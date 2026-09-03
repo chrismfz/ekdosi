@@ -7,7 +7,6 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
-use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
@@ -21,17 +20,16 @@ use Throwable;
 /**
  * Issue a new invoice. Two save paths:
  *
- *   - "Save (draft)" — persists with mydata_state=null. Operator
- *     can review the PDF preview before deciding to submit. ΑΑ is
- *     allocated under a row lock (InvoiceNumberer) inside the same
- *     transaction as the INSERT — same atomic semantics as the
- *     legacy INVOICE_BI1 + INVOICE_AI triggers.
+ *   - "Save (draft)" — persists with mydata_state=null and a PROVISIONAL
+ *     identity (gapless-at-send): no ΑΑ is consumed, and the Invoice
+ *     `created` hook sets invcode = «ΠΡΟΣ-ΤΠΥ-{id}». Operator can review
+ *     the PDF preview before deciding to submit.
  *
  *   - "Save and Submit to myDATA" — does Save, then immediately
- *     submits via MyDataSubmitter. If submission fails, the invoice
- *     stays as a draft (with the ΑΑ already burned — gap in
- *     sequence acceptable, matches legacy behaviour). Operator can
- *     fix and click "Submit to myDATA" from the view page.
+ *     submits via MyDataSubmitter, which allocates the real ΑΑ before it
+ *     transmits (InvoiceNumberer::assign). If submission fails, the invoice
+ *     stays a provisional draft (a definitive rejection releases the number;
+ *     an ambiguous one keeps it) — no gap in the sequence either way.
  *
  * The Save-and-Submit button is hidden when the tenant's mode is Off
  * — the equivalent would route to NullSubmitter and confuse
@@ -108,20 +106,20 @@ class CreateInvoice extends CreateRecord
             throw new \RuntimeException('Cannot create invoice without a tenant context.');
         }
 
-        $type = InvoiceType::query()
+        // Validate the chosen type belongs to this tenant before persisting.
+        InvoiceType::query()
             ->where('company_id', $tenant->getKey())
             ->whereKey($data['invoice_type_id'])
             ->firstOrFail();
 
-        return DB::transaction(function () use ($data, $tenant, $type) {
-            $allocation = app(InvoiceNumberer::class)->allocate($tenant, $type->code);
+        // Gapless-at-send (reverses MON-4): a draft no longer consumes an ΑΑ. `code`
+        // stays null and the Invoice `created` hook assigns a provisional invcode
+        // («ΠΡΟΣ-ΤΠΥ-{id}»); the real ΑΑ/invcode/series are allocated at transmission
+        // (InvoiceNumberer::assign, called by the submitters).
+        unset($data['code'], $data['invcode']);
+        $data['company_id'] = $tenant->getKey();
 
-            $data['code'] = $allocation->code;
-            $data['invcode'] = $allocation->invcode;
-            $data['company_id'] = $tenant->getKey();
-
-            return Invoice::create($data);
-        });
+        return Invoice::create($data);
     }
 
     /**

@@ -78,7 +78,10 @@ class StageServiceRenewalTest extends TestCase
         $this->assertSame('draft', $invoice->local_status);
         $this->assertNull($invoice->mydata_mark);
         $this->assertSame($contract->id, $invoice->service_contract_id);
-        $this->assertSame('ΤΠΥ1', $invoice->invcode);
+        // Gapless-at-send: a staged renewal is a draft with a provisional identity —
+        // no ΑΑ is consumed until it is issued.
+        $this->assertNull($invoice->code);
+        $this->assertSame('ΠΡΟΣ-ΤΠΥ-'.$invoice->id, $invoice->invcode);
 
         // One line from the snapshot; net=100, gross=124.
         $this->assertSame(1, InvoiceLine::where('invoice_id', $invoice->id)->count());

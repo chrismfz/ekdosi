@@ -155,8 +155,10 @@ class WhmcsInvoiceFilerTest extends TestCase
             createdByUserId: null,
         );
 
-        // ΑΑ allocated + lines persisted, but it's an editable DRAFT — NOT filed.
-        $this->assertSame('ΤΠΥ1', $invoice->invcode);
+        // Gapless-at-send: an editable DRAFT with a PROVISIONAL identity (no ΑΑ) —
+        // the real number is allocated only when it is issued, NOT at createDraft.
+        $this->assertNull($invoice->code);
+        $this->assertSame('ΠΡΟΣ-ΤΠΥ-'.$invoice->id, $invoice->invcode);
         $this->assertSame('draft', $invoice->local_status);
         $this->assertNull($invoice->mydata_state);
         $this->assertNull($invoice->mydata_mark);

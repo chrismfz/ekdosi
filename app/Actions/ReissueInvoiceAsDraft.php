@@ -4,7 +4,6 @@ namespace App\Actions;
 
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
-use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -22,7 +21,6 @@ use RuntimeException;
 class ReissueInvoiceAsDraft
 {
     public function __construct(
-        private InvoiceNumberer $numberer,
         private RecomputeInvoiceTotals $recompute,
     ) {}
 
@@ -39,8 +37,8 @@ class ReissueInvoiceAsDraft
         }
 
         return DB::transaction(function () use ($original) {
-            $allocation = $this->numberer->allocate($original->company, $original->invoiceType->code);
-
+            // Gapless-at-send: the reissued draft carries a provisional identity
+            // (no ΑΑ); the real number is allocated at transmission.
             $reissue = Invoice::create([
                 'company_id' => $original->company_id,
                 'invoice_type_id' => $original->invoice_type_id,
@@ -51,8 +49,6 @@ class ReissueInvoiceAsDraft
                 'delivery_method_id' => $original->delivery_method_id,
                 'delivery_date' => $original->delivery_date,
                 'issued_at' => now(),
-                'code' => $allocation->code,
-                'invcode' => $allocation->invcode,
                 'local_status' => 'draft',
                 // PROV-019: remember what this replaces, so filing it can soft-warn
                 // while the reversed original is still standing at AADE.

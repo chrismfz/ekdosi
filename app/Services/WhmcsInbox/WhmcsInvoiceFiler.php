@@ -11,7 +11,6 @@ use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
 use App\Services\EInvoiceSubmitterFactory;
-use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\Whmcs\WhmcsWritebackService;
 use Illuminate\Support\Facades\DB;
@@ -67,7 +66,6 @@ class WhmcsInvoiceFiler
 {
     public function __construct(
         private WhmcsInvoiceMapper $mapper,
-        private InvoiceNumberer $numberer,
         private RecomputeInvoiceTotals $recompute,
         private EInvoiceSubmitterFactory $submitterFactory,
         private WhmcsWritebackService $writeback,
@@ -118,7 +116,7 @@ class WhmcsInvoiceFiler
 
         // Phase 1: transactional persist with lockForUpdate on the
         // pending row + atomic invoice_id linking.
-        $invoice = DB::transaction(function () use ($tenant, $pending, $invoiceType, $mapped) {
+        $invoice = DB::transaction(function () use ($tenant, $pending, $mapped) {
             // Re-load the pending row under a write lock. If the row
             // changed since the caller fetched it (status flipped to
             // filed, invoice_id was set by a concurrent op), we'll
@@ -130,13 +128,9 @@ class WhmcsInvoiceFiler
 
             $this->assertCanBeFiled($locked);
 
-            $allocation = $this->numberer->allocate($tenant, $invoiceType->code);
-
-            $invoiceData = $mapped['header'];
-            $invoiceData['code'] = $allocation->code;
-            $invoiceData['invcode'] = $allocation->invcode;
-
-            $invoice = Invoice::create($invoiceData);
+            // Gapless-at-send: create the invoice provisional (no ΑΑ); the real number
+            // is allocated by the submit below (this path files immediately).
+            $invoice = Invoice::create($mapped['header']);
 
             foreach ($mapped['lines'] as $lineData) {
                 InvoiceLine::create(array_merge($lineData, [
@@ -280,7 +274,7 @@ class WhmcsInvoiceFiler
         // paths (file() / whmcs:auto-issue) keep the full reconcile guards.
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
 
-        return DB::transaction(function () use ($tenant, $pending, $invoiceType, $mapped, $createdByUserId) {
+        return DB::transaction(function () use ($tenant, $pending, $mapped, $createdByUserId) {
             $locked = PendingWhmcsInvoice::query()
                 ->whereKey($pending->id)
                 ->lockForUpdate()
@@ -288,11 +282,9 @@ class WhmcsInvoiceFiler
 
             $this->assertCanBeFiled($locked);
 
-            $allocation = $this->numberer->allocate($tenant, $invoiceType->code);
-
+            // Gapless-at-send: the inbox draft carries a provisional identity (no ΑΑ);
+            // the real number is allocated when the operator issues it.
             $header = $mapped['header'];
-            $header['code'] = $allocation->code;
-            $header['invcode'] = $allocation->invcode;
             $header['whmcs_pending_id'] = $locked->id;
             $header['local_status'] = 'draft';
 
@@ -308,7 +300,7 @@ class WhmcsInvoiceFiler
                 'invoice_id' => $invoice->id,
                 'status' => PendingWhmcsInvoice::STATUS_DRAFTED,
                 'filed_by_user_id' => $createdByUserId,
-                'notes' => 'Δημιουργήθηκε προσχέδιο '.$allocation->invcode
+                'notes' => 'Δημιουργήθηκε προσχέδιο '.$invoice->invcode
                     .' — έλεγξε/διόρθωσε και έκδωσέ το από τα Παραστατικά.',
             ]);
 

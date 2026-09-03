@@ -84,7 +84,10 @@ class IssueCreditNoteTest extends TestCase
         ]);
 
         $this->assertSame($original->id, $credit->credited_invoice_id);
-        $this->assertSame('ΠΤ1', $credit->invcode);
+        // Gapless-at-send: the credit note is a draft with a provisional identity —
+        // its real ΑΑ is allocated only when it is transmitted.
+        $this->assertNull($credit->code);
+        $this->assertSame('ΠΡΟΣ-ΠΤ-'.$credit->id, $credit->invcode);
         $this->assertEqualsWithDelta(124.0, (float) $credit->gross_total, 0.001);   // positive lines
         $this->assertCount(1, $credit->lines);
 

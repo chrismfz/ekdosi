@@ -8,6 +8,7 @@ use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Services\InvoiceNumberer;
 use App\Services\MyDataRejected;
 use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\EInvoice\FilingLog;
@@ -96,20 +97,35 @@ class GrProviderSubmitter implements EInvoiceSubmitter
     private function performSubmit(Invoice $invoice): MyDataMark
     {
         $this->assertNotAlreadyFiled($invoice);
-        // PROV-020 (auto): under the two-dates model the LEGAL issue date is the moment
-        // of issue — i.e. now, when we press «Αποστολή» — not when the draft was prepared
-        // (that stays on created_at). The provider also REQUIRES IssueDate = today
-        // (InvoSign 238). So stamp issued_at to today HERE instead of blocking a stale
-        // draft and making the operator fix it by hand. Fresh issue only (assertNotAlready-
-        // Filed above rejects a re-send/recovery), on the lock-fresh invoice.
-        $this->stampIssuedToday($invoice);
-        // Safety net: the stamp makes this trivially pass, but keep the guard so any future
-        // path reaching here without stamping still cannot backdate a provider call.
-        ProviderIssueDateGuard::assertIssuedToday($invoice->issued_at, (string) $invoice->invcode);
+        // Gapless-at-send: allocate the real ΑΑ/invcode/series NOW, before the payload
+        // is built (AadeInvoiceDocument throws on a null code). Idempotent — a retry
+        // after an ambiguous failure keeps the number it already reserved. A draft that
+        // was never sent consumed nothing, so the transmitted sequence stays continuous.
+        app(InvoiceNumberer::class)->assign($invoice);
 
-        $document = new AadeInvoiceDocument($this->tenant);
-        $payload = $document->build($invoice);
-        $xml = $document->toXml($payload);
+        try {
+            // PROV-020 (auto): the LEGAL issue date is the moment of issue — now, when we
+            // press «Αποστολή» — not when the draft was prepared (that stays on created_at).
+            // The provider also REQUIRES IssueDate = today (InvoSign 238). Stamp it here
+            // instead of blocking a stale draft. Fresh issue only (assertNotAlreadyFiled
+            // above rejects a re-send/recovery), on the lock-fresh invoice.
+            $this->stampIssuedToday($invoice);
+            // Safety net: the stamp makes this trivially pass, but keep the guard so any
+            // future path reaching here without stamping still cannot backdate a call.
+            ProviderIssueDateGuard::assertIssuedToday($invoice->issued_at, (string) $invoice->invcode);
+
+            $document = new AadeInvoiceDocument($this->tenant);
+            $payload = $document->build($invoice);
+            $xml = $document->toXml($payload);
+        } catch (Throwable $e) {
+            // The number was reserved above but a LOCAL step (stamp/guard/build — a config
+            // error) failed before anything was transmitted: return the ΑΑ to the pool so
+            // a fixed resubmit re-allocates, keeping the sequence gapless. (A rejection or
+            // ambiguous timeout AFTER the send is handled below, NOT here.)
+            app(InvoiceNumberer::class)->release($invoice);
+            throw $e;
+        }
+
         $credentials = ProviderCredentials::fromCompany($this->tenant);
 
         // Wall-clock from just before the outbound send to the success log below.
@@ -147,6 +163,11 @@ class GrProviderSubmitter implements EInvoiceSubmitter
 
         if (! $result->success) {
             $this->recordRejection($invoice, $xml, $result);
+            // Gapless-at-send: a DEFINITIVE rejection did not file anything, so return
+            // the reserved ΑΑ to the pool (revert to provisional) — the next attempt
+            // re-allocates and the sequence stays gapless. NOT done on the ambiguous
+            // transport-throw path above, where the document may in fact have filed.
+            app(InvoiceNumberer::class)->release($invoice);
             throw new MyDataRejected(
                 'E-invoice provider rejected the submission: '.$result->errorMessage(),
                 $xml,
