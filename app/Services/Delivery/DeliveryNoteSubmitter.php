@@ -399,10 +399,20 @@ class DeliveryNoteSubmitter
             );
         }
 
+        // PROV-020 (auto): for the PROVIDER channel the issue date must be today
+        // (InvoSign 238) and IS the moment of issue — stamp it BEFORE the payload is
+        // built so the outbound IssueDate carries today, not the draft-prep date.
+        // Provider-only: direct-myDATA allows a backdated movement date (wrong-period
+        // risk if forced) and keeps the operator's date.
+        $viaProvider = $this->tenant->isLiveProviderTenant();
+        if ($viaProvider) {
+            $this->stampIssuedToday($note);
+        }
+
         $payload = $this->buildAadeDeliveryNote($note);
         $xml = $this->payloadToXml($payload);
 
-        if ($this->tenant->isLiveProviderTenant()) {
+        if ($viaProvider) {
             return $this->submitViaProvider($note, $xml);
         }
 
@@ -466,11 +476,29 @@ class DeliveryNoteSubmitter
         return $this->persistResponse($note, $xml, $response, $responseXml);
     }
 
+    /**
+     * Stamp the movement issue date (issued_at) to today, Greece-local, at the moment
+     * of issue — only when it isn't already today, to avoid a needless write. created_at
+     * keeps the internal «πότε φτιάχτηκε». Mirrors GrProviderSubmitter::stampIssuedToday.
+     */
+    private function stampIssuedToday(DeliveryNote $note): void
+    {
+        $tz = ProviderIssueDateGuard::TZ;
+        $today = now()->setTimezone($tz)->toDateString();
+
+        if ($note->issued_at?->copy()->setTimezone($tz)->toDateString() === $today) {
+            return;
+        }
+
+        $note->update(['issued_at' => now()]);
+    }
+
     /** Submit the same canonical 9.x AADE XML through the tenant's ΥΠΑΗΕΣ provider. */
     private function submitViaProvider(DeliveryNote $note, string $xml): DeliveryMark
     {
-        // Normal online provider issue requires IssueDate = today (InvoSign 238);
-        // reject a backdated/future date locally before any outbound request (PROV-020).
+        // PROV-020: issued_at was already stamped to today in submit() BEFORE the XML
+        // was built (so $xml carries today's IssueDate). This guard is the safety net —
+        // now meaningful, because $note->issued_at and the serialized $xml agree.
         ProviderIssueDateGuard::assertIssuedToday($note->issued_at, (string) $note->invcode);
 
         $transport = app(ProviderTransportRegistry::class)->for((string) $this->tenant->einvoice_provider_key);
