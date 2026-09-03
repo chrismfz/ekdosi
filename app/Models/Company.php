@@ -386,6 +386,20 @@ class Company extends Model
     }
 
     /**
+     * Does this tenant file to AADE by PROVIDER — Greek myDATA directly (`gr-mydata`)
+     * or via a Greek e-invoicing provider (`gr-provider`)? Provider-gated and mode-
+     * INDEPENDENT on purpose: it answers «is this an AADE tenant whose §8-code config
+     * must be valid», which a mode=off `gr-mydata` tenant still is (the mapping must be
+     * ready BEFORE go-live flips the mode on). The single source for that gate — the
+     * config audit (MYD-4), the Preflight report and the Payment-Methods §8.12 column
+     * all read it, so they never drift on «who is an AADE tenant».
+     */
+    public function filesToAadeByProvider(): bool
+    {
+        return in_array($this->einvoice_provider, ['gr-mydata', 'gr-provider'], true);
+    }
+
+    /**
      * Which myDATA environment do we READ from, or null when this tenant can't
      * read from myDATA at all. ORTHOGONAL to submission (see canReadMyData()).
      *

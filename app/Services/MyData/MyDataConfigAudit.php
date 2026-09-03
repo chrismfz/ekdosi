@@ -81,7 +81,7 @@ class MyDataConfigAudit
         // the payment means. Surface it here (visible in preflight / «Έλεγχος
         // ρυθμίσεων» / go-live) so it's mapped BEFORE it matters. Only for tenants
         // that actually file to AADE (direct or via provider).
-        if (in_array($company->einvoice_provider, ['gr-mydata', 'gr-provider'], true)) {
+        if ($company->filesToAadeByProvider()) {
             $unmapped = PaymentMethod::query()
                 ->where('company_id', $company->getKey())
                 ->whereNull('mydata_payment_type')
