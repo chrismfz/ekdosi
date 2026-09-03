@@ -16,48 +16,51 @@
         App\Support\MyData\DeliveryCodes.
     --}}
     <style>
-        @page { margin: 16mm 14mm 22mm 14mm; }
-        body { font-family: DejaVu Sans, sans-serif; font-size: 9.5pt; color: #1f2937; line-height: 1.35; }
+        /* Compact single-page layout (PDF-COMPACT): mirrors the invoice PDF's
+           tightened margins/fonts/spacing so a typical ΔΑ fits on one A4 page
+           and reads denser (the roomy spacing wasted ~a third of the sheet). */
+        @page { margin: 11mm 12mm 18mm 12mm; }
+        body { font-family: DejaVu Sans, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.22; }
 
         /* Banners */
-        .banner { text-align: center; font-weight: bold; font-size: 14pt; padding: 3mm; margin-bottom: 4mm; border: 2px solid; border-radius: 2mm; }
+        .banner { text-align: center; font-weight: bold; font-size: 12pt; padding: 2mm; margin-bottom: 2.5mm; border: 1.5pt solid; border-radius: 1.5mm; }
         .banner-draft     { color: #9a3412; border-color: #9a3412; background: #fff7ed; }
         .banner-cancelled { color: #7f1d1d; border-color: #7f1d1d; background: #fef2f2; }
 
         /* Header — tenant on the left, doc meta on the right */
-        .hdr { display: table; width: 100%; table-layout: fixed; border-bottom: 1.5pt solid #111827; padding-bottom: 3mm; margin-bottom: 4mm; }
+        .hdr { display: table; width: 100%; table-layout: fixed; border-bottom: 1.2pt solid #111827; padding-bottom: 2mm; margin-bottom: 2.5mm; }
         .hdr-left  { display: table-cell; width: 60%; vertical-align: top; }
         .hdr-right { display: table-cell; width: 40%; vertical-align: top; text-align: right; }
-        .hdr-logo  { max-height: 22mm; max-width: 60mm; margin-bottom: 2mm; }
-        .tenant-name { font-size: 13pt; font-weight: bold; margin: 0 0 1mm 0; }
-        .tenant-info { font-size: 8.5pt; color: #4b5563; }
-        .doc-type    { font-size: 14pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; }
-        .doc-code    { font-size: 12pt; color: #111827; margin: 1mm 0; }
-        .doc-date    { font-size: 9pt; color: #4b5563; }
-        .doc-mydata  { font-size: 8.5pt; color: #6b7280; }
+        .hdr-logo  { max-height: 14mm; max-width: 48mm; margin-bottom: 1mm; }
+        .tenant-name { font-size: 11.5pt; font-weight: bold; margin: 0 0 0.6mm 0; }
+        .tenant-info { font-size: 8pt; color: #4b5563; }
+        .doc-type    { font-size: 13pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; }
+        .doc-code    { font-size: 11pt; color: #111827; margin: 0.6mm 0; }
+        .doc-date    { font-size: 8.5pt; color: #4b5563; }
+        .doc-mydata  { font-size: 8pt; color: #6b7280; }
 
         /* Two-column meta strip (issuer / recipient) */
-        .meta { display: table; width: 100%; table-layout: fixed; margin-bottom: 4mm; }
-        .meta-cell { display: table-cell; width: 50%; vertical-align: top; padding: 3mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
+        .meta { display: table; width: 100%; table-layout: fixed; margin-bottom: 2.5mm; }
+        .meta-cell { display: table-cell; width: 50%; vertical-align: top; padding: 2mm 2.5mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
         .meta-cell + .meta-cell { border-left: none; }
-        .meta-cell h3 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
-        .meta-cell .name { font-weight: bold; font-size: 10.5pt; margin-bottom: 1mm; }
-        .meta-row { font-size: 9pt; color: #1f2937; }
+        .meta-cell h3 { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1mm 0; font-weight: bold; }
+        .meta-cell .name { font-weight: bold; font-size: 9.5pt; margin-bottom: 0.6mm; }
+        .meta-row { font-size: 8.5pt; color: #1f2937; }
         .meta-label { color: #6b7280; }
 
         /* Movement / transport block */
-        .move { margin-bottom: 4mm; padding: 3mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
-        .move h3 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
+        .move { margin-bottom: 2.5mm; padding: 2mm 2.5mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
+        .move h3 { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1mm 0; font-weight: bold; }
         .move-grid { display: table; width: 100%; table-layout: fixed; }
         .move-col  { display: table-cell; width: 50%; vertical-align: top; }
-        .move-row  { font-size: 9pt; color: #1f2937; padding: 0.3mm 0; }
+        .move-row  { font-size: 8.5pt; color: #1f2937; padding: 0.2mm 0; }
         .move-label { color: #6b7280; }
 
         /* Lines table */
         .lines-wrap { page-break-inside: auto; }
         table.lines { width: 100%; border-collapse: collapse; }
-        table.lines thead th { background: #f3f4f6; border-bottom: 1pt solid #9ca3af; padding: 2mm; font-size: 8.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3pt; color: #374151; text-align: left; }
-        table.lines tbody td { padding: 2mm; border-bottom: 0.5pt solid #e5e7eb; font-size: 9pt; vertical-align: top; }
+        table.lines thead th { background: #f3f4f6; border-bottom: 1pt solid #9ca3af; padding: 1.4mm 2mm; font-size: 8pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3pt; color: #374151; text-align: left; }
+        table.lines tbody td { padding: 1.4mm 2mm; border-bottom: 0.5pt solid #e5e7eb; font-size: 8.5pt; vertical-align: top; }
         table.lines tbody tr { page-break-inside: avoid; }
         table.lines td.num, table.lines th.num { text-align: right; }
         table.lines td.center, table.lines th.center { text-align: center; }
@@ -65,36 +68,36 @@
            weights against DejaVu Sans and falls back to a Greek-less core
            font, rendering Greek as ?. (Same note as the invoice PDF.) */
         .line-desc { font-weight: normal; }
-        .line-notes { font-size: 8pt; color: #6b7280; margin-top: 0.5mm; font-style: italic; }
+        .line-notes { font-size: 7.5pt; color: #6b7280; margin-top: 0.4mm; font-style: italic; }
 
         /* Notes */
-        .notes-box { margin-top: 5mm; padding: 3mm; background: #f9fafb; border-left: 3pt solid #6b7280; font-size: 9pt; }
-        .notes-box h3 { margin: 0 0 1mm 0; font-size: 8.5pt; text-transform: uppercase; color: #6b7280; letter-spacing: 0.3pt; }
+        .notes-box { margin-top: 3mm; padding: 2mm 2.5mm; background: #f9fafb; border-left: 3pt solid #6b7280; font-size: 8.5pt; }
+        .notes-box h3 { margin: 0 0 0.8mm 0; font-size: 8pt; text-transform: uppercase; color: #6b7280; letter-spacing: 0.3pt; }
 
         /* myDATA footer block: QR + MARK + url, only when filed */
-        .mydata-foot { margin-top: 6mm; padding: 3mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; display: table; width: 100%; table-layout: fixed; }
-        .mydata-qr   { display: table-cell; width: 32mm; vertical-align: top; text-align: center; }
-        .mydata-qr img { width: 28mm; height: 28mm; display: block; }
-        .mydata-qr .qr-label { font-size: 7pt; color: #6b7280; margin: 1mm 0 0 0; }
-        .mydata-info { display: table-cell; vertical-align: top; padding-left: 3mm; font-size: 8.5pt; color: #374151; }
+        .mydata-foot { margin-top: 3mm; padding: 2mm 2.5mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; display: table; width: 100%; table-layout: fixed; page-break-inside: avoid; }
+        .mydata-qr   { display: table-cell; width: 28mm; vertical-align: top; text-align: center; }
+        .mydata-qr img { width: 24mm; height: 24mm; display: block; }
+        .mydata-qr .qr-label { font-size: 6.5pt; color: #6b7280; margin: 0.6mm 0 0 0; }
+        .mydata-info { display: table-cell; vertical-align: top; padding-left: 3mm; font-size: 8pt; color: #374151; }
         .mydata-info .mark { font-weight: bold; word-break: break-all; }
-        .mydata-info .url  { word-break: break-all; overflow-wrap: anywhere; font-size: 7.5pt; color: #6b7280; margin-top: 1mm; }
-        .draft-foot { margin-top: 6mm; padding: 3mm; text-align: center; border: 1pt dashed #9a3412; border-radius: 1mm; color: #9a3412; font-size: 9pt; font-weight: bold; }
+        .mydata-info .url  { word-break: break-all; overflow-wrap: anywhere; font-size: 6.5pt; color: #6b7280; margin-top: 0.8mm; }
+        .draft-foot { margin-top: 3mm; padding: 2mm; text-align: center; border: 1pt dashed #9a3412; border-radius: 1mm; color: #9a3412; font-size: 8.5pt; font-weight: bold; }
 
         /* Ιστορικό (movement lifecycle + myDATA submissions), printed when present */
-        .history { margin-top: 6mm; page-break-inside: auto; }
-        .history h3 { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
-        .history .hist-sub { font-size: 8pt; font-weight: bold; color: #374151; margin: 2mm 0 1mm; }
+        .history { margin-top: 3mm; page-break-inside: auto; }
+        .history h3 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1mm 0; font-weight: bold; }
+        .history .hist-sub { font-size: 7.5pt; font-weight: bold; color: #374151; margin: 1.5mm 0 0.8mm; }
         table.hist { width: 100%; border-collapse: collapse; }
-        table.hist th { background: #f3f4f6; border-bottom: 1pt solid #cbd5e1; padding: 1.2mm 2mm; font-size: 7.5pt; text-align: left; color: #374151; font-weight: bold; }
-        table.hist td { padding: 1.2mm 2mm; border-bottom: 0.5pt solid #eee; font-size: 8pt; vertical-align: top; color: #1f2937; }
+        table.hist th { background: #f3f4f6; border-bottom: 1pt solid #cbd5e1; padding: 1mm 2mm; font-size: 7pt; text-align: left; color: #374151; font-weight: bold; }
+        table.hist td { padding: 1mm 2mm; border-bottom: 0.5pt solid #eee; font-size: 7.5pt; vertical-align: top; color: #1f2937; }
         table.hist td.mono { word-break: break-all; }
 
-        /* Page-bottom footer */
-        .footer { position: fixed; left: 0; right: 0; bottom: -16mm; text-align: center; font-size: 7.5pt; color: #6b7280; padding: 0 14mm; }
+        /* Page-bottom footer. The «Σελίδα X από Y» pager is drawn on the DomPDF
+           canvas by DeliveryNotePdf::drawPager, because DomPDF 3.x resolves
+           counter(pages) to 0 inside a fixed footer. */
+        .footer { position: fixed; left: 0; right: 0; bottom: -9mm; text-align: center; font-size: 7pt; color: #6b7280; padding: 0 12mm; }
         .footer .tenant-text { font-style: italic; }
-        .pager:after { content: counter(page); }
-        .pager-total:after { content: counter(pages); }
     </style>
 </head>
 <body>
@@ -362,10 +365,10 @@
     @if(! empty($tenant->pdf_footer_text))
         <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>
     @endif
-    <div style="margin-top:1mm">
-        Σελίδα <span class="pager"></span> από <span class="pager-total"></span>
-    </div>
 </div>
+{{-- The «Σελίδα X από Y» pager is drawn on the DomPDF canvas by
+     DeliveryNotePdf::drawPager (counter(pages) resolves to 0 inside this fixed
+     footer on DomPDF 3.x). --}}
 
 </body>
 </html>

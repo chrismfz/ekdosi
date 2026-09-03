@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Support\MyData\QrImage;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Dompdf\Dompdf;
 use Illuminate\Support\Facades\Storage;
 use League\Flysystem\FilesystemException;
 
@@ -50,7 +51,7 @@ class DeliveryNotePdf
             @ini_set('memory_limit', self::RENDER_MEMORY_LIMIT);
             @set_time_limit(self::RENDER_TIME_LIMIT_SECONDS);
 
-            return Pdf::loadView('delivery-notes.pdf', [
+            $pdf = Pdf::loadView('delivery-notes.pdf', [
                 'note' => $note,
                 'tenant' => $note->company,
                 'qrDataUri' => $qrDataUri,
@@ -71,12 +72,40 @@ class DeliveryNotePdf
                     ->whereIn('mydata_action', ['INSERT', 'PROVIDER_INSERT', 'CANCEL'])
                     ->oldest()->get(),
             ])
-                ->setPaper('A4', 'portrait')
-                ->output();
+                ->setPaper('A4', 'portrait');
+
+            // «Σελίδα X από Y» drawn on the DomPDF canvas after layout (counter(pages)
+            // resolves to 0 inside a fixed footer on DomPDF 3.x). Done here — NOT via an
+            // in-template `<script type="text/php">` — so isPhpEnabled stays OFF on a
+            // render that carries recipient data. Same approach as InvoicePdfRenderer.
+            $dompdf = $pdf->getDomPDF();
+            $dompdf->render();
+            $this->drawPager($dompdf);
+
+            return $dompdf->output();
         } finally {
             @ini_set('memory_limit', $previousMemory);
             @set_time_limit((int) $previousTime);
         }
+    }
+
+    /**
+     * «Σελίδα X από Y», centred at the page bottom on every page, via the DomPDF
+     * canvas (mirrors InvoicePdfRenderer::drawPager). Greek-only, matching the
+     * δελτίο template. Kept ~6.5mm above the sheet edge to clear a typical
+     * printer's non-printable margin; colour matches the footer text (#6b7280).
+     */
+    private function drawPager(Dompdf $dompdf): void
+    {
+        $canvas = $dompdf->getCanvas();
+        $fontMetrics = $dompdf->getFontMetrics();
+        $font = $fontMetrics->getFont('DejaVu Sans', 'normal');
+        $size = 7;
+        $text = 'Σελίδα {PAGE_NUM} από {PAGE_COUNT}';
+        $x = ($canvas->get_width() - $fontMetrics->getTextWidth($text, $font, $size)) / 2;
+        $y = $canvas->get_height() - 18;
+
+        $canvas->page_text($x, $y, $text, $font, $size, [0.42, 0.45, 0.5]);
     }
 
     /** Render the AADE qrUrl as an inline base64 PNG data URI (same helper invoices use). */
