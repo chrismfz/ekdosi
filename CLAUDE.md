@@ -236,6 +236,7 @@ php artisan mydata:reconcile-sales --tenant=SLUG [--raw] # READ-ONLY local↔AAD
 
 # WHMCS
 php artisan whmcs:fetch-pending --tenant=SLUG            # stage paid+unfiled WHMCS invoices into the inbox
+php artisan whmcs:fetch-unpaid --tenant=SLUG             # stage UNPAID invoices of «invoice-before-pay» customers (needs_invoice_before_payment) → inbox, manual επί-πιστώσει (never auto)
 ```
 
 ## Deliberately dropped (verified absent in new code — do not resurrect)

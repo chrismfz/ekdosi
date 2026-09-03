@@ -127,6 +127,14 @@ return [
         'whmcs_fetch_enabled' => env('EKDOSI_SCHEDULE_WHMCS_FETCH', true),
         'whmcs_fetch_cron' => env('EKDOSI_WHMCS_FETCH_CRON', '*/15 * * * *'),
 
+        // whmcs:fetch-unpaid — stage the UNPAID invoices of «τιμολόγιο πριν την
+        // πληρωμή» customers (needs_invoice_before_payment) into the inbox for
+        // MANUAL επί-πιστώσει issuance. Never files, never auto-issues. OFF by
+        // default (opt-in secondary fetch); unpaid invoices don't change fast, so a
+        // low cadence (hourly) is plenty.
+        'whmcs_fetch_unpaid_enabled' => env('EKDOSI_SCHEDULE_WHMCS_FETCH_UNPAID', false),
+        'whmcs_fetch_unpaid_cron' => env('EKDOSI_WHMCS_FETCH_UNPAID_CRON', '0 * * * *'),
+
         // whmcs:auto-issue — auto-FILE paid inbox rows for γκρινιάρης
         // customers on armed tenants. UNLIKE the fetch above, this submits
         // to AADE unattended, so it's OFF by default — a deliberate two-key
