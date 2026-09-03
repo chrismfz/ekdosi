@@ -2,9 +2,9 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Support\MailTemplateFields;
 use App\Models\Company;
 use App\Models\CompanyBackupSetting;
-use App\Services\MailTemplateRenderer;
 use App\Support\MyData\ClassificationGuidance;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -158,16 +158,14 @@ class CompanySettings extends Page implements HasForms
                 Section::make('Πρότυπα email τιμολογίου')
                     ->description('Θέμα + σώμα του email προς τον πελάτη. Placeholders: {tenant_name}, {invoice_code}, {invoice_type}, {issued_at}, {customer_name}, {total}, {mark}, {verify_url}, {mark_section}.')
                     ->schema([
-                        TextInput::make('mail_subject_template')
-                            ->label('Πρότυπο θέματος')
-                            ->maxLength(191)
-                            ->placeholder(MailTemplateRenderer::DEFAULT_SUBJECT_TEMPLATE)
-                            ->helperText('Κενό = προεπιλογή. Μία γραμμή.'),
-                        Textarea::make('mail_body_template')
-                            ->label('Πρότυπο σώματος')
-                            ->rows(10)
-                            ->placeholder(MailTemplateRenderer::DEFAULT_BODY_TEMPLATE)
-                            ->helperText('Απλό κείμενο με placeholders. Το HTML μετατρέπεται σε plain text κατά την αποστολή (ασφάλεια).'),
+                        MailTemplateFields::subject(
+                            'Πρότυπο θέματος',
+                            'Προσυμπληρωμένο με το προεπιλεγμένο πρότυπο — άλλαξέ το ελεύθερα. Με «Επαναφορά προεπιλογής» (ή αδειάζοντάς το) επανέρχεται η προεπιλογή. Μία γραμμή.',
+                        ),
+                        MailTemplateFields::body(
+                            'Πρότυπο σώματος',
+                            'Προσυμπληρωμένο με το προεπιλεγμένο πρότυπο — άλλαξέ το ελεύθερα. Με «Επαναφορά προεπιλογής» επανέρχεται η προεπιλογή. Απλό κείμενο με placeholders· το HTML μετατρέπεται σε plain text κατά την αποστολή (ασφάλεια).',
+                        ),
                     ]),
 
                 Section::make('Αποστολή email')

@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\CompanyBackupSetting;
 use App\Models\Role;
 use App\Models\User;
+use App\Services\MailTemplateRenderer;
 use App\Services\TenantRoleProvisioner;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -208,6 +209,106 @@ class CompanySettingsPageTest extends TestCase
         $this->assertSame($original, $company->name, 'identity must be untouched by the self-service page');
         $this->assertNull($company->mydata_subscription_key_production, 'credentials must be unreachable here');
         $this->assertSame('legit change', $company->pdf_footer_text);
+    }
+
+    // ── Mail-template prefill + reset behaviour (MailTemplateFields) ─────────
+
+    #[Test]
+    public function mail_templates_prefill_the_default_as_editable_text_when_unset(): void
+    {
+        // A tenant with no custom template must SEE the default as real, editable
+        // text (not a grey placeholder that vanishes on the first keystroke), so a
+        // one-line tweak doesn't start from a blank box.
+        $company = $this->actAsAuthorized();
+        $this->assertNull($company->mail_subject_template);
+        $this->assertNull($company->mail_body_template);
+
+        Livewire::test(CompanySettings::class)
+            ->assertSuccessful()
+            ->assertSet('data.mail_subject_template', MailTemplateRenderer::DEFAULT_SUBJECT_TEMPLATE)
+            ->assertSet('data.mail_body_template', MailTemplateRenderer::DEFAULT_BODY_TEMPLATE);
+    }
+
+    #[Test]
+    public function a_stored_custom_template_is_shown_verbatim_not_clobbered_by_the_default(): void
+    {
+        $company = $this->actAsAuthorized();
+        $company->update([
+            'mail_subject_template' => 'ΔΙΚΟ ΜΟΥ {invoice_code}',
+            'mail_body_template' => 'Το δικό μου σώμα {total}',
+        ]);
+
+        Livewire::test(CompanySettings::class)
+            ->assertSet('data.mail_subject_template', 'ΔΙΚΟ ΜΟΥ {invoice_code}')
+            ->assertSet('data.mail_body_template', 'Το δικό μου σώμα {total}');
+    }
+
+    #[Test]
+    public function saving_an_untouched_prefilled_default_keeps_the_column_null(): void
+    {
+        // The core of the contract (MailTemplateRendererTest): a template left
+        // equal to the app default is dehydrated back to NULL, never frozen into
+        // the column — so the send-time fallback stays live and a future default
+        // wording change still reaches this tenant.
+        $company = $this->actAsAuthorized();
+
+        Livewire::test(CompanySettings::class)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $company->refresh();
+        $this->assertNull($company->mail_subject_template, 'the default must not be frozen into the column');
+        $this->assertNull($company->mail_body_template, 'the default must not be frozen into the column');
+    }
+
+    #[Test]
+    public function explicitly_setting_a_template_back_to_the_default_stores_null(): void
+    {
+        // The «Επαναφορά προεπιλογής» hint-action just re-sets the field to the
+        // default text; on save that must collapse to NULL exactly like an
+        // untouched prefill (this proves the reset-then-save round-trip).
+        $company = $this->actAsAuthorized();
+        $company->update(['mail_body_template' => 'κάτι προσαρμοσμένο']);
+
+        Livewire::test(CompanySettings::class)
+            ->assertSet('data.mail_body_template', 'κάτι προσαρμοσμένο')
+            ->set('data.mail_body_template', MailTemplateRenderer::DEFAULT_BODY_TEMPLATE)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertNull($company->refresh()->mail_body_template);
+    }
+
+    #[Test]
+    public function a_genuinely_custom_template_is_persisted(): void
+    {
+        $company = $this->actAsAuthorized();
+
+        Livewire::test(CompanySettings::class)
+            ->set('data.mail_subject_template', 'Το τιμολόγιό σας {invoice_code}')
+            ->set('data.mail_body_template', 'Γεια σας — {total}')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $company->refresh();
+        $this->assertSame('Το τιμολόγιό σας {invoice_code}', $company->mail_subject_template);
+        $this->assertSame('Γεια σας — {total}', $company->mail_body_template);
+    }
+
+    #[Test]
+    public function clearing_a_custom_template_falls_back_to_null(): void
+    {
+        // Emptying the box (rather than using the reset action) must also fall
+        // back to the default — the column is nulled, not stored as ''.
+        $company = $this->actAsAuthorized();
+        $company->update(['mail_body_template' => 'κάτι προσαρμοσμένο']);
+
+        Livewire::test(CompanySettings::class)
+            ->set('data.mail_body_template', '')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertNull($company->refresh()->mail_body_template);
     }
 
     #[Test]
