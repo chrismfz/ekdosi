@@ -12,6 +12,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use UnitEnum;
 
 /**
  * Tenant-wide, READ-ONLY «Ιστορικό email» — every invoice-email attempt for the
@@ -29,13 +30,15 @@ class InvoiceMailLogResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-envelope';
 
+    protected static string|UnitEnum|null $navigationGroup = 'Σύστημα';
+
     protected static ?string $navigationLabel = 'Ιστορικό email';
 
     protected static ?string $modelLabel = 'email';
 
     protected static ?string $pluralModelLabel = 'Ιστορικό email';
 
-    protected static ?int $navigationSort = 30;
+    protected static ?int $navigationSort = 45;
 
     public static function getEloquentQuery(): Builder
     {

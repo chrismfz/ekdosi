@@ -25,6 +25,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use UnitEnum;
 
 /**
  * Read-only Invoice resource (roadmap step #6).
@@ -47,7 +48,9 @@ class InvoiceResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
-    protected static ?int $navigationSort = 1;
+    protected static string|UnitEnum|null $navigationGroup = 'Καθημερινά';
+
+    protected static ?int $navigationSort = 10;
 
     protected static ?string $recordTitleAttribute = 'invcode';
 

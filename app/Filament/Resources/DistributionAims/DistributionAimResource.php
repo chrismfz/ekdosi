@@ -28,9 +28,16 @@ class DistributionAimResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedPaperAirplane;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 40;
+
+    protected static ?string $modelLabel = 'Σκοπός διακίνησης';
+
+    protected static ?string $pluralModelLabel = 'Σκοποί διακίνησης';
+
+    // Verbatim nav label — else Filament title-cases the plural.
+    protected static ?string $navigationLabel = 'Σκοποί διακίνησης';
 
     protected static ?string $recordTitleAttribute = 'description';
 

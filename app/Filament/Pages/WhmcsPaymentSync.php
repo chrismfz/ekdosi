@@ -41,9 +41,9 @@ class WhmcsPaymentSync extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrows-right-left';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static string|UnitEnum|null $navigationGroup = 'myDATA & Διασυνδέσεις';
 
-    protected static ?int $navigationSort = 92;
+    protected static ?int $navigationSort = 30;
 
     protected string $view = 'filament.pages.whmcs-payment-sync';
 

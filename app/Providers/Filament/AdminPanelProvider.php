@@ -58,6 +58,19 @@ class AdminPanelProvider extends PanelProvider
             ->colors([
                 'primary' => Color::Amber,
             ])
+            // Explicit top-level navigation-group order (rest fall back to
+            // discovery order). Keep these strings byte-identical to the
+            // per-resource $navigationGroup values or a group silently splits.
+            ->navigationGroups([
+                'Καθημερινά',
+                'Leads',
+                'Είδη & Προμήθειες',
+                'Ψηφιακή Διακίνηση',
+                'Λογιστικά',
+                'myDATA & Διασυνδέσεις',
+                'Ρυθμίσεις',
+                'Σύστημα',
+            ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
             ->discoverClusters(in: app_path('Filament/Clusters'), for: 'App\Filament\Clusters')
@@ -101,7 +114,15 @@ class AdminPanelProvider extends PanelProvider
                     .e(app(BuildInfo::class)->label()).'</div>',
             )
             ->plugins([
-                FilamentShieldPlugin::make(),
+                // Shield's «Roles» resource → «Σύστημα» group as «Ρόλοι» (sort 30).
+                // filament-shield 4.x reads the Role resource's nav group/sort/label
+                // from the plugin instance (RoleResource::pluginOrParent), so these
+                // fluent setters are the supported mechanism — no vendor config keys
+                // exist for it. Empties the old 'Filament Shield' group so it vanishes.
+                FilamentShieldPlugin::make()
+                    ->navigationGroup('Σύστημα')
+                    ->navigationSort(30)
+                    ->navigationLabel('Ρόλοι'),
             ])
             ->authMiddleware([
                 Authenticate::class,

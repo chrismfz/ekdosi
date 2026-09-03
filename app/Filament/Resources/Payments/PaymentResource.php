@@ -24,9 +24,9 @@ class PaymentResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Είσπραξη/Πληρωμές';
+    protected static string|UnitEnum|null $navigationGroup = 'Καθημερινά';
 
-    protected static ?int $navigationSort = 5;
+    protected static ?int $navigationSort = 40;
 
     protected static ?string $modelLabel = 'πληρωμή';
 

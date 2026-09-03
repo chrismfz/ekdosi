@@ -34,7 +34,7 @@ class LedgerBook extends Page
 
     protected static string|UnitEnum|null $navigationGroup = 'Λογιστικά';
 
-    protected static ?int $navigationSort = 95;
+    protected static ?int $navigationSort = 10;
 
     protected string $view = 'filament.pages.ledger-book';
 

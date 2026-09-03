@@ -26,7 +26,7 @@ class AgedReceivables extends Page
 
     protected static string|UnitEnum|null $navigationGroup = 'Λογιστικά';
 
-    protected static ?int $navigationSort = 96;
+    protected static ?int $navigationSort = 20;
 
     protected string $view = 'filament.pages.aged-receivables';
 

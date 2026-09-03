@@ -30,9 +30,9 @@ class ProviderConsole extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-paper-airplane';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static string|UnitEnum|null $navigationGroup = 'myDATA & Διασυνδέσεις';
 
-    protected static ?int $navigationSort = 93;
+    protected static ?int $navigationSort = 40;
 
     protected static ?string $navigationLabel = 'Πάροχος';
 

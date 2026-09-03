@@ -26,9 +26,13 @@ class VatCategoryResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptPercent;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 60;
+
+    protected static ?string $modelLabel = 'Κατηγορία ΦΠΑ';
+
+    protected static ?string $pluralModelLabel = 'Κατηγορίες ΦΠΑ';
 
     protected static ?string $recordTitleAttribute = 'description';
 

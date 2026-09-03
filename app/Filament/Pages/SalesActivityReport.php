@@ -12,6 +12,7 @@ use Filament\Facades\Filament;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Symfony\Component\HttpFoundation\StreamedResponse;
+use UnitEnum;
 
 /**
  * «Απολογισμός πωλήσεων» — Leads L2 (docs/leads-mini-crm.md §7): per-operator
@@ -24,10 +25,11 @@ class SalesActivityReport extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedChartBar;
 
+    protected static string|UnitEnum|null $navigationGroup = 'Leads';
+
     protected static ?string $navigationLabel = 'Απολογισμός πωλήσεων';
 
-    // Right after the Leads resource (which sits at -1 among the party resources).
-    protected static ?int $navigationSort = 0;
+    protected static ?int $navigationSort = 40;
 
     protected string $view = 'filament.pages.sales-activity-report';
 

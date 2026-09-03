@@ -18,6 +18,7 @@ use Filament\Schemas\Schema;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use UnitEnum;
 
 /**
  * Recurring service contracts (Υπηρεσίες) — the per-customer subscription
@@ -34,13 +35,15 @@ class ServiceContractResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrow-path-rounded-square';
 
+    protected static string|UnitEnum|null $navigationGroup = 'Είδη & Προμήθειες';
+
     protected static ?string $navigationLabel = 'Υπηρεσίες';
 
     protected static ?string $modelLabel = 'υπηρεσία';
 
     protected static ?string $pluralModelLabel = 'Υπηρεσίες';
 
-    protected static ?int $navigationSort = 35;
+    protected static ?int $navigationSort = 20;
 
     protected static ?string $recordTitleAttribute = 'description';
 

@@ -16,6 +16,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Database\Eloquent\Collection;
+use UnitEnum;
 
 /**
  * «Πίνακας leads» — Leads L3 kanban: one column per OPEN status, a card per
@@ -34,9 +35,11 @@ class LeadsBoard extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedViewColumns;
 
+    protected static string|UnitEnum|null $navigationGroup = 'Leads';
+
     protected static ?string $navigationLabel = 'Πίνακας leads';
 
-    protected static ?int $navigationSort = 0;
+    protected static ?int $navigationSort = 20;
 
     protected string $view = 'filament.pages.leads-board';
 

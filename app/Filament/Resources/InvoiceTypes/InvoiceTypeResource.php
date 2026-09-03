@@ -29,9 +29,16 @@ class InvoiceTypeResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 10;
+
+    protected static ?string $modelLabel = 'Τύπος παραστατικού';
+
+    protected static ?string $pluralModelLabel = 'Τύποι παραστατικών';
+
+    // Verbatim nav label — else Filament title-cases the plural to «Τύποι Παραστατικών».
+    protected static ?string $navigationLabel = 'Τύποι παραστατικών';
 
     protected static ?string $recordTitleAttribute = 'name';
 

@@ -16,6 +16,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
+use UnitEnum;
 
 /**
  * «Ημερολόγιο leads» — Leads L3: a month grid (Δευ–Κυρ) of the OPEN leads'
@@ -28,9 +29,11 @@ class LeadsCalendar extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCalendarDays;
 
+    protected static string|UnitEnum|null $navigationGroup = 'Leads';
+
     protected static ?string $navigationLabel = 'Ημερολόγιο leads';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 30;
 
     protected string $view = 'filament.pages.leads-calendar';
 

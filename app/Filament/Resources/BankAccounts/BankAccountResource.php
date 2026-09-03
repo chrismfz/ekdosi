@@ -27,7 +27,7 @@ class BankAccountResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingLibrary;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 21;
 

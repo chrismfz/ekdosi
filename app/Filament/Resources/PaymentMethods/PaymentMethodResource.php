@@ -30,9 +30,16 @@ class PaymentMethodResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBanknotes;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 20;
+
+    protected static ?string $modelLabel = 'Τρόπος πληρωμής';
+
+    protected static ?string $pluralModelLabel = 'Τρόποι πληρωμής';
+
+    // Verbatim nav label — else Filament title-cases the plural.
+    protected static ?string $navigationLabel = 'Τρόποι πληρωμής';
 
     protected static ?string $recordTitleAttribute = 'description';
 
