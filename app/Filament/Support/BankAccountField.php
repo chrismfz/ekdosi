@@ -30,15 +30,21 @@ class BankAccountField
             // accounts, but a crafted request could submit another tenant's id.
             // Reject anything that isn't an account of $companyId (null is fine —
             // the field is optional). Closes the cross-tenant IBAN store/print path.
-            ->rules([
-                function (string $attribute, mixed $value, Closure $fail) use ($companyId): void {
-                    if ($value === null || $value === '') {
-                        return;
-                    }
-                    if (! BankAccount::belongsToTenant($value, $companyId)) {
-                        $fail('Μη έγκυρος τραπεζικός λογαριασμός.');
-                    }
-                },
-            ]);
+            //
+            // The Laravel rule closure MUST be returned from an OUTER Filament closure
+            // (`fn (): Closure => …`), never registered bare. Filament evaluates every
+            // registered rule (getValidationRules → evaluate), and a bare
+            // `function (string $attribute, …)` makes it try to resolve `$attribute` as a
+            // dependency → "closure … [$attribute] was unresolvable" on validate/create.
+            // The wrapper is evaluated (no injectable params) and hands the inner
+            // closure to the Laravel validator, which calls it with ($attribute,$value,$fail).
+            ->rule(fn (): Closure => function (string $attribute, mixed $value, Closure $fail) use ($companyId): void {
+                if ($value === null || $value === '') {
+                    return;
+                }
+                if (! BankAccount::belongsToTenant($value, $companyId)) {
+                    $fail('Μη έγκυρος τραπεζικός λογαριασμός.');
+                }
+            });
     }
 }
