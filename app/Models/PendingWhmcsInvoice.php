@@ -274,6 +274,42 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
+     * Does the WHMCS «γκρινιάρης» (immediate-invoice) custom field mark this client
+     * for άμεση τιμολόγηση? Reads the mapped 'griniaris' role checkbox (same truthy
+     * set — and same null-when-unmapped contract — as wantsInvoice):
+     *   - null  = the tenant hasn't MAPPED the griniaris field → intent unknown, so
+     *             WHMCS is NOT the source of truth here (leave the flag to the operator).
+     *   - true  = the field is mapped AND checked.
+     *   - false = the field is mapped but absent/unchecked.
+     *
+     * WHMCS is the source of truth for this flag on WHMCS-linked customers: it seeds
+     * customers.needs_immediate_invoice at CREATE (WhmcsCustomerCreator) and is MIRRORED
+     * onto the matched customer on every ingest (WhmcsInvoiceIngestor) — so a later
+     * WHMCS toggle propagates. The null (unmapped) case is exactly what stops a tenant
+     * that doesn't use the field from having every customer's flag forced off.
+     */
+    public function wantsImmediateInvoice(): ?bool
+    {
+        if ($this->company?->whmcsCustomFieldId('griniaris') === null) {
+            return null;
+        }
+        // A payload with NO customfields block means we could not READ the client's
+        // fields — WhmcsClient::getInvoiceWithClient degrades to the bare invoice when
+        // the WHMCS client lookup fails (timeout/500/rate-limit). That is «unknown»,
+        // NOT «unchecked»: returning null here (→ the mirror leaves the flag alone)
+        // stops a transient WHMCS blip from silently forcing an existing customer OFF.
+        // A SUCCESSFUL client fetch always carries the customfields key (griniaris is a
+        // mapped field), so a genuine uncheck still propagates as false below.
+        $payload = is_array($this->payload) ? $this->payload : [];
+        if (! array_key_exists('customfields', $payload)) {
+            return null;
+        }
+        $v = mb_strtolower((string) $this->whmcsCustomField('griniaris'));
+
+        return in_array($v, ['on', '1', 'yes', 'true', 'ναι', 'checked'], true);
+    }
+
+    /**
      * Receipt-vs-invoice for the customer's OWN (non-routed) lines: true =
      * «Απόδειξη», false = «Τιμολόγιο». Driven by the PRIMARY customer, NOT the
      * per-route is_receipt (which the plugin defaults to false for own lines —

@@ -6,6 +6,7 @@ use App\Mcp\Tools\AppHealthTool;
 use App\Mcp\Tools\AppVersionMcpTool;
 use App\Mcp\Tools\CountSalesMcpTool;
 use App\Mcp\Tools\CreateReminderMcpTool;
+use App\Mcp\Tools\ErrorLogTailTool;
 use App\Mcp\Tools\FailedJobsTool;
 use App\Mcp\Tools\FindCustomerMcpTool;
 use App\Mcp\Tools\InvoiceFilingMcpTool;
@@ -42,8 +43,8 @@ use Laravel\Mcp\Server\Tool;
  *     over App\Services\Assistant\Tools\*: tenant-scoped, Shield-gated, and the
  *     two write tools PROPOSE-ONLY (stage an AiPendingAction the operator
  *     confirms inside ekdosi).
- *   - Ops/debug tools (app_health, failed_jobs, log_tail) — cross-tenant infra,
- *     super_admin only, for debugging the deployment remotely.
+ *   - Ops/debug tools (app_health, failed_jobs, log_tail, error_log_tail) —
+ *     cross-tenant infra, super_admin only, for debugging the deployment remotely.
  */
 #[Name('ekdosi')]
 #[Version('0.1.0')]
@@ -77,7 +78,11 @@ Ops / debugging (super-admin only, cross-tenant infrastructure, read-only):
   Start here for "is anything wrong?".
 - failed_jobs — recent failed queue jobs with the head of each exception. The first stop
   for "why did the background job / mail / WHMCS / myDATA submit fail?".
-- log_tail — tail the application log (level/substring filters) for the actual error text.
+- log_tail — tail the application log (storage/logs/laravel*.log) for the actual error text.
+- error_log_tail — tail the PHP/FPM/web-server ERROR log instead: fatals, infinite recursion,
+  FPM-worker deaths, pre-framework 500s — the errors that NEVER reach laravel.log. «Error while
+  loading page» with an empty app log lands here. Resolves PHP's own error_log from ini_get
+  (portable across cPanel/DirectAdmin/Virtualmin/standalone) + probes common panel locations.
 
 myDATA / provider forensics (super-admin only, cross-tenant, read-only) — «γιατί έσκασε
 αυτό;» on the filing path. The evidence is already stored (byte-exact request/response XML
@@ -125,6 +130,10 @@ class EkdosiMcpServer extends Server
         AppHealthTool::class,
         FailedJobsTool::class,
         LogTailTool::class,
+        // The PHP/FPM/web-server error log (ini_get error_log + panel candidates) —
+        // fatals/recursion/worker-deaths that never reach laravel.log (the «Error
+        // while loading page» with an empty app log).
+        ErrorLogTailTool::class,
         // myDATA / provider forensics (super_admin only, cross-tenant, read-only) —
         // «γιατί έσκασε ΑΥΤΟ το παραστατικό;». See known-issues.md §OBS-001.
         InvoiceFilingMcpTool::class,

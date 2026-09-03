@@ -406,6 +406,12 @@ data model + phase gates: **`PLAN.md`**.
   «Αντιστοίχιση WHMCS (πληρωμές)» κάνει `wire:model="choice.{gateway}"`· ένα gateway module name με `.`
   (ασυνήθιστο — τα WHMCS modules είναι `[a-z0-9_]`) θα γινόταν nested path. Θέλει index-based binding ή
   sanitised key. Χαμηλή πιθανότητα· άνοιξέ το αν εμφανιστεί τέτοιο gateway.
+- **`customfields` ως scalar → TypeError στο `resolveWhmcsCustomField` (P2, από review — pre-existing)** —
+  αν κάποιο WHMCS/bridge response έδινε ποτέ το `customfields` ως scalar αντί για array, το
+  `array_is_list($scalar)` θα πετούσε TypeError. Κοινή παραδοχή όλου του parsing (`wantsInvoice`/`whmcsAfm`/
+  matcher/`wantsImmediateInvoice`), **μη προσβάσιμη από κανένα πραγματικό feed path** (native + bridge δίνουν
+  πάντα array). Στον γκρινιάρη-mirror το καταπίνει το best-effort `\Throwable` catch· στο create-seed
+  (`WhmcsCustomerCreator`) όχι. Fix = ένας κοινός guard `is_array($customfields)` στην κορυφή του reader.
 
 ## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
 _Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._
