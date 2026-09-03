@@ -470,6 +470,18 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **PROV-009 remainder — explicit `evidence_pending` indicator** _(P2)._ The core (quota + reception
+  capture, widget, low-quota warn) shipped. What's left: when a filing is adopted via a MARK-only
+  recovery (the myDATA read returns MARK+QR but not the provider UID/auth), the provider evidence is
+  incomplete — surface that explicitly (a DERIVED predicate «has uid+auth?» + a console/invoice-box
+  badge «στοιχεία παρόχου ελλιπή», not a stored state to drift). It must NEVER trigger a re-file merely
+  to fill those fields (the finding is explicit). Two related asks are **not feasible**, not deferred:
+  a delivery-failure warn (the issue response carries no delivery outcome — the provider emails the
+  customer afterwards with no callback) and a scheduled quota poll (no non-issuing endpoint, and the
+  quota already refreshes on every filing). Also parked: **shared-account quota** — the widget/warn read
+  the tenant's OWN latest reading, correct for one InvoSign contract per tenant (our setup); if a single
+  provider account ever backed several tenants, each would see a per-tenant partial view of the shared
+  quota. Revisit only if a reseller/accountant shared-account setup appears.
 - **PROV-005 remaining half — authenticated provider credential probe** _(P1, vendor-blocked)._
   The local config false-greens are fixed (issuer-field completeness + active-env credential pairing,
   in `ProviderPreflight` + go-live). What stays: `InvoSignTransport::ping()` is an **unauthenticated**

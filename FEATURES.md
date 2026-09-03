@@ -190,6 +190,10 @@
   ζεύγος myDATA read-creds για το ενεργό περιβάλλον (PROV-005). Τα υποχρεωτικά στοιχεία
   εκδότη (+ΑΦΜ) ελέγχονται ΚΑΙ ως gate στο `ekdosi:go-live-check` (το read-creds ζεύγος
   μένει στο Console preflight — μη-μπλοκάρον advisory).
+- **Υπόλοιπο εκδόσεων παρόχου (PROV-009)** — ο πάροχος επιστρέφει σε κάθε έκδοση το quota
+  (`remaining_invoices`) + τα emails παραλήπτη (`receptionEmails`), που αποθηκεύονται δομημένα στο
+  `mydata_marks`. Dashboard widget **«Πάροχος ΥΠΑΗΕΣ»** με το τρέχον υπόλοιπο (χρωματισμένο κοντά στο
+  όριο) + προειδοποίηση στο log σε χαμηλό υπόλοιπο — χωρίς polling.
 - **PEPPOL Phase 1** (Εσθονία) — provider-independent **BIS Billing 3.0 / EN 16931 UBL**
   builder (`PeppolInvoiceDocument` μέσω `josemmo/einvoicing`) + `peppol:test-submit`
   (dry-run + validate). Phase 2 (Access-Point transport) = backlog.

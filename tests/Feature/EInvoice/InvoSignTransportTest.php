@@ -17,6 +17,7 @@ use App\Services\EInvoiceSubmitterFactory;
 use App\Support\EInvoice\ProviderCredentials;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -98,6 +99,9 @@ class InvoSignTransportTest extends TestCase
         $this->assertSame('400001957061986', $result->mark);
         $this->assertSame('AUTH-XYZ', $result->authenticationCode);
         $this->assertSame('https://invosign.gr/viewinvoice.php?uid=UID1', $result->qrUrl);
+        // PROV-009: operational evidence parsed off the response.
+        $this->assertSame(2985, $result->remainingInvoices);
+        $this->assertNull($result->receptionEmails, 'absent in the stub → null, not empty string');
 
         Http::assertSent(function ($request) {
             return str_contains($request->url(), '/iNVOSign_Api.php')
@@ -367,11 +371,136 @@ class InvoSignTransportTest extends TestCase
         $this->assertSame('400001957061986', $mark->mark);
         $this->assertSame('invosign', $mark->provider_key);
         $this->assertSame('AUTH-XYZ', $mark->authentication_code);
+        $this->assertSame(2985, $mark->remaining_invoices, 'PROV-009: quota persisted on the mark');
         $this->assertSame('VALID', $invoice->fresh()->mydata_state);
         $this->assertSame(1, MyDataMark::where('invoice_id', $invoice->id)->count());
         // The stored request is the ACTUAL sent payload (augmented), not the AADE core.
         $this->assertStringContainsString('API_InvoiceDetails', (string) $mark->request);
         $this->assertStringContainsString('statusCode', (string) $mark->response); // what came back
+    }
+
+    public function test_low_provider_quota_logs_a_warning(): void
+    {
+        // PROV-009: a fresh filing whose reported quota is at/below the threshold
+        // (default 50) logs a low-quota warning; the value is persisted regardless.
+        Log::spy();
+        $xml = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<invoiceUid>UID9</invoiceUid><invoiceMark>400001957062000</invoiceMark>'
+            .'<authenticationCode>A</authenticationCode><statusCode>Success</statusCode>'
+            .'<remaining_invoices>3</remaining_invoices></response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($xml, 200)]);
+
+        $mark = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->submit($this->makeInvoice());
+
+        $this->assertSame(3, $mark->remaining_invoices);
+        Log::shouldHaveReceived('warning')
+            ->withArgs(fn (string $message) => str_contains($message, 'quota is low'))
+            ->once();
+    }
+
+    public function test_reception_emails_are_persisted_when_present(): void
+    {
+        // PROV-009: capture who the provider notified (empty in prod today, but real).
+        $xml = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<invoiceUid>UID8</invoiceUid><invoiceMark>400001957062001</invoiceMark>'
+            .'<statusCode>Success</statusCode><remaining_invoices>500</remaining_invoices>'
+            .'<receptionEmails>pelatis@example.gr</receptionEmails></response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($xml, 200)]);
+
+        $mark = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->submit($this->makeInvoice());
+
+        $this->assertSame('pelatis@example.gr', $mark->reception_emails);
+        $this->assertSame(500, $mark->remaining_invoices);
+    }
+
+    public function test_no_repeat_warning_when_quota_was_already_low(): void
+    {
+        // PROV-009: warn only on the CROSSING into the low band, not on every filing
+        // while already low (no alert fatigue). A prior low reading exists → silence.
+        Log::spy();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'mark' => '400001900000001',
+            'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'invosign',
+            'remaining_invoices' => 40, // already ≤ threshold (50) — we warned then
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+        $xml = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<invoiceUid>U</invoiceUid><invoiceMark>400001957062009</invoiceMark>'
+            .'<statusCode>Success</statusCode><remaining_invoices>39</remaining_invoices>'
+            .'</response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($xml, 200)]);
+
+        app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->submit($this->makeInvoice());
+
+        Log::shouldNotHaveReceived('warning');
+    }
+
+    public function test_exhausted_quota_logs_at_error_level(): void
+    {
+        // PROV-009: severity escalates — an EXHAUSTED (≤ 0) account is an error, not
+        // the same warning as merely-low, so "filings about to fail hard" stands out.
+        Log::spy();
+        $xml = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<invoiceUid>U</invoiceUid><invoiceMark>400001957062010</invoiceMark>'
+            .'<statusCode>Success</statusCode><remaining_invoices>0</remaining_invoices>'
+            .'</response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($xml, 200)]);
+
+        $mark = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->submit($this->makeInvoice());
+
+        $this->assertSame(0, $mark->remaining_invoices, 'zero persisted, not null');
+        Log::shouldHaveReceived('error')
+            ->withArgs(fn (string $message) => str_contains($message, 'EXHAUSTED'))
+            ->once();
+    }
+
+    public function test_gradual_depletion_from_low_to_exhausted_still_escalates_to_error(): void
+    {
+        // PROV-009 (R2-1): the crossing guard must treat low→exhausted as its OWN
+        // crossing. A prior LOW reading (band 1) exists, and this filing hits ZERO
+        // (band 2): the round-1 «skip if previously ≤ threshold» guard swallowed the
+        // EXHAUSTED error exactly here — the account silently ran dry. The banded
+        // guard fires the error because band 2 > band 1.
+        Log::spy();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id, 'mark' => '400001900000002',
+            'mydata_action' => 'PROVIDER_INSERT', 'provider_key' => 'invosign',
+            'remaining_invoices' => 5, // already low (≤ 50) but NOT yet exhausted
+            'mark_date' => now()->toDateString(), 'mark_time' => now()->toTimeString(),
+        ]);
+        $xml = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<invoiceUid>U</invoiceUid><invoiceMark>400001957062011</invoiceMark>'
+            .'<statusCode>Success</statusCode><remaining_invoices>0</remaining_invoices>'
+            .'</response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($xml, 200)]);
+
+        app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->submit($this->makeInvoice());
+
+        Log::shouldHaveReceived('error')
+            ->withArgs(fn (string $message) => str_contains($message, 'EXHAUSTED'))
+            ->once();
+        // Still merely-low was already alerted on the earlier crossing → no new warning.
+        Log::shouldNotHaveReceived('warning');
+    }
+
+    public function test_absurdly_large_quota_is_capped_and_the_filing_still_commits(): void
+    {
+        // PROV-009 (review P2): the clamp must guard BOTH directions. A garbage huge
+        // remaining_invoices would exceed the unsignedInteger column max and, under
+        // strict mode, fail the insert — rolling back a filing AADE already accepted
+        // and stranding a VALID document as locally-unfiled. Cap to 4294967295 so the
+        // shared VALID-commit transaction survives.
+        $invoice = $this->makeInvoice();
+        $xml = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc><response>'
+            .'<invoiceUid>U</invoiceUid><invoiceMark>400001957062020</invoiceMark>'
+            .'<statusCode>Success</statusCode><remaining_invoices>99999999999</remaining_invoices>'
+            .'</response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($xml, 200)]);
+
+        $mark = app(EInvoiceSubmitterFactory::class)->for($this->tenant->fresh())->submit($invoice);
+
+        $this->assertSame(4294967295, $mark->remaining_invoices, 'capped to the unsignedInteger max, not the raw garbage');
+        $this->assertSame('VALID', $invoice->fresh()->mydata_state, 'the filing committed — the clamp prevented a rollback');
     }
 
     public function test_non_delivery_note_cancel_is_refused_before_reaching_the_provider(): void

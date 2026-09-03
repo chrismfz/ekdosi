@@ -282,6 +282,7 @@ class InvoiceInfolist
                             ->hint(fn ($record) => $record->providerEvidence() !== null
                                 ? 'Επίσημο έγγραφο παρόχου'
                                 : null)
+                            ->extraAttributes(['class' => 'break-all'])
                             ->limit(60),
 
                         // Provider evidence (null for direct myDATA / cancelled / no
@@ -293,25 +294,30 @@ class InvoiceInfolist
                             ->state(fn ($record) => $record->providerEvidence()['commercial_name'] ?? null)
                             ->visible(fn ($record) => $record->providerEvidence() !== null),
 
+                        // PROV-009 ρετούς: these carry long, unbreakable strings (a
+                        // licence code, 40-hex UID/signature) that overflowed the box
+                        // in the narrow 4-column grid. `break-all` wraps them inside
+                        // their cell (class defined in panel.css — no-build gotcha).
                         TextEntry::make('provider_licence')
                             ->label('Αριθμός Αδειοδότησης')
                             ->state(fn ($record) => $record->providerEvidence()['licence_no'] ?? null)
                             ->visible(fn ($record) => $record->providerEvidence() !== null)
+                            ->extraAttributes(['class' => 'break-all'])
                             ->copyable(),
 
                         TextEntry::make('provider_uid')
                             ->label('Αναγνωριστικό (UID)')
                             ->state(fn ($record) => $record->providerEvidence()['uid'] ?? null)
                             ->visible(fn ($record) => filled($record->providerEvidence()['uid'] ?? null))
-                            ->copyable()
-                            ->limit(40),
+                            ->extraAttributes(['class' => 'break-all'])
+                            ->copyable(),
 
                         TextEntry::make('authentication_code')
                             ->label('Υπογραφή')
                             ->state(fn ($record) => $record->providerEvidence()['auth_code'] ?? null)
                             ->visible(fn ($record) => filled($record->providerEvidence()['auth_code'] ?? null))
-                            ->copyable()
-                            ->limit(40),
+                            ->extraAttributes(['class' => 'break-all'])
+                            ->copyable(),
                     ])
                     ->columns(4),
 
