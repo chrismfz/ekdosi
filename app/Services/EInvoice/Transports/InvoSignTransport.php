@@ -225,6 +225,16 @@ class InvoSignTransport implements EInvoiceProviderTransport
             authenticationCode: ((string) ($resp->authenticationCode ?? '')) ?: null,
             qrUrl: ((string) ($resp->qrUrl ?? '')) ?: null,
             raw: $xml,
+            // PROV-009: operational evidence InvoSign returns on every issue.
+            // remaining_invoices is a numeric quota (sandbox-confirmed «988»); an
+            // absent/non-numeric one → null (never a fabricated 0). receptionEmails
+            // is present-but-empty until the notification path is configured → null.
+            // Clamp to the unsignedInteger range [0, 4294967295]: this write shares the
+            // VALID-commit transaction, so an out-of-range value (a negative «overdraft»
+            // OR a garbage huge one) must NOT fail the insert and roll back an accepted
+            // filing. 0 already means exhausted; the 32-bit cap never bites a real quota.
+            remainingInvoices: is_numeric((string) ($resp->remaining_invoices ?? '')) ? min(4294967295, max(0, (int) $resp->remaining_invoices)) : null,
+            receptionEmails: ((string) ($resp->receptionEmails ?? '')) ?: null,
         );
     }
 }

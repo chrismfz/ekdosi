@@ -510,7 +510,7 @@ Priorities:
 | PROV-006 | P0 | DONE | — | Provider retail | **Sandbox-verified 2026-09-03:** retail 11.1 (ΑΛΠ) via InvoSign accepted → VALID, MARK 400001970206125 (named counterpart). Truly-anonymous ΑΛΠ (no name) untested — not this tenant's workflow |
 | PROV-007 | P1 | VERIFY | C | Provider totals | Header/line discount semantics of InvoSign api_* fields are not proven |
 | PROV-008 | P1 | OPEN | C | Provider outage | Transmission Failure_1/2 issue and recovery lifecycle is absent |
-| PROV-009 | P2 | OPEN | B | Provider observability | UID, reception feedback and remaining quota are not structured/surfaced |
+| PROV-009 | P2 | PARTIAL | B | Provider observability | **Core DONE (this PR).** UID already persisted (#406); now `remaining_invoices` (quota) + `receptionEmails` are parsed & persisted to `mydata_marks` (sandbox-confirmed shape). Dashboard widget «Πάροχος ΥΠΑΗΕΣ» shows the running quota (colour-banded, scoped by company+provider_key), a log line on each band crossing (low → warning, exhausted → error; `provider_low_quota_threshold`, default 50), + invoice-box overflow ρετούς. **Deferred:** an explicit `evidence_pending` indicator for MARK-only adoptions (→ BACKLOG); delivery-failure warn (no API feedback) + scheduled poll (no non-issuing endpoint) — not feasible |
 | PROV-010 | P0 | DONE | — | Provider activation | Contract + «Δήλωση Έναρξης» + acceptance in place (operator-confirmed 2026-09-02) |
 | PROV-011 | P1 | VERIFY | B | Provider API | Version support and contradictory cancellation example need written confirmation |
 | PROV-012 | P1 | OPEN | C | Provider scope | Public-contract/All-in-one POS capabilities are not gated from the AADE register |
@@ -3031,20 +3031,30 @@ document update and exact-once MARK adoption.
 
 ### PROV-009 — Provider operational evidence is discarded
 
-**Status:** OPEN · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
+**Status:** PARTIAL (core DONE this PR) · **Priority:** P2 · **Research:** CONFIRMED 2026-08-30
 
-InvoSign returns `invoiceUid`, `receptionEmails` and
-`remaining_invoices`. UID is parsed but not stored in a structured column; the
-other fields are ignored. Raw XML is useful forensic evidence but cannot drive
-alerts, filtering or a readable support workflow.
+**Resolution (core).** A real sandbox response (2026-09-03) confirmed the exact shape
+— `<remaining_invoices>988</remaining_invoices>` (a real quota) and
+`<receptionEmails></receptionEmails>` (present, empty until the notification path is
+configured). Both are now parsed (`ProviderResult` + `InvoSignTransport`) and persisted
+to `mydata_marks` (`remaining_invoices` int, `reception_emails` string); UID/auth/QR
+were already persisted (#406). Surfaced:
+- **`ProviderQuotaStats`** dashboard widget «Πάροχος ΥΠΑΗΕΣ» — the running quota off the
+  latest provider mark, colour-banded by `config('ekdosi.einvoice.provider_low_quota_threshold')`.
+- **Low-quota warning** logged on each fresh filing at/below the threshold (free — the
+  quota rides every issue response, no polling).
+- **Box ρετούς:** the long provider strings (licence / 40-hex UID / signature) now wrap
+  inside the «myDATA / Πάροχος» box (`break-all`) instead of overflowing it.
 
-Persist UID and normalized provider delivery/quota data while retaining the raw
-response. A MARK-only recovery may adopt the legal filing, but must set an
-explicit `evidence_pending` state when UID, authentication code, QR or provider
-artifact is incomplete; it must never refile merely to fill those fields. Warn on
-delivery failure and low quota, expose the information in the invoice/provider
-console, and add a scheduled quota/health check only if InvoSign provides a
-non-issuing endpoint.
+**Deferred:**
+- **`evidence_pending`** — an explicit indicator when a MARK-only adoption (via the
+  myDATA read, which returns MARK+QR but not the provider UID/auth) leaves provider
+  evidence incomplete. A derived predicate (uid/auth present?) + a console badge →
+  `docs/BACKLOG.md`. Never re-file to fill it (as the finding requires).
+- **Warn on delivery failure** — not feasible: the issue response carries no delivery
+  outcome (the provider emails the customer *after* issue, with no callback to us).
+- **Scheduled quota/health check** — no non-issuing endpoint exists; and the quota
+  already refreshes on every filing, so a poll adds nothing.
 
 ### PROV-010 — Provider contract/declaration activation is not a go-live gate
 

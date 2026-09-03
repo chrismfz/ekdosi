@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Παρακολούθηση quota & δεδομένων παρόχου ΥΠΑΗΕΣ (PROV-009).** Ο InvoSign επιστρέφει σε κάθε έκδοση το
+  **υπόλοιπο εκδόσεων** (`remaining_invoices`) και τα **emails παραλήπτη** (`receptionEmails`) — τα
+  καταγράφουμε πλέον δομημένα στο `mydata_marks` (το UID/auth/QR ήδη). Νέο dashboard widget **«Πάροχος
+  ΥΠΑΗΕΣ»** δείχνει το τρέχον υπόλοιπο (χρωματισμένο· πορτοκαλί/κόκκινο κοντά στο όριο
+  `EKDOSI_PROVIDER_LOW_QUOTA_THRESHOLD`, default 50), και όταν το υπόλοιπο **περάσει το όριο προς τα
+  κάτω** γράφεται εγγραφή στο log (χαμηλό → warning, εξαντλημένο → error) — μία φορά ανά διέλευση, όχι σε
+  κάθε έκδοση, **χωρίς polling** (το quota έρχεται δωρεάν σε κάθε υποβολή).
 - **`mydata:backfill-config` — εναρμόνιση imported tenants με τα fresh-setup defaults.** Ένας tenant
   seeded από τον `MyDataLookupSeeder` είναι σωστός out-of-the-box· ένας migrated από Firebird όχι, γιατί η
   legacy DB δεν είχε πεδίο για την §8.3 αιτία απαλλαγής ούτε για τον §8.12 τύπο πληρωμής → οι imported
@@ -31,6 +38,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (`App\Services\MyData\ConfigBackfiller`).
 
 ### Fixed
+- **Ρετούς στο box «myDATA / Πάροχος» στη σελίδα παραστατικού (PROV-009).** Τα μακριά αλφαριθμητικά
+  (Αριθμός Αδειοδότησης, 40-hex UID/Υπογραφή, QR URL) ξεχείλιζαν το πλαίσιο· τυλίγονται πλέον μέσα στο
+  κελί (`break-all`).
 - **Provider preflight: πλήρης ταυτότητα εκδότη + σωστό ζευγάρωμα myDATA creds (PROV-005 local half).** Το
   preflight (και το `ekdosi:go-live-check`) έλεγχαν μόνο το ΑΦΜ εκδότη — ένας tenant παρόχου χωρίς
   ΔΟΥ/ΚΑΔ/διεύθυνση περνούσε **πράσινος** και τον απέρριπτε ο InvoSign στο πρώτο κανονικό παραστατικό.

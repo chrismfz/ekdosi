@@ -354,6 +354,16 @@ return [
         'in_doubt_grace_minutes' => (int) env('EKDOSI_MYDATA_INDOUBT_GRACE_MINUTES', 10),
 
         /*
+        | PROV-009 — low-quota threshold for a ΥΠΑΗΕΣ provider account. Providers
+        | (InvoSign) return the account's REMAINING QUOTA on every issue response
+        | (`remaining_invoices`), so we track it for free. At or below this many
+        | remaining filings a warning is logged on each new filing, and the
+        | ProviderQuotaStats dashboard widget turns warning/danger — nudging the
+        | operator to top up before the account runs dry mid-day.
+        */
+        'provider_low_quota_threshold' => (int) env('EKDOSI_PROVIDER_LOW_QUOTA_THRESHOLD', 50),
+
+        /*
         | Human labels for the operator "Τρόπος αποστολής" dropdown (P3). Each key
         | yields a "<label> — Δοκιμαστικό" + "<label> — Παραγωγή" pair. Listed here
         | so a provider is SELECTABLE (and its credentials enterable) before the
