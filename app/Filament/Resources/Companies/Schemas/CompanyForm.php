@@ -11,12 +11,12 @@ use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Filament\Pages\MyDataCodeGuide;
+use App\Filament\Support\MailTemplateFields;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Services\AadeRegistryLookup;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\NullProviderTransport;
-use App\Services\MailTemplateRenderer;
 use App\Services\MyDataSubmitter;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
@@ -497,16 +497,14 @@ class CompanyForm
                                 Section::make('Mail templates')
                                     ->description('Subject and body for the customer-facing invoice mail. Use placeholders: {tenant_name}, {invoice_code}, {invoice_type}, {issued_at}, {customer_name}, {total}, {mark}, {verify_url}, {mark_section}.')
                                     ->schema([
-                                        TextInput::make('mail_subject_template')
-                                            ->label('Subject template')
-                                            ->maxLength(191)
-                                            ->placeholder(MailTemplateRenderer::DEFAULT_SUBJECT_TEMPLATE)
-                                            ->helperText('Leave blank to use the default. Single line.'),
-                                        Textarea::make('mail_body_template')
-                                            ->label('Body template')
-                                            ->rows(10)
-                                            ->placeholder(MailTemplateRenderer::DEFAULT_BODY_TEMPLATE)
-                                            ->helperText('Plain text with placeholders. HTML is escaped to plain text at send time (security).'),
+                                        MailTemplateFields::subject(
+                                            'Subject template',
+                                            'Pre-filled with the default so you can tweak it. Use the reset link (or clear the field) to restore the app default. Single line.',
+                                        ),
+                                        MailTemplateFields::body(
+                                            'Body template',
+                                            'Pre-filled with the default — edit it inline. Use the reset link to restore the default. Plain text with placeholders; HTML is escaped to plain text at send time (security).',
+                                        ),
                                     ]),
 
                                 Section::make('Outbound mail routing')
