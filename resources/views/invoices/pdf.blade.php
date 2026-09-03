@@ -18,55 +18,58 @@
         via `page-break-inside` on `.lines-wrap`.
     --}}
     <style>
-        @page { margin: 16mm 14mm 22mm 14mm; }
-        body { font-family: DejaVu Sans, sans-serif; font-size: 9.5pt; color: #1f2937; line-height: 1.35; }
+        /* Compact single-page layout (PDF-COMPACT): tightened margins, fonts and
+           inter-block spacing so a typical 1–8 line invoice fits on ONE A4 page
+           (the roomy PR-27 spacing pushed even a single line onto a 2nd page). */
+        @page { margin: 11mm 12mm 18mm 12mm; }
+        body { font-family: DejaVu Sans, sans-serif; font-size: 9pt; color: #1f2937; line-height: 1.22; }
 
         /* Banners */
-        .banner { text-align: center; font-weight: bold; font-size: 14pt; padding: 3mm; margin-bottom: 4mm; border: 2px solid; border-radius: 2mm; }
+        .banner { text-align: center; font-weight: bold; font-size: 12pt; padding: 2mm; margin-bottom: 2.5mm; border: 1.5pt solid; border-radius: 1.5mm; }
         .banner-draft     { color: #9a3412; border-color: #9a3412; background: #fff7ed; }
         .banner-cancelled { color: #7f1d1d; border-color: #7f1d1d; background: #fef2f2; }
         .banner-credit    { color: #1e40af; border-color: #1e40af; background: #eff6ff; }
 
         /* Header — tenant on the left, invoice meta on the right */
-        .hdr { display: table; width: 100%; table-layout: fixed; border-bottom: 1.5pt solid #111827; padding-bottom: 3mm; margin-bottom: 4mm; }
+        .hdr { display: table; width: 100%; table-layout: fixed; border-bottom: 1.2pt solid #111827; padding-bottom: 2mm; margin-bottom: 2.5mm; }
         .hdr-left  { display: table-cell; width: 60%; vertical-align: top; }
         .hdr-right { display: table-cell; width: 40%; vertical-align: top; text-align: right; }
-        .hdr-logo  { max-height: 22mm; max-width: 60mm; margin-bottom: 2mm; }
-        .tenant-name { font-size: 13pt; font-weight: bold; margin: 0 0 1mm 0; }
-        .tenant-info { font-size: 8.5pt; color: #4b5563; }
+        .hdr-logo  { max-height: 14mm; max-width: 48mm; margin-bottom: 1mm; }
+        .tenant-name { font-size: 11.5pt; font-weight: bold; margin: 0 0 0.6mm 0; }
+        .tenant-info { font-size: 8pt; color: #4b5563; }
         /* clear:right so the (possibly multi-word) type name sits BELOW the floated
            QR instead of wrapping around it — fixes «ΠΙΣΤΩΤΙΚΟ» / «ΤΙΜΟΛΟΓΙΟ» splitting. */
-        .doc-type    { font-size: 14pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; clear: right; }
-        .doc-code    { font-size: 12pt; color: #111827; margin: 1mm 0; }
-        .doc-date    { font-size: 9pt; color: #4b5563; }
+        .doc-type    { font-size: 13pt; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; clear: right; }
+        .doc-code    { font-size: 11pt; color: #111827; margin: 0.6mm 0; }
+        .doc-date    { font-size: 8.5pt; color: #4b5563; }
 
         /* Two-column meta strip (customer / invoice details) */
-        .meta { display: table; width: 100%; table-layout: fixed; margin-bottom: 4mm; }
-        .meta-cell { display: table-cell; width: 50%; vertical-align: top; padding: 3mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
+        .meta { display: table; width: 100%; table-layout: fixed; margin-bottom: 2.5mm; }
+        .meta-cell { display: table-cell; width: 50%; vertical-align: top; padding: 2mm 2.5mm; border: 1pt solid #d1d5db; border-radius: 1mm; }
         .meta-cell + .meta-cell { border-left: none; }
-        .meta-cell h3 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
-        .meta-cell .name { font-weight: bold; font-size: 10.5pt; margin-bottom: 1mm; }
-        .meta-row { font-size: 9pt; color: #1f2937; }
+        .meta-cell h3 { font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.5pt; color: #6b7280; margin: 0 0 1mm 0; font-weight: bold; }
+        .meta-cell .name { font-weight: bold; font-size: 9.5pt; margin-bottom: 0.6mm; }
+        .meta-row { font-size: 8.5pt; color: #1f2937; }
         .meta-label { color: #6b7280; }
 
         /* QR block floats over the meta strip on filed invoices */
-        .qr-block { float: right; text-align: center; margin: 0 0 3mm 4mm; padding: 2mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; }
-        .qr-block img { width: 32mm; height: 32mm; display: block; }
-        .qr-block .qr-label { font-size: 7pt; color: #6b7280; margin: 1mm 0 0 0; }
-        .qr-block .qr-mark  { font-size: 7pt; color: #374151; word-break: break-all; max-width: 32mm; }
+        .qr-block { float: right; text-align: center; margin: 0 0 2mm 4mm; padding: 1.5mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; }
+        .qr-block img { width: 26mm; height: 26mm; display: block; }
+        .qr-block .qr-label { font-size: 6.5pt; color: #6b7280; margin: 0.6mm 0 0 0; }
+        .qr-block .qr-mark  { font-size: 6.5pt; color: #374151; word-break: break-all; max-width: 26mm; }
 
         /* Provider (ΥΠΑΗΕΣ) evidence block — PROV-003 / A.1112/2025 */
-        .provider-box { clear: both; border: 1pt solid #d1d5db; border-radius: 1.5mm; background: #f9fafb; padding: 2.5mm 3mm; margin: 0 0 3mm 0; font-size: 7.5pt; color: #374151; }
-        .provider-box .provider-title { font-weight: 700; color: #111827; margin: 0 0 1mm 0; font-size: 8pt; }
-        .provider-box .provider-row { margin: 0 0 0.6mm 0; }
+        .provider-box { clear: both; border: 1pt solid #d1d5db; border-radius: 1.5mm; background: #f9fafb; padding: 2mm 2.5mm; margin: 0 0 2.5mm 0; font-size: 7pt; color: #374151; }
+        .provider-box .provider-title { font-weight: 700; color: #111827; margin: 0 0 0.8mm 0; font-size: 7.5pt; }
+        .provider-box .provider-row { margin: 0 0 0.4mm 0; }
         .provider-box .provider-label { color: #6b7280; }
         .provider-box .provider-auth { word-break: break-all; overflow-wrap: anywhere; }
 
         /* Lines table */
         .lines-wrap { page-break-inside: auto; }
         table.lines { width: 100%; border-collapse: collapse; }
-        table.lines thead th { background: #f3f4f6; border-bottom: 1pt solid #9ca3af; padding: 2mm; font-size: 8.5pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3pt; color: #374151; text-align: left; }
-        table.lines tbody td { padding: 2mm; border-bottom: 0.5pt solid #e5e7eb; font-size: 9pt; vertical-align: top; }
+        table.lines thead th { background: #f3f4f6; border-bottom: 1pt solid #9ca3af; padding: 1.4mm 2mm; font-size: 8pt; font-weight: bold; text-transform: uppercase; letter-spacing: 0.3pt; color: #374151; text-align: left; }
+        table.lines tbody td { padding: 1.4mm 2mm; border-bottom: 0.5pt solid #e5e7eb; font-size: 8.5pt; vertical-align: top; }
         table.lines tbody tr { page-break-inside: avoid; }
         table.lines td.num, table.lines th.num { text-align: right; }
         table.lines td.center, table.lines th.center { text-align: center; }
@@ -75,58 +78,59 @@
            silently falls back to a core-14 font like Helvetica, which has
            no Greek glyphs -- Greek text in this cell then renders as ?. */
         .line-desc { font-weight: normal; }
-        .line-notes { font-size: 8pt; color: #6b7280; margin-top: 0.5mm; font-style: italic; }
+        .line-notes { font-size: 7.5pt; color: #6b7280; margin-top: 0.4mm; font-style: italic; }
 
         /* Totals — right-aligned summary box */
-        .totals-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 4mm; }
+        .totals-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 2.5mm; page-break-inside: avoid; }
         .totals-spacer { display: table-cell; width: 45%; }
         .totals-box { display: table-cell; width: 55%; vertical-align: top; }
         table.totals { width: 100%; border-collapse: collapse; }
-        table.totals td { padding: 1.5mm 3mm; font-size: 9.5pt; }
-        table.totals .vat-row td { color: #4b5563; font-size: 8.5pt; }
+        table.totals td { padding: 1mm 3mm; font-size: 9pt; }
+        table.totals .vat-row td { color: #4b5563; font-size: 8pt; }
         table.totals .label { color: #374151; }
         table.totals .value { text-align: right; }
-        table.totals .subtotal td { border-top: 0.5pt solid #d1d5db; padding-top: 2mm; }
-        table.totals .grand { background: #111827; color: #fff; font-weight: bold; font-size: 11pt; }
-        table.totals .grand td { padding: 2.5mm 3mm; }
+        table.totals .subtotal td { border-top: 0.5pt solid #d1d5db; padding-top: 1.5mm; }
+        table.totals .grand { background: #111827; color: #fff; font-weight: bold; font-size: 10.5pt; }
+        table.totals .grand td { padding: 1.8mm 3mm; }
         table.totals .withhold td { color: #9a3412; font-style: italic; }
-        table.totals .discount-note td { color: #6b7280; font-size: 8pt; font-style: italic; padding-top: 0; }
+        table.totals .discount-note td { color: #6b7280; font-size: 7.5pt; font-style: italic; padding-top: 0; }
 
         /* Customer running-balance block (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») */
-        .balance-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 4mm; }
+        .balance-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 2.5mm; page-break-inside: avoid; }
         .balance-spacer { display: table-cell; width: 45%; }
         .balance-box { display: table-cell; width: 55%; vertical-align: top; border: 0.5pt solid #d1d5db; border-radius: 1mm; }
-        .balance-box h3 { margin: 0; padding: 1.5mm 3mm; font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; background: #f3f4f6; border-bottom: 0.5pt solid #d1d5db; }
+        .balance-box h3 { margin: 0; padding: 1mm 3mm; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; background: #f3f4f6; border-bottom: 0.5pt solid #d1d5db; }
         table.balance { width: 100%; border-collapse: collapse; }
-        table.balance td { padding: 1.5mm 3mm; font-size: 9.5pt; }
+        table.balance td { padding: 1mm 3mm; font-size: 9pt; }
         table.balance .label { color: #374151; }
         table.balance .value { text-align: right; }
         table.balance .new td { border-top: 0.5pt solid #d1d5db; font-weight: bold; }
 
         /* Payment accounts list (several IBANs) + total-quantity line */
-        .bank-row { padding-left: 3mm; font-size: 8.5pt; color: #374151; }
-        .qty-total { text-align: right; font-size: 8.5pt; color: #374151; margin-top: 1.5mm; }
+        .bank-row { padding-left: 3mm; font-size: 8pt; color: #374151; }
+        .qty-total { text-align: right; font-size: 8.5pt; color: #374151; margin-top: 1mm; }
 
         /* Notes / payment terms */
-        .notes-box { margin-top: 5mm; padding: 3mm; background: #f9fafb; border-left: 3pt solid #6b7280; font-size: 9pt; }
-        .notes-box h3 { margin: 0 0 1mm 0; font-size: 8.5pt; text-transform: uppercase; color: #6b7280; letter-spacing: 0.3pt; }
+        .notes-box { margin-top: 3mm; padding: 2mm 2.5mm; background: #f9fafb; border-left: 3pt solid #6b7280; font-size: 8.5pt; }
+        .notes-box h3 { margin: 0 0 0.8mm 0; font-size: 8pt; text-transform: uppercase; color: #6b7280; letter-spacing: 0.3pt; }
 
         /* Footer with verification + tenant text — rendered as a fixed
-           bottom-margin block by DomPDF via the page-bottom margin. */
-        .footer { position: fixed; left: 0; right: 0; bottom: -16mm; text-align: center; font-size: 7.5pt; color: #6b7280; padding: 0 14mm; }
-        .footer .mydata-line { margin-bottom: 1mm; color: #374151; }
-        .footer .mydata-url { word-break: break-all; overflow-wrap: anywhere; font-size: 7pt; color: #6b7280; }
-        .footer .tenant-text { margin-top: 1mm; font-style: italic; }
-        .pager:after { content: counter(page); }
-        .pager-total:after { content: counter(pages); }
+           bottom-margin block by DomPDF via the page-bottom margin. The pager
+           («Σελίδα X από Y») is drawn on the DomPDF canvas by
+           InvoicePdfRenderer::drawPager, because DomPDF 3.x resolves
+           counter(pages) to 0 inside a fixed footer. */
+        .footer { position: fixed; left: 0; right: 0; bottom: -9mm; text-align: center; font-size: 7pt; color: #6b7280; padding: 0 12mm; }
+        .footer .mydata-line { margin-bottom: 0.8mm; color: #374151; }
+        .footer .mydata-url { word-break: break-all; overflow-wrap: anywhere; font-size: 6.5pt; color: #6b7280; }
+        .footer .tenant-text { margin-top: 0.8mm; font-style: italic; }
 
         /* Related documents (credit-note / delivery links), printed when present */
-        .related { margin-top: 6mm; padding: 3mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; page-break-inside: avoid; }
-        .related h3 { font-size: 8.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1.5mm 0; font-weight: bold; }
-        .related .rel-row { font-size: 9pt; color: #1f2937; margin: 0.8mm 0; }
+        .related { margin-top: 3mm; padding: 2mm 2.5mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; page-break-inside: avoid; }
+        .related h3 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1mm 0; font-weight: bold; }
+        .related .rel-row { font-size: 8.5pt; color: #1f2937; margin: 0.6mm 0; }
         .related .rel-label { color: #6b7280; }
         .related .rel-badge { font-weight: bold; color: #7f1d1d; }
-        .related .rel-note { font-size: 7.5pt; color: #6b7280; margin: 0.3mm 0 1.5mm; }
+        .related .rel-note { font-size: 7.5pt; color: #6b7280; margin: 0.3mm 0 1mm; }
     </style>
 </head>
 <body>
@@ -513,10 +517,10 @@
     @if(! empty($tenant->pdf_footer_text))
         <div class="tenant-text">{{ $tenant->pdf_footer_text }}</div>
     @endif
-    <div style="margin-top:1mm">
-        {{ $L('page') }} <span class="pager"></span> {{ $L('of') }} <span class="pager-total"></span>
-    </div>
 </div>
+{{-- The «Σελίδα X από Y» pager is drawn on the DomPDF canvas by
+     InvoicePdfRenderer::drawPager (counter(pages) resolves to 0 inside this
+     fixed footer on DomPDF 3.x), so nothing pager-related lives here. --}}
 
 </body>
 </html>
