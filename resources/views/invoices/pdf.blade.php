@@ -296,21 +296,30 @@
 @endif
 
 {{-- ====================== Lines ====================== --}}
+@php
+    // Hoisted so the description column width can account for the optional 7%
+    // discount column: under table-layout:fixed the th width%s must sum to 100%
+    // in BOTH cases, or the browser scales every column down and the numeric
+    // headers («ΤΙΜΗ ΜΟΝ.»/«ΜΕ ΦΠΑ») wrap — the regression this width tuning
+    // exists to prevent. So the description gives back exactly the discount
+    // column's 7% (46% → 39%) when a line carries a discount.
+    $anyDiscount = ! $isDelivery && $invoice->lines->contains(fn ($l) => (float) $l->discount > 0);
+    $descWidth = $anyDiscount ? 39 : 46;
+@endphp
 <div class="lines-wrap">
     <table class="lines">
         <thead>
             <tr>
-                {{-- Description gets the lion's share (44%) so long hosting lines
+                {{-- Description gets the lion's share so long hosting lines
                      («Semi Dedicated 6C - domain.gr (dd/mm - dd/mm)») stay on ONE row
                      instead of wrapping — the biggest per-row height saving. The
                      numeric columns hold short values (198,00 / 24% / 245,52) and are
-                     trimmed accordingly. --}}
-                <th style="width: 46%">@gup($L('description'))</th>
+                     trimmed accordingly (widths sum to 100% with and without discount). --}}
+                <th style="width: {{ $descWidth }}%">@gup($L('description'))</th>
                 <th class="center" style="width: 6%">@gup($L('unit'))</th>
                 <th class="num" style="width: 10%">@gup($L('quantity'))</th>
                 @if(! $isDelivery)
                     <th class="num" style="width: 10%">@gup($L('unit_price'))</th>
-                    @php $anyDiscount = $invoice->lines->contains(fn($l) => (float)$l->discount > 0); @endphp
                     @if($anyDiscount)
                         <th class="num" style="width: 7%">@gup($L('discount_pct'))</th>
                     @endif

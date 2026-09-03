@@ -58,9 +58,11 @@ class InboxColumnsTest extends TestCase
             ->assertSee('245,52 EUR')   // amount (main of the merged Ποσό column)
             ->assertSee('Απλήρωτο')     // paid status folded into the Ποσό description
             // …coloured amber via an HtmlString span (green «Πληρωμένο» / amber
-            // «Απλήρωτο»), rendered unescaped because a column description passes
-            // through e() which lets an Htmlable through.
-            ->assertSee('text-warning-600', false);
+            // «Απλήρωτο»), rendered UNESCAPED because a column description passes
+            // through e() which lets an Htmlable through. Asserting the raw opening
+            // tag (not just the class substring) is what proves it's unescaped: an
+            // escaped HtmlString would render «&lt;span class=&quot;…» and fail this.
+            ->assertSee('<span class="text-warning-600', false);
     }
 
     public function test_filed_row_links_to_the_ekdosi_invoice_by_code(): void
