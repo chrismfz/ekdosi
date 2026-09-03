@@ -134,6 +134,15 @@
   (cross-check τοπικού ↔ ΑΑΔΕ).
 - **`mydata:preflight`** — read-only έλεγχος invoice-type/VAT config vs §8 code tables (thin
   renderer πάνω στο κοινό `MyDataConfigAudit`· βλ. «Έλεγχος ρυθμίσεων» tab).
+- **Περιβάλλον ανάγνωσης myDATA (override)** — από προεπιλογή η ΑΝΑΓΝΩΣΗ (κονσόλα/συμφωνία/έξοδα)
+  ακολουθεί τον «Τρόπο αποστολής» (πάροχος Δοκιμαστικό → Sandbox, Παραγωγή → Production). Νέος
+  διακόπτης `mydata_read_env` (καρτέλα myDATA) το **αποσυνδέει**: διαβάζεις **Παραγωγή ενώ στέλνεις
+  μέσω δοκιμαστικού παρόχου** (τιμάται μόνο αν υπάρχουν τα creds του περιβάλλοντος· αλλιώς πέφτει σε
+  «Αυτόματο»). Μία πηγή: `Company::mydataReadMode()`· οι αναγνώσεις δεν γράφουν ποτέ στην ΑΑΔΕ.
+- **`mydata_settings`** (MCP, super_admin, read-only) — η ρύθμιση καναλιού ενός tenant: submit
+  channel/mode vs το **resolved περιβάλλον ανάγνωσης** (sandbox/production + AADE endpoint) και ποια
+  credential slots είναι γεμάτα (booleans — **ποτέ** τα keys). Η γρήγορη απάντηση στο «γιατί η κονσόλα
+  φέρνει μόνο δοκιμαστικά παραστατικά;».
 - **`mydata:backfill-config`** — εναρμονίζει imported (ETL) tenants με τα fresh-setup defaults
   (`ConfigBackfiller`): §8.12 τύπος πληρωμής από keyword-suggestion (whole-word/stem, unmatched→null)·
   §8.3 αιτία 0% στην seed-προεπιλογή **μόνο με `--exemption-default`** (νομικός κωδικός, opt-in· 2+ 0%

@@ -16,6 +16,7 @@ use App\Mcp\Tools\LogTailTool;
 use App\Mcp\Tools\MyDataDiscrepanciesMcpTool;
 use App\Mcp\Tools\MyDataFailuresMcpTool;
 use App\Mcp\Tools\MyDataPreflightMcpTool;
+use App\Mcp\Tools\MyDataSettingsMcpTool;
 use App\Mcp\Tools\OutstandingReceivablesMcpTool;
 use App\Mcp\Tools\RecentActivityMcpTool;
 use App\Mcp\Tools\RecentInvoicesMcpTool;
@@ -91,6 +92,10 @@ per attempt, forensic REJECTED/*_FAILED rows, mydata_pending_since); these expos
   phase-1 state contradictions (DB-only); live=true runs a real AADE reconciliation.
 - preflight — the read-only myDATA readiness audit (issuer/type/VAT vs the §8 code tables);
   error_count > 0 is a go-live blocker. No AADE call.
+- mydata_settings — the tenant's e-invoice CHANNEL config: submit channel/mode vs the RESOLVED
+  read environment (sandbox vs production) + its AADE endpoint, and which credential slots are
+  populated (booleans, never the keys). The first stop for "why does the console only show
+  test/sandbox documents?". No AADE call.
 
 Nothing here changes AADE/myDATA state or issues a document; the only writes are the two
 propose-only tools above, and even those wait for in-app operator confirmation.
@@ -127,5 +132,6 @@ class EkdosiMcpServer extends Server
         StuckDocumentsMcpTool::class,
         MyDataDiscrepanciesMcpTool::class,
         MyDataPreflightMcpTool::class,
+        MyDataSettingsMcpTool::class,
     ];
 }
