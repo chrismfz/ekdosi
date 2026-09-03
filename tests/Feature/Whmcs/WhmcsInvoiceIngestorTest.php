@@ -518,6 +518,27 @@ class WhmcsInvoiceIngestorTest extends TestCase
         );
     }
 
+    public function test_mirror_leaves_flag_untouched_when_customfields_block_is_absent(): void
+    {
+        // getInvoiceWithClient degrades to the BARE invoice (no customfields block) when
+        // the WHMCS client lookup transiently fails — but the matcher still links by
+        // userid, so the mirror runs. An absent block is «unreadable», NOT «unchecked»:
+        // the mirror must never force an existing customer OFF on such a blip.
+        $tenant = $this->tenantWithGriniaris();
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Linked', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => true,
+        ]);
+
+        // No 'customfields' key at all (client fetch failed upstream).
+        $this->ingestor()->ingest($tenant, ['invoiceid' => 106, 'userid' => 555, 'total' => '10.00']);
+
+        $this->assertTrue(
+            $customer->fresh()->needs_immediate_invoice,
+            'absent customfields = unreadable, not unchecked → the flag is preserved',
+        );
+    }
+
     public function test_mirror_does_not_write_when_already_in_sync(): void
     {
         // No needless updated_at / activity-log row when WHMCS agrees with ekdosi.

@@ -293,6 +293,17 @@ class PendingWhmcsInvoice extends Model
         if ($this->company?->whmcsCustomFieldId('griniaris') === null) {
             return null;
         }
+        // A payload with NO customfields block means we could not READ the client's
+        // fields — WhmcsClient::getInvoiceWithClient degrades to the bare invoice when
+        // the WHMCS client lookup fails (timeout/500/rate-limit). That is «unknown»,
+        // NOT «unchecked»: returning null here (→ the mirror leaves the flag alone)
+        // stops a transient WHMCS blip from silently forcing an existing customer OFF.
+        // A SUCCESSFUL client fetch always carries the customfields key (griniaris is a
+        // mapped field), so a genuine uncheck still propagates as false below.
+        $payload = is_array($this->payload) ? $this->payload : [];
+        if (! array_key_exists('customfields', $payload)) {
+            return null;
+        }
         $v = mb_strtolower((string) $this->whmcsCustomField('griniaris'));
 
         return in_array($v, ['on', '1', 'yes', 'true', 'ναι', 'checked'], true);
