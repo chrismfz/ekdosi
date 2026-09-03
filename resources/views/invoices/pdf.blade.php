@@ -450,9 +450,13 @@
         <h3>@gup($L('related_docs'))</h3>
 
         @if($invoice->isFullyCredited())
+            {{-- PROV-019: only stamp «Ακυρώθηκε με πιστωτικό» on the printed document
+                 when the reversal is LEGAL (isLegallyReversed). A still-draft credit
+                 leaves the original standing at AADE, so the honest status is
+                 «μειώθηκε με πρόχειρο πιστωτικό». --}}
             <div class="rel-row">
                 <span class="rel-label">{{ $L('doc_status') }}:</span>
-                <span class="rel-badge">{{ $L('cancelled_by_credit') }}</span>
+                <span class="rel-badge">{{ $invoice->isLegallyReversed() ? $L('cancelled_by_credit') : $L('reduced_by_draft_credit') }}</span>
             </div>
         @endif
 
@@ -467,9 +471,10 @@
         @if($relCredits->isNotEmpty())
             <div class="rel-row">
                 {{-- Full cancel vs partial credit: «Ακυρώθηκε» only when the credit
-                     notes fully reverse the invoice — else it would mislead a customer
-                     who still owes a balance. --}}
-                <span class="rel-label">{{ ($invoice->isFullyCredited() ? $L('cancelled_credited_with') : $L('credited_partially_with')).':' }}</span>
+                     notes fully AND legally reverse the invoice — else it would mislead
+                     a customer who still owes a balance or whose reversal is a draft.
+                     PROV-019: a full-but-draft credit reads as «μειώθηκε (πρόχειρο)». --}}
+                <span class="rel-label">{{ ($invoice->isLegallyReversed() ? $L('cancelled_credited_with') : ($invoice->isFullyCredited() ? $L('reduced_credited_with') : $L('credited_partially_with'))).':' }}</span>
                 <strong>{{ $relCredits->pluck('invcode')->implode(', ') }}</strong>
             </div>
             {{-- Only assert the AADE status when it's actually VALID — never on a

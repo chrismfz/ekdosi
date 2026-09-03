@@ -98,6 +98,14 @@ class PdfLabels
         'related_docs' => ['Σχετικά παραστατικά', 'Related documents'],
         'doc_status' => ['Κατάσταση παραστατικού', 'Document status'],
         'cancelled_by_credit' => ['Ακυρώθηκε με πιστωτικό', 'Cancelled by credit note'],
+        // PROV-019: a full credit that is still an UN-FILED draft has not legally
+        // reversed the original at AADE — say so on the printed document rather than
+        // claim a cancellation that hasn't happened.
+        'reduced_by_draft_credit' => [
+            'Μειώθηκε με πρόχειρο πιστωτικό (δεν υποβλήθηκε στην ΑΑΔΕ)',
+            'Reduced by draft credit note (not filed at AADE)',
+        ],
+        'reduced_credited_with' => ['Μειώθηκε (πρόχειρο πιστωτικό) με', 'Reduced (draft credit) by'],
         'credit_reverses' => ['Πιστωτικό — αντιστρέφει το παραστατικό', 'Credit note — reverses document'],
         'credit_note_purpose' => [
             'Αυτό το πιστωτικό εκδόθηκε για να ακυρώσει/διορθώσει το παραπάνω παραστατικό.',
