@@ -7,7 +7,6 @@ use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\ReturnInvoiceExtra;
 use App\Services\InvoiceBalance;
-use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\RecomputeReturnedQuantities;
 use Closure;
@@ -120,8 +119,8 @@ class IssueCreditNote
 
             $selections = $resolveSelections($original->lines);
 
-            $allocation = app(InvoiceNumberer::class)->allocate($original->company, $creditType->code);
-
+            // Gapless-at-send: the credit note is created as a draft with a provisional
+            // identity (no ΑΑ). Its real number is allocated when it is transmitted.
             $credit = Invoice::create([
                 'company_id' => $original->company_id,
                 'invoice_type_id' => $creditType->id,
@@ -129,8 +128,6 @@ class IssueCreditNote
                 'payment_method_id' => $original->payment_method_id,
                 'credited_invoice_id' => $original->id,
                 'issued_at' => now(),
-                'code' => $allocation->code,
-                'invcode' => $allocation->invcode,
                 'header_discount_percent' => $original->header_discount_percent,
                 // Mirror the original's additional-tax RATES/categories so the
                 // credit note reverses the withholding/fees too: RecomputeInvoiceTaxes

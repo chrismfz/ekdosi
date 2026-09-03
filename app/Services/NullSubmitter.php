@@ -31,6 +31,13 @@ class NullSubmitter implements EInvoiceSubmitter
 {
     public function submit(Invoice $invoice): ?MyDataMark
     {
+        // Gapless-at-send: for a non-transmitting tenant ('off'/'none'/pre-PEPPOL)
+        // this call IS the issuance — there is no AADE round-trip to hang the number
+        // on, so allocate the real ΑΑ/invcode/series HERE (idempotent). Without it an
+        // 'off' tenant's document would stay provisional forever. The SKIPPED mark
+        // below still records the deliberate decision not to file.
+        app(InvoiceNumberer::class)->assign($invoice);
+
         return DB::transaction(function () use ($invoice) {
             return MyDataMark::create([
                 'company_id' => $invoice->company_id,

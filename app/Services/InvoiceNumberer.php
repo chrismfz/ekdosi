@@ -3,8 +3,10 @@
 namespace App\Services;
 
 use App\Models\Company;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Support\MyData\Codes;
+use App\Support\ProvisionalCode;
 use Illuminate\Database\ConnectionInterface;
 use RuntimeException;
 
@@ -72,27 +74,23 @@ use RuntimeException;
  *     covers the original SELECT; subsequent UPDATEs need their own
  *     locking strategy.
  *
- * ──── ΑΑ GAP POLICY (MON-4 — explicit, do not change without a decision) ────
+ * ──── ΑΑ GAP POLICY — GAPLESS-AT-SEND (reverses MON-4, accountant-required) ────
  *
- * The ΑΑ is allocated when the DRAFT is created (CreateInvoice), NOT when it
- * is finalised/filed. Two consequences, both accepted by design:
+ * The ΑΑ is allocated when a document is TRANSMITTED to myDATA/provider (see
+ * {@see assign()}), NOT at draft creation. Until then a draft or a finalized-but-
+ * unsent document carries a PROVISIONAL identity ({@see ProvisionalCode},
+ * «ΠΡΟΣ-ΤΠΥ-{id}», `code` NULL) and consumes no number — so the sequence the
+ * ΑΑΔΕ sees is always continuous, whatever is drafted, abandoned or cancelled.
+ * (A strict accountant reads a gap in the transmitted series as a hidden/deleted
+ * document; the legacy allocate-at-draft policy this replaces produced exactly
+ * such gaps.) Non-AADE tenants have no transmission event, so they allocate at
+ * FINALISATION instead (the finalize action).
  *
- *   - Deleting a draft (EditInvoice, draft-only) leaves a PERMANENT gap in the
- *     per-series sequence. The number is never recycled — recycling would risk
- *     a duplicate ΑΑ on a filed (legally binding) document, which is far worse
- *     than a gap. myDATA identifies a document by its AADE MARK, not by a
- *     gapless ΑΑ, so a gap is legally fine; the legacy Firebird app behaved
- *     identically (a failed INSERT / deleted row left the same gap).
- *
- *   - `issued_at` is captured at draft creation alongside the ΑΑ (form default =
- *     now), so the two are aligned at capture. A draft that lingers before
- *     finalisation keeps its creation-time date; finalisation does not renumber
- *     or re-date it. Operators can edit `issued_at` on the draft form.
- *
- * The alternative — allocate the ΑΑ only at finalisation — would eliminate
- * delete-gaps but a draft would then have no invcode (every PDF/preview/WHMCS
- * surface assumes one), a large blast radius for a legally-immaterial gap. Not
- * done. Revisit only if an operator's accountant requires gapless ΑΑ per series.
+ * A definitively-rejected send returns its reserved number to the pool
+ * ({@see release()}, decrement-if-top), so a rejection during setup leaves no
+ * gap either. An AMBIGUOUS failure (timeout that may have filed) KEEPS the
+ * number — the in-doubt recovery adopts the real MARK by (series, ΑΑ), and
+ * releasing a number the provider actually used would risk a duplicate.
  */
 final class InvoiceNumberer
 {
@@ -117,7 +115,7 @@ final class InvoiceNumberer
         if (! $this->db->transactionLevel()) {
             throw new RuntimeException(
                 'InvoiceNumberer::allocate() must run inside a DB transaction. '
-                . 'Wrap the IssueInvoice action in DB::transaction(...).'
+                .'Wrap the IssueInvoice action in DB::transaction(...).'
             );
         }
 
@@ -133,7 +131,7 @@ final class InvoiceNumberer
         if (! $type) {
             throw new RuntimeException(sprintf(
                 'No invoice_type with code=%s for company_id=%d (slug=%s). '
-                . 'Cannot allocate ΑΑ.',
+                .'Cannot allocate ΑΑ.',
                 $invoiceTypeCode,
                 $company->id,
                 $company->slug,
@@ -153,15 +151,15 @@ final class InvoiceNumberer
         if (! $allowMovementType && Codes::isMovementOnlyType($type->mydata_type)) {
             throw new RuntimeException(sprintf(
                 'Invoice-type code=%s (myDATA %s) is a movement-only Δελτίο '
-                . 'Αποστολής and cannot be issued as a monetary invoice. '
-                . 'Use the Delivery Notes flow instead.',
+                .'Αποστολής and cannot be issued as a monetary invoice. '
+                .'Use the Delivery Notes flow instead.',
                 $type->code,
                 $type->mydata_type,
             ));
         }
 
         $allocatedAa = $type->invcount;
-        $invcode = $type->code . $allocatedAa;
+        $invcode = $type->code.$allocatedAa;
 
         // Bump for the next allocation via a RAW UPDATE — NOT Eloquent's
         // ->increment(), which fires updating/updated events and touches
@@ -186,5 +184,77 @@ final class InvoiceNumberer
             invcode: $invcode,
             invoiceType: $type,
         );
+    }
+
+    /**
+     * Allocate the real ΑΑ onto a not-yet-numbered invoice at transmission time
+     * (gapless-at-send). Writes `code`/`invcode`/`series` and FREEZES the series
+     * here — the `creating` model hook cannot, because at draft creation the row
+     * carries only a provisional invcode + null code.
+     *
+     * Idempotent: a retry after an ambiguous send keeps the number it already
+     * reserved (never re-allocates a second one). Wraps its own short transaction —
+     * the caller must NOT hold it open across the outbound HTTP call (the row lock
+     * inside allocate() would block all other issuance).
+     */
+    public function assign(Invoice $invoice, bool $allowMovementType = false): void
+    {
+        if ($invoice->code !== null) {
+            return;
+        }
+
+        $this->db->transaction(function () use ($invoice, $allowMovementType): void {
+            $allocation = $this->allocate($invoice->company, (string) $invoice->invoiceType->code, $allowMovementType);
+            $invoice->forceFill([
+                'code' => $allocation->code,
+                'invcode' => $allocation->invcode,
+                'series' => $allocation->series,
+            ])->save();
+        });
+    }
+
+    /**
+     * Return a reserved ΑΑ to the pool after a DEFINITIVE rejection, reverting the
+     * document to its provisional identity so the next attempt re-allocates. The
+     * counter is decremented ONLY when this was the last number handed out
+     * (`invcount === code + 1`); if a concurrent issuance already took the next
+     * number, leaving a gap is far safer than reusing one (renumbering a document
+     * that another request may already have FILED under the next number would risk
+     * a duplicate ΑΑ — the one thing worse than a gap).
+     *
+     * LIMITATION (honest): this is gapless under SERIAL issuance — which the common
+     * flows are (a queue worker; the per-invoice single-flight lock). It is NOT
+     * gapless if two documents of the SAME series are submitted CONCURRENTLY (two
+     * FPM requests) and the earlier-numbered one is then rejected: its number is
+     * no longer the top, so a rare gap remains. At these tenants' volumes
+     * (~70 docs/month, few operators) that race is negligible; a fully-gapless
+     * guarantee under concurrency is a BACKLOG item (it needs safe renumbering).
+     *
+     * NEVER call on an ambiguous failure — see the class ΑΑ GAP POLICY.
+     */
+    public function release(Invoice $invoice): void
+    {
+        if ($invoice->code === null) {
+            return;
+        }
+
+        $this->db->transaction(function () use ($invoice): void {
+            $type = InvoiceType::query()
+                ->whereKey($invoice->invoice_type_id)
+                ->lockForUpdate()
+                ->first();
+
+            if ($type !== null && (int) $type->invcount === (int) $invoice->code + 1) {
+                $this->db->table('invoice_types')
+                    ->where('id', $type->id)
+                    ->update(['invcount' => $this->db->raw('invcount - 1')]);
+            }
+
+            $invoice->forceFill([
+                'code' => null,
+                'series' => null,
+                'invcode' => ProvisionalCode::make($invoice->invoiceType?->code, $invoice->getKey()),
+            ])->save();
+        });
     }
 }

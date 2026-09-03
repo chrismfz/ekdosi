@@ -18,6 +18,7 @@ use App\Services\Cmr\CreateCmrFromSource;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\EInvoice\Transports\InvoSignDocument;
 use App\Services\EInvoiceSubmitterFactory;
+use App\Services\InvoiceNumberer;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
 use App\Services\Stock\StockService;
@@ -180,6 +181,17 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription('Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
                 ->action(function (Invoice $record) {
                     $record->update(['local_status' => 'active']);
+
+                    // Gapless-at-send: a tenant that does NOT transmit to AADE has no
+                    // submission event, so finalisation IS its issuance — allocate the
+                    // real ΑΑ here. Uses the mode-AWARE submitsElectronically() (not
+                    // filesToAadeByProvider()): a gr-mydata/gr-provider tenant in mode=off
+                    // routes to NullSubmitter and would otherwise stay provisional forever.
+                    // Live-filing tenants keep the provisional identity until they transmit
+                    // (where InvoiceNumberer::assign runs instead).
+                    if ($record->code === null && ! $record->company->submitsElectronically()) {
+                        app(InvoiceNumberer::class)->assign($record);
+                    }
 
                     // S2.5: non-blocking heads-up if the sale pushed any tracked
                     // product to negative stock (the issue ALWAYS proceeds).

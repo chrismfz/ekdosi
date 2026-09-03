@@ -170,6 +170,38 @@ class GrProviderSubmitterTest extends TestCase
         );
     }
 
+    public function test_a_build_failure_after_assign_releases_the_reserved_number(): void
+    {
+        // Gapless-at-send P1: assign() reserves the real ΑΑ before the payload is built.
+        // If the LOCAL build then throws (here: a type with no §8.1 classification), the
+        // number must be RELEASED — the counter must not advance and the invoice reverts
+        // to provisional — so a config error never burns a number (no gap).
+        $badType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'BAD', 'name' => 'Χωρίς κλάση',
+            'invcount' => 1, 'mydata_type' => null,
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invoice_type_id' => $badType->id,
+            'customer_id' => $this->customer->id, 'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'x', 'qty' => 1,
+            'price_per_item' => 100, 'vat_percent' => 24,
+        ]);
+        $this->assertNull($invoice->code, 'draft starts provisional');
+
+        try {
+            (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
+            $this->fail('Expected the payload build to throw on an unclassified type.');
+        } catch (\Throwable $e) {
+            // build failed locally — nothing transmitted.
+        }
+
+        $this->assertNull($invoice->fresh()->code, 'reverted to provisional');
+        $this->assertSame(1, $badType->fresh()->invcount, 'counter NOT advanced — number was released');
+        $this->assertSame(0, MyDataMark::where('invoice_id', $invoice->id)->count(), 'nothing filed');
+    }
+
     public function test_provider_rejection_throws_and_records_forensic_row_without_filing(): void
     {
         $invoice = $this->makeInvoice();
@@ -186,6 +218,32 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertSame(0, MyDataMark::where('invoice_id', $invoice->id)->where('mydata_action', 'PROVIDER_INSERT')->count());
         // Mirror untouched — no fake filing.
         $this->assertNull($invoice->fresh()->mydata_state);
+    }
+
+    public function test_a_definitive_rejection_releases_the_reserved_number(): void
+    {
+        // Gapless-at-send: a provisional draft → submit reserves ΤΠΥ1 (counter→2) → the
+        // provider DEFINITIVELY rejects → the number is returned to the pool (counter back
+        // to 1, invoice reverts to provisional), so the fixed resubmit re-uses ΤΠΥ1 — no gap.
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invoice_type_id' => $this->type->id,
+            'customer_id' => $this->customer->id, 'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Υπηρεσία', 'qty' => 1,
+            'price_per_item' => 100, 'vat_percent' => 24,
+        ]);
+        $this->assertNull($invoice->code);
+
+        try {
+            (new GrProviderSubmitter($this->tenant, new FakeGrTransport(send: 'fail')))->submit($invoice->fresh('lines'));
+            $this->fail('Expected MyDataRejected.');
+        } catch (MyDataRejected $e) {
+            // rejected
+        }
+
+        $this->assertNull($invoice->fresh()->code, 'reverted to provisional on rejection');
+        $this->assertSame(1, (int) $this->type->fresh()->invcount, 'number released — counter back to 1');
     }
 
     public function test_refuses_to_refile_an_already_valid_invoice(): void
