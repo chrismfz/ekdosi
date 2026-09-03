@@ -3,6 +3,7 @@
 namespace App\Mcp\Tools;
 
 use App\Mcp\Tools\Concerns\SuperAdminMcpTool;
+use App\Mcp\Tools\Concerns\TailsLogFiles;
 use Illuminate\Contracts\JsonSchema\JsonSchema;
 use Laravel\Mcp\Request;
 use Laravel\Mcp\Response;
@@ -36,6 +37,8 @@ use Laravel\Mcp\Server\Tools\Annotations\IsReadOnly;
 #[IsIdempotent]
 class ErrorLogTailTool extends SuperAdminMcpTool
 {
+    use TailsLogFiles;
+
     private const MAX_TAIL_BYTES = 262144; // 256 KiB read window from EOF, per file
 
     private const MAX_OUTPUT_BYTES = 65536; // 64 KiB cap on returned text, per file
@@ -65,7 +68,11 @@ class ErrorLogTailTool extends SuperAdminMcpTool
         $checked = [];    // every candidate we probed + why it was/ wasn't used
         foreach ($this->candidates($iniErrorLog) as [$source, $path]) {
             if (count($files) >= self::MAX_FILES) {
-                break;
+                // Budget spent — record the rest as skipped (not silently dropped)
+                // so «name a missing path» stays honest about what wasn't probed.
+                $checked[] = ['source' => $source, 'path' => $path, 'status' => 'skipped (file budget)'];
+
+                continue;
             }
 
             if (! is_file($path)) {
@@ -125,13 +132,36 @@ class ErrorLogTailTool extends SuperAdminMcpTool
     {
         $out = [];
 
-        // 1) The authoritative, portable source — where PHP itself logs.
+        // 1) The authoritative, portable source — where PHP itself logs. First so it
+        //    can never be starved by the file budget.
         if ($iniErrorLog !== '' && strtolower($iniErrorLog) !== 'syslog') {
             $out[] = ['php_error_log (ini)', $iniErrorLog];
         }
 
-        // 2) Common absolute FPM / PHP / web-server / panel locations (best-effort;
-        //    unreadable ones are reported and skipped).
+        // 2) Home-relative logs the account user CAN read (cPanel/DirectAdmin/
+        //    Virtualmin per-account + per-domain error logs) — the MOST
+        //    app-relevant on shared hosting, so BEFORE the broad system list so a
+        //    box with many readable /var/log files doesn't exhaust the budget first.
+        $home = $this->accountHome();
+        $patterns = [];
+        if ($home !== null) {
+            $patterns[] = [$home.'/logs/*error*', 'account home'];
+            $patterns[] = [$home.'/domains/*/logs/*.error.log', 'domain (DirectAdmin)'];
+        }
+        // Some layouts keep vhost logs a level above the docroot.
+        $patterns[] = [dirname(base_path()).'/logs/*error*', 'above app root'];
+
+        foreach ($patterns as [$pattern, $label]) {
+            $matches = array_filter(glob($pattern) ?: [], $this->isPlainLog(...));
+            // Newest first, so the most relevant (live) domain log wins the budget.
+            usort($matches, static fn ($a, $b) => (int) @filemtime($b) <=> (int) @filemtime($a));
+            foreach (array_slice($matches, 0, self::MAX_GLOB_PER_PATTERN) as $m) {
+                $out[] = [$label, $m];
+            }
+        }
+
+        // 3) Common absolute FPM / PHP / web-server / panel locations (best-effort;
+        //    root-owned ones are reported and skipped on shared hosting).
         foreach ([
             '/var/log/php-fpm/www-error.log',
             '/var/log/php-fpm/error.log',
@@ -146,27 +176,16 @@ class ErrorLogTailTool extends SuperAdminMcpTool
             $out[] = ['system', $p];
         }
 
-        // 3) Home-relative logs the account user CAN read (cPanel/DirectAdmin/
-        //    Virtualmin per-account + per-domain error logs). Globbed, bounded.
-        $home = $this->accountHome();
-        $patterns = [];
-        if ($home !== null) {
-            $patterns[] = [$home.'/logs/*error*', 'account home'];
-            $patterns[] = [$home.'/domains/*/logs/*.error.log', 'domain (DirectAdmin)'];
-        }
-        // Some layouts keep vhost logs a level above the docroot.
-        $patterns[] = [dirname(base_path()).'/logs/*error*', 'above app root'];
-
-        foreach ($patterns as [$pattern, $label]) {
-            $matches = glob($pattern) ?: [];
-            // Newest first, so the most relevant domain log wins the file budget.
-            usort($matches, static fn ($a, $b) => (int) @filemtime($b) <=> (int) @filemtime($a));
-            foreach (array_slice($matches, 0, self::MAX_GLOB_PER_PATTERN) as $m) {
-                $out[] = [$label, $m];
-            }
-        }
-
         return $out;
+    }
+
+    /**
+     * Exclude rotated/compressed logs from a glob — a freshly-rotated `error.log.1`
+     * or `.gz` could be newest and tail binary/stale content into the response.
+     */
+    private function isPlainLog(string $path): bool
+    {
+        return preg_match('/\.(gz|bz2|xz|zip|zst|\d+)$/i', $path) !== 1;
     }
 
     /** Best-effort account home for the running process (empty → skipped). */
@@ -195,27 +214,8 @@ class ErrorLogTailTool extends SuperAdminMcpTool
      */
     private function tailRows(string $file, int $lines, string $contains): array
     {
-        $size = filesize($file);
-        if ($size === false || $size === 0) {
-            return [];
-        }
-
-        $read = (int) min($size, self::MAX_TAIL_BYTES);
-        $fh = fopen($file, 'rb');
-        if ($fh === false) {
-            return [];
-        }
-        fseek($fh, -$read, SEEK_END);
-        $chunk = (string) fread($fh, $read);
-        fclose($fh);
-
-        // Dropped a partial first line if we started mid-file.
-        if ($read < $size) {
-            $nl = strpos($chunk, "\n");
-            $chunk = $nl === false ? $chunk : substr($chunk, $nl + 1);
-        }
-
-        $rows = $chunk === '' ? [] : explode("\n", rtrim($chunk, "\n"));
+        $tail = $this->readTailString($file, self::MAX_TAIL_BYTES);
+        $rows = $tail === '' ? [] : explode("\n", $tail);
 
         if ($contains !== '') {
             $rows = array_values(array_filter($rows, static fn ($l) => stripos($l, $contains) !== false));
@@ -223,28 +223,6 @@ class ErrorLogTailTool extends SuperAdminMcpTool
 
         $rows = array_slice($rows, -$lines);
 
-        return $this->capBytes($rows);
-    }
-
-    /**
-     * Keep the payload under MAX_OUTPUT_BYTES, trimming from the OLDEST (front) so
-     * the most recent lines survive.
-     *
-     * @param  list<string>  $rows
-     * @return list<string>
-     */
-    private function capBytes(array $rows): array
-    {
-        $total = 0;
-        $kept = [];
-        foreach (array_reverse($rows) as $line) {
-            $total += strlen($line) + 1;
-            if ($total > self::MAX_OUTPUT_BYTES) {
-                break;
-            }
-            $kept[] = $line;
-        }
-
-        return array_reverse($kept);
+        return $this->capTailBytes($rows, self::MAX_OUTPUT_BYTES);
     }
 }

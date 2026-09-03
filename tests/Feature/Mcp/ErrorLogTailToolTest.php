@@ -93,6 +93,25 @@ class ErrorLogTailToolTest extends TestCase
         @unlink($tmp);
     }
 
+    public function test_an_over_long_single_fatal_line_is_truncated_not_dropped(): void
+    {
+        // A fatal + stack trace written as ONE line longer than the byte cap must
+        // still surface (truncated) — returning «empty» would hide the exact error
+        // this tool exists to find.
+        $tmp = tempnam(sys_get_temp_dir(), 'ekdosi-phperr-').'.log';
+        file_put_contents($tmp, 'PHP Fatal error: START-MARKER '.str_repeat('x', 200000)." END\n");
+        ini_set('error_log', $tmp);
+
+        $response = EkdosiMcpServer::actingAs($this->superAdmin($this->company()))
+            ->tool(ErrorLogTailTool::class, []);
+
+        $response->assertOk();
+        $response->assertSee('START-MARKER');            // the fatal is surfaced…
+        $response->assertSee('γραμμή περικομμένη');       // …truncated, not dropped
+
+        @unlink($tmp);
+    }
+
     public function test_not_offered_to_a_tenant_member(): void
     {
         // Error logs can carry sensitive paths/queries — super_admin only.
