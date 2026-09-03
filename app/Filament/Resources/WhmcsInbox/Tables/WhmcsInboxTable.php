@@ -62,30 +62,30 @@ class WhmcsInboxTable
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
                 $query->where('company_id', $tenant?->getKey() ?? 0)
-                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
+                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'invoice:id,invcode', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
             })
             ->columns([
                 // Bridges/Connectors: which billing source this row came from. One
                 // «Εισερχόμενα» for every bridge; the badge label comes from the
                 // source's registry entry (so a future WooCommerce row reads its own
                 // label from one place). WHMCS-only today, but already source-driven.
-                TextColumn::make('source')
-                    ->label('Πηγή')
-                    ->badge()
-                    ->color('gray')
-                    ->formatStateUsing(fn (?string $state): string => $sourceLabels[(string) $state]
-                        ?? strtoupper((string) ($state ?? '—'))),
-
+                // Compact (INBOX-COLS): WHMCS # (clickable → full invoice view) with the
+                // source label + invoice date stacked underneath — merges the old
+                // «Πηγή» + «WHMCS #» + «Ημ/νία τιμολ.» into one column. The external-id
+                // label still comes from the billing source's capabilities (Phase 0).
                 TextColumn::make('whmcs_invoice_id')
-                    // Phase 0 (Bridges/Connectors): the external-id label comes
-                    // from the billing source's capabilities, so a future source
-                    // reads «WooCommerce #» from one place. WHMCS-only today.
                     ->label(app(BillingSourceRegistry::class)
                         ->for(PendingWhmcsInvoice::SOURCE_WHMCS)?->capabilities()->externalIdLabel ?? 'WHMCS #')
                     ->sortable()
                     ->searchable()
                     ->prefix('#')
                     ->color('primary')
+                    ->description(function (PendingWhmcsInvoice $r) use ($sourceLabels): string {
+                        $src = $sourceLabels[(string) $r->source] ?? strtoupper((string) ($r->source ?? '—'));
+                        $date = $r->payload['date'] ?? null;
+
+                        return $date ? $src.' · '.$date : $src;
+                    })
                     ->tooltip('Προβολή ολόκληρου του WHMCS τιμολογίου')
                     // E: click the # → full invoice view, rendered from the
                     // staged payload (no live API call).
@@ -98,37 +98,25 @@ class WhmcsInboxTable
                             ->modalWidth('3xl')
                     ),
 
-                TextColumn::make('payload.date')
-                    ->label('Ημ/νία τιμολ.')
-                    ->date('Y-m-d')
-                    ->state(fn (PendingWhmcsInvoice $r) => $r->payload['date'] ?? null),
-
+                // Compact (INBOX-COLS): amount with the WHMCS payment status stacked
+                // underneath — merges «Σύνολο» + «Πληρωμή WHMCS». The amount itself
+                // turns warning-coloured when unpaid, so the «επί πιστώσει» signal
+                // survives dropping the standalone coloured badge.
                 TextColumn::make('payload.total')
-                    ->label('Σύνολο')
+                    ->label('Ποσό')
                     ->state(function (PendingWhmcsInvoice $r): string {
                         $total = (float) ($r->payload['total'] ?? 0);
                         $cur = (string) ($r->payload['currencycode'] ?? '');
 
                         return number_format($total, 2, ',', '.').' '.$cur;
                     })
-                    ->alignRight(),
-
-                // WHMCS payment status: Unpaid rows should be issued επί πιστώσει
-                // (open receivable), Paid rows settled at issue. Drives the draft's
-                // pre-selected type; surfaced so the operator sees it at a glance.
-                TextColumn::make('whmcs_paid_status')
-                    ->label('Πληρωμή WHMCS')
-                    ->badge()
-                    ->state(fn (PendingWhmcsInvoice $r): ?string => match (true) {
+                    ->color(fn (PendingWhmcsInvoice $r): ?string => $r->whmcsIsUnpaid() ? 'warning' : null)
+                    ->description(fn (PendingWhmcsInvoice $r): ?string => match (true) {
                         $r->whmcsIsUnpaid() => 'Απλήρωτο',
                         strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 => 'Πληρωμένο',
                         $r->whmcsStatus() !== null => $r->whmcsStatus(),   // Cancelled/Refunded raw
                         default => null,
-                    })
-                    ->color(fn (PendingWhmcsInvoice $r): string => $r->whmcsIsUnpaid()
-                        ? 'warning'
-                        : (strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 ? 'success' : 'gray'))
-                    ->toggleable(),
+                    }),
 
                 // Who the invoice is from on the WHMCS side — always shown,
                 // even for unmatched rows, so the operator has the full picture
@@ -174,50 +162,20 @@ class WhmcsInboxTable
 
                         return null;
                     })
-                    ->searchable(),
-
-                // G8 (phase 1): άμεση-τιμολόγηση / immediate-invoicing heads-up. A
-                // matched customer flagged needs_immediate_invoice wants their
-                // παραστατικό issued ASAP — surface it so the operator
-                // prioritises this row. Warning only here; auto-issue is a
-                // separate, default-OFF knob (see CLAUDE.md G8).
-                TextColumn::make('immediate')
-                    ->label('Άμεσο')
-                    ->badge()
-                    ->color('danger')
-                    ->icon('heroicon-o-bolt')
-                    ->placeholder('—')
-                    ->state(fn (PendingWhmcsInvoice $r): ?string => $r->customer?->needs_immediate_invoice
-                        ? 'Άμεσο'
-                        : null)
-                    ->tooltip('Ο πελάτης ζητά άμεση τιμολόγηση — δώσε προτεραιότητα.'),
-
-                // Scannable third-party flag: lights up when the WHMCS invoice
-                // routes (some/all) lines to a beneficiary other than the client.
-                // Single → the beneficiary name; multi → «Πολλοί (N)» (needs split).
-                // The «Παραλήπτης» column carries the detail; this is the at-a-glance
-                // «έχει τρίτο;» badge the operator scans for.
-                TextColumn::make('third_party')
-                    ->label('Τρίτος')
-                    ->badge()
-                    ->icon('heroicon-o-users')
-                    ->placeholder('—')
-                    ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->third_party_state) {
-                        PendingWhmcsInvoice::TP_SINGLE => self::firstBeneficiaryName($r) ?? 'Τρίτος',
-                        PendingWhmcsInvoice::TP_MULTI => ($n = count(self::beneficiaryNames($r))) > 0 ? "Πολλοί ({$n})" : 'Πολλοί',
-                        default => null,
-                    })
-                    ->color(fn (PendingWhmcsInvoice $r): string => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI ? 'warning' : 'info')
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => ($n = self::beneficiaryNames($r)) !== [] ? 'Κλικ για ανάλυση ανά γραμμή · '.implode(' · ', $n) : null)
-                    // Click the badge → per-line routing preview. Only meaningful for
-                    // third-party rows; the '—' placeholder on plain rows isn't clickable.
+                    // INBOX-COLS: the «Τρίτος» detail lives here now (its standalone
+                    // column was dropped) — a third-party row is clickable → per-line
+                    // routing preview; a plain matched row isn't.
                     ->disabledClick(fn (PendingWhmcsInvoice $r): bool => ! in_array(
                         $r->third_party_state,
                         [PendingWhmcsInvoice::TP_SINGLE, PendingWhmcsInvoice::TP_MULTI],
                         true,
                     ))
-                    ->action(self::viewRoutingAction()),
+                    ->action(self::viewRoutingAction())
+                    ->searchable(),
 
+                // INBOX-COLS: «Άμεσο» is folded into the «Κατάσταση» description below
+                // and «Τρίτος» into «Παραλήπτης» above — both standalone columns are
+                // gone (their filters remain in the filter bar).
                 TextColumn::make('status')
                     ->label('Κατάσταση')
                     ->badge()
@@ -245,7 +203,20 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_HELD => $r->hold_reason,
                         PendingWhmcsInvoice::STATUS_REJECTED => $r->rejected_reason,
                         default => null,
-                    }),
+                    })
+                    // INBOX-COLS: a filed row shows the ekdosi παραστατικό it produced,
+                    // as a link → invoice view (code = navigation; the MARK stays its
+                    // own copyable column = AADE identity). «Άμεσο» rows (still pending)
+                    // show the priority flag here instead of a standalone column.
+                    ->description(fn (PendingWhmcsInvoice $r): ?string => match (true) {
+                        $r->status === PendingWhmcsInvoice::STATUS_FILED && filled($r->invoice?->invcode) => '→ '.$r->invoice->invcode,
+                        (bool) $r->customer?->needs_immediate_invoice => '⚡ Άμεσο',
+                        default => null,
+                    })
+                    ->url(fn (PendingWhmcsInvoice $r): ?string => $r->status === PendingWhmcsInvoice::STATUS_FILED && $r->invoice_id !== null
+                        ? InvoiceResource::getUrl('view', ['record' => $r->invoice_id, 'tenant' => Filament::getTenant()])
+                        : null)
+                    ->openUrlInNewTab(),
 
                 TextColumn::make('mydata_mark')
                     ->label('MARK')
@@ -314,9 +285,9 @@ class WhmcsInboxTable
 
                 TextColumn::make('created_at')
                     ->label('Συγχρ.')
-                    ->dateTime('Y-m-d H:i')
+                    ->since()
                     ->sortable()
-                    ->tooltip('Πότε συγχρονίστηκε στο inbox'),
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->created_at?->format('Y-m-d H:i').' — πότε συγχρονίστηκε στο inbox'),
             ])
             // DEFAULT order (overridable by a column-header click — Filament appends
             // the user's sort BEFORE this closure, so a manual sort stays primary and
