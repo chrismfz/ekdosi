@@ -77,13 +77,16 @@ class ErrorLogTailTool extends SuperAdminMcpTool
 
             if (! is_file($path)) {
                 // is_file() is false BOTH when the file is truly absent AND when we
-                // can't even STAT it because the parent dir isn't traversable (the app
-                // user ≠ the log owner — e.g. /var/log/php-fpm is 0770 apache:root and
-                // we run as the pool user). Distinguish them so «absent» never masks a
-                // permissions problem the operator must actually fix.
-                $dir = dirname($path);
-                $noAccess = is_dir($dir) && ! (@is_readable($dir) && @is_executable($dir));
-                $checked[] = ['source' => $source, 'path' => $path, 'status' => $noAccess ? 'no access (parent dir)' : 'absent'];
+                // can't even STAT it because some ancestor dir isn't traversable (the
+                // app user ≠ the log owner — e.g. /var/log/php-fpm is 0770 apache:root
+                // and we run as the pool user). Distinguish them so «absent» never
+                // masks a permissions problem. Reaching a NAMED file needs only
+                // EXECUTE (traverse) on the dir — never read/list — so a 0711 dir with
+                // a genuinely-missing file is «absent», and a non-traversable ancestor
+                // at ANY depth is «no access».
+                $reachDir = $this->nearestStatableDir($path);
+                $noAccess = $reachDir !== null && ! @is_executable($reachDir);
+                $checked[] = ['source' => $source, 'path' => $path, 'status' => $noAccess ? 'no access (dir not traversable)' : 'absent'];
 
                 continue;
             }
@@ -144,6 +147,11 @@ class ErrorLogTailTool extends SuperAdminMcpTool
         $target = $iniErrorLog === '' ? 'stderr → FPM (no explicit error_log)'
             : (strtolower($iniErrorLog) === 'syslog' ? 'syslog' : 'file');
 
+        // As root (uid 0) every is_readable/writable/executable check succeeds, so
+        // the whole diagnostic reflects ROOT, not the pool user that actually serves
+        // the app — surface that so an «all clear» from a root ops shell isn't trusted.
+        $asRoot = function_exists('posix_geteuid') && posix_geteuid() === 0;
+
         $writable = null;
         if ($isFile) {
             $writable = is_file($iniErrorLog) ? @is_writable($iniErrorLog) : @is_writable(dirname($iniErrorLog));
@@ -156,14 +164,22 @@ class ErrorLogTailTool extends SuperAdminMcpTool
             // null = not a plain file target (syslog / stderr); true/false = the app
             // user can / cannot write where PHP is configured to log.
             'writable_by_app' => $writable,
+            'checks_reflect' => $asRoot ? 'root (uid 0) — checks are BYPASSED, not the pool user' : 'the running app/pool user',
+            'as_root' => $asRoot,
         ];
     }
 
     /** @param array<string, mixed> $logging */
     private function buildNote(array $logging, int $filesFound): string
     {
+        // Prepended to every note when running as root: the permission-based
+        // conclusions below reflect root, not the pool user, and can false-clear.
+        $rootCaveat = ($logging['as_root'] ?? false)
+            ? 'ΣΗΜΕΙΩΣΗ: τρέχει ως root — οι έλεγχοι δικαιωμάτων παρακάμπτονται (δείχνουν root, όχι τον pool user). '
+            : '';
+
         if (($logging['writable_by_app'] ?? null) === false) {
-            return 'ΠΡΟΣΟΧΗ: το PHP είναι ρυθμισμένο να γράφει errors στο «'.$logging['error_log'].'» αλλά ο '
+            return $rootCaveat.'ΠΡΟΣΟΧΗ: το PHP είναι ρυθμισμένο να γράφει errors στο «'.$logging['error_log'].'» αλλά ο '
                 .'app user ΔΕΝ έχει δικαίωμα εγγραφής εκεί — άρα τα PHP fatals ΧΑΝΟΝΤΑΙ (γι\' αυτό δεν βλέπεις '
                 .'τίποτα). Διόρθωση: στο FPM pool δείξε το error_log σε path που ανήκει στον app user, π.χ. '
                 .'`php_admin_value[error_log] = '.base_path('storage/logs/php-error.log').'` (+ `php_admin_flag[log_errors] = on`), '
@@ -171,18 +187,41 @@ class ErrorLogTailTool extends SuperAdminMcpTool
         }
 
         if (($logging['log_errors'] ?? null) === 'off') {
-            return 'ΠΡΟΣΟΧΗ: `log_errors` = off — το PHP δεν καταγράφει errors καθόλου. Βάλε '
+            return $rootCaveat.'ΠΡΟΣΟΧΗ: `log_errors` = off — το PHP δεν καταγράφει errors καθόλου. Βάλε '
                 .'`php_admin_flag[log_errors] = on` στο FPM pool και όρισε writable `error_log`.';
         }
 
         if ($filesFound === 0) {
-            return 'Κανένα αναγνώσιμο error log δεν βρέθηκε (δες `checked`: «no access (parent dir)» = θέμα '
-                .'δικαιωμάτων, όχι ότι λείπει). Το `error_log` του PHP δείχνει «'.($logging['error_log'] ?? '—').'». '
+            return $rootCaveat.'Κανένα αναγνώσιμο error log δεν βρέθηκε (δες `checked`: «no access (dir not traversable)» = '
+                .'θέμα δικαιωμάτων, όχι ότι λείπει). Το `error_log` του PHP δείχνει «'.($logging['error_log'] ?? '—').'». '
                 .'Αν ο app user δεν το διαβάζει, δείξε το σε path υπό το storage/. Για το laravel.log: log_tail.';
         }
 
-        return 'Αυτά είναι PHP/FPM/web-server error logs (ΟΧΙ το laravel.log — γι\' αυτό: log_tail). Εδώ '
+        return $rootCaveat.'Αυτά είναι PHP/FPM/web-server error logs (ΟΧΙ το laravel.log — γι\' αυτό: log_tail). Εδώ '
             .'πέφτουν fatals/recursion/worker deaths που δεν πιάνει ο Laravel handler.';
+    }
+
+    /**
+     * The deepest ancestor directory of $path that we can actually STAT (walking up
+     * until is_dir succeeds). Null if none. Lets us tell «file absent» from «a parent
+     * dir isn't traversable» at ANY depth, not just the immediate parent.
+     */
+    private function nearestStatableDir(string $path): ?string
+    {
+        $dir = dirname($path);
+        $guard = 0;
+        while ($dir !== '' && $dir !== '.' && $guard++ < 64) {
+            if (@is_dir($dir)) {
+                return $dir;
+            }
+            $parent = dirname($dir);
+            if ($parent === $dir) {
+                break;
+            }
+            $dir = $parent;
+        }
+
+        return null;
     }
 
     /**
