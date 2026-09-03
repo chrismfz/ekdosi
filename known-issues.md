@@ -519,7 +519,7 @@ Priorities:
 | PROV-015 | P0 | OPEN | C | Provider cancellation | Missing/lost cancellation evidence can create a false or split-brain terminal state |
 | PROV-016 | P0 | OPEN | C | Provider cutover | Historical issue channel/environment is not frozen or used for later actions |
 | PROV-017 | P1 | PARTIAL | C | Provider endpoint security | Base URL now public-https-only (hygiene DONE); approved-host allowlist + DNS-rebinding pin OPEN → BACKLOG |
-| PROV-018 | P1 | OPEN | B | Provider partial credits | Full-reversal actions reuse original rather than remaining quantities |
+| PROV-018 | P1 | DONE | — | Provider partial credits | Full-reversal actions now credit each line's REMAINING qty under the original-row lock (`IssueCreditNote::reverseRemaining`); «Ακύρωση μέσω πιστωτικού»/«Ακύρωση & επανέκδοση» work after a partial credit |
 | PROV-019 | P0 | OPEN | B | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
 | PROV-020 | P1 | DONE | — | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
 | STOCK-001 | P1 | DONE | — | Stock ledger | **Fixed (this PR).** `reverseSaleForDeliveryNote()` (wired in `DeliveryLifecycleService::persistCancellation`, direct+provider) and `reverseReturnForCreditNote()` (wired in `InvoiceObserver` cancelled branch) — idempotent, whichever-first; the credit-note reversal moves together with MON-1's freed `qty_returned` (no stock inflation). Reused by MYD-019 |
@@ -3286,7 +3286,7 @@ services.
 
 ### PROV-018 — Full-reversal actions break after a partial credit
 
-**Status:** OPEN · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
+**Status:** DONE 2026-09-03 · **Priority:** P1 · **Research:** CONFIRMED 2026-08-30
 
 Both `cancel_via_credit` in
 [ViewInvoice](app/Filament/Resources/Invoices/Pages/ViewInvoice.php) and
@@ -3302,6 +3302,23 @@ zero-remainder lines and fail clearly only when no remainder exists. Reuse one
 domain service for both actions and recompute under the existing original-row
 lock. Tests must cover one partially credited line, mixed full/partial lines,
 cancelled prior credits and two concurrent remainder reversals.
+
+**Fix (2026-09-03):** new `IssueCreditNote::reverseRemaining($original,
+$creditType)` — one shared, locked transaction body (`issue()`) resolves the
+selection *after* the original-row `lockForUpdate`, so `reverseRemaining` reads
+each line's live remaining qty (`qty − Σ live qty_returned`), skips zero-
+remainder lines and throws a clear «ήδη πιστωθεί πλήρως» error when nothing is
+left. Both `cancel_via_credit` and `StornoAndReissue` now call it (no more full-
+original-qty selection); the explicit per-line partial-credit modal is unchanged.
+No-prior-credit behaviour is identical to before (remainder = full qty). Tests:
+`IssueCreditNoteTest` (no-prior / leftover-after-partial / mixed skip+remainder /
+qty freed by a cancelled prior credit / clear throw when nothing remains) +
+`StornoAndReissueTest::test_storno_after_a_partial_credit_reverses_only_the_remainder`.
+True two-connection concurrency stays MariaDB-only (like the InvoiceNumberer row-
+lock tests); the lock + `RecomputeReturnedQuantities` canonicalisation guard it,
+and the sequential "second reversal finds nothing" test proves no double reversal.
+**Note:** this fixes the *selection*; whether a draft credit legally reverses at
+the provider is the separate PROV-019.
 
 ### PROV-019 — Draft credit is confused with legal provider reversal
 

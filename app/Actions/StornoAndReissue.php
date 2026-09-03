@@ -3,7 +3,6 @@
 namespace App\Actions;
 
 use App\Models\Invoice;
-use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -13,8 +12,9 @@ use RuntimeException;
  * received a MARK through a provider (ΥΠΑΗΕΣ), where a plain cancel is NOT
  * available (only a credit note reverses it). Two things in one transaction:
  *
- *   1. a FULL credit note (every line, full remaining qty) via IssueCreditNote
- *      — the legal reversal that nets the original to zero at AADE;
+ *   1. a credit note for every line's REMAINING qty via IssueCreditNote::
+ *      reverseRemaining (PROV-018) — the legal reversal that nets the original
+ *      to zero at AADE, and that still works after an earlier partial credit;
  *   2. a fresh DRAFT copy of the original (new ΑΑ, same type/customer/lines/
  *      party snapshot) for the operator to fix and re-issue normally.
  *
@@ -46,14 +46,14 @@ class StornoAndReissue
         }
 
         return DB::transaction(function () use ($original, $creditType) {
-            // 1) Full credit note for every line (full remaining qty).
-            //    IssueCreditNote validates the credit type + same tenant and
-            //    locks the original; nesting in this transaction is a savepoint.
-            $selections = $original->lines
-                ->map(fn (InvoiceLine $l) => ['line_id' => $l->id, 'qty' => (float) $l->qty])
-                ->all();
-
-            $credit = ($this->issueCreditNote)($original, $creditType, $selections);
+            // 1) Full credit note for every line's REMAINING qty (PROV-018).
+            //    reverseRemaining computes each line's remainder under the
+            //    original-row lock, so a storno still works after an earlier
+            //    partial credit (it reverses only what is left, not the full
+            //    original qty). IssueCreditNote validates the credit type +
+            //    same tenant and locks the original; nesting in this
+            //    transaction is a savepoint.
+            $credit = $this->issueCreditNote->reverseRemaining($original, $creditType);
 
             // 2) Fresh DRAFT copy of the original for correction — delegated to
             //    ReissueInvoiceAsDraft (its own savepoint within this transaction).

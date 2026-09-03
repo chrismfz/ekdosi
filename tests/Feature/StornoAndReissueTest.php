@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Actions\IssueCreditNote;
 use App\Actions\StornoAndReissue;
 use App\Enums\PaymentStatus;
 use App\Models\Company;
@@ -133,9 +134,38 @@ class StornoAndReissueTest extends TestCase
         $original = $this->originalWithLines();
         app(StornoAndReissue::class)($original, $this->creditType);   // fully credited
 
-        // A second storno would over-credit the lines → IssueCreditNote's
-        // remaining-qty guard fires (caught & surfaced by the Filament action).
+        // A second storno finds no remaining qty → reverseRemaining's
+        // «ήδη πιστωθεί πλήρως» guard fires (caught & surfaced by the Filament action).
         $this->expectException(RuntimeException::class);
         app(StornoAndReissue::class)($original->fresh(), $this->creditType);
+    }
+
+    public function test_storno_after_a_partial_credit_reverses_only_the_remainder(): void
+    {
+        // PROV-018: before the fix, storno always requested the full ORIGINAL qty
+        // and threw «Επιστροφή 2 > διαθέσιμη ποσότητα 1» the moment a line had been
+        // partially credited — leaving a provider invoice impossible to cancel.
+        $original = $this->originalWithLines();       // Widget ×2 @50, Gadget ×1 @30
+        $widget = $original->lines->firstWhere('product_descr', 'Widget');
+
+        // Partially credit the Widget line (1 of 2) first.
+        app(IssueCreditNote::class)($original->fresh(['lines']), $this->creditType, [
+            ['line_id' => $widget->id, 'qty' => 1],
+        ]);
+
+        // Storno now reverses the REMAINDER (Widget 1 left + Gadget 1) — no throw.
+        $result = app(StornoAndReissue::class)($original->fresh(['lines']), $this->creditType);
+        $credit = $result['credit'];
+
+        $this->assertCount(2, $credit->lines);
+        $widgetCredit = $credit->lines->firstWhere('original_line_id', $widget->id);
+        $this->assertEqualsWithDelta(1.0, (float) $widgetCredit->qty, 0.001);   // only the leftover
+
+        // The original ends fully credited overall, and the reissue draft still
+        // carries both original lines at full qty (a clean copy to correct).
+        $b = app(InvoiceBalance::class)->for($original->refresh());
+        $this->assertSame(PaymentStatus::Credited, $b->status);
+        $this->assertSame(0.0, $b->owed);
+        $this->assertCount(2, $result['reissue']->lines);
     }
 }

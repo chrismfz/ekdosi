@@ -498,9 +498,28 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   would free while the `+qty` return-IN stayed → a later original-cancel could inflate. Latent: no
   in-app path flips `mydata_state` without `local_status` (both cancel choke-points sync the two). The
   `reverseReturnForCreditNote` skip-when-original-cancelled guard has the mirror caveat: it assumes the
-  INVOICE owns the sale (false for a δελτίο-first linked group → overstate). A recompute closes all of
-  these. Stock is informational (never blocks a sale, self-corrects with a manual adjustment), so these
+  INVOICE owns the sale (false for a δελτίο-first linked group → overstate).
+  (e) **revive does not re-apply the movement** _(from the PROV-018 review; confirmed on the credit-note
+  path)._ «Επαναφορά» (`ViewInvoice::revive`, `local_status: cancelled → active`) does NOT re-apply stock:
+  `recordReturnForCreditNote` (and, by the same `lineHasMovement` guard, `recordSaleForInvoice`) skips
+  because the ORIGINAL `REASON_RETURN`/`REASON_SALE` movement still exists, while the cancel's
+  `REASON_CANCEL` compensation stands → net 0 (credit note: understated by qty; a revived normal invoice
+  the mirror: overstated). Reachable via a plain Ακύρωση→Επαναφορά on a tracked-stock document.
+  (f) **delivery-cancel reversal durability** _(from the PROV-018 review)._
+  `DeliveryLifecycleService::persistCancellation` records `reverseSaleForDeliveryNote` best-effort AFTER
+  the cancel transaction commits; if the process dies between commit and the reversal a retry cancel
+  throws «ήδη ακυρωμένο στη myDATA» and never re-runs it (and the remote-cancel/`refreshStatus` path —
+  MYD-019, currently frozen on the ΔΑ v2.0.2 spec — does not reverse stock at all yet, so the changelog's
+  «reused by MYD-019» is the method being ready, not wired).
+  A recompute-from-live-documents pass closes (a)–(f) at once (or move (f)'s reversal inside the txn).
+  Stock is informational (never blocks a sale, self-corrects with a manual adjustment), so these
   are genuinely P2.
+- **PROV-018 micro-cleanup** _(P2 from the PROV-018 review, accepted)._ `IssueCreditNote::reverseRemaining`'s
+  per-line `remainingQty()` read duplicates the loop's inline `qty_returned` read, and a full reversal runs
+  2N `return_invoice_extras` reads (resolver builds the selection, then the loop re-validates) where N would
+  do. Deliberate: the resolver reads pre-mutation while the loop re-reads under its own mid-loop writes
+  (correctness over micro-opt); a single keyed prefetch reused by both would collapse it. Negligible on real
+  invoice line counts — revisit only if a reversal ever touches many lines under contention.
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
   `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a

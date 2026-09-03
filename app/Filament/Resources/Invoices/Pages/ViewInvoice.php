@@ -764,14 +764,14 @@ class ViewInvoice extends ViewRecord
                             ->whereKey($data['credit_type_id'])
                             ->firstOrFail();
 
-                        // Full credit: every line at full qty → reverses the
-                        // original. IssueCreditNote writes credited_invoice_id (the
-                        // bind shown under «Σχετικά παραστατικά» on both records).
-                        $selections = $record->lines
-                            ->map(fn ($l) => ['line_id' => $l->id, 'qty' => (float) $l->qty])
-                            ->all();
-
-                        $credit = app(IssueCreditNote::class)($record, $creditType, $selections);
+                        // Reverse every line's REMAINING qty (PROV-018): full qty
+                        // minus what earlier credit notes already returned, so this
+                        // still works after a partial credit — on a provider channel
+                        // this is the ONLY way to cancel a MARKed invoice, so it must
+                        // never dead-end on «Επιστροφή > διαθέσιμη ποσότητα».
+                        // IssueCreditNote writes credited_invoice_id (the bind shown
+                        // under «Σχετικά παραστατικά» on both records).
+                        $credit = app(IssueCreditNote::class)->reverseRemaining($record, $creditType);
 
                         if ($data['submit_now'] ?? false) {
                             try {
