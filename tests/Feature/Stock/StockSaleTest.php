@@ -342,6 +342,67 @@ class StockSaleTest extends TestCase
         $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
     }
 
+    public function test_invoice_cancel_then_revive_reapplies_the_sale(): void
+    {
+        // STOCK-001 revive edge: Ακύρωση→Επαναφορά must re-apply the sale-out. Before
+        // the fix recordSaleForInvoice skipped on revive (REASON_SALE already present)
+        // while the cancel's +qty compensation stood → stock stuck at 10 instead of 7.
+        $inv = $this->draftInvoice();
+        $this->line($inv, $this->tracked, 3);
+
+        $inv->update(['local_status' => 'active']);      // sale −3 → 7
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $inv->update(['local_status' => 'cancelled']);   // reverse +3 → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $inv->update(['local_status' => 'active']);      // REVIVE: re-apply −3 → 7
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+        $this->assertDatabaseHas('stock_movements', [
+            'product_id' => $this->tracked->id, 'reason' => 'revive', 'source_type' => InvoiceLine::class,
+        ]);
+    }
+
+    public function test_credit_note_cancel_then_revive_reapplies_the_return(): void
+    {
+        // The mirror for a credit note: return-IN +qty, cancelled −qty, revived +qty.
+        $inv = $this->draftInvoice();
+        $line = $this->line($inv, $this->tracked, 3);
+        $inv->update(['local_status' => 'active']);      // sale −3 → 7
+
+        $credit = $this->draftInvoice(creditedId: $inv->id);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $credit->id, 'product_id' => $this->tracked->id,
+            'qty' => 3, 'price_per_item' => 10, 'vat_percent' => 24, 'original_line_id' => $line->id,
+        ]);
+        $credit->update(['local_status' => 'active']);    // return +3 → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $credit->update(['local_status' => 'cancelled']); // reverse return −3 → 7
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $credit->update(['local_status' => 'active']);    // REVIVE: re-apply return +3 → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+    }
+
+    public function test_invoice_cancel_revive_recancel_is_idempotent(): void
+    {
+        // The compensation must be NET-aware: each revive returns the balance to
+        // zero so a SECOND cancel compensates afresh. An existence-keyed guard would
+        // skip the re-cancel and leave stock stuck at 7.
+        $inv = $this->draftInvoice();
+        $this->line($inv, $this->tracked, 3);
+
+        $inv->update(['local_status' => 'active']);      // −3 → 7
+        $inv->update(['local_status' => 'cancelled']);   // +3 → 10
+        $inv->update(['local_status' => 'active']);      // revive −3 → 7
+        $inv->update(['local_status' => 'cancelled']);   // re-cancel +3 → 10
+        $this->assertSame(10.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+
+        $inv->update(['local_status' => 'active']);      // revive again −3 → 7
+        $this->assertSame(7.0, app(StockService::class)->currentStock($this->tracked->fresh()));
+    }
+
     private function makeNote(int $movePurpose, float $qty, ?int $invoiceId = null): DeliveryNote
     {
         $note = DeliveryNote::create([

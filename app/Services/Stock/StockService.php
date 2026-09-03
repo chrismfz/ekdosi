@@ -81,6 +81,11 @@ class StockService
                 continue;
             }
             if ($this->lineAlreadyMoved($product->company_id, InvoiceLine::class, $line->getKey())) {
+                // Already sold-out once. If a later cancel compensated it and the
+                // invoice is now REVIVED, re-apply the sale (undo the compensation);
+                // otherwise this is a plain idempotent re-fire → nothing to do.
+                $this->reapplyOnRevive($product, InvoiceLine::class, $line);
+
                 continue;
             }
             if ($this->groupMovedProduct($product->company_id, DeliveryNoteLine::class, $linkedDeliveryLineIds, (int) $product->id)) {
@@ -138,6 +143,11 @@ class StockService
                 continue;
             }
             if ($this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
+                // Already returned-in once. If a later cancel compensated it and the
+                // credit note is now REVIVED, re-apply the return (undo the
+                // compensation); otherwise a plain idempotent re-fire → no-op.
+                $this->reapplyOnRevive($product, InvoiceLine::class, $line);
+
                 continue;
             }
             $this->record($product, (float) $line->qty, StockMovement::REASON_RETURN, source: $line, occurredAt: $creditNote->issued_at);
@@ -179,8 +189,8 @@ class StockService
             if (! $this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
                 continue; // this line never moved (e.g. the linked δελτίο did) — nothing to reverse
             }
-            if ($this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
-                continue; // already reversed
+            if ($this->isCompensated($product->company_id, InvoiceLine::class, $line->getKey())) {
+                continue; // already reversed (net) — a revive would zero this before a re-cancel
             }
 
             $returned = (float) (ReturnInvoiceExtra::query()
@@ -223,8 +233,8 @@ class StockService
             if (! $this->lineHasMovement($product->company_id, DeliveryNoteLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
                 continue; // this note never moved it (e.g. the linked invoice did) — nothing to reverse
             }
-            if ($this->lineHasMovement($product->company_id, DeliveryNoteLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
-                continue; // already reversed
+            if ($this->isCompensated($product->company_id, DeliveryNoteLine::class, $line->getKey())) {
+                continue; // already reversed (net)
             }
 
             $this->record($product, (float) $line->qty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης δελτίου');
@@ -285,8 +295,8 @@ class StockService
             if (! $this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
                 continue; // this line never returned (untracked at the time, etc.) — nothing to reverse
             }
-            if ($this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_CANCEL)) {
-                continue; // already reversed
+            if ($this->isCompensated($product->company_id, InvoiceLine::class, $line->getKey())) {
+                continue; // already reversed (net) — a revive would zero this before a re-cancel
             }
 
             $this->record($product, -(float) $line->qty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης πιστωτικού');
@@ -347,5 +357,54 @@ class StockService
             ->where('source_type', $sourceType)
             ->whereIn('source_id', $sourceLineIds)
             ->exists();
+    }
+
+    /**
+     * The outstanding cancel-compensation for a source line: Σ of its REASON_CANCEL
+     * (recorded on a document cancel) and REASON_REVIVE (recorded on a revive)
+     * movements. Zero ⇒ the line's sale/return currently stands; non-zero ⇒ it is
+     * compensated (the document is cancelled). Net-based (not existence-keyed) so a
+     * cancel → revive → re-cancel cycle stays idempotent — each revive brings the
+     * balance back to zero, freeing the next cancel to compensate afresh.
+     */
+    private function compensationBalance(int|string $companyId, string $sourceType, int|string $sourceId): float
+    {
+        return (float) StockMovement::query()
+            ->where('company_id', $companyId)
+            ->whereIn('reason', [StockMovement::REASON_CANCEL, StockMovement::REASON_REVIVE])
+            ->where('source_type', $sourceType)
+            ->where('source_id', $sourceId)
+            ->sum('qty_change');
+    }
+
+    /** Is this source line's sale/return currently compensated by a cancel? (net, not existence) */
+    private function isCompensated(int|string $companyId, string $sourceType, int|string $sourceId): bool
+    {
+        return abs($this->compensationBalance($companyId, $sourceType, $sourceId)) > 0.00001;
+    }
+
+    /**
+     * Re-apply a line's sale/return when its document is REVIVED (Επαναφορά). If a
+     * prior cancel compensated the line (balance ≠ 0), record the exact opposite as
+     * a REASON_REVIVE so the net returns to the original sale/return magnitude and a
+     * later re-cancel starts from a zero balance. A no-op when nothing is
+     * compensated (a plain draft→active re-fire never touched the compensation
+     * ledger). The compensation is undone in full — the cancel amount itself
+     * (`qty − qty_returned` for a sale, `qty` for a return) is preserved by
+     * mirroring whatever was recorded, so the qty_returned/remainder logic on the
+     * cancel side is never re-derived here.
+     *
+     * Stamped at now() (not the document's issue date): a revive is a present-time
+     * event undoing the equally-present-time cancel, so a date-ordered / as-of-date
+     * view of the ledger reads SALE@issue → CANCEL@cancel → REVIVE@revive instead of
+     * a phantom doubled sale back at the issue date.
+     */
+    private function reapplyOnRevive(Product $product, string $sourceType, Model $line): void
+    {
+        $balance = $this->compensationBalance($product->company_id, $sourceType, $line->getKey());
+        if (abs($balance) < 0.00001) {
+            return;
+        }
+        $this->record($product, -$balance, StockMovement::REASON_REVIVE, source: $line, note: 'Επαναφορά');
     }
 }

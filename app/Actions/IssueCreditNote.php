@@ -10,6 +10,8 @@ use App\Services\InvoiceBalance;
 use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\RecomputeReturnedQuantities;
+use Closure;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -30,13 +32,70 @@ use RuntimeException;
  *
  * This action only PERSISTS the draft credit note; it does not submit
  * to myDATA. The caller submits via EInvoiceSubmitterFactory.
+ *
+ * Two entry points share ONE locked transaction body (`issue`):
+ *   - __invoke()        — credit the exact per-line quantities the operator
+ *                         chose (partial or full), each validated against the
+ *                         line's live remaining qty;
+ *   - reverseRemaining() — credit every line's REMAINING qty in one shot, for
+ *                         the full-reversal actions (PROV-018).
  */
 class IssueCreditNote
 {
     /**
+     * Credit the exact per-line quantities the operator selected. Each is
+     * validated against the line's live remaining quantity under the lock.
+     *
      * @param  array<int, array{line_id: int, qty: float}>  $selections
      */
     public function __invoke(Invoice $original, InvoiceType $creditType, array $selections): Invoice
+    {
+        return $this->issue($original, $creditType, fn (Collection $lines) => $selections);
+    }
+
+    /**
+     * Reverse every line's REMAINING quantity — the full qty minus what prior
+     * credit notes already returned — computed under the original-row lock so
+     * two concurrent reversals can't both claim the same remainder. Zero-
+     * remainder lines are skipped; an already-fully-credited invoice throws a
+     * clear error instead of the misleading per-line over-credit message.
+     *
+     * This is the one path behind «Ακύρωση μέσω πιστωτικού» and «Ακύρωση &
+     * επανέκδοση» (PROV-018): they used to request the full ORIGINAL qty and so
+     * failed the moment a line had been partially credited. On a provider
+     * channel — where a credit note is the ONLY way to reverse a MARKed
+     * invoice (no CancelInvoice) — that left the operator unable to cancel the
+     * remaining quantity at all.
+     */
+    public function reverseRemaining(Invoice $original, InvoiceType $creditType): Invoice
+    {
+        return $this->issue($original, $creditType, function (Collection $lines): array {
+            $selections = $lines
+                ->map(fn (InvoiceLine $line) => [
+                    'line_id' => $line->id,
+                    'qty' => $this->remainingQty($line),
+                ])
+                ->filter(fn (array $sel) => $sel['qty'] > 0.0001)
+                ->values()
+                ->all();
+
+            if ($selections === []) {
+                throw new RuntimeException(
+                    'Το παραστατικό έχει ήδη πιστωθεί πλήρως — δεν υπάρχει υπόλοιπο προς αντιστροφή.'
+                );
+            }
+
+            return $selections;
+        });
+    }
+
+    /**
+     * Shared locked body. `$resolveSelections` runs AFTER the original-row lock
+     * so remaining-qty math (reverseRemaining) sees the latest qty_returned.
+     *
+     * @param  Closure(Collection<int, InvoiceLine>): array<int, array{line_id: int, qty: float}>  $resolveSelections
+     */
+    private function issue(Invoice $original, InvoiceType $creditType, Closure $resolveSelections): Invoice
     {
         if ($original->credited_invoice_id !== null) {
             throw new RuntimeException('Cannot issue a credit note against another credit note.');
@@ -51,11 +110,15 @@ class IssueCreditNote
         $original->loadMissing(['lines', 'company']);
         $linesById = $original->lines->keyBy('id');
 
-        return DB::transaction(function () use ($original, $creditType, $selections, $linesById) {
+        return DB::transaction(function () use ($original, $creditType, $resolveSelections, $linesById) {
             // Lock the original so two concurrent credit notes can't both
             // read the same already-returned qty and over-credit a line
-            // (TOCTOU on the remaining-qty check below).
+            // (TOCTOU on the remaining-qty check below). The selection
+            // resolver runs AFTER the lock so «reverse remaining» computes
+            // each line's remainder from the latest qty_returned.
             Invoice::query()->whereKey($original->id)->lockForUpdate()->first();
+
+            $selections = $resolveSelections($original->lines);
 
             $allocation = app(InvoiceNumberer::class)->allocate($original->company, $creditType->code);
 
@@ -169,5 +232,18 @@ class IssueCreditNote
 
             return $credit->refresh();
         });
+    }
+
+    /**
+     * A single original line's remaining returnable quantity: its qty minus
+     * what live credit notes have already returned (return_invoice_extras).
+     * Read under the caller's lock so concurrent reversals stay consistent.
+     */
+    private function remainingQty(InvoiceLine $line): float
+    {
+        $returned = (float) (ReturnInvoiceExtra::query()
+            ->where('invoice_line_id', $line->id)->value('qty_returned') ?? 0);
+
+        return (float) $line->qty - $returned;
     }
 }

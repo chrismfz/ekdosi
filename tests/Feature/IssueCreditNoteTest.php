@@ -276,4 +276,120 @@ class IssueCreditNoteTest extends TestCase
             ['line_id' => $line->id, 'qty' => 1],
         ]);
     }
+
+    // PROV-018 — reverseRemaining(): the full-reversal path («Ακύρωση μέσω
+    // πιστωτικού» / «Ακύρωση & επανέκδοση») credits each line's REMAINING qty,
+    // computed under the original-row lock. On a provider channel a credit note
+    // is the ONLY way to reverse a MARKed invoice, so it must never dead-end on
+    // «Επιστροφή > διαθέσιμη ποσότητα» after an earlier partial credit.
+
+    public function test_reverse_remaining_with_no_prior_credit_reverses_the_full_qty(): void
+    {
+        $original = $this->originalWithLine();        // qty 2, gross 124
+        $line = $original->lines->first();
+
+        $credit = app(IssueCreditNote::class)->reverseRemaining($original, $this->creditType);
+
+        $this->assertCount(1, $credit->lines);
+        $this->assertEqualsWithDelta(2.0, (float) $credit->lines->first()->qty, 0.001);
+        $this->assertEqualsWithDelta(124.0, (float) $credit->gross_total, 0.001);
+
+        $b = $this->svc()->for($original->refresh());
+        $this->assertSame(PaymentStatus::Credited, $b->status);
+        $this->assertSame(0.0, $b->owed);
+        $this->assertEqualsWithDelta(
+            2.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+    }
+
+    public function test_reverse_remaining_credits_only_the_leftover_after_a_partial_credit(): void
+    {
+        // THE headline bug: credit 1 of 2, then «Ακύρωση μέσω πιστωτικού». Before
+        // the fix this threw «Επιστροφή 2 > διαθέσιμη ποσότητα 1»; now it reverses
+        // only the leftover 1.
+        $original = $this->originalWithLine();        // qty 2
+        $line = $original->lines->first();
+
+        app(IssueCreditNote::class)($original, $this->creditType, [
+            ['line_id' => $line->id, 'qty' => 1],
+        ]);
+
+        $credit = app(IssueCreditNote::class)->reverseRemaining($original->fresh(['lines']), $this->creditType);
+
+        $this->assertCount(1, $credit->lines);
+        $this->assertEqualsWithDelta(1.0, (float) $credit->lines->first()->qty, 0.001);
+
+        // The original is now fully credited (1 + 1 = 2).
+        $this->assertEqualsWithDelta(
+            2.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+        $b = $this->svc()->for($original->refresh());
+        $this->assertSame(0.0, $b->owed);
+    }
+
+    public function test_reverse_remaining_skips_fully_credited_lines_and_credits_mixed_remainders(): void
+    {
+        // Two lines: A is already fully credited (0 remaining → skipped), B is
+        // partially credited (remainder credited). Mixed full/partial coverage.
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-10 10:00:00', 'mydata_state' => 'VALID',
+        ]);
+        $a = InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 2, 'price_per_item' => 50, 'vat_percent' => 24, 'product_descr' => 'A',
+        ]);
+        $b = InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 3, 'price_per_item' => 20, 'vat_percent' => 24, 'product_descr' => 'B',
+        ]);
+        app(RecomputeInvoiceTotals::class)($inv);
+
+        // Fully credit A (2), partially credit B (1 of 3).
+        app(IssueCreditNote::class)($inv->fresh(['lines']), $this->creditType, [
+            ['line_id' => $a->id, 'qty' => 2],
+            ['line_id' => $b->id, 'qty' => 1],
+        ]);
+
+        $credit = app(IssueCreditNote::class)->reverseRemaining($inv->fresh(['lines']), $this->creditType);
+
+        // A contributed nothing (0 remaining); only B's remaining 2 is credited.
+        $this->assertCount(1, $credit->lines);
+        $this->assertSame($b->id, (int) $credit->lines->first()->original_line_id);
+        $this->assertEqualsWithDelta(2.0, (float) $credit->lines->first()->qty, 0.001);
+    }
+
+    public function test_reverse_remaining_reuses_qty_freed_by_a_cancelled_prior_credit(): void
+    {
+        // A partial credit that is later cancelled frees its qty (MON-1); the
+        // reversal then reclaims the full quantity.
+        $original = $this->originalWithLine();        // qty 2
+        $line = $original->lines->first();
+
+        $c1 = app(IssueCreditNote::class)($original, $this->creditType, [
+            ['line_id' => $line->id, 'qty' => 1],
+        ]);
+        $c1->forceFill(['mydata_state' => 'CANCELLED', 'local_status' => 'cancelled'])->save();
+        $this->assertEqualsWithDelta(
+            0.0, (float) ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned'), 0.001,
+        );
+
+        $credit = app(IssueCreditNote::class)->reverseRemaining($original->fresh(['lines']), $this->creditType);
+
+        $this->assertEqualsWithDelta(2.0, (float) $credit->lines->first()->qty, 0.001);
+    }
+
+    public function test_reverse_remaining_throws_a_clear_error_when_nothing_remains(): void
+    {
+        // Represents "no double reversal": a second full reversal (e.g. two
+        // concurrent clicks, once serialised by the row lock) finds no remainder
+        // and fails with a clear message instead of the per-line over-credit one.
+        $original = $this->originalWithLine();
+        app(IssueCreditNote::class)->reverseRemaining($original, $this->creditType);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('έχει ήδη πιστωθεί πλήρως');
+        app(IssueCreditNote::class)->reverseRemaining($original->fresh(['lines']), $this->creditType);
+    }
 }
