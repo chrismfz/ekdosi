@@ -63,6 +63,9 @@ class Company extends Model
         'mydata_aade_id_production',
         'mydata_subscription_key_production',
         'mydata_mode',
+        // Explicit READ-environment override (null = follow the submit mode);
+        // lets a provider tenant testing in sandbox READ production myDATA.
+        'mydata_read_env',
         // AI «Βοηθός» per-company governance (see ai-assistant-blueprint.md).
         'ai_assistant_enabled',
         'ai_model',
@@ -403,11 +406,18 @@ class Company extends Model
      * Which myDATA environment do we READ from, or null when this tenant can't
      * read from myDATA at all. ORTHOGONAL to submission (see canReadMyData()).
      *
-     * - gr-mydata: the submission mode IS the read mode; Off → null (no endpoint).
-     * - gr-provider: the provider does the SUBMITTING, but the tenant still reads
-     *   its OWN ΑΦΜ documents back with its own myDATA subscription. mydata_mode
-     *   is 'off' for providers (the channel form clears it), so the read
-     *   environment follows `einvoice_provider_mode` — the sandbox/production
+     * - Explicit override (`mydata_read_env` = 'sandbox' | 'production') wins,
+     *   decoupling the read environment from the submit channel/mode. This is the
+     *   one lever for the otherwise-impossible case: a tenant submitting via a
+     *   provider's SANDBOX (InvoSign Δοκιμαστικό) that wants to READ its real
+     *   PRODUCTION myDATA picture. Honoured only when the chosen environment has a
+     *   populated read credential slot; otherwise we fall through to the automatic
+     *   rule below rather than silently reading nothing. Null (the default) = auto.
+     * - gr-mydata (auto): the submission mode IS the read mode; Off → null.
+     * - gr-provider (auto): the provider does the SUBMITTING, but the tenant still
+     *   reads its OWN ΑΦΜ documents back with its own myDATA subscription.
+     *   mydata_mode is 'off' for providers (the channel form clears it), so the
+     *   read environment follows `einvoice_provider_mode` — the sandbox/production
      *   twin the whole provider stack keys off (ProviderCredentials::fromCompany,
      *   EInvoiceSubmitterFactory) — so reads land on the SAME environment the
      *   tenant submits to, never split-brain. Only an explicit 'production'
@@ -424,26 +434,59 @@ class Company extends Model
      */
     public function mydataReadMode(): ?MyDataMode
     {
+        // Only the two Greek channels read from myDATA at all.
+        if (! in_array($this->einvoice_provider, ['gr-mydata', 'gr-provider'], true)) {
+            return null;
+        }
+
+        // Explicit override — honoured only when that environment has credentials
+        // (else fall through to auto, so a mis-set override never blanks the read).
+        if (($override = $this->honouredMydataReadEnvOverride()) !== null) {
+            return $override;
+        }
+
         if ($this->einvoice_provider === 'gr-mydata') {
             return $this->mydata_mode_enum === MyDataMode::Off
                 ? null
                 : $this->mydata_mode_enum;
         }
 
-        if ($this->einvoice_provider === 'gr-provider') {
-            $order = ($this->einvoice_provider_mode ?? 'off') === 'production'
-                ? [MyDataMode::Production, MyDataMode::Sandbox]
-                : [MyDataMode::Sandbox, MyDataMode::Production];
+        // gr-provider: follow einvoice_provider_mode, falling back to the populated slot.
+        $order = ($this->einvoice_provider_mode ?? 'off') === 'production'
+            ? [MyDataMode::Production, MyDataMode::Sandbox]
+            : [MyDataMode::Sandbox, MyDataMode::Production];
 
-            foreach ($order as $mode) {
-                $idColumn = $mode === MyDataMode::Production
-                    ? 'mydata_aade_id_production'
-                    : 'mydata_aade_id_sandbox';
-
-                if (filled($this->{$idColumn})) {
-                    return $mode;
-                }
+        foreach ($order as $mode) {
+            if (filled($this->{self::mydataReadIdColumn($mode)})) {
+                return $mode;
             }
+        }
+
+        return null;
+    }
+
+    /** The plain aade-user-id column backing a READ environment (never Off). */
+    private static function mydataReadIdColumn(MyDataMode $mode): string
+    {
+        return $mode === MyDataMode::Production
+            ? 'mydata_aade_id_production'
+            : 'mydata_aade_id_sandbox';
+    }
+
+    /**
+     * The explicit `mydata_read_env` override IFF it is actually honoured — a valid
+     * sandbox/production value whose aade-id slot is populated; null otherwise (unset,
+     * or set to a slot with no read credentials, in which case mydataReadMode() uses
+     * the auto rule). The ONE definition of "did the override win", shared by
+     * mydataReadMode() and the mydata_settings diagnostic so the two never drift.
+     * Checks only the plain aade-id column — no key decryption (rotated-APP_KEY-safe).
+     */
+    public function honouredMydataReadEnvOverride(): ?MyDataMode
+    {
+        $override = MyDataMode::tryFrom((string) ($this->mydata_read_env ?? ''));
+        if (($override === MyDataMode::Sandbox || $override === MyDataMode::Production)
+            && filled($this->{self::mydataReadIdColumn($override)})) {
+            return $override;
         }
 
         return null;

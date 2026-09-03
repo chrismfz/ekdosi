@@ -134,6 +134,81 @@ class ProviderReadAccessTest extends TestCase
         $this->assertFalse($this->company(['einvoice_provider' => 'ee-peppol'])->canReadMyData());
     }
 
+    public function test_read_env_override_lets_a_sandbox_provider_read_production(): void
+    {
+        // THE headline case: a provider submitting via InvoSign Δοκιμαστικό (sandbox)
+        // that wants to READ its real production myDATA. Auto would resolve Sandbox;
+        // the explicit override flips reads to Production while submission stays dev.
+        $prov = $this->company([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'mydata_mode' => 'off',
+            'mydata_read_env' => 'production',
+            'mydata_aade_id_sandbox' => 'SBX', 'mydata_subscription_key_sandbox' => 'SK',
+            'mydata_aade_id_production' => 'PROD', 'mydata_subscription_key_production' => 'PK',
+        ]);
+
+        $this->assertSame(MyDataMode::Production, $prov->mydataReadMode());
+        $this->assertTrue($prov->canReadMyData());
+    }
+
+    public function test_read_env_override_is_ignored_when_target_slot_is_empty(): void
+    {
+        // Override asks for production, but no production read credentials exist →
+        // fall through to auto (sandbox) rather than silently reading nothing.
+        $prov = $this->company([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'mydata_mode' => 'off',
+            'mydata_read_env' => 'production',
+            'mydata_aade_id_sandbox' => 'SBX', 'mydata_subscription_key_sandbox' => 'SK',
+        ]);
+
+        $this->assertSame(MyDataMode::Sandbox, $prov->mydataReadMode());
+        $this->assertTrue($prov->canReadMyData());
+    }
+
+    public function test_read_env_override_flips_a_direct_mydata_tenant_to_sandbox(): void
+    {
+        // A gr-mydata tenant submitting to Production but reading Sandbox on purpose.
+        $t = $this->company([
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'production',
+            'mydata_read_env' => 'sandbox',
+            'mydata_aade_id_sandbox' => 'SBX', 'mydata_subscription_key_sandbox' => 'SK',
+            'mydata_aade_id_production' => 'PROD', 'mydata_subscription_key_production' => 'PK',
+        ]);
+
+        $this->assertSame(MyDataMode::Sandbox, $t->mydataReadMode());
+    }
+
+    public function test_null_read_env_override_keeps_the_automatic_behaviour(): void
+    {
+        // Explicit null (the default) must be identical to the pre-override auto rule.
+        $prov = $this->company([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'mydata_mode' => 'off',
+            'mydata_read_env' => null,
+            'mydata_aade_id_sandbox' => 'SBX', 'mydata_subscription_key_sandbox' => 'SK',
+            'mydata_aade_id_production' => 'PROD', 'mydata_subscription_key_production' => 'PK',
+        ]);
+
+        $this->assertSame(MyDataMode::Sandbox, $prov->mydataReadMode());
+    }
+
+    public function test_firebed_credentials_init_honours_the_read_env_override(): void
+    {
+        // Override → production, sandbox is the auto default: init must resolve the
+        // production environment (no throw) because the override wins.
+        $prov = $this->company([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'sandbox', 'mydata_mode' => 'off',
+            'mydata_read_env' => 'production',
+            'mydata_aade_id_production' => 'PRODUSER',
+            'mydata_subscription_key_production' => 'PRODKEY',
+        ]);
+
+        FirebedCredentials::init($prov, null);
+        $this->assertSame(MyDataMode::Production, $prov->mydataReadMode());
+    }
+
     public function test_firebed_credentials_init_picks_provider_read_environment(): void
     {
         // Provider with production read creds → must NOT throw (read is allowed)

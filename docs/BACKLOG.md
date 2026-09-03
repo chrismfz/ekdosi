@@ -111,6 +111,21 @@ surfaced in the open-items sections further down.
   δικλείδες: opt-in flag, μόνο single-category (2+ = ambiguous), skip vatCategory-8, dry-run, ρητό output
   «ΠΡΟΕΠΙΛΟΓΗ — επιβεβαίωσέ την». Συνειδητό trade-off (ο owner ζήτησε ρητά τον default). Η πλήρης λύση
   (per-category scenario picker) είναι ο `VatExemptionGuidance` scenario-picker που ήδη τρακάρεται εδώ.
+- **`mydata_read_env` override: gate στο aade-id, όχι στο subscription-key (P2, από review)** — το
+  `Company::mydataReadMode()` τιμά το override (και η auto-λογική διαλέγει slot) με `filled(aade_id)`,
+  **όχι** το key. Άρα override=production με production aade-id αλλά κενό key → `canReadMyData()=true`,
+  μα το `FirebedCredentials::init()` πετάει στο fetch (αντί να πέσει σε sandbox). **Συνειδητά deferred:**
+  (α) η υπάρχουσα auto-λογική έχει ΤΗΝ ΙΔΙΑ ασυμμετρία (id-only) — αλλαγή μόνο στο override θα ήταν
+  ασυνεπής· (β) ο έλεγχος του key απαιτεί **decrypt κατά την πλοήγηση**, ακριβώς αυτό που το docblock
+  αποφεύγει (crash σε rotated APP_KEY). Το `mydata_settings` MCP tool ήδη δείχνει `*_subscription_key`
+  presence χωριστά, οπότε η μισο-ρυθμισμένη κατάσταση είναι ορατή. Πλήρης λύση: κοινός helper που ελέγχει
+  ΚΑΙ τα δύο slots + surfacing στο UI — για ΟΛΑ τα read paths μαζί, όχι μόνο το override.
+- **`mydata_read_env` override αγνοεί το gr-mydata «Off» (P2, από review)** — το override αξιολογείται
+  ΠΑΝΩ από το `gr-mydata → Off→null` gate, οπότε ένας gr-mydata tenant με myDATA σκόπιμα Off + leftover
+  creds + ρητό override ξαναποκτά ΑΝΑΓΝΩΣΗ (μπαίνει στα scheduled read jobs). **Συνειδητά deferred:** το
+  «Off» στο `MyDataMode` σημαίνει «καμία **υποβολή**» — οι αναγνώσεις είναι ορθογώνιες (ο πάροχος διαβάζει
+  ενώ mydata_mode=off), και το override είναι **ρητό opt-in** δύο ενεργειών (set env + creds), read-only.
+  Defensible· αν φανεί surprising στην πράξη, το gate γίνεται «override δεν ξυπνά reads σε gr-mydata Off».
 - **Η σελίδα ΜΑΡΚ δείχνει το XML της ΤΕΛΕΥΤΑΙΑΣ ανταλλαγής, όχι της έκδοσης (P2, από review MYD-023)** —
   το `MyDataMarkDetail::load()` κάνει `where('mark', …)->latest('id')`, οπότε όταν υπάρχει γραμμή
   CANCEL με το ίδιο ΜΑΡΚ, το panel request/response XML δείχνει την **ακύρωση** αντί για την αρχική

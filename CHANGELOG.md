@@ -32,6 +32,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
   πράξη· περιπτώσεις-όρια (ταυτόχρονη υποβολή, XML preview προχείρου, ΔΑ Phase 2) → `docs/BACKLOG.md`.
 
 ### Added
+- **Περιβάλλον ανάγνωσης myDATA αποσυνδεδεμένο από τον «Τρόπο αποστολής» (`mydata_read_env`).** Μέχρι
+  τώρα η ΑΝΑΓΝΩΣΗ (κονσόλα/συμφωνία/έξοδα) ακολουθούσε πάντα το submit mode — ώστε ένας tenant με
+  **πάροχο Δοκιμαστικό (InvoSign)** έβλεπε μόνο τα λίγα synthetic παραστατικά του **sandbox** myDATA, όχι τα
+  πραγματικά της Παραγωγής. Νέος διακόπτης «Περιβάλλον ανάγνωσης myDATA» (καρτέλα myDATA) επιτρέπει ρητά
+  **ανάγνωση Παραγωγής ενώ η υποβολή μένει στο δοκιμαστικό**· τιμάται μόνο αν υπάρχουν τα creds του
+  περιβάλλοντος (αλλιώς επανέρχεται σε «Αυτόματο»), αφορά **μόνο ανάγνωση** και ποτέ δεν γράφει στην ΑΑΔΕ.
+  Default `null` = καμία αλλαγή συμπεριφοράς για υπάρχοντες tenants. Μία πηγή: `Company::mydataReadMode()`.
+- **MCP tool `mydata_settings`** (super_admin, read-only) — δείχνει submit channel/mode vs το **resolved
+  περιβάλλον ανάγνωσης** (sandbox/production + AADE endpoint) + ποια credential slots είναι γεμάτα
+  (booleans· **ποτέ** τα subscription keys, χωρίς decrypt). Διαγιγνώσκει άμεσα το «γιατί η κονσόλα φέρνει
+  μόνο δοκιμαστικά». _Migration: `mydata_read_env` nullable στο `companies` (μη-καταστροφικό)._
 - **`ops:health`/go-live: ξεχωριστός έλεγχος «ζει ο cron;» (OPS-001).** Νέο **scheduler
   heartbeat** — το `schedule:run` γράφει σφυγμό ΣΥΓΧΡΟΝΑ κάθε λεπτό (χωρίς queue worker), οπότε
   το `ops:health` πλέον ξεχωρίζει **«ο cron δεν τρέχει»** από **«ο worker δεν τρέχει»** (μέχρι τώρα

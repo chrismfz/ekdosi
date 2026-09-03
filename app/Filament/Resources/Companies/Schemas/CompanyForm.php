@@ -292,10 +292,38 @@ class CompanyForm
                                         .'<p class="font-semibold">ℹ️ Ανάγνωση myDATA & πάροχος</p>'
                                         .'<p>Στέλνεις μέσω παρόχου, αλλά οι έλεγχοι/συμφωνία/έξοδα διαβάζουν '
                                         .'<strong>απευθείας από την ΑΑΔΕ</strong> με τα δικά σου διαπιστευτήρια myDATA — όχι από τον πάροχο.</p>'
-                                        .'<p>Το <strong>περιβάλλον ανάγνωσης ακολουθεί τον «Τρόπο αποστολής»</strong>: '
-                                        .'<em>Δοκιμαστικό</em> → διαβάζει από Sandbox · <em>Παραγωγή</em> → από Production. '
-                                        .'Γι\' αυτό σε δοκιμαστικό βλέπεις μόνο τα λίγα test παραστατικά του sandbox.</p>'
+                                        .'<p>Από προεπιλογή το <strong>περιβάλλον ανάγνωσης ακολουθεί τον «Τρόπο αποστολής»</strong>: '
+                                        .'<em>Δοκιμαστικό</em> → διαβάζει από Sandbox · <em>Παραγωγή</em> → από Production '
+                                        .'(γι\' αυτό σε δοκιμαστικό βλέπεις μόνο τα λίγα test παραστατικά του sandbox). '
+                                        .'Μπορείς όμως να το <strong>ορίσεις ρητά</strong> παρακάτω — π.χ. να διαβάζεις '
+                                        .'<strong>Παραγωγή</strong> ενώ δοκιμάζεις τον πάροχο στο Sandbox.</p>'
                                         .'</div>'
+                                    )),
+
+                                // The explicit READ-environment override (Company::mydataReadMode).
+                                // Empty = «Αυτόματο» (follow the send mode) — the default for every
+                                // tenant; a value reads that environment REGARDLESS of the submit
+                                // channel, provided its credentials are set. Reads never write to AADE.
+                                Select::make('mydata_read_env')
+                                    ->label('Περιβάλλον ανάγνωσης myDATA')
+                                    // Provider-only, matching the notice above: a DIRECT gr-mydata
+                                    // tenant reads the same environment it submits to, so a
+                                    // read≠submit split there would just manufacture false
+                                    // reconciliation mismatches (all invoices «missingAtAade»)
+                                    // with no upside. The model still honours a value set out-of-band.
+                                    ->visible(fn (callable $get) => SendChannel::isProvider((string) $get('send_channel')))
+                                    ->options([
+                                        'sandbox' => 'Δοκιμαστικό (Sandbox)',
+                                        'production' => 'Παραγωγή (Production)',
+                                    ])
+                                    ->placeholder('Αυτόματο — ακολουθεί τον «Τρόπο αποστολής»')
+                                    ->native(false)
+                                    ->dehydrateStateUsing(fn (?string $state): ?string => $state ?: null)
+                                    ->helperText(new HtmlString(
+                                        'Κανονικά το περιβάλλον ανάγνωσης ακολουθεί τον «Τρόπο αποστολής». '
+                                        .'Όρισέ το ρητά για να <strong>διαβάζεις Παραγωγή ενώ στέλνεις μέσω δοκιμαστικού παρόχου</strong> '
+                                        .'(χρειάζονται συμπληρωμένα τα αντίστοιχα διαπιστευτήρια πιο κάτω· αλλιώς επανέρχεται στο «Αυτόματο»). '
+                                        .'Αφορά μόνο ΑΝΑΓΝΩΣΗ — δεν επηρεάζει την υποβολή.'
                                     )),
 
                                 Section::make('Sandbox / Developer credentials')
