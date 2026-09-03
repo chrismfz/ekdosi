@@ -276,15 +276,23 @@ class PendingWhmcsInvoice extends Model
     /**
      * Does the WHMCS «γκρινιάρης» (immediate-invoice) custom field mark this client
      * for άμεση τιμολόγηση? Reads the mapped 'griniaris' role checkbox (same truthy
-     * set as wantsInvoice). false when the field isn't mapped / absent / unchecked —
-     * so it only ever SEEDS a positive flag, never forces one off.
+     * set — and same null-when-unmapped contract — as wantsInvoice):
+     *   - null  = the tenant hasn't MAPPED the griniaris field → intent unknown, so
+     *             WHMCS is NOT the source of truth here (leave the flag to the operator).
+     *   - true  = the field is mapped AND checked.
+     *   - false = the field is mapped but absent/unchecked.
      *
-     * Used by WhmcsCustomerCreator to seed customers.needs_immediate_invoice at CREATE
-     * time (option γ: WHMCS seeds, the operator owns it thereafter — re-syncs never
-     * touch an existing customer's flag).
+     * WHMCS is the source of truth for this flag on WHMCS-linked customers: it seeds
+     * customers.needs_immediate_invoice at CREATE (WhmcsCustomerCreator) and is MIRRORED
+     * onto the matched customer on every ingest (WhmcsInvoiceIngestor) — so a later
+     * WHMCS toggle propagates. The null (unmapped) case is exactly what stops a tenant
+     * that doesn't use the field from having every customer's flag forced off.
      */
-    public function wantsImmediateInvoice(): bool
+    public function wantsImmediateInvoice(): ?bool
     {
+        if ($this->company?->whmcsCustomFieldId('griniaris') === null) {
+            return null;
+        }
         $v = mb_strtolower((string) $this->whmcsCustomField('griniaris'));
 
         return in_array($v, ['on', '1', 'yes', 'true', 'ναι', 'checked'], true);

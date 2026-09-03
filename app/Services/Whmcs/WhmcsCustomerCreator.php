@@ -93,11 +93,12 @@ class WhmcsCustomerCreator
                 'email' => self::firstFilled($p['email'] ?? null),
                 'phone1' => self::firstFilled($p['phonenumber'] ?? null),
                 'whmcs_client_id' => $pending->whmcs_userid ?: null,
-                // Seed «Άμεση τιμολόγηση» from the WHMCS «γκρινιάρης» custom field, ONLY
-                // at creation (option γ: WHMCS seeds, operator overrides). The existing-
-                // customer branch below deliberately never touches it — once the customer
-                // exists in ekdosi, the operator owns the flag.
-                'needs_immediate_invoice' => $pending->wantsImmediateInvoice(),
+                // Seed «Άμεση τιμολόγηση» from the WHMCS «γκρινιάρης» custom field at
+                // creation. WHMCS is the source of truth for this flag on WHMCS-linked
+                // customers: WhmcsInvoiceIngestor MIRRORS it onto the matched customer on
+                // every later ingest too, so a toggle a month later propagates. null
+                // (griniaris unmapped for this tenant) → false here = the column default.
+                'needs_immediate_invoice' => $pending->wantsImmediateInvoice() ?? false,
             ]);
         } catch (UniqueConstraintViolationException) {
             // Lost a race with a parallel create for the same ΑΦΜ: the other

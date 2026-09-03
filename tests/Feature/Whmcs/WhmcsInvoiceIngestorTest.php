@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\User;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use InvalidArgumentException;
 use Tests\TestCase;
@@ -41,6 +42,35 @@ class WhmcsInvoiceIngestorTest extends TestCase
         return app(WhmcsInvoiceIngestor::class);
     }
 
+    /** A tenant that maps the «γκρινιάρης» role (id 16) — so the ingestor mirror is live. */
+    private function tenantWithGriniaris(string $slug = 'ing-g'): Company
+    {
+        return Company::create([
+            'name' => 'IngG',
+            'slug' => $slug.'-'.uniqid(),
+            'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata',
+            'mydata_mode' => 'off',
+            'whmcs_custom_field_map' => ['vatno' => 13, 'griniaris' => 16],
+        ]);
+    }
+
+    /** Payload matched to whmcs_client_id=$userId, carrying the griniaris field ($g = 'on'|'off'|null). */
+    private function payloadWithGriniaris(int $invoiceId, int $userId, ?string $g): array
+    {
+        $customfields = [];
+        if ($g !== null) {
+            $customfields[] = ['id' => 16, 'value' => $g];
+        }
+
+        return [
+            'invoiceid' => $invoiceId,
+            'userid' => $userId,
+            'total' => '10.00',
+            'customfields' => $customfields,
+        ];
+    }
+
     public function test_throws_when_payload_missing_invoice_id(): void
     {
         $this->expectException(InvalidArgumentException::class);
@@ -53,8 +83,8 @@ class WhmcsInvoiceIngestorTest extends TestCase
 
         $result = $this->ingestor()->ingest($tenant, [
             'invoiceid' => 4242,
-            'userid'    => 9999,
-            'total'     => '50.00',
+            'userid' => 9999,
+            'total' => '50.00',
         ]);
 
         $this->assertTrue($result->created);
@@ -79,8 +109,8 @@ class WhmcsInvoiceIngestorTest extends TestCase
 
         $result = $this->ingestor()->ingest($tenant, [
             'invoiceid' => 100,
-            'userid'    => 555,
-            'total'     => '10.00',
+            'userid' => 555,
+            'total' => '10.00',
         ]);
 
         $this->assertSame(PendingWhmcsInvoice::REASON_LINKED, $result->row->match_reason);
@@ -93,8 +123,8 @@ class WhmcsInvoiceIngestorTest extends TestCase
 
         $first = $this->ingestor()->ingest($tenant, [
             'invoiceid' => 777,
-            'userid'    => 1,
-            'total'     => '5.00',
+            'userid' => 1,
+            'total' => '5.00',
         ]);
 
         // Mutate the upstream snapshot AND introduce a linkable
@@ -107,8 +137,8 @@ class WhmcsInvoiceIngestorTest extends TestCase
 
         $second = $this->ingestor()->ingest($tenant, [
             'invoiceid' => 777,
-            'userid'    => 1,
-            'total'     => '6.50',   // <-- changed
+            'userid' => 1,
+            'total' => '6.50',   // <-- changed
             'notes_test_marker' => 'fresh',
         ]);
 
@@ -127,24 +157,24 @@ class WhmcsInvoiceIngestorTest extends TestCase
         $tenant = $this->tenant();
         $first = $this->ingestor()->ingest($tenant, [
             'invoiceid' => 8888,
-            'userid'    => 7,
-            'total'     => '100.00',
+            'userid' => 7,
+            'total' => '100.00',
         ]);
 
         // Simulate Stage B-2 filing the row.
         $first->row->update([
-            'status'           => PendingWhmcsInvoice::STATUS_FILED,
-            'filed_at'         => now(),
-            'mydata_mark'      => '4000123456789',
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
+            'filed_at' => now(),
+            'mydata_mark' => '4000123456789',
         ]);
 
         // WHMCS-side edits the invoice (e.g. typo fix in client
         // address) and re-pushes the webhook. Audit must NOT mutate.
         $second = $this->ingestor()->ingest($tenant, [
             'invoiceid' => 8888,
-            'userid'    => 7,
-            'total'     => '999.99',  // <-- attempted mutation
-            'sneaky'    => 'should not land',
+            'userid' => 7,
+            'total' => '999.99',  // <-- attempted mutation
+            'sneaky' => 'should not land',
         ]);
 
         $this->assertTrue($second->auditPreserved);
@@ -192,8 +222,8 @@ class WhmcsInvoiceIngestorTest extends TestCase
 
             $second = $this->ingestor()->ingest($tenant, [
                 'invoiceid' => $first->row->whmcs_invoice_id,
-                'userid'    => 1,
-                'total'     => '99.00',   // refresh attempt
+                'userid' => 1,
+                'total' => '99.00',   // refresh attempt
             ]);
 
             $this->assertTrue($second->auditPreserved, "status={$status} should freeze payload");
@@ -219,13 +249,13 @@ class WhmcsInvoiceIngestorTest extends TestCase
 
         // Pre-create the row directly (simulating the "other worker"
         // having won the race) without going through the ingestor.
-        \App\Models\PendingWhmcsInvoice::create([
-            'company_id'       => $tenant->id,
+        PendingWhmcsInvoice::create([
+            'company_id' => $tenant->id,
             'whmcs_invoice_id' => 3001,
-            'whmcs_userid'     => 5,
-            'payload'          => ['invoiceid' => 3001, 'userid' => 5, 'total' => '10.00'],
-            'match_reason'     => \App\Models\PendingWhmcsInvoice::REASON_UNMATCHED,
-            'status'           => \App\Models\PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'whmcs_userid' => 5,
+            'payload' => ['invoiceid' => 3001, 'userid' => 5, 'total' => '10.00'],
+            'match_reason' => PendingWhmcsInvoice::REASON_UNMATCHED,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
         ]);
 
         // Our ingest would normally hit existing-row branch. To force
@@ -239,13 +269,13 @@ class WhmcsInvoiceIngestorTest extends TestCase
         // separately below via a forced fake.
         $result = $this->ingestor()->ingest($tenant, [
             'invoiceid' => 3001,
-            'userid'    => 5,
-            'total'     => '99.99',
+            'userid' => 5,
+            'total' => '99.99',
         ]);
 
         $this->assertFalse($result->created);
         $this->assertSame('99.99', $result->row->payload['total']);
-        $this->assertSame(1, \App\Models\PendingWhmcsInvoice::count());
+        $this->assertSame(1, PendingWhmcsInvoice::count());
     }
 
     public function test_unique_violation_helper_recognises_sqlite_and_mariadb_messages(): void
@@ -261,7 +291,7 @@ class WhmcsInvoiceIngestorTest extends TestCase
         $ref = new \ReflectionMethod($ingestor, 'isUniqueConstraintViolation');
         $ref->setAccessible(true);
 
-        $makeQE = function (string $message, string $sqlState): \Illuminate\Database\QueryException {
+        $makeQE = function (string $message, string $sqlState): QueryException {
             // PDOException's $code is set to a SQLSTATE string in
             // production by the PDO C extension, but the constructor
             // type-hints int. Use reflection to set the protected
@@ -270,7 +300,8 @@ class WhmcsInvoiceIngestorTest extends TestCase
             $codeProp = new \ReflectionProperty(\Exception::class, 'code');
             $codeProp->setAccessible(true);
             $codeProp->setValue($pdo, $sqlState);
-            return new \Illuminate\Database\QueryException('mariadb', '', [], $pdo);
+
+            return new QueryException('mariadb', '', [], $pdo);
         };
 
         $this->assertTrue($ref->invoke($ingestor, $makeQE(
@@ -297,7 +328,7 @@ class WhmcsInvoiceIngestorTest extends TestCase
         // Transition to filed first (allowed - the original status is
         // still pending_review at the moment of save).
         $result->row->update([
-            'status' => \App\Models\PendingWhmcsInvoice::STATUS_FILED,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
             'filed_at' => now(),
             'mydata_mark' => '4000999888777',
         ]);
@@ -317,7 +348,7 @@ class WhmcsInvoiceIngestorTest extends TestCase
         $tenant = $this->tenant();
         $result = $this->ingestor()->ingest($tenant, ['invoiceid' => 7100, 'userid' => 1]);
         $result->row->update([
-            'status' => \App\Models\PendingWhmcsInvoice::STATUS_FILED,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
             'filed_at' => now(),
             'mydata_mark' => '4000888',
         ]);
@@ -342,7 +373,7 @@ class WhmcsInvoiceIngestorTest extends TestCase
         $tenant = $this->tenant();
         $result = $this->ingestor()->ingest($tenant, ['invoiceid' => 7200, 'userid' => 1]);
         $result->row->update([
-            'status' => \App\Models\PendingWhmcsInvoice::STATUS_FILED,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
             'filed_at' => now(),
             'mydata_mark' => '4000111',
         ]);
@@ -350,7 +381,7 @@ class WhmcsInvoiceIngestorTest extends TestCase
         $filed = $result->row->fresh();
 
         $this->expectException(\LogicException::class);
-        $filed->update(['status' => \App\Models\PendingWhmcsInvoice::STATUS_PENDING_REVIEW]);
+        $filed->update(['status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW]);
     }
 
     public function test_notifies_operators_when_a_new_immediate_row_is_staged(): void
@@ -385,5 +416,125 @@ class WhmcsInvoiceIngestorTest extends TestCase
         $this->ingestor()->ingest($tenant, ['invoiceid' => 9002, 'userid' => 556, 'total' => '10.00']);
 
         $this->assertSame(0, $user->fresh()->notifications()->count());
+    }
+
+    // ============ «Γκρινιάρης» → needs_immediate_invoice mirror (WHMCS = source of truth) ============
+
+    public function test_mirror_flips_needs_immediate_invoice_on_from_griniaris(): void
+    {
+        $tenant = $this->tenantWithGriniaris();
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Linked', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => false,
+        ]);
+
+        $this->ingestor()->ingest($tenant, $this->payloadWithGriniaris(100, 555, 'on'));
+
+        $this->assertTrue($customer->fresh()->needs_immediate_invoice, 'WHMCS γκρινιάρης=on mirrors the flag ON');
+    }
+
+    public function test_mirror_flips_needs_immediate_invoice_off_whmcs_is_source_of_truth(): void
+    {
+        $tenant = $this->tenantWithGriniaris();
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Linked', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => true,
+        ]);
+
+        $this->ingestor()->ingest($tenant, $this->payloadWithGriniaris(101, 555, 'off'));
+
+        $this->assertFalse(
+            $customer->fresh()->needs_immediate_invoice,
+            'WHMCS = source of truth: a cleared γκρινιάρης mirrors the flag OFF',
+        );
+    }
+
+    public function test_a_later_whmcs_toggle_propagates_on_re_ingest(): void
+    {
+        // The «γκρινιάζει ένα μήνα μετά» scenario: the customer already exists, the
+        // first ingest has no γκρινιάρης, and a later ingest of the SAME invoice has
+        // it on → ekdosi follows on the next fetch (unlike the create-only seed).
+        $tenant = $this->tenantWithGriniaris();
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Linked', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => false,
+        ]);
+
+        $this->ingestor()->ingest($tenant, $this->payloadWithGriniaris(102, 555, null));
+        $this->assertFalse($customer->fresh()->needs_immediate_invoice, 'no γκρινιάρης yet');
+
+        $this->ingestor()->ingest($tenant, $this->payloadWithGriniaris(102, 555, 'on'));
+        $this->assertTrue(
+            $customer->fresh()->needs_immediate_invoice,
+            'operator ticked γκρινιάρης in WHMCS a month later → propagates on the next ingest',
+        );
+    }
+
+    public function test_mirror_is_a_noop_when_tenant_does_not_map_griniaris(): void
+    {
+        // The critical safety guard: a tenant that doesn't manage γκρινιάρης in WHMCS
+        // must NEVER have its customers' flag touched by an ingest — even if the payload
+        // carries a griniaris-looking custom field. Without this, every fetch would force
+        // the flag off for tenants that don't use the field.
+        $tenant = $this->tenant();   // no whmcs_custom_field_map → griniaris unmapped
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Linked', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => true,
+        ]);
+
+        $this->ingestor()->ingest($tenant, [
+            'invoiceid' => 103, 'userid' => 555, 'total' => '10.00',
+            'customfields' => [['id' => 16, 'value' => 'off']],
+        ]);
+
+        $this->assertTrue(
+            $customer->fresh()->needs_immediate_invoice,
+            'unmapped tenant → the flag is left entirely to the ekdosi operator',
+        );
+    }
+
+    public function test_audit_frozen_row_does_not_mirror_the_flag(): void
+    {
+        // A filed row's re-ingest keeps the decision-time payload frozen AND does not
+        // sync the customer flag — the client's next pending_review invoice does.
+        $tenant = $this->tenantWithGriniaris();
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Linked', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => true,
+        ]);
+
+        $first = $this->ingestor()->ingest($tenant, $this->payloadWithGriniaris(104, 555, 'on'));
+        $first->row->update([
+            'status' => PendingWhmcsInvoice::STATUS_FILED, 'filed_at' => now(), 'mydata_mark' => '4000123',
+        ]);
+
+        // WHMCS clears γκρινιάρης and re-pushes the (now filed) invoice.
+        $second = $this->ingestor()->ingest($tenant, $this->payloadWithGriniaris(104, 555, 'off'));
+
+        $this->assertTrue($second->auditPreserved);
+        $this->assertTrue(
+            $customer->fresh()->needs_immediate_invoice,
+            'a frozen re-ingest never touches the flag (the next live invoice syncs it)',
+        );
+    }
+
+    public function test_mirror_does_not_write_when_already_in_sync(): void
+    {
+        // No needless updated_at / activity-log row when WHMCS agrees with ekdosi.
+        $tenant = $this->tenantWithGriniaris();
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Linked', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => true,
+        ]);
+        $stamp = $customer->fresh()->updated_at;
+
+        sleep(1);
+        $this->ingestor()->ingest($tenant, $this->payloadWithGriniaris(105, 555, 'on'));
+
+        $this->assertSame(
+            $stamp->timestamp,
+            $customer->fresh()->updated_at->timestamp,
+            'already in sync → the customer row is not re-saved',
+        );
     }
 }

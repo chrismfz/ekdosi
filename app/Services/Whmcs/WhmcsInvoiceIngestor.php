@@ -6,6 +6,7 @@ use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use Filament\Notifications\Notification;
 use Illuminate\Database\QueryException;
@@ -148,6 +149,8 @@ class WhmcsInvoiceIngestor
                         'hold_reason' => $consolidatedReason,
                     ]);
 
+                    $this->mirrorImmediateInvoiceFlag($tenant, $match->customer, $row);
+
                     return new IngestionResult(row: $row, created: true, auditPreserved: false);
                 } catch (QueryException $e) {
                     // Concurrent ingest race under READ COMMITTED: another worker
@@ -215,6 +218,8 @@ class WhmcsInvoiceIngestor
             }
             $existing->update($update);
 
+            $this->mirrorImmediateInvoiceFlag($tenant, $match->customer, $existing);
+
             return new IngestionResult(row: $existing, created: false, auditPreserved: false);
         }, 3);
 
@@ -268,6 +273,49 @@ class WhmcsInvoiceIngestor
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * Mirror the WHMCS «γκρινιάρης» flag onto the matched ekdosi customer's
+     * needs_immediate_invoice — WHMCS is the source of truth for this flag on
+     * WHMCS-linked customers (operator decision, 2026-09). Runs on EVERY ingest
+     * (create + pre-filing refresh), so a WHMCS toggle a month later propagates —
+     * unlike the create-time seed in WhmcsCustomerCreator, which only fires for a
+     * brand-new customer.
+     *
+     * Guards:
+     *  - Targets $match->customer — the PRIMARY WHMCS client's customer (whose
+     *    customfields carry the griniaris value), NEVER a third-party end-customer.
+     *  - Only when the tenant actually MAPPED the griniaris field (intent !== null).
+     *    An unmapped tenant doesn't manage the flag in WHMCS → leave it entirely to
+     *    the ekdosi operator (else every fetch would force all their customers off).
+     *  - Writes only on a real change: no needless updated_at, and a genuine flip is
+     *    audited as a «Σύστημα» activity-log entry (needs_immediate_invoice is logged).
+     *  - Skipped in the audit-frozen branch (its stored payload is the decision-time
+     *    truth, not the fresh griniaris); the client's next pending_review ingest syncs.
+     *
+     * $row's stored payload is the FRESH one at both call sites (create stores it; the
+     * pre-filing branch updates it just above), so wantsImmediateInvoice() reads the
+     * current griniaris. setRelation avoids a company re-query per ingest.
+     */
+    private function mirrorImmediateInvoiceFlag(Company $tenant, ?Customer $customer, PendingWhmcsInvoice $row): void
+    {
+        if ($customer === null || $customer->company_id !== $tenant->id) {
+            return;
+        }
+
+        $row->setRelation('company', $tenant);
+        $intent = $row->wantsImmediateInvoice();
+        if ($intent === null) {
+            return;   // griniaris not mapped for this tenant — WHMCS isn't the truth here
+        }
+
+        if ((bool) $customer->needs_immediate_invoice === $intent) {
+            return;   // already in sync — no write, no activity-log noise
+        }
+
+        $customer->needs_immediate_invoice = $intent;
+        $customer->save();
     }
 
     /**

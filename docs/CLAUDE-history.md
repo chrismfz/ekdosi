@@ -2055,13 +2055,21 @@ Ordered by likely impact. Several are "confirm usage in the production
   scaffolded, but nothing reads field 338 to set it and there's no
   immediate-vs-batch router. *Impact: dead scaffolding until the scheduler
   + an auto-file path exist (currently inbox is operator-gated by design).*
-  **UPDATE 2026-09 (wired, option γ):** `WhmcsCustomerCreator` now **seeds**
-  `needs_immediate_invoice` from the mapped `griniaris` field **at customer
-  create only** (`PendingWhmcsInvoice::wantsImmediateInvoice`) — an existing
-  customer's flag is never touched by a re-sync (operator owns it). The
-  consumer side has existed since the type-aware `whmcs:auto-issue` shipped
-  (files paid rows for flagged customers on armed tenants). So the flag is no
-  longer dead — WHMCS seeds it, the operator overrides, auto-issue reads it.
+  **UPDATE 2026-09 (wired — WHMCS = source of truth):** first shipped as a
+  create-only seed (option γ), then — after the «γκρινιάζει ένα μήνα μετά»
+  case surfaced — promoted to a full mirror. `WhmcsCustomerCreator` **seeds**
+  `needs_immediate_invoice` from the mapped `griniaris` field at create, and
+  `WhmcsInvoiceIngestor` **mirrors** it onto the matched PRIMARY customer on
+  **every ingest** (`PendingWhmcsInvoice::wantsImmediateInvoice(): ?bool` —
+  null when the tenant hasn't mapped the field, the guard that stops an
+  unmapped tenant from having the flag forced off). ON→ON, OFF→OFF, written
+  only on a real change (audited «Σύστημα»); the audit-frozen re-ingest branch
+  is skipped (the client's next live invoice syncs). The ekdosi CustomerForm
+  toggle is locked read-only for WHMCS-linked customers so a manual edit can't
+  be silently overwritten. The consumer side has existed since the type-aware
+  `whmcs:auto-issue` shipped (files paid rows for flagged customers on armed
+  tenants). So the flag is no longer dead — WHMCS is the truth, ekdosi mirrors,
+  auto-issue reads it.
 - **"Assigned invoices" `invoiced=-333`** workflow — not implemented,
   purpose unconfirmed. *CONFIRM whether myip uses it.*
 - **Gross-price-edit on lines** — form takes net `price_per_item` only; no

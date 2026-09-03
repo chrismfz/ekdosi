@@ -308,9 +308,12 @@ class WhmcsCustomerCreatorTest extends TestCase
 
         $this->assertFalse($result->created);
         $this->assertSame('existing', $result->source);
+        // createForPending is a pure create/link — it never mutates an existing
+        // customer's flag. (Flag PROPAGATION for existing customers is the ingestor
+        // mirror's job, tested in WhmcsInvoiceIngestorTest — not this operator action.)
         $this->assertFalse(
             $existing->fresh()->needs_immediate_invoice,
-            'once the customer exists the operator owns the flag — a re-sync never flips it back on',
+            'createForPending on an existing ΑΦΜ leaves the flag untouched',
         );
     }
 
@@ -329,9 +332,13 @@ class WhmcsCustomerCreatorTest extends TestCase
 
         $this->assertFalse($result->created);
         $this->assertSame('existing', $result->source);
+        // Both directions confirm createForPending is flag-NEUTRAL on existing rows
+        // (never on→off here, never off→on above). System-wide propagation — including
+        // WHMCS turning it OFF as the source of truth — is the ingestor mirror's job,
+        // covered in WhmcsInvoiceIngestorTest; this operator create/link never does it.
         $this->assertTrue(
             $existing->fresh()->needs_immediate_invoice,
-            'the other direction of «operator owns it» — a re-sync with the field cleared never turns άμεση OFF',
+            'createForPending on an existing ΑΦΜ leaves the flag untouched (both directions)',
         );
     }
 }
