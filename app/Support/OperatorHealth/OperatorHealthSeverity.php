@@ -48,19 +48,67 @@ class OperatorHealthSeverity
         $critical = [];
         $warnings = [];
 
+        // --- Scheduler (OS cron): the heartbeat that proves `schedule:run` fires.
+        // OPS-001: ticked SYNCHRONOUSLY every minute inside schedule:run (no worker),
+        // so a stale/missing tick means the OS crontab isn't calling schedule:run —
+        // and NOTHING scheduled (backups, reconcile, auto-email, the queue heartbeat
+        // itself) runs. Same thresholds as the worker: a brief gap after a restart is
+        // a warning; >30 min of silence is a real outage. The `ops:cron` hint points
+        // the operator straight at the copy-paste crontab line.
+        $cron = $data['cron'] ?? [];
+        $cronStatus = $cron['status'] ?? 'missing';
+        $cronAge = $cron['age_minutes'] ?? null;
+        if ($cronStatus === 'missing') {
+            $warnings[] = 'Χρονοπρογραμματιστής (cron): το schedule:run δεν έχει καταγράψει εκτέλεση — αν μόλις στήθηκε ο host, πρόσθεσε το cron (τρέξε «php artisan ops:cron»).';
+        } elseif ($cronStatus === 'stale') {
+            if ($cronAge !== null && $cronAge > self::HEARTBEAT_CRITICAL_MINUTES) {
+                $critical[] = 'Χρονοπρογραμματιστής (cron): σιωπηλός >'.self::HEARTBEAT_CRITICAL_MINUTES.' λεπτά — καμία προγραμματισμένη εργασία (backups/reconcile/email) δεν τρέχει· έλεγξε το OS crontab («php artisan ops:cron»).';
+            } else {
+                $warnings[] = 'Χρονοπρογραμματιστής (cron): heartbeat παλιό (>10 λεπτά) — μόλις έκανε restart ο host;';
+            }
+        }
         // --- Queue worker: no/stale heartbeat = jobs (mail, imports, backups) aren't running.
         // 'missing' (never seen / cache cleared) and a briefly-stale beat are only
         // WARNINGS; a heartbeat silent for >30 min is a real outage → CRITICAL.
+        //
+        // BUT the queue heartbeat is a queued job DISPATCHED by schedule:run, so it
+        // and the cron are genuinely coupled. The honest model:
+        //   • cron ok → the beat is definitive → judge the worker normally.
+        //   • cron down → the beat is only proof of a WORKER fault if it went stale
+        //     WHILE CRON WAS STILL ALIVE. In a cron outage a perfectly healthy (idle)
+        //     worker's beat naturally sits at ~cronAge + (0..5) min — its last beat
+        //     was up to one 5-min dispatch old when cron died, then just ages with the
+        //     outage. So a beat within `cronAge + 5` is fully explained by the cron and
+        //     we say NOTHING about the worker (the cron finding already drives severity;
+        //     once cron is fixed a still-stale beat surfaces the worker next check).
+        //     Only a beat STALER than that gap proves the worker was already failing
+        //     before cron died → a real fault we still report.
+        //
+        // The residual 5-min boundary (a worker that died within ~5 min of cron dying)
+        // is INHERENTLY ambiguous — indistinguishable from a healthy idle worker — and
+        // self-heals once cron is fixed; we accept it rather than pick a slack that
+        // false-alarms on every sustained cron outage (the wrong trade). Likewise a
+        // 'missing' beat carries NO timing evidence of a worker fault while cron was
+        // alive, so during a cron outage it stays attributed to cron (declined finding:
+        // reporting it would re-introduce the "blame the worker for a dead cron" bug).
         $queue = $data['queue'] ?? [];
         $hb = $queue['worker_heartbeat_status'] ?? null;
         $age = $queue['worker_heartbeat_age_minutes'] ?? null;
-        if ($hb === 'missing') {
-            $warnings[] = 'Queue worker: κανένα heartbeat ακόμη (fresh box / cache;).';
-        } elseif ($hb === 'stale') {
-            if ($age !== null && $age > self::HEARTBEAT_CRITICAL_MINUTES) {
-                $critical[] = 'Queue worker: heartbeat σιωπηλό >'.self::HEARTBEAT_CRITICAL_MINUTES.' λεπτά — πιθανό down.';
-            } else {
-                $warnings[] = 'Queue worker: heartbeat παλιό (>10 λεπτά) — μόλις έκανε restart;';
+        $attributableToCron = $cronStatus !== 'ok' && (
+            $hb === 'missing'
+            || $age === null
+            || $cronAge === null
+            || $age <= $cronAge + 5
+        );
+        if (! $attributableToCron) {
+            if ($hb === 'missing') {
+                $warnings[] = 'Queue worker: κανένα heartbeat ακόμη (fresh box / cache;).';
+            } elseif ($hb === 'stale') {
+                if ($age !== null && $age > self::HEARTBEAT_CRITICAL_MINUTES) {
+                    $critical[] = 'Queue worker: heartbeat σιωπηλό >'.self::HEARTBEAT_CRITICAL_MINUTES.' λεπτά — πιθανό down.';
+                } else {
+                    $warnings[] = 'Queue worker: heartbeat παλιό (>10 λεπτά) — μόλις έκανε restart;';
+                }
             }
         }
         // Only RECENT (24h) failures gate — an old un-flushed row must not warn forever.

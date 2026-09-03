@@ -62,6 +62,7 @@ class OperatorHealthReport
     {
         $data = [
             'generated_at' => now()->toIso8601String(),
+            'cron' => $this->cron(),
             'queue' => $this->queue(),
             'scheduler' => $this->scheduler(),
             'recent_runs' => $this->recentRuns(),
@@ -100,6 +101,29 @@ class OperatorHealthReport
             // RECENT failures gate the severity/exit code; the all-time count above
             // is display-only (one old un-flushed failure must not warn forever).
             'failed_jobs_24h' => $this->recentFailedJobs(),
+        ];
+    }
+
+    /**
+     * OPS-001: the scheduler (OS cron) heartbeat — proves `schedule:run` is
+     * firing, independently of any queue worker. Public so GoLiveCheckReport can
+     * surface a dead cron without running the full build(). `schedule:run` ticks
+     * this every minute; the queue heartbeat is the compound (cron + worker)
+     * signal, so comparing the two tells «cron down» from «worker down».
+     *
+     * @return array<string, mixed>
+     */
+    public function cron(): array
+    {
+        $tick = $this->cacheGet(HealthKeys::SCHEDULER_HEARTBEAT);
+        $ageMinutes = $tick ? Carbon::parse($tick)->diffInMinutes(now()) : null;
+
+        return [
+            'last_tick_at' => $tick,
+            'age_minutes' => $ageMinutes,
+            // The tick runs every minute; allow generous slack (a schedule:run that
+            // overlaps a long task, a paused box) before calling it stale.
+            'status' => $ageMinutes === null ? 'missing' : ($ageMinutes <= 10 ? 'ok' : 'stale'),
         ];
     }
 

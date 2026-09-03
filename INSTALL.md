@@ -767,6 +767,13 @@ talk to the socket. The pool itself still runs as `ekdosi:ekdosi`.
 
 ## 11. Background jobs
 
+> **Shortcut:** `php artisan ops:cron` prints the exact crontab + worker lines for
+> THIS host (real PHP binary + app path), for both a VPS and a cPanel/DirectAdmin
+> box, plus the live cron/worker state — paste rather than hand-edit the examples
+> below. After wiring, `php artisan ops:health` reports **cron** and **queue** as two
+> separate signals, so a dead cron no longer looks like a dead worker. Shared-hosting
+> specifics: [`docs/shared-hosting-deploy.md`](docs/shared-hosting-deploy.md).
+
 ### Scheduler (cron) — runs Laravel's `schedule:run` every minute
 
 ```bash

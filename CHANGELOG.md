@@ -19,6 +19,27 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **`ops:health`/go-live: ξεχωριστός έλεγχος «ζει ο cron;» (OPS-001).** Νέο **scheduler
+  heartbeat** — το `schedule:run` γράφει σφυγμό ΣΥΓΧΡΟΝΑ κάθε λεπτό (χωρίς queue worker), οπότε
+  το `ops:health` πλέον ξεχωρίζει **«ο cron δεν τρέχει»** από **«ο worker δεν τρέχει»** (μέχρι τώρα
+  και τα δύο εμφανίζονταν ίδια ως «queue heartbeat stale»). Όταν ο cron είναι νεκρός, ο worker ΔΕΝ
+  κατηγορείται πια άδικα (ο σφυγμός του worker είναι job που το στέλνει ο cron). Το ίδιο cron gate
+  προστέθηκε και στο `ekdosi:go-live-check` (WARN). Νέα βοηθητική εντολή **`ops:cron`** που τυπώνει
+  τις ακριβείς γραμμές crontab + queue worker για ΑΥΤΟΝ τον host (VPS systemd **και** shared-hosting/
+  cPanel/DirectAdmin, με το πραγματικό PHP path) + την τρέχουσα κατάσταση.
+- **`lookups:seed` — headless (ξανα)στήσιμο τυπικών AADE lookups ανά tenant.** Το CLI-δίδυμο του
+  «Εισαγωγή τυπικών» / του install seed: τρέχει τον idempotent + fill-empty `seedStandardLookups`,
+  οπότε **συμπληρώνει** ό,τι λείπει (π.χ. νέες σειρές seed που ήρθαν με update) χωρίς να πειράζει
+  edits του χειριστή. `--tenant=SLUG` για έναν, `--all` για όλους τους GR tenants, `--json`. Ο
+  backfill τρόπος μετά από `git pull` σε cPanel/DirectAdmin.
+- **Κατηγορίες προϊόντων: seed με κατηγορία εσόδων §8.6 έτοιμη.** Οι 3 τυπικές κατηγορίες
+  (Υπηρεσίες→`category1_3`, Εμπορεύματα→`category1_1`, Προϊόντα→`category1_2`) σπέρνονται πλέον με το
+  §8.6 bucket τους, ώστε ένας μικτός tenant να τιμολογεί κάθε γραμμή στη σωστή κατηγορία χωρίς setup
+  (το go-live `classificationPolicyGate` + η ενότητα προϊόντων στο «Έλεγχος ετοιμότητας» βγαίνουν
+  πράσινα out-of-the-box). Ο E3 **τύπος** εσόδων μένει στον τύπο παραστατικού (channel-driven).
+  **New-rows-only**: μια ΥΠΑΡΧΟΥΣΑ κατηγορία δεν πειράζεται ποτέ — back-fill του bucket θα άλλαζε
+  σιωπηλά την §8.6 ταξινόμηση ήδη υποβεβλημένων αγαθών (η πολιτική MYD-006 συνεχίζει να διέπει μέχρι
+  ο χειριστής να ορίσει ρητά bucket).
 - **«Έλεγχος ετοιμότητας» — checklist παραγωγικής ετοιμότητας ανά εταιρεία (`Preflight` page).** Το config-δίδυμο
   του «Υγεία συστήματος» (που είναι liveness): απαντά «είμαι νόμιμος;» πριν βγει ο tenant production, σε μία
   οθόνη ανά εταιρεία με κατάσταση **Έτοιμο / Προσοχή / Μπλόκο**. Ελέγχει: **ρυθμίσεις myDATA** (τύποι/ΦΠΑ/§8.3/§8.12

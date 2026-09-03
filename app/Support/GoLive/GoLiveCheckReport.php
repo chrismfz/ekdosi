@@ -570,6 +570,17 @@ class GoLiveCheckReport
         $queue = $this->health->queue();
         $gates = [];
 
+        // OPS-001: the OS cron (scheduler tick) — proved independently of the worker.
+        // WARN, not FAIL: issuing + myDATA submit are synchronous, so a dead cron
+        // doesn't block go-live, but it silently stops backups/reconcile/auto-email.
+        $cron = $this->health->cron();
+        $cronStatus = $cron['status'] ?? 'missing';
+        $gates[] = $cronStatus === 'ok'
+            ? $this->gate('cron', 'Χρονοπρογραμματιστής (cron)', 'pass', 'ζωντανός')
+            : $this->gate('cron', 'Χρονοπρογραμματιστής (cron)', 'warn',
+                ($cronStatus === 'missing' ? 'το schedule:run δεν έχει τρέξει' : 'stale (>10 λεπτά)')
+                .' — backups/reconcile/email δεν θα τρέξουν· τρέξε «php artisan ops:cron»');
+
         $hb = $queue['worker_heartbeat_status'] ?? 'missing';
         $gates[] = $hb === 'ok'
             ? $this->gate('queue_worker', 'Queue worker', 'pass', 'ζωντανός')
