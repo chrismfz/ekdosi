@@ -499,21 +499,61 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
-- **Gapless-at-send (ΑΑ Phase 1) — P2 survivors of the review loop** _(consciously deferred)._ The
-  gapless-at-send numbering change (real ΑΑ allocated at transmission, provisional «ΠΡΟΣ-…» until then)
-  passed the adversarial gate with two P1s fixed (finalize gate → mode-aware `submitsElectronically()`;
-  a build/config error after `assign()` now `release()`s the number). Three items parked: **(a) Concurrency
-  gap** — `InvoiceNumberer::release()`'s decrement-if-top is gapless only under SERIAL issuance; if two
+- **Gapless-at-send (ΑΑ Phase 1 invoices + Phase 2 δελτία) — P2 survivors of the review loop**
+  _(consciously deferred)._ The gapless-at-send numbering change (real ΑΑ allocated at transmission,
+  provisional «ΠΡΟΣ-…» until then) passed the adversarial gate with two P1s fixed (finalize gate → mode-aware
+  `submitsElectronically()`; a build/config error after `assign()` now `release()`s the number). **Phase 2
+  (delivery notes) shipped** — `delivery_notes` migrated (code/invcode nullable+widened), `CreateDeliveryNote`
+  provisional, `DeliveryNoteSubmitter` assigns/releases via `InvoiceNumberer::assignDelivery`/`releaseDelivery`.
+  The same three items stay parked, and (a)+(b) now apply to BOTH invoices and δελτία: **(a) Concurrency
+  gap** — the decrement-if-top `release`/`releaseDelivery` is gapless only under SERIAL issuance; if two
   documents of the same series are submitted from two concurrent FPM requests and the earlier-numbered one
   is rejected, its number is no longer the top and a rare gap remains (negligible at ~70 docs/month; a
   fully-gapless guarantee needs safe renumbering). **(b) Draft XML preview** — a draft has `code=null`, so
-  «Προεπισκόπηση XML» / `mydata:test-submit --print-only` on a NOT-yet-issued draft now throws
-  (AadeInvoiceDocument guards `code < 1`); the fix is to build the preview with the next counter value as a
-  non-consuming placeholder aa (and a clearer message meanwhile). **(c) Provisional on finalized-unsent
-  actives** — a live AADE tenant that finalises but hasn't transmitted shows «ΠΡΟΣ-…» in the ledger/PDF
-  filename until it sends (correct per the model, but a small «(προσωρινό)» badge would remove any surprise).
-  Also pending: **Phase 2 — delivery notes** (move their allocation to send too; migrate `delivery_notes`
-  code/invcode then).
+  the AADE payload can't be built (it guards `code < 1`); the two preview actions now show a clear «issue
+  first» message instead of the raw builder error, but a true preview needs the next counter value as a
+  non-consuming placeholder aa. `delivery:sandbox-validate` sidesteps this by keeping allocate-at-create for
+  its throwaway test note. **(c) Provisional on finalized-unsent actives** — a live AADE tenant that finalises
+  but hasn't transmitted shows «ΠΡΟΣ-…» in the ledger/PDF filename until it sends (correct per the model, but a
+  small «(προσωρινό)» badge would remove any surprise). **(d) Second write per draft** — the provisional
+  invcode is keyed on the surrogate id, so it needs a post-INSERT `saveQuietly` (INSERT+UPDATE per draft
+  create). Negligible at these volumes; a derived/read-time label would avoid it but invcode is a real,
+  queried column. **(e) `down()` is best-effort** — the migration's rollback restores NOT NULL / varchar(15),
+  which fails while any provisional row exists; deploy rollback uses a DB snapshot (`ekdosi:db-restore`), not
+  `migrate:rollback`, so this is documented, not load-bearing. _(Review round 2 P0 fixed at root:
+  `release()`/`releaseDelivery()` now fire only for the number THIS submit reserved — `assign()` returns
+  whether it allocated — so an already-numbered doc, e.g. finalized-at-'off'-then-live or a legacy import,
+  is never renumbered by a rejection it merely triggered.)_
+  _Round 2 (Phase 2) P2 survivors, all documented not fixed: **(f) off-tenant ΔΑ stays provisional** — a
+  non-transmitting tenant ('off'/'none') has no delivery-note local-issuance path (no finalize action; «Έκδοση»
+  is gated on `submitsElectronically()`), so its ΔΑ drafts keep «ΠΡΟΣ-ΔΑΠ-{id}» forever. Acceptable: a compliant
+  ΔΑ is always transmitted (e-transport mandate), the note was never issuable at an off tenant even before Phase 2,
+  and the «ΠΡΟΧΕΙΡΟ» banner signals it. If a local-issuance ΔΑ flow is ever wanted, add a finalize→`assignDelivery`
+  path like the invoice one. **(g) Pre-send local-failure gap** — a failure AFTER assign but before the wire send
+  (initFirebed missing-creds, armInDoubt DB failure, provider issue-date/transport-resolution) is outside the
+  release try/catch, so the number isn't returned; but the far more likely RETRY reuses it (assign no-ops on the
+  set code), so a gap needs infra-error + abandon. Shared with the invoice submitters. **(h) CMR from a provisional
+  draft** — «Δημιουργία CMR» is available on a draft, so `reference_no` records the provisional «ΠΡΟΣ-…»; the CMR
+  is an editable ΠΡΟΧΕΙΡΟ the operator fixes before printing._
+  _Round 3 (whole-ΑΑ holistic review, Phase 1+2 together) — two edge bugs FIXED at root, three P2 kept:
+  **fixed:** a concurrent-reservation GAP on the lock-less local-issuance paths (finalize/NullSubmitter) —
+  `reserve()` now re-reads the row's `code` under a row lock so a loser adopts the winner's number
+  (counter bumped once); and finalize now `assign()`s BEFORE the `local_status→active` flip so a failed
+  allocation leaves a recoverable draft, not an active-but-unnumbered document. **P2 kept: (i) provisional
+  LABEL type-segment can go stale** — the invcode «ΠΡΟΣ-ΤΠΥ-{id}» is frozen by the `created` hook and not
+  refreshed if the draft's `invoice_type` is changed (EditInvoice), and `revert()` rebuilds it from the
+  current type; the real ΑΑ at send is always correct and the «ΠΡΟΣ» marker signals non-final, so this is
+  cosmetic (id-keyed → unique either way). Dropping the type segment from the format would remove it but the
+  operator explicitly chose «ΠΡΟΣ-ΤΠΥ-6885». **(j) `ProvisionalCode::is()`** is exercised by the numbering
+  tests (not dead); app readers use the equivalent `code === null` (the authoritative DB signal) — both valid._
+  _Rounds 4–5 (verify-the-fix passes) hardened the round-3 fixes: `reserve()` now THROWS (not burns) if the
+  row vanished mid-operation; the adopt path syncs only the three number columns (a caller's other pending
+  edit survives); `revert()` locks document→invoice_types in the SAME order as `reserve()` (provably
+  deadlock-free); finalize wraps assign+flip in one transaction (savepoint rollback undoes the counter bump).
+  One P2 accepted, not fixed: **(k) transient stale in-memory model after a rolled-back finalize** — if the
+  status-flip fails, the outer transaction reverts code/invcount in the DB but the in-memory $record still
+  shows them; the action errored (no redirect, no success toast) and the row refetches on the next load, so
+  there is no persisted corruption. Severity converged P1→P1→P2→P2 across the rounds (no P0/P1 in round 5)._
 - **OPS-001 cron↔worker attribution — inherent 5-min boundary ambiguity** _(P2, DECLINED across the OPS-001
   review loop — documented, not a bug to keep patching)._ `OperatorHealthSeverity` disambiguates «cron down»
   from «worker down» via the queue heartbeat (a job cron dispatches): when cron is down it suppresses the

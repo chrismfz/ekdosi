@@ -8,6 +8,7 @@ use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Services\InvoiceNumberer;
 use App\Services\MyData\FirebedCredentials;
 use App\Services\MyData\SalesReconciler;
 use App\Services\Stock\StockService;
@@ -399,21 +400,45 @@ class DeliveryNoteSubmitter
             );
         }
 
+        // Gapless-at-send (Phase 2): allocate the real ΑΑ/invcode/series NOW, before the
+        // payload build (buildAadeDeliveryNote throws on a null code). Idempotent — a
+        // retry after an ambiguous failure keeps the number it already reserved. A draft
+        // that was never sent consumed nothing, so the 9.x sequence the ΑΑΔΕ sees stays
+        // continuous. Twin of MyDataSubmitter / GrProviderSubmitter.
+        //
+        // $reservedByUs gates every releaseDelivery() below: a δελτίο can arrive ALREADY
+        // numbered (assignDelivery no-op → false) and releasing that would strip its ΑΑ —
+        // release only OUR OWN reservation.
+        $reservedByUs = app(InvoiceNumberer::class)->assignDelivery($note);
+
         // PROV-020 (auto): for the PROVIDER channel the issue date must be today
         // (InvoSign 238) and IS the moment of issue — stamp it BEFORE the payload is
         // built so the outbound IssueDate carries today, not the draft-prep date.
         // Provider-only: direct-myDATA allows a backdated movement date (wrong-period
         // risk if forced) and keeps the operator's date.
         $viaProvider = $this->tenant->isLiveProviderTenant();
-        if ($viaProvider) {
-            $this->stampIssuedToday($note);
+
+        try {
+            if ($viaProvider) {
+                $this->stampIssuedToday($note);
+            }
+
+            $payload = $this->buildAadeDeliveryNote($note);
+            $xml = $this->payloadToXml($payload);
+        } catch (Throwable $e) {
+            // The number was reserved above but a LOCAL step (stamp / payload build — a
+            // data or config error) failed before anything was transmitted: return the
+            // ΑΑ to the pool so a fixed resubmit re-allocates, keeping the sequence
+            // gapless. (A rejection or ambiguous timeout AFTER the send is handled in the
+            // persist / provider paths below, NOT here.)
+            if ($reservedByUs) {
+                app(InvoiceNumberer::class)->releaseDelivery($note);
+            }
+            throw $e;
         }
 
-        $payload = $this->buildAadeDeliveryNote($note);
-        $xml = $this->payloadToXml($payload);
-
         if ($viaProvider) {
-            return $this->submitViaProvider($note, $xml);
+            return $this->submitViaProvider($note, $xml, $reservedByUs);
         }
 
         $this->initFirebed();
@@ -473,7 +498,7 @@ class DeliveryNoteSubmitter
 
         $responseXml = $action->getResponseXML() ?? '';
 
-        return $this->persistResponse($note, $xml, $response, $responseXml);
+        return $this->persistResponse($note, $xml, $response, $responseXml, $reservedByUs);
     }
 
     /**
@@ -494,7 +519,7 @@ class DeliveryNoteSubmitter
     }
 
     /** Submit the same canonical 9.x AADE XML through the tenant's ΥΠΑΗΕΣ provider. */
-    private function submitViaProvider(DeliveryNote $note, string $xml): DeliveryMark
+    private function submitViaProvider(DeliveryNote $note, string $xml, bool $reservedByUs = false): DeliveryMark
     {
         // PROV-020: issued_at was already stamped to today in submit() BEFORE the XML
         // was built (so $xml carries today's IssueDate). This guard is the safety net —
@@ -526,6 +551,14 @@ class DeliveryNoteSubmitter
             // something already known not to have been filed. (A provider TRANSPORT
             // failure above stays armed — that one is genuinely ambiguous.)
             $this->disarmInDoubt($note);
+            // Gapless-at-send: a DEFINITIVE rejection filed nothing, so return the
+            // reserved ΑΑ to the pool (revert to provisional) and let the fixed resubmit
+            // re-allocate. Same gate as disarm; NEVER on the ambiguous transport-throw
+            // path above, where the document may in fact have filed; and only for OUR OWN
+            // reservation ($reservedByUs), never an already-numbered δελτίο.
+            if ($reservedByUs) {
+                app(InvoiceNumberer::class)->releaseDelivery($note);
+            }
             $this->recordProviderRejection($note, $transport->key(), $xml, $result);
             throw new DeliveryNoteRejected(
                 'E-invoice provider rejected the delivery note: '.$result->errorMessage(),
@@ -1196,6 +1229,7 @@ class DeliveryNoteSubmitter
         string $xml,
         ResponseDoc $response,
         string $responseXml,
+        bool $reservedByUs = false,
     ): DeliveryMark {
         /** @var Response|null $first */
         $first = $response->first();
@@ -1211,8 +1245,17 @@ class DeliveryNoteSubmitter
             // data must be able to retry at once. A NULL $first is a different animal:
             // an empty or unparseable ResponseDoc tells us nothing about whether a
             // MARK was created, so it stays ARMED and the next attempt reconciles.
+            //
+            // Gapless-at-send: the SAME gate returns the reserved ΑΑ to the pool (revert
+            // to provisional) — a DEFINITIVE rejection filed nothing, so the next attempt
+            // re-allocates and the sequence stays gapless. A NULL $first KEEPS its number
+            // (the δελτίο may have filed) — never released, mirroring the arm. And only
+            // OUR OWN reservation ($reservedByUs), never an already-numbered δελτίο.
             if ($first !== null) {
                 $this->disarmInDoubt($note);
+                if ($reservedByUs) {
+                    app(InvoiceNumberer::class)->releaseDelivery($note);
+                }
             }
             $this->recordRejection($note, $xml, $responseXml);
             throw new DeliveryNoteRejected(

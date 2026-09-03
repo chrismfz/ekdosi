@@ -101,7 +101,11 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         // is built (AadeInvoiceDocument throws on a null code). Idempotent — a retry
         // after an ambiguous failure keeps the number it already reserved. A draft that
         // was never sent consumed nothing, so the transmitted sequence stays continuous.
-        app(InvoiceNumberer::class)->assign($invoice);
+        //
+        // $reservedByUs gates both release()s below: an already-numbered doc (assign
+        // no-op → false) is NOT ours to revert — releasing it would strip the ΑΑ off a
+        // validly-issued document (legacy import / finalized-then-live).
+        $reservedByUs = app(InvoiceNumberer::class)->assign($invoice);
 
         try {
             // PROV-020 (auto): the LEGAL issue date is the moment of issue — now, when we
@@ -122,7 +126,9 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             // error) failed before anything was transmitted: return the ΑΑ to the pool so
             // a fixed resubmit re-allocates, keeping the sequence gapless. (A rejection or
             // ambiguous timeout AFTER the send is handled below, NOT here.)
-            app(InvoiceNumberer::class)->release($invoice);
+            if ($reservedByUs) {
+                app(InvoiceNumberer::class)->release($invoice);
+            }
             throw $e;
         }
 
@@ -166,8 +172,12 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             // Gapless-at-send: a DEFINITIVE rejection did not file anything, so return
             // the reserved ΑΑ to the pool (revert to provisional) — the next attempt
             // re-allocates and the sequence stays gapless. NOT done on the ambiguous
-            // transport-throw path above, where the document may in fact have filed.
-            app(InvoiceNumberer::class)->release($invoice);
+            // transport-throw path above, where the document may in fact have filed;
+            // and only for OUR OWN reservation ($reservedByUs), never an already-numbered
+            // doc a rejection merely happened to hit.
+            if ($reservedByUs) {
+                app(InvoiceNumberer::class)->release($invoice);
+            }
             throw new MyDataRejected(
                 'E-invoice provider rejected the submission: '.$result->errorMessage(),
                 $xml,

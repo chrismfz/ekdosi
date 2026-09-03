@@ -225,7 +225,12 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // build (build() throws on a null code). Idempotent — a retry after an ambiguous
         // failure keeps the number it already reserved. A never-sent draft consumed
         // nothing, so the sequence the ΑΑΔΕ sees stays continuous.
-        app(InvoiceNumberer::class)->assign($invoice);
+        //
+        // $reservedByUs gates every release() below: a document can arrive ALREADY
+        // numbered (a legacy-imported row, or one finalized at a mode='off' tenant then
+        // submitted after go-live), where assign() no-ops → false. Releasing that would
+        // strip the ΑΑ off a validly-issued document — release only OUR OWN reservation.
+        $reservedByUs = app(InvoiceNumberer::class)->assign($invoice);
 
         try {
             $payload = $this->document()->build($invoice);
@@ -236,7 +241,9 @@ class MyDataSubmitter implements EInvoiceSubmitter
             // return the ΑΑ to the pool and let the fixed resubmit re-allocate. Without
             // this a config error would burn a number — the exact gap this feature
             // prevents. (A rejection/timeout AFTER the send is handled further down.)
-            app(InvoiceNumberer::class)->release($invoice);
+            if ($reservedByUs) {
+                app(InvoiceNumberer::class)->release($invoice);
+            }
             throw $e;
         }
 
@@ -328,7 +335,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // the next submit would blindly re-POST → double income. Flag in-doubt in
         // that case so the retry ADOPTS the existing MARK instead.
         try {
-            $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml);
+            $mark = $this->persistResponse($invoice, $payload, $xml, $response, $responseXml, $reservedByUs);
         } catch (MyDataRejected $e) {
             // Nothing to do here: persistResponse already disarmed if AADE genuinely
             // answered and refused, and deliberately did NOT when the response was
@@ -925,6 +932,7 @@ class MyDataSubmitter implements EInvoiceSubmitter
         string $xml,
         ResponseDoc $response,
         string $responseXml,
+        bool $reservedByUs = false,
     ): MyDataMark {
         // ResponseDoc extends TypeArray which is iterable and exposes
         // first(). It does NOT have a getResponses() method (the
@@ -948,7 +956,12 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 // nothing, so return the reserved ΑΑ to the pool (revert to provisional)
                 // and let the fixed resubmit re-allocate. A NULL $firstResponse stays
                 // ARMED and KEEPS its number (the doc may have filed) — never released.
-                app(InvoiceNumberer::class)->release($invoice);
+                // ...but ONLY the number THIS attempt reserved ($reservedByUs): an
+                // already-numbered doc (legacy import / finalized-then-live) must not be
+                // renumbered by a rejection it merely happened to trigger.
+                if ($reservedByUs) {
+                    app(InvoiceNumberer::class)->release($invoice);
+                }
             }
             // Persist a forensic record + carry the XML on the throw, so a
             // rejection isn't a dead-end — the round-trip is otherwise lost

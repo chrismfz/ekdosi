@@ -5,20 +5,21 @@ namespace App\Filament\Resources\DeliveryNotes\Pages;
 use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Models\DeliveryNote;
 use App\Models\InvoiceType;
-use App\Services\InvoiceNumberer;
 use Filament\Facades\Filament;
 use Filament\Resources\Pages\CreateRecord;
 use Filament\Support\Enums\Width;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * Issue a new Δελτίο Αποστολής as a DRAFT. The ΑΑ is allocated server-side by
- * InvoiceNumberer under a row lock inside the same transaction as the INSERT —
- * IDENTICAL atomic semantics to CreateInvoice (the legacy INVOICE_BI1 +
- * INVOICE_AI triggers). The delivery type's series feeds the counter; the
- * note's mydata_type is snapshotted from the type at save.
+ * Issue a new Δελτίο Αποστολής as a DRAFT.
+ *
+ * Gapless-at-send (Phase 2, reverses MON-4 for δελτία): a draft no longer consumes
+ * an ΑΑ. `code` stays null and the DeliveryNote `created` hook assigns a PROVISIONAL
+ * invcode («ΠΡΟΣ-ΔΑΠ-{id}»); the real ΑΑ/invcode/series are allocated at transmission
+ * (DeliveryNoteSubmitter → InvoiceNumberer::assignDelivery), so an abandoned or
+ * cancelled draft never leaves a gap in the sequence the ΑΑΔΕ sees. The note's
+ * mydata_type is still snapshotted from the chosen 9.x type at save.
  *
  * Filing to myDATA is NOT done here — the operator reviews the draft and clicks
  * «Έκδοση» on the view page (mirrors the invoice draft-then-submit flow).
@@ -44,19 +45,15 @@ class CreateDeliveryNote extends CreateRecord
             ->whereKey($data['delivery_type_id'])
             ->firstOrFail();
 
-        return DB::transaction(function () use ($data, $tenant, $type) {
-            // allowMovementType: a Δελτίο Αποστολής legitimately carries a 9.x
-            // type, so it opts out of the numberer's monetary 9.x guard (MYD-003).
-            $allocation = app(InvoiceNumberer::class)->allocate($tenant, $type->code, allowMovementType: true);
+        // Gapless-at-send: no ΑΑ is consumed at draft creation. `code`/`invcode` are
+        // left unset (the `created` hook assigns a provisional invcode); the real
+        // number is allocated at transmission by the submitter.
+        unset($data['code'], $data['invcode']);
+        $data['company_id'] = $tenant->getKey();
+        $data['local_status'] = 'draft';
+        // Snapshot the myDATA doc type from the chosen delivery type (9.x).
+        $data['mydata_type'] = $type->mydata_type;
 
-            $data['code'] = $allocation->code;
-            $data['invcode'] = $allocation->invcode;
-            $data['company_id'] = $tenant->getKey();
-            $data['local_status'] = 'draft';
-            // Snapshot the myDATA doc type from the chosen delivery type (9.x).
-            $data['mydata_type'] = $type->mydata_type;
-
-            return DeliveryNote::create($data);
-        });
+        return DeliveryNote::create($data);
     }
 }

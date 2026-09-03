@@ -9,6 +9,8 @@ use App\Models\Concerns\TracksActivity;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
 use App\Support\IsoCountry;
+use App\Support\ProvisionalCode;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -297,6 +299,21 @@ class DeliveryNote extends Model
                 $model->series = DocumentSeries::fromInvcode($model->invcode, $model->code);
             }
         });
+
+        // Gapless-at-send Phase 2 (reverses MON-4 for δελτία): a note created WITHOUT
+        // a real ΑΑ — the new draft flow, which no longer allocates at creation — gets
+        // a PROVISIONAL identity keyed by its surrogate id («ΠΡΟΣ-ΔΑΠ-6885»), so every
+        // `invcode` reader (list, infolist, PDF, CMR) shows a stable, unique,
+        // clearly-provisional label. The real code/invcode/series are written later, at
+        // transmission (DeliveryNoteSubmitter → InvoiceNumberer::assignDelivery). Guarded
+        // on `code === null`, so ETL/import/fixtures that set a real code are untouched.
+        // Post-insert (`created`) because the id is the unique token. Twin of Invoice.
+        static::created(function (self $model): void {
+            if ($model->code === null && blank($model->invcode)) {
+                $model->invcode = ProvisionalCode::make($model->deliveryType?->code, $model->getKey());
+                $model->saveQuietly();
+            }
+        });
     }
 
     /**
@@ -385,7 +402,7 @@ class DeliveryNote extends Model
      * set), not cancelled, no `mydata_mark`, AND not imported (`legacy_id` null).
      * Mirrors Invoice::scopeAwaitingMyData.
      */
-    public function scopeAwaitingMyData(\Illuminate\Database\Eloquent\Builder $query): \Illuminate\Database\Eloquent\Builder
+    public function scopeAwaitingMyData(Builder $query): Builder
     {
         return $query
             ->whereNull('legacy_id')

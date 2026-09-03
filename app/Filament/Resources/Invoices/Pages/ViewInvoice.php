@@ -180,8 +180,6 @@ class ViewInvoice extends ViewRecord
                 ->modalHeading('Οριστικοποίηση παραστατικού')
                 ->modalDescription('Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
                 ->action(function (Invoice $record) {
-                    $record->update(['local_status' => 'active']);
-
                     // Gapless-at-send: a tenant that does NOT transmit to AADE has no
                     // submission event, so finalisation IS its issuance — allocate the
                     // real ΑΑ here. Uses the mode-AWARE submitsElectronically() (not
@@ -189,9 +187,19 @@ class ViewInvoice extends ViewRecord
                     // routes to NullSubmitter and would otherwise stay provisional forever.
                     // Live-filing tenants keep the provisional identity until they transmit
                     // (where InvoiceNumberer::assign runs instead).
-                    if ($record->code === null && ! $record->company->submitsElectronically()) {
-                        app(InvoiceNumberer::class)->assign($record);
-                    }
+                    //
+                    // ATOMIC assign + status flip: wrapped in ONE transaction so a failure of
+                    // either rolls back BOTH. Neither half-state is possible — not active-but-
+                    // unnumbered (no UI path to a number), and not numbered-but-draft (a
+                    // reserved ΑΑ the operator could abandon into a gap). A retry re-runs
+                    // cleanly (assign no-ops once the invoice carries a code).
+                    DB::transaction(function () use ($record): void {
+                        if ($record->code === null && ! $record->company->submitsElectronically()) {
+                            app(InvoiceNumberer::class)->assign($record);
+                        }
+
+                        $record->update(['local_status' => 'active']);
+                    });
 
                     // S2.5: non-blocking heads-up if the sale pushed any tracked
                     // product to negative stock (the issue ALWAYS proceeds).
@@ -965,6 +973,20 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription('Builds the AADE payload and records it as a DRY_RUN row in the audit history. Does NOT contact AADE. Safe on any mode.')
                 ->modalSubmitActionLabel('Generate preview')
                 ->action(function (Invoice $record) {
+                    // Gapless-at-send: a provisional draft has no ΑΑ yet, so the payload
+                    // can't be built (it carries the real code/series). Show a clear
+                    // «issue first» message instead of the raw «has no ΑΑ number» error.
+                    if ($record->code === null) {
+                        Notification::make()
+                            ->title('Δεν έχει δοθεί ακόμη ΑΑ')
+                            ->body('Η προεπισκόπηση XML είναι διαθέσιμη μόλις το παραστατικό πάρει αριθμό — '
+                                .'στην αποστολή στο myDATA ή στην οριστικοποίηση. Όσο είναι πρόχειρο κρατά '
+                                .'προσωρινή ταυτότητα («ΠΡΟΣ-…») χωρίς ΑΑ.')
+                            ->warning()->send();
+
+                        return;
+                    }
+
                     try {
                         // Same reasoning as Submit/Cancel: derive the
                         // tenant from the record's own company FK
@@ -1003,6 +1025,13 @@ class ViewInvoice extends ViewRecord
                 ->modalSubmitAction(false)
                 ->modalCancelActionLabel('Κλείσιμο')
                 ->fillForm(function (Invoice $record): array {
+                    // Gapless-at-send: a provisional draft has no ΑΑ, so the payload can't
+                    // be built yet — say so plainly instead of a raw builder error.
+                    if ($record->code === null) {
+                        return ['payload' => 'Το παραστατικό δεν έχει ακόμη ΑΑ (προσωρινό «ΠΡΟΣ-…»). '
+                            .'Η προεπισκόπηση παρόχου είναι διαθέσιμη μόλις δοθεί αριθμός στην αποστολή.'];
+                    }
+
                     try {
                         $doc = new AadeInvoiceDocument($record->company);
                         $aade = $doc->toXml($doc->build($record));

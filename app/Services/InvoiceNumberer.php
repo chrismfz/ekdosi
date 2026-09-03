@@ -3,11 +3,13 @@
 namespace App\Services;
 
 use App\Models\Company;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Support\MyData\Codes;
 use App\Support\ProvisionalCode;
 use Illuminate\Database\ConnectionInterface;
+use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 
 /**
@@ -196,21 +198,17 @@ final class InvoiceNumberer
      * reserved (never re-allocates a second one). Wraps its own short transaction —
      * the caller must NOT hold it open across the outbound HTTP call (the row lock
      * inside allocate() would block all other issuance).
+     *
+     * RETURNS whether it actually allocated a number NOW (true), or found one already
+     * present and no-op'd (false). The caller MUST use this to decide whether a later
+     * {@see release()} is undoing ITS OWN reservation: a document can reach a submitter
+     * ALREADY numbered — a legacy-imported row, or one finalized locally at a
+     * non-transmitting tenant then submitted after go-live — and blindly releasing that
+     * would strip the ΑΑ off a document this attempt never numbered (see release()).
      */
-    public function assign(Invoice $invoice, bool $allowMovementType = false): void
+    public function assign(Invoice $invoice, bool $allowMovementType = false): bool
     {
-        if ($invoice->code !== null) {
-            return;
-        }
-
-        $this->db->transaction(function () use ($invoice, $allowMovementType): void {
-            $allocation = $this->allocate($invoice->company, (string) $invoice->invoiceType->code, $allowMovementType);
-            $invoice->forceFill([
-                'code' => $allocation->code,
-                'invcode' => $allocation->invcode,
-                'series' => $allocation->series,
-            ])->save();
-        });
+        return $this->reserve($invoice, $invoice->company, (string) $invoice->invoiceType->code, $allowMovementType);
     }
 
     /**
@@ -221,6 +219,13 @@ final class InvoiceNumberer
      * number, leaving a gap is far safer than reusing one (renumbering a document
      * that another request may already have FILED under the next number would risk
      * a duplicate ΑΑ — the one thing worse than a gap).
+     *
+     * CALL ONLY when {@see assign()} for the same attempt returned true (this attempt
+     * reserved the number). A document that arrived ALREADY numbered (assign no-op'd →
+     * false) is NOT ours to revert: releasing it strips the ΑΑ off, and renumbers, a
+     * document that was validly issued earlier — a legacy-imported row, or one finalized
+     * at a mode='off'/'none' tenant then submitted once the tenant went live. The
+     * submitters gate every release() on the assign() return value for exactly this.
      *
      * LIMITATION (honest): this is gapless under SERIAL issuance — which the common
      * flows are (a queue worker; the per-invoice single-flight lock). It is NOT
@@ -234,26 +239,134 @@ final class InvoiceNumberer
      */
     public function release(Invoice $invoice): void
     {
-        if ($invoice->code === null) {
-            return;
+        $this->revert($invoice, $invoice->invoice_type_id, $invoice->invoiceType?->code);
+    }
+
+    /**
+     * Delivery-note twin of {@see assign()} — reserve the real ΑΑ on a not-yet-numbered
+     * Δελτίο Αποστολής at transmission time (gapless-at-send, Phase 2). Reads the
+     * delivery type relation/FK and always opts into the 9.x movement type (a Δελτίο
+     * Αποστολής legitimately carries one, MYD-003). Same idempotency + return contract
+     * as assign().
+     */
+    public function assignDelivery(DeliveryNote $note): bool
+    {
+        return $this->reserve($note, $note->company, (string) $note->deliveryType->code, allowMovementType: true);
+    }
+
+    /**
+     * Delivery-note twin of {@see release()} — same decrement-if-top rule, same
+     * SERIAL-issuance limitation, and the SAME "only your own reservation" contract:
+     * call only when assignDelivery() returned true for this attempt.
+     */
+    public function releaseDelivery(DeliveryNote $note): void
+    {
+        $this->revert($note, $note->delivery_type_id, $note->deliveryType?->code);
+    }
+
+    /**
+     * Shared reserve core for {@see assign()} / {@see assignDelivery()}. `$doc` is an
+     * Invoice or a DeliveryNote — both carry `code`/`invcode`/`series` and are numbered
+     * off the same `invoice_types` counter; only the type relation/FK differs, passed in.
+     * Returns true iff it allocated a number now (false = already numbered, no-op).
+     */
+    private function reserve(Model $doc, Company $company, string $typeCode, bool $allowMovementType): bool
+    {
+        if ($doc->code !== null) {
+            return false;
         }
 
-        $this->db->transaction(function () use ($invoice): void {
-            $type = InvoiceType::query()
-                ->whereKey($invoice->invoice_type_id)
+        return $this->db->transaction(function () use ($doc, $company, $typeCode, $allowMovementType): bool {
+            // Concurrency: two reservations of the SAME document both read code===null
+            // above and would each allocate — the later save overwrites the earlier,
+            // BURNING the first number → a gap. The submitters serialise on a per-document
+            // `Cache::lock`, but the local-issuance paths (ViewInvoice finalize, NullSubmitter)
+            // hold no such lock, so close the race HERE for every caller: re-read THIS row's
+            // code under a row lock. The loser adopts the winner's number and no-ops.
+            // (Lock order is always document → invoice_types — here, then allocate() below;
+            // revert() takes the same order, so the two can never form a lock cycle.)
+            $locked = $this->db->table($doc->getTable())
+                ->where($doc->getKeyName(), $doc->getKey())
                 ->lockForUpdate()
                 ->first();
 
-            if ($type !== null && (int) $type->invcount === (int) $invoice->code + 1) {
+            // The row vanished (hard-deleted) between the outer check and this locked
+            // re-read: there is nothing to number, so DON'T allocate — that would bump the
+            // counter into a 0-row UPDATE (a gap with no document carrying the number).
+            // THROW rather than return false: a false is "already numbered, carry on", which
+            // would let a submitter build with code=null or a finalize run a 0-row no-op
+            // under a success toast. A gone document must fail loudly and distinctly.
+            if ($locked === null) {
+                throw new RuntimeException(sprintf(
+                    'Cannot allocate an ΑΑ for %s #%s — the row no longer exists (deleted mid-operation).',
+                    $doc->getTable(),
+                    $doc->getKey(),
+                ));
+            }
+
+            if ($locked->code !== null) {
+                // Sync the in-memory model to the winner's persisted values (no write) so
+                // the caller — and its release-gate — sees an already-numbered document.
+                // syncOriginalAttributes (NOT syncOriginal): mark ONLY these three columns
+                // clean, so any other attribute the caller set before assign() stays dirty
+                // and is still persisted by a later save().
+                $doc->forceFill([
+                    'code' => $locked->code,
+                    'invcode' => $locked->invcode,
+                    'series' => $locked->series,
+                ])->syncOriginalAttributes(['code', 'invcode', 'series']);
+
+                return false;
+            }
+
+            $allocation = $this->allocate($company, $typeCode, $allowMovementType);
+            $doc->forceFill([
+                'code' => $allocation->code,
+                'invcode' => $allocation->invcode,
+                'series' => $allocation->series,
+            ])->save();
+
+            return true;
+        });
+    }
+
+    /**
+     * Shared revert core for {@see release()} / {@see releaseDelivery()}. Decrements the
+     * counter only when the reverted number was the top one handed out, and puts the
+     * document back to its provisional identity. See release() for the "only your own
+     * reservation" contract the callers enforce.
+     */
+    private function revert(Model $doc, int|string|null $typeId, ?string $typeCode): void
+    {
+        if ($doc->code === null) {
+            return;
+        }
+
+        $this->db->transaction(function () use ($doc, $typeId, $typeCode): void {
+            // Lock the DOCUMENT row FIRST, then invoice_types — the SAME order reserve()
+            // uses — so reserve() and revert() on the same (document, type) can never form
+            // a lock cycle. Provably deadlock-free by construction, not by relying on tenant
+            // mode-gating to keep the two paths off the same document.
+            $this->db->table($doc->getTable())
+                ->where($doc->getKeyName(), $doc->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            $type = InvoiceType::query()
+                ->whereKey($typeId)
+                ->lockForUpdate()
+                ->first();
+
+            if ($type !== null && (int) $type->invcount === (int) $doc->code + 1) {
                 $this->db->table('invoice_types')
                     ->where('id', $type->id)
                     ->update(['invcount' => $this->db->raw('invcount - 1')]);
             }
 
-            $invoice->forceFill([
+            $doc->forceFill([
                 'code' => null,
                 'series' => null,
-                'invcode' => ProvisionalCode::make($invoice->invoiceType?->code, $invoice->getKey()),
+                'invcode' => ProvisionalCode::make($typeCode, $doc->getKey()),
             ])->save();
         });
     }

@@ -17,6 +17,7 @@ use App\Models\Supplier;
 use App\Models\User;
 use App\Services\Delivery\DeliveryNoteSubmitter;
 use App\Support\MyData\DeliveryGuidance;
+use App\Support\ProvisionalCode;
 use Filament\Facades\Filament;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
@@ -180,17 +181,20 @@ class DeliveryNoteResourceTest extends TestCase
 
         $note = DeliveryNote::query()->where('company_id', $this->tenant->id)->latest('id')->first();
         $this->assertNotNull($note);
-        // ΑΑ allocated from the type counter (started at 1).
-        $this->assertSame(1, (int) $note->code);
-        $this->assertSame('ΔΑΠ1', $note->invcode);
+        // Gapless-at-send (Phase 2): a fresh draft carries a PROVISIONAL identity — no
+        // ΑΑ, no series freeze, no counter bump. The real ΑΑ is allocated at
+        // transmission (assignDelivery). A never-issued draft therefore leaves no gap.
+        $this->assertNull($note->code);
+        $this->assertSame(ProvisionalCode::make('ΔΑΠ', $note->id), $note->invcode);
+        $this->assertNull($note->series);
         $this->assertSame('draft', $note->local_status);
         $this->assertSame('9.3', $note->mydata_type);  // snapshotted from the type
         $this->assertSame(1, (int) $note->move_purpose); // sale → Πώληση
         $this->assertCount(1, $note->lines);
         $this->assertSame('Κιβώτια', $note->lines->first()->product_descr);
 
-        // The type counter advanced for the next allocation.
-        $this->assertSame(2, (int) $this->deliveryType->fresh()->invcount);
+        // The type counter did NOT advance — nothing was transmitted.
+        $this->assertSame(1, (int) $this->deliveryType->fresh()->invcount);
     }
 
     public function test_required_fields_fail_validation(): void
