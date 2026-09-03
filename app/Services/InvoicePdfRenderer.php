@@ -66,6 +66,13 @@ class InvoicePdfRenderer
 
             return Pdf::loadView('invoices.pdf', $this->viewData($invoice))
                 ->setPaper('A4', 'portrait')
+                // isPhpEnabled: the template draws the «Σελίδα X από Y» pager via a
+                // DomPDF text-callback (`<script type="text/php">`) because DomPDF 3.x
+                // resolves counter(pages) to 0 inside a fixed footer. Safe here: the
+                // template is developer-authored and the ONLY interpolated free-text
+                // (invoice notes) is e()-escaped before DomPDF sees it, so no
+                // user-controlled markup can inject a text/php script.
+                ->setOption('isPhpEnabled', true)
                 ->output();
         } finally {
             // Restore previous limits so a long-lived FPM worker
