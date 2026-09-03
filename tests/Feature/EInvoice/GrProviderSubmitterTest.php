@@ -246,6 +246,28 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertSame(1, (int) $this->type->fresh()->invcount, 'number released — counter back to 1');
     }
 
+    public function test_a_rejection_does_not_renumber_an_alread_y_numbered_invoice(): void
+    {
+        // Review finding 1 (P0): an invoice can reach the submitter ALREADY numbered — one
+        // finalized at a mode='off' tenant then submitted after go-live, or a legacy import.
+        // assign() no-ops (returns false), so a DEFINITIVE rejection must NOT release: the
+        // ΑΑ was validly issued earlier and stripping/renumbering it corrupts a legal document.
+        $invoice = $this->makeInvoice(7);              // a real, pre-existing ΑΑ (ΤΠΥ7)
+        $this->type->forceFill(['invcount' => 12])->save();  // counter has long moved on
+
+        try {
+            (new GrProviderSubmitter($this->tenant, new FakeGrTransport(send: 'fail')))->submit($invoice->fresh('lines'));
+            $this->fail('Expected MyDataRejected.');
+        } catch (MyDataRejected) {
+            // rejected
+        }
+
+        $fresh = $invoice->fresh();
+        $this->assertSame(7, (int) $fresh->code, 'the pre-existing ΑΑ is preserved, not stripped');
+        $this->assertSame('TPY7', $fresh->invcode);
+        $this->assertSame(12, (int) $this->type->fresh()->invcount, 'counter untouched');
+    }
+
     public function test_refuses_to_refile_an_already_valid_invoice(): void
     {
         $invoice = $this->makeInvoice();

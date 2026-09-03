@@ -965,6 +965,20 @@ class ViewInvoice extends ViewRecord
                 ->modalDescription('Builds the AADE payload and records it as a DRY_RUN row in the audit history. Does NOT contact AADE. Safe on any mode.')
                 ->modalSubmitActionLabel('Generate preview')
                 ->action(function (Invoice $record) {
+                    // Gapless-at-send: a provisional draft has no ΑΑ yet, so the payload
+                    // can't be built (it carries the real code/series). Show a clear
+                    // «issue first» message instead of the raw «has no ΑΑ number» error.
+                    if ($record->code === null) {
+                        Notification::make()
+                            ->title('Δεν έχει δοθεί ακόμη ΑΑ')
+                            ->body('Η προεπισκόπηση XML είναι διαθέσιμη μόλις το παραστατικό πάρει αριθμό — '
+                                .'στην αποστολή στο myDATA ή στην οριστικοποίηση. Όσο είναι πρόχειρο κρατά '
+                                .'προσωρινή ταυτότητα («ΠΡΟΣ-…») χωρίς ΑΑ.')
+                            ->warning()->send();
+
+                        return;
+                    }
+
                     try {
                         // Same reasoning as Submit/Cancel: derive the
                         // tenant from the record's own company FK
@@ -1003,6 +1017,13 @@ class ViewInvoice extends ViewRecord
                 ->modalSubmitAction(false)
                 ->modalCancelActionLabel('Κλείσιμο')
                 ->fillForm(function (Invoice $record): array {
+                    // Gapless-at-send: a provisional draft has no ΑΑ, so the payload can't
+                    // be built yet — say so plainly instead of a raw builder error.
+                    if ($record->code === null) {
+                        return ['payload' => 'Το παραστατικό δεν έχει ακόμη ΑΑ (προσωρινό «ΠΡΟΣ-…»). '
+                            .'Η προεπισκόπηση παρόχου είναι διαθέσιμη μόλις δοθεί αριθμός στην αποστολή.'];
+                    }
+
                     try {
                         $doc = new AadeInvoiceDocument($record->company);
                         $aade = $doc->toXml($doc->build($record));

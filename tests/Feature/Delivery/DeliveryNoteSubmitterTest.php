@@ -15,6 +15,7 @@ use App\Services\Delivery\DeliveryNoteSubmitter;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
+use App\Support\ProvisionalCode;
 use Firebed\AadeMyData\Models\Invoice as AadeInvoice;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
@@ -1094,6 +1095,143 @@ class DeliveryNoteSubmitterTest extends TestCase
         ]);
         // The note is NOT marked filed.
         $this->assertNull($note->fresh()->mydata_state);
+    }
+
+    /* ============ Gapless-at-send Phase 2: assign at send / release on reject ============ */
+
+    /** A provisional draft with no code — the new create flow. */
+    private function makeProvisionalNote(array $overrides = []): DeliveryNote
+    {
+        return $this->makeNote(array_merge(['code' => null, 'invcode' => null], $overrides));
+    }
+
+    public function test_submit_assigns_the_real_number_before_transmission(): void
+    {
+        // A provisional draft (no ΑΑ) gets its real number reserved at the submit
+        // choke-point; the type counter advances only then, so nothing burned it earlier.
+        $note = $this->makeProvisionalNote();
+        $this->assertNull($note->code);
+        $this->assertTrue(ProvisionalCode::is($note->invcode));
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->successResponseXml())]);
+        (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+
+        $fresh = $note->fresh();
+        $this->assertSame(1, (int) $fresh->code, 'real ΑΑ allocated at transmission');
+        $this->assertSame('DA1', $fresh->invcode);
+        $this->assertSame('DA', $fresh->series, 'series frozen at send');
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertSame(2, (int) $this->deliveryType->fresh()->invcount, 'counter advanced once, at send');
+    }
+
+    public function test_a_definitive_rejection_releases_the_reserved_number(): void
+    {
+        // AADE processed and refused it → no MARK. The reserved ΑΑ returns to the pool
+        // (revert to provisional) so the next attempt re-allocates — no gap in the sequence.
+        $note = $this->makeProvisionalNote();
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->validationErrorXml())]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+            $this->fail('expected DeliveryNoteRejected');
+        } catch (DeliveryNoteRejected) {
+            // expected
+        }
+
+        $fresh = $note->fresh();
+        $this->assertNull($fresh->code, 'reverted to provisional after a definitive rejection');
+        $this->assertTrue(ProvisionalCode::is($fresh->invcode));
+        $this->assertNull($fresh->series);
+        $this->assertSame(1, (int) $this->deliveryType->fresh()->invcount, 'reserved ΑΑ returned — no gap');
+    }
+
+    public function test_a_build_failure_after_assign_releases_the_reserved_number(): void
+    {
+        // A LOCAL build error (a blank mandatory address) fires AFTER the number is
+        // reserved but before anything is transmitted: it must return the ΑΑ to the pool,
+        // never burn one on a data/config error.
+        $note = $this->makeProvisionalNote(['delivery_city' => '']);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant))->submit($note);
+            $this->fail('expected a build failure');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('διεύθυνση παράδοσης', $e->getMessage());
+        }
+
+        $fresh = $note->fresh();
+        $this->assertNull($fresh->code, 'reverted to provisional after a local build error');
+        $this->assertTrue(ProvisionalCode::is($fresh->invcode));
+        $this->assertSame(1, (int) $this->deliveryType->fresh()->invcount, 'no ΑΑ burned by a data error');
+    }
+
+    public function test_a_provider_rejection_releases_the_reserved_number(): void
+    {
+        config()->set('ekdosi.einvoice.providers.fake-rejecting-delivery', FakeRejectingDeliveryProviderTransport::class);
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'fake-rejecting-delivery',
+            'einvoice_provider_mode' => 'sandbox',
+            'einvoice_provider_config' => ['demo_base_url' => 'https://provider.test', 'demo_token' => 'tok'],
+            'mydata_mode' => 'off',
+        ])->save();
+
+        $note = $this->makeProvisionalNote();
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant->fresh()))->submit($note);
+            $this->fail('expected provider rejection');
+        } catch (DeliveryNoteRejected) {
+            // expected
+        }
+
+        $fresh = $note->fresh();
+        $this->assertNull($fresh->code, 'reverted to provisional after a provider rejection');
+        $this->assertSame(1, (int) $this->deliveryType->fresh()->invcount, 'reserved ΑΑ returned to the pool');
+    }
+
+    public function test_a_rejection_does_not_renumber_an_alread_y_numbered_note(): void
+    {
+        // Review finding 1 (P0): a δελτίο can reach the submitter ALREADY numbered (one
+        // finalized before go-live, or a legacy import). assignDelivery no-ops → false, so
+        // a DEFINITIVE rejection must NOT release: stripping/renumbering a validly-issued
+        // legal document is the one outcome worse than a gap.
+        $note = $this->makeNote();                         // code=1, a real ΑΑ
+        $this->deliveryType->forceFill(['invcount' => 9])->save(); // counter moved on
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $this->validationErrorXml())]);
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+            $this->fail('expected DeliveryNoteRejected');
+        } catch (DeliveryNoteRejected) {
+            // expected
+        }
+
+        $fresh = $note->fresh();
+        $this->assertSame(1, (int) $fresh->code, 'the pre-existing ΑΑ is preserved, not stripped');
+        $this->assertSame('DA1', $fresh->invcode);
+        $this->assertSame(9, (int) $this->deliveryType->fresh()->invcount, 'counter untouched');
+    }
+
+    public function test_an_ambiguous_failure_keeps_the_reserved_number(): void
+    {
+        // A 502 MAY have filed (TransmissionFailedException) — the number stays reserved
+        // AND armed so the in-doubt recovery adopts the real MARK by (series, ΑΑ) instead
+        // of burning a duplicate. Releasing here would risk a second AADE document.
+        $note = $this->makeProvisionalNote();
+        $mock = new MockHandler([new GuzzleResponse(502, [], 'Bad Gateway')]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($note);
+            $this->fail('expected the transmission failure to throw');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $fresh = $note->fresh();
+        $this->assertSame(1, (int) $fresh->code, 'number KEPT on an ambiguous failure');
+        $this->assertNotNull($fresh->mydata_pending_since, 'stays armed for in-doubt recovery');
+        $this->assertSame(2, (int) $this->deliveryType->fresh()->invcount, 'counter not rolled back');
     }
 
     private function validationErrorXml(): string
