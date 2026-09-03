@@ -383,6 +383,14 @@ data model + phase gates: **`PLAN.md`**.
 - **Multi-party SPLIT write-back** στο WHMCS (ένα MARK ≠ N invoices).
 - **T-4 manual split tools** (transfer_invoice / relid_remover) — χαμηλή προτεραιότητα.
 - **«All of a client's third parties» 2ο dropdown** (θέλει `contacts-by-userid` bridge endpoint).
+- **WHMCS-inbox resolver memoization (P2, από review)** — ο `WhmcsPaymentMethodResolver` (και ο δίδυμος
+  `WhmcsIncomeClassifier`) χτίζονται per-`map()` call, οπότε preview+persist και κάθε split-party κάνουν
+  ξεχωριστό query. Invoice-invariant → θα μπορούσαν να περνιούνται μία φορά από τον caller. Αμελητέο (ένα
+  indexed query/κλήση)· κοινό pattern με το income map, γι' αυτό αφήνεται μαζί.
+- **WHMCS gateway key με τελεία σπάει το Livewire `wire:model` binding (P2, από review)** — η σελίδα
+  «Αντιστοίχιση WHMCS (πληρωμές)» κάνει `wire:model="choice.{gateway}"`· ένα gateway module name με `.`
+  (ασυνήθιστο — τα WHMCS modules είναι `[a-z0-9_]`) θα γινόταν nested path. Θέλει index-based binding ή
+  sanitised key. Χαμηλή πιθανότητα· άνοιξέ το αν εμφανιστεί τέτοιο gateway.
 
 ## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
 _Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._

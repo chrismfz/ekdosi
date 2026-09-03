@@ -19,6 +19,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **WHMCS «Εισερχόμενα»: αυτόματος §8.12 τρόπος πληρωμής ανά gateway.** Ένα τιμολόγιο WHMCS κρατά ΠΩΣ
+  πληρώθηκε στο `paymentmethod` (banktransfer / stripe / paypal …), αλλά το inbox το αγνοούσε και έπαιρνε
+  τον τρόπο πληρωμής από τον **τύπο** (συνήθως «Μετρητά», §8.12=3) — έτσι ένα τιμολόγιο πληρωμένο με
+  κάρτα/κατάθεση δηλωνόταν λάθος. Νέος χάρτης **gateway → τρόπος πληρωμής ekdosi** (`whmcs_payment_maps`):
+  ο `WhmcsInvoiceMapper` διαβάζει τον gateway σε **πληρωμένο** τιμολόγιο και βάζει τον σωστό τρόπο (που
+  κουβαλά §8.12), fallback στον τύπο όταν δεν υπάρχει αντιστοίχιση ή το τιμολόγιο είναι ΑΠΛΗΡΩΤΟ (ώστε να
+  μη γίνει «settled» ανοιχτή οφειλή).
+  - **Σελίδα «Αντιστοίχιση WHMCS (πληρωμές)»** (`WhmcsPaymentMapping`, super_admin + WHMCS ρυθμισμένο):
+    αντλεί τα ενεργά gateways (`WhmcsClient::getPaymentMethods` → WHMCS `GetPaymentMethods`), ο χειριστής
+    ορίζει τρόπο πληρωμής ανά gateway (μόνο **εξοφλημένοι-στην-έκδοση** μέθοδοι, δείχνει τον §8.12), τα
+    μη-ορισμένα highlighted.
+  - **Plugin v0.45.0** — το invoice-feed κουβαλά πλέον το `paymentmethod` (bridge parity με το native
+    `GetInvoice`). _Μετά deploy: `shield:generate` (νέο page permission)._
 - **Παρακολούθηση quota & δεδομένων παρόχου ΥΠΑΗΕΣ (PROV-009).** Ο InvoSign επιστρέφει σε κάθε έκδοση το
   **υπόλοιπο εκδόσεων** (`remaining_invoices`) και τα **emails παραλήπτη** (`receptionEmails`) — τα
   καταγράφουμε πλέον δομημένα στο `mydata_marks` (το UID/auth/QR ήδη). Νέο dashboard widget **«Πάροχος

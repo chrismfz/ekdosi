@@ -343,6 +343,13 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (`invoice_lines.mydata_income_class(_category)`, `WhmcsIncomeClassifier` product→group→fallback)· ο
   submitter το διαβάζει πρώτο. Ποσό/περιγραφή μένουν του WHMCS. Plugin feed v0.44.0 δίνει `whmcs_product_id`/
   `whmcs_group_id` ανά γραμμή.
+- **Αυτόματος §8.12 τρόπος πληρωμής ανά gateway** — σελίδα «Αντιστοίχιση WHMCS (πληρωμές)»
+  (`WhmcsPaymentMapping`): αντλεί τα ενεργά gateways (`GetPaymentMethods`), ο χειριστής ορίζει τρόπο
+  πληρωμής ekdosi **ανά gateway** («Stripe → Κάρτα», «Τραπεζική → Κατάθεση»· μόνο εξοφλημένοι-στην-έκδοση
+  τρόποι). Ο mapper διαβάζει τον gateway (`paymentmethod`) σε **πληρωμένο** τιμολόγιο → `whmcs_payment_maps`
+  → `WhmcsPaymentMethodResolver`, fallback στον τύπο (ή για ΑΠΛΗΡΩΤΟ)· ο τρόπος ekdosi κουβαλά τον §8.12,
+  οπότε ένα κάρτα/κατάθεση-πληρωμένο τιμολόγιο δεν δηλώνεται πια «Μετρητά». Plugin feed v0.45.0 κουβαλά το
+  `paymentmethod` (bridge parity με το native).
 - **Paid/unpaid-aware τιμολόγηση**: badge «Πληρωμή WHMCS» (Πληρωμένο/Απλήρωτο) στο inbox· το draft
   προ-επιλέγει τύπο βάσει κατάστασης — ΑΠΛΗΡΩΤΟ → «Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ» (επί πιστώσει →
   ανοιχτή οφειλή), ΠΛΗΡΩΜΕΝΟ → cash-term (τιμολόγιο/απόδειξη κατά πρόθεση)· override πάντα.

@@ -68,7 +68,7 @@ class InvoiceFeed
 
         $invoices = $q->offset($offset)->limit($limit)->get([
             'id', 'userid', 'date', 'duedate', 'datepaid', 'subtotal',
-            'tax', 'taxrate', 'total', 'status', 'invoiced',
+            'tax', 'taxrate', 'total', 'status', 'invoiced', 'paymentmethod',
         ]);
 
         $payloads = self::buildPayloads($invoices, $withRouting);
@@ -94,7 +94,7 @@ class InvoiceFeed
             ->where('id', $invoiceId)
             ->get([
                 'id', 'userid', 'date', 'duedate', 'datepaid', 'subtotal',
-                'tax', 'taxrate', 'total', 'status', 'invoiced',
+                'tax', 'taxrate', 'total', 'status', 'invoiced', 'paymentmethod',
             ]);
 
         return self::buildPayloads($invoices, $withRouting)[0] ?? null;
@@ -150,6 +150,9 @@ class InvoiceFeed
                 'total' => (string) ($inv->total ?? '0'),
                 'status' => (string) ($inv->status ?? ''),
                 'invoiced' => (int) ($inv->invoiced ?? 0),
+                // Payment gateway system name (banktransfer / stripe / paypal …) —
+                // ekdosi maps it to a §8.12 payment method (WhmcsPaymentMap).
+                'paymentmethod' => (string) ($inv->paymentmethod ?? ''),
                 'currencycode' => $currencyCodes[$currencyId] ?? '',
                 // Client identity (mirror the getInvoiceWithClient merge).
                 'companyname' => $client->companyname ?? '',

@@ -41,6 +41,7 @@ class CompanyExporter
         'billing_connections',
         'expense_classification_rules',
         'whmcs_income_maps',
+        'whmcs_payment_maps',
     ];
 
     /**
