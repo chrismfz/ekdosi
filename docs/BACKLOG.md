@@ -503,6 +503,28 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   all hold on floats), but for display/threshold cleanliness cast to a non-negative int minute count in ONE
   place shared by both slices (keep `queue()`/`cron()` in parity — don't fix only one). Untouched here to
   preserve that parity.
+- **PROV-020 auto-stamp — P2 survivors of the review loop** _(consciously deferred)._ The change that
+  auto-stamps `issued_at`=today at Send (provider + ΔΑ) passed the gate with the delivery-path ordering
+  bug fixed (stamp now runs BEFORE the XML build; guarded by an XML-content test). Three P2s parked:
+  (a) **Cross-day ambiguous retry** — if a Day-1 send times out AFTER the provider filed (no local MARK),
+  a Day-2 retry re-stamps `issued_at`=Day-2 before `recoverViaStatusCheck` adopts the Day-1 MARK, so the
+  local date can diverge from the filed date. **Not a regression** — the same mismatch was reachable
+  before (the operator had to re-date past the block to retry); it is the PROV-001 exactly-once
+  limitation (no durable in-doubt marker). Fix belongs with PROV-001: on adopt, reconcile `issued_at` to
+  the adopted MARK's `mark_date`. (b) **Recompute/audit side effect** — the stamp's `update()` fires the
+  InvoiceObserver balance recompute (due-date shifts to today — correct) and an «issued_at changed»
+  activity row on every filing (truthful, but an operator could read it as a manual back-office edit);
+  optionally tag it distinctly. (c) **Provisional draft date** — a draft on a provider tenant shows
+  «Ημερομηνία έκδοσης» = its prep date, which changes to today at Send; a small «οριστικοποιείται στην
+  αποστολή» hint on the draft/Send view would remove the surprise (also covers a *finalized* doc whose
+  operator-set date is silently re-dated to today at Send). (d) **Timezone unification (masked)** — the
+  stamp writes `now()` (app tz), the payload serializes `Carbon::parse(issued_at)->toDateString()` (app
+  tz), and the guard validates in hardcoded `Europe/Athens`; all agree only while `APP_TIMEZONE=Europe/
+  Athens` (which this Greek app always uses). If it ever isn't, unify the issue-date tz across stamp +
+  payload (`AadeInvoiceDocument::setIssueDate`) + guard. (e) **`created_at` on legacy rows** — the new
+  «Ημερομηνία δημιουργίας» shows the ETL import timestamp for Firebird-imported invoices (not the original
+  prep date), so a historical record can read as «created after issued»; cosmetic, hide/relabel for
+  `legacy_id`-set rows if it confuses.
 - **«Έλεγχος ετοιμότητας» (Preflight) — P2 survivors of the review loop** _(consciously deferred)._
   Two P2s survived the 2-round adversarial gate (round 1 = the tenant double-scoping P1, fixed at root
   with `CompanyContext::actAs`; round 2 = no P0/P1). (a) **Query fan-out**: `ReadinessReport::build()`

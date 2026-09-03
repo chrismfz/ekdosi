@@ -521,7 +521,7 @@ Priorities:
 | PROV-017 | P1 | PARTIAL | C | Provider endpoint security | Base URL now public-https-only (hygiene DONE); approved-host allowlist + DNS-rebinding pin OPEN → BACKLOG |
 | PROV-018 | P1 | DONE | — | Provider partial credits | Full-reversal actions now credit each line's REMAINING qty under the original-row lock (`IssueCreditNote::reverseRemaining`); «Ακύρωση μέσω πιστωτικού»/«Ακύρωση & επανέκδοση» work after a partial credit |
 | PROV-019 | P0 | OPEN | B | Provider correction state | Draft credit is treated as legal reversal and replacement is not filing-gated |
-| PROV-020 | P1 | DONE | — | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight |
+| PROV-020 | P1 | DONE | — | Provider issue date | Backdated/future online issue reaches InvoSign instead of failing actionable preflight. **Evolved 2026-09-03:** the submitter now AUTO-STAMPS `issued_at`=today at send (provider + ΔΑ) instead of blocking; guard kept as safety net; two dates surfaced (created_at vs issued_at) |
 | STOCK-001 | P1 | DONE | — | Stock ledger | **Fixed (this PR).** `reverseSaleForDeliveryNote()` (wired in `DeliveryLifecycleService::persistCancellation`, direct+provider) and `reverseReturnForCreditNote()` (wired in `InvoiceObserver` cancelled branch) — idempotent, whichever-first; the credit-note reversal moves together with MON-1's freed `qty_returned` (no stock inflation). Reused by MYD-019 |
 | SETUP-001 | P1 | OPEN | C | Onboarding | Fresh tenant is not guided to a first valid invoice |
 | SETUP-002 | P1 | OPEN | C | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
@@ -4319,6 +4319,7 @@ These are not open issues:
 | 2026-08-31 | **MYD-013 DONE** — RegisterTransfer requires valid transportType 1–7 + vehicle (except type 7) at the service boundary | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-016 DONE** — delivery measurementUnit must be a valid §8.13 1–6; missing/out-of-range/unit-7 blocked (unit-7 full support → BACKLOG) | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **PROV-020 DONE** — provider online issue rejects non-today issue date (Europe/Athens) before any outbound; Transmission Failure route stays PROV-008 | `CHANGELOG.md` [Unreleased] → Fixed |
+| 2026-09-03 | **PROV-020 evolved** — instead of blocking a stale-dated provider/ΔΑ issue, the submitter now AUTO-STAMPS `issued_at`=today at send (issue date = moment of issue); guard kept as safety net; two dates surfaced in the UI (created_at vs issued_at). Direct-myDATA unchanged (AADE allows backdate → wrong-period risk) | `CHANGELOG.md` [Unreleased] → Changed |
 | 2026-08-31 | **PROV-017 DONE** *(superseded 2026-09-01 → PARTIAL, see below)* — provider base URL constrained to public https (guard at transport/preflight/form) + no credentialed redirects; TOCTOU/endpoint-profile deferred → BACKLOG | `CHANGELOG.md` [Unreleased] → Security |
 | 2026-08-31 | **MYD-003 DONE** — movement-only 9.x excluded from the monetary invoice picker + build guard; Δελτία Αποστολής stay in the delivery flow | `CHANGELOG.md` [Unreleased] → Fixed |
 | 2026-08-31 | **MYD-012 DONE** — unsupported ΔΑ types 9.1/9.2 hidden from the delivery picker + submitter guard (only 9.3 fileable); full model → BACKLOG | `CHANGELOG.md` [Unreleased] → Fixed |

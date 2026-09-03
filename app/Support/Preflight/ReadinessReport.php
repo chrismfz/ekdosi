@@ -85,7 +85,7 @@ class ReadinessReport
     /** @return array{key:string, label:string, status:string, items: list<array{status:string, message:string}>} */
     private function mydataSection(Company $company): array
     {
-        if (! in_array($company->einvoice_provider, ['gr-mydata', 'gr-provider'], true)) {
+        if (! $company->filesToAadeByProvider()) {
             return $this->section('mydata', 'Ρυθμίσεις myDATA', [
                 $this->item('ok', 'Μη-AADE tenant («'.$company->einvoice_provider.'») — δεν απαιτείται config myDATA.'),
             ]);

@@ -96,8 +96,15 @@ class GrProviderSubmitter implements EInvoiceSubmitter
     private function performSubmit(Invoice $invoice): MyDataMark
     {
         $this->assertNotAlreadyFiled($invoice);
-        // Normal online provider issue requires IssueDate = today (InvoSign 238);
-        // reject a backdated/future date locally before any outbound request (PROV-020).
+        // PROV-020 (auto): under the two-dates model the LEGAL issue date is the moment
+        // of issue — i.e. now, when we press «Αποστολή» — not when the draft was prepared
+        // (that stays on created_at). The provider also REQUIRES IssueDate = today
+        // (InvoSign 238). So stamp issued_at to today HERE instead of blocking a stale
+        // draft and making the operator fix it by hand. Fresh issue only (assertNotAlready-
+        // Filed above rejects a re-send/recovery), on the lock-fresh invoice.
+        $this->stampIssuedToday($invoice);
+        // Safety net: the stamp makes this trivially pass, but keep the guard so any future
+        // path reaching here without stamping still cannot backdate a provider call.
         ProviderIssueDateGuard::assertIssuedToday($invoice->issued_at, (string) $invoice->invcode);
 
         $document = new AadeInvoiceDocument($this->tenant);
@@ -342,6 +349,28 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'Restore it first (Επαναφορά σε πρόχειρο → Οριστικοποίηση) if the cancellation was a mistake.'
             );
         }
+    }
+
+    /**
+     * Stamp the legal issue date (issued_at) to today, Greece-local, at the moment
+     * of issue — only when it isn't already today, so an already-today document is
+     * not needlessly rewritten (no spurious audit entry). The internal «πότε φτιάχτηκε»
+     * lives on created_at and is untouched. Runs under the submit lock on the
+     * lock-fresh invoice (see submit()), so it commits before the payload is built.
+     */
+    private function stampIssuedToday(Invoice $invoice): void
+    {
+        // now() is app-tz; the payload's setIssueDate and this compare both resolve
+        // «today» via Europe/Athens. They agree while APP_TIMEZONE=Europe/Athens (this
+        // Greek app always runs that) — see docs/BACKLOG.md for the tz-unification note.
+        $tz = ProviderIssueDateGuard::TZ;
+        $today = now()->setTimezone($tz)->toDateString();
+
+        if ($invoice->issued_at?->copy()->setTimezone($tz)->toDateString() === $today) {
+            return;
+        }
+
+        $invoice->update(['issued_at' => now()]);
     }
 
     /**
