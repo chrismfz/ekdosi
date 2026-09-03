@@ -18,7 +18,7 @@ class StandardLookupSeedAction
 {
     /**
      * @param  string  $seederMethod  a MyDataLookupSeeder method returning
-     *                                 ['created' => int, 'skipped' => int]
+     *                                ['created' => int, 'skipped' => int]
      */
     public static function make(string $seederMethod, string $label, string $modalHeading, string $modalDescription): Action
     {
@@ -36,9 +36,14 @@ class StandardLookupSeedAction
                     return;
                 }
                 $r = app(MyDataLookupSeeder::class)->{$seederMethod}($tenant);
-                Notification::make()
-                    ->title("Προστέθηκαν {$r['created']} · Υπήρχαν ήδη {$r['skipped']}")
-                    ->success()->send();
+                // Some seeders (e.g. invoice types) also FILL-EMPTY missing myDATA
+                // classification on pre-existing rows — surface that count, or a
+                // back-fill-only run reads a misleading «Προστέθηκαν 0» toast.
+                $filled = $r['filled'] ?? 0;
+                $title = "Προστέθηκαν {$r['created']}"
+                    .($filled > 0 ? " · συμπληρώθηκαν {$filled}" : '')
+                    ." · Υπήρχαν ήδη {$r['skipped']}";
+                Notification::make()->title($title)->success()->send();
             });
     }
 }

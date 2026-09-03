@@ -527,9 +527,9 @@ Priorities:
 | SETUP-002 | P1 | OPEN | C | Issuer identity | Installer accepts insufficient legal/myDATA issuer data |
 | SETUP-003 | P2 | OPEN | D | Payment | An *unmapped* method already warns + shows in preflight; only a null method defaults to cash. Hard-blocking a filing over this is worse than type 3 |
 | SETUP-004 | P2 | OPEN | B | Estonia | EE tenant skips even non-AADE standard lookups |
-| OPS-001 | P1 | OPEN | C | Scheduler/queue | Installer does not provision or prove OS cron and worker |
+| OPS-001 | P1 | PARTIAL | C | Scheduler/queue | **Prove + helper DONE** (this PR): a synchronous **scheduler heartbeat** lets `ops:health`/go-live tell «cron down» from «worker down» (and stop blaming the worker for a dead cron); **`ops:cron`** prints the exact crontab + worker lines for THIS host. Auto-provisioning the OS cron/worker stays inherently a host action |
 | OPS-002 | P2 | OPEN | B | Installer | Writable env/application root is not a hard preflight |
-| OPS-003 | P2 | OPEN | B | Shared hosting | No cPanel/shared-hosting queue recipe or direct completion link |
+| OPS-003 | P2 | PARTIAL | B | Shared hosting | **Recipe + command + test DONE** (this PR): `docs/shared-hosting-deploy.md` + `ops:cron` generate the cPanel/DirectAdmin cron-driven worker recipe per host. The install completion-page deep-link → UI follow-up |
 | TEST-001 | P2 | OPEN | B | Tests/CI | No full web installer success-path test; inspected CI was not green |
 | DEP-001 | P2 | WATCH | B | Dependency | firebed/aade-mydata is current; watch AADE v2.0.2 |
 | OBS-001 | P1 | DONE | — | Observability | 5 read-only forensic MCP tools shipped (#405): invoice_filing / mydata_failures / stuck_documents / mydata_discrepancies / preflight. Optional per-success INFO line → BACKLOG |
@@ -3637,7 +3637,23 @@ Run the neutral portion for EE.
 
 ### OPS-001 — Scheduler and queue are implemented but not provisioned/proved
 
-**Status:** OPEN · **Priority:** P1
+**Status:** PARTIAL (prove + helper DONE 2026-09-03) · **Priority:** P1
+
+**Resolution (this PR).** The two automatable halves are done:
+- **Prove.** A synchronous **scheduler heartbeat** (`HealthKeys::SCHEDULER_HEARTBEAT`,
+  written by a `->everyMinute()` closure in `routes/console.php` — no queue worker) makes
+  `ops:health` distinguish **«cron down»** (this tick stale) from **«worker down»** (the
+  queue heartbeat stale while cron is fresh). Because the queue heartbeat is a job
+  *dispatched by* `schedule:run`, the severity logic no longer blames the worker when the
+  cron is the real cause. The same cron gate is on `ekdosi:go-live-check` (WARN).
+- **Helper.** **`ops:cron`** prints the exact copy-paste crontab + worker lines computed
+  from this host's real `PHP_BINARY` + app path — for a VPS (systemd) and a
+  shared-hosting/cPanel box (see OPS-003 / `docs/shared-hosting-deploy.md`) — plus the live
+  cron/worker state.
+
+**Still open (inherently a host action, not code):** actually installing the OS crontab +
+the resident worker on the box. The completion screen «application installed vs
+scheduler/worker verified» split is a UI follow-up; the verification data now exists.
 
 **Verified implementation**
 
@@ -3701,7 +3717,15 @@ install is not one atomic transaction.
 
 ### OPS-003 — Shared-hosting/cPanel deployment path is incomplete
 
-**Status:** OPEN · **Priority:** P2
+**Status:** PARTIAL (recipe + command + test DONE 2026-09-03) · **Priority:** P2
+
+**Resolution (this PR).** [`docs/shared-hosting-deploy.md`](shared-hosting-deploy.md)
+documents the cPanel/DirectAdmin fallback — the scheduler cron + a **cron-driven**
+`queue:work --stop-when-empty --max-time=110` worker (flock overlap guard, EasyApache
+`ea-phpXX` binary note, `storage/logs/queue.log`, off-site backup reminder). **`ops:cron`**
+generates those exact lines for the specific host (real PHP binary + app path), so the
+operator pastes rather than hand-edits; covered by `OpsCronCommandTest`. Remaining: a direct
+deep-link to this path from the install completion page (UI follow-up).
 
 **Evidence**
 

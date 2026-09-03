@@ -45,6 +45,10 @@
   Πιστωτικά κληρονομούν την ταξινόμηση του αρχικού. Go-live gate: δεν γίνεται πράσινο χωρίς επιλογή.
   Picker στη «Ρυθμίσεις εταιρείας» + καρτέλα εταιρείας. Το προϊόν/υπηρεσία δείχνει (create/edit) πώς
   ταξινομείται στην ΑΑΔΕ· στήλη «Κατηγ. εσόδων» στις λίστες Προϊόντων + Κατηγοριών προϊόντων.
+  Οι **seed-κατηγορίες προϊόντων** έρχονται με το §8.6 bucket τους έτοιμο (Υπηρεσίες→category1_3,
+  Εμπορεύματα→category1_1, Προϊόντα→category1_2· ο E3 **τύπος** μένει channel-driven στον τύπο
+  παραστατικού), οπότε ένας μικτός tenant είναι πράσινος out-of-the-box. **New-rows-only** (μια
+  υπάρχουσα κατηγορία δεν επαναταξινομείται ποτέ σιωπηλά — MYD-006).
 - **Απόδειξη παρόχου ΥΠΑΗΕΣ στο PDF** (A.1112/2025, PROV-003) — για παραστατικό που εκδόθηκε **μέσω
   παρόχου** (υπάρχει `PROVIDER_INSERT` ΜΑΡΚ, VALID/μη-ακυρωμένο), το PDF τυπώνει μπλοκ «Εκδόθηκε μέσω
   παρόχου (ΥΠΑΗΕΣ)»: εμπορική+νομική επωνυμία, ιστότοπος, κωδικός ΑΑΔΕ, **αρ. αδείας ΥΠΑΗΕΣ**, ΜΑΡΚ,
@@ -472,6 +476,17 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **`ops:health` verdict + exit code** — `OperatorHealthSeverity` αποστάζει το report σε
   **0=ok / 1=warning / 2=critical**, ώστε το deploy gate + cron `ops:health || alert` να είναι
   ζωντανά· **failed queue jobs ειδοποιούν** (`Queue::failing` → ίδιο ops email με τα exceptions).
+- **`ops:health` cron/worker disambiguation + `ops:cron` helper** (OPS-001/OPS-003) — ξεχωριστός
+  **scheduler heartbeat** (το `schedule:run` γράφει σφυγμό ΣΥΓΧΡΟΝΑ κάθε λεπτό, χωρίς worker) ώστε το
+  health να λέει **«ο cron δεν τρέχει»** αντί να ρίχνει το φταίξιμο στον worker (ο σφυγμός του worker
+  είναι job που τον στέλνει ο cron — άρα όταν ο cron πέσει ο worker δεν κατηγορείται). Ίδιο cron gate
+  και στο `ekdosi:go-live-check`. **`ops:cron`**: τυπώνει τις ακριβείς γραμμές crontab + queue worker
+  για αυτόν τον host — VPS (systemd) **και** shared-hosting/cPanel/DirectAdmin (cron-driven worker,
+  `--stop-when-empty`, με το πραγματικό PHP path) — μαζί με την τρέχουσα κατάσταση. `docs/shared-hosting-deploy.md`.
+- **`lookups:seed` — headless (ξανα)στήσιμο/backfill τυπικών AADE lookups** (`--tenant=SLUG` / `--all`
+  / `--json`): το CLI-δίδυμο του «Εισαγωγή τυπικών», idempotent, ώστε ένα `git pull` σε
+  cPanel/DirectAdmin να συμπληρώνει ό,τι λείπει (νέους τύπους/κατηγορίες που δεν υπάρχουν ακόμη, ή
+  κατηγοριοποίηση myDATA fill-empty σε τύπους χωρίς αυτή) χωρίς να ανοίξει ο χειριστής το panel ανά tenant.
 - **`ops:health` shared-webhook-secret detector** (SEC-3) — row «Security» + warning όταν δύο
   tenants μοιράζονται `whmcs_webhook_secret` (forgeable cross-tenant webhooks)· συγκρίνει hash του
   decrypted, ποτέ plaintext στο report.

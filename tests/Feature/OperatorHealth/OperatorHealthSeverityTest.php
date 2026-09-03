@@ -17,6 +17,7 @@ class OperatorHealthSeverityTest extends TestCase
     private function healthy(): array
     {
         return [
+            'cron' => ['status' => 'ok', 'age_minutes' => 1],
             'queue' => ['worker_heartbeat_status' => 'ok', 'worker_heartbeat_age_minutes' => 2, 'failed_jobs_24h' => 0],
             'backup' => [
                 'monitor' => ['status' => 'ok'],
@@ -74,6 +75,110 @@ class OperatorHealthSeverityTest extends TestCase
         $crit['queue']['worker_heartbeat_status'] = 'stale';
         $crit['queue']['worker_heartbeat_age_minutes'] = 45;
         $this->assertSame('critical', OperatorHealthSeverity::evaluate($crit)['level']);
+    }
+
+    #[Test]
+    public function missing_cron_tick_is_only_a_warning(): void
+    {
+        // OPS-001: a never-recorded scheduler tick (fresh box, cron not wired) is a
+        // warning, not proof of an outage.
+        $data = $this->healthy();
+        $data['cron'] = ['status' => 'missing', 'age_minutes' => null];
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('warning', $s['level']);
+        $this->assertSame(1, $s['exit_code']);
+    }
+
+    #[Test]
+    public function long_silent_cron_tick_is_critical(): void
+    {
+        // The OS cron stopped calling schedule:run → nothing scheduled runs.
+        $data = $this->healthy();
+        $data['cron'] = ['status' => 'stale', 'age_minutes' => 45];
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('critical', $s['level']);
+        $this->assertSame(2, $s['exit_code']);
+    }
+
+    #[Test]
+    public function a_stale_worker_beat_is_not_blamed_on_the_worker_when_cron_is_down(): void
+    {
+        // The queue heartbeat is dispatched BY schedule:run, so when cron is down a
+        // stale worker beat is a consequence, not independent proof of a dead worker.
+        // Only the cron finding should fire (critical), with no separate «worker down».
+        $data = $this->healthy();
+        $data['cron'] = ['status' => 'stale', 'age_minutes' => 45];
+        $data['queue']['worker_heartbeat_status'] = 'stale';
+        $data['queue']['worker_heartbeat_age_minutes'] = 45;
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('critical', $s['level']);
+        // Exactly one critical (the cron), not two.
+        $this->assertCount(1, $s['critical']);
+        $this->assertStringContainsString('cron', $s['critical'][0]);
+    }
+
+    #[Test]
+    public function a_stale_worker_beat_i_s_the_worker_when_cron_is_alive(): void
+    {
+        // Cron ticking (ok) but the worker heartbeat silent >30 min → the worker is
+        // genuinely down → critical, attributed to the worker.
+        $data = $this->healthy();
+        $data['queue']['worker_heartbeat_status'] = 'stale';
+        $data['queue']['worker_heartbeat_age_minutes'] = 45;
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('critical', $s['level']);
+        $this->assertCount(1, $s['critical']);
+        $this->assertStringContainsString('worker', $s['critical'][0]);
+    }
+
+    #[Test]
+    public function a_worker_outage_older_than_the_cron_gap_stays_critical(): void
+    {
+        // Regression guard (review finding #1): the worker crashed 45 min ago
+        // (critical); the cron only fell behind 20 min ago (a WARNING, age ≤ 30).
+        // The worker beat (45') is staler than the cron gap (20') → the worker was
+        // already failing while cron was alive → a real worker outage that must NOT
+        // be downgraded to a warning just because the cron is also late.
+        $data = $this->healthy();
+        $data['cron'] = ['status' => 'stale', 'age_minutes' => 20];
+        $data['queue']['worker_heartbeat_status'] = 'stale';
+        $data['queue']['worker_heartbeat_age_minutes'] = 45;
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('critical', $s['level']);
+        $this->assertSame(2, $s['exit_code']);
+        // Both the cron (warning) and the worker (critical) are reported.
+        $this->assertCount(1, $s['critical']);
+        $this->assertStringContainsString('worker', strtolower($s['critical'][0]));
+    }
+
+    #[Test]
+    public function a_sustained_cron_outage_does_not_false_alarm_the_worker(): void
+    {
+        // Review round-3: during a long cron outage a perfectly healthy (idle) worker's
+        // beat naturally sits at ~cronAge + (0..5) min — its last beat was up to one
+        // 5-min dispatch old when cron died. That must NOT be reported as a worker
+        // outage (that's the exact «blame the worker for a dead cron» bug this feature
+        // removes). Only the cron critical fires; no second worker critical.
+        $data = $this->healthy();
+        $data['cron'] = ['status' => 'stale', 'age_minutes' => 40];   // cron down 40'
+        $data['queue']['worker_heartbeat_status'] = 'stale';
+        $data['queue']['worker_heartbeat_age_minutes'] = 43;          // = cronAge + 3 (healthy idle)
+
+        $s = OperatorHealthSeverity::evaluate($data);
+
+        $this->assertSame('critical', $s['level']);       // the CRON is critically down
+        $this->assertCount(1, $s['critical']);            // …and ONLY the cron — not a phantom worker
+        $this->assertStringContainsString('cron', $s['critical'][0]);
     }
 
     #[Test]

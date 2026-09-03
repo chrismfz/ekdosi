@@ -82,6 +82,17 @@ $trackSchedule(
     'mail_sweep'
 );
 
+// OPS-001: scheduler tick — write a heartbeat SYNCHRONOUSLY every minute, inside
+// schedule:run itself (no queue worker). This is the «ο cron ζει» proof: if the OS
+// crontab isn't calling `php artisan schedule:run` this key goes stale, and
+// ops:health can then say «cron down» rather than blaming the worker. Deliberately
+// UNGATED (unlike every other task) — it's the heartbeat that detects a dead cron,
+// so a flag must not be able to silence it. Cost: one tiny cache write per minute
+// (a single-row upsert on the DB cache driver used on prod), no queue involved.
+Schedule::call(fn () => app(HealthRecorder::class)->recordSchedulerHeartbeat())
+    ->everyMinute()
+    ->name('scheduler-heartbeat');
+
 // Queue worker heartbeat — dispatch a tiny queued job. The health command only
 // turns green when a real worker picks it up and writes the heartbeat.
 Schedule::job(new RecordQueueHeartbeat)
