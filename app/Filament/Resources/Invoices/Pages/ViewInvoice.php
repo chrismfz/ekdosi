@@ -499,7 +499,15 @@ class ViewInvoice extends ViewRecord
                 ->label('Έκδοση πιστωτικού')
                 ->icon('heroicon-o-receipt-refund')
                 ->color('warning')
-                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
+                // Only on an ISSUED original — one that declares income/VAT a credit
+                // note can reverse: finalised locally (active) OR filed at AADE
+                // (mydata_state VALID, which a doc filed via an external channel can be
+                // while its local_status is still 'draft' after reconciliation). Hidden
+                // on a genuine πρόχειρο (edit/delete it instead) and on anything
+                // cancelled (locally or at AADE — its reversal is handled elsewhere).
+                ->visible(fn (Invoice $record) => ($record->local_status === 'active' || $record->mydata_state === 'VALID')
+                    && $record->local_status !== 'cancelled'
+                    && $record->credited_invoice_id === null
                     && $record->mydata_state !== 'CANCELLED'
                     && ! $record->isFullyCredited()
                     && self::creditTypes($record)->isNotEmpty())
@@ -528,7 +536,14 @@ class ViewInvoice extends ViewRecord
                             ])->all())
                         ->schema([
                             Hidden::make('line_id'),
-                            Placeholder::make('label')
+                            // Carry the display text as REAL (dehydrated) state and show
+                            // it via a Placeholder with a DIFFERENT name. A Placeholder
+                            // named «label» reading $get('label') is a SELF-REFERENCE:
+                            // under Filament v5 it recurses (the field resolves its own
+                            // content → $get('label') → …), which hung the modal mount →
+                            // «Error while loading page» with no PHP exception logged.
+                            Hidden::make('label'),
+                            Placeholder::make('line_label')
                                 ->label('')
                                 ->content(fn (Get $get) => $get('label') ?? ''),
                             TextInput::make('qty')

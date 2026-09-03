@@ -19,6 +19,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Fixed
+- **«Error while loading page» στο κουμπί «Έκδοση πιστωτικού».** Το modal είχε per-line Repeater με ένα
+  `Placeholder::make('label')` του οποίου το `->content(fn (Get $get) => $get('label'))` **αναφερόταν στον
+  εαυτό του** — στο Filament v5 αυτό μπαίνει σε **άπειρη αναδρομή** (το πεδίο αποτιμά το δικό του content →
+  διαβάζει τον εαυτό του → …), κρεμώντας το mount της ενέργειας· εμφανιζόταν ως «Error while loading page»
+  **χωρίς** καταγεγραμμένο PHP exception (γι' αυτό δεν φαινόταν στο laravel.log). Το «Ακύρωση μέσω πιστωτικού»
+  δούλευε ακριβώς επειδή δεν έχει Repeater. Fix: η ετικέτα κρατιέται σε `Hidden::make('label')` (πραγματικό
+  state) και εμφανίζεται από `Placeholder::make('line_label')` — χωρίς αυτο-αναφορά. Regression test που κάνει
+  mount + έκδοση.
+- **Πιστωτικό λιανικής (ΠΙΛ / 11.4) απορριπτόταν με [205] «CorrelatedInvoices is forbidden for this invoice
+  type».** Ο submitter συσχέτιζε (`addCorrelatedInvoice`) **κάθε** πιστωτικό εκτός του 5.2, οπότε ένα 11.4
+  πιστωτικό έναντι ΑΛΠ έστελνε `<correlatedInvoices>` που η ΑΑΔΕ/πάροχος απορρίπτει (η λιανική είναι μη
+  συσχετιζόμενη). Αντιστράφηκε σε **fail-safe**: συσχετίζουμε ΜΟΝΟ τον 5.1 (`Codes::CORRELATED_CREDIT_TYPES` /
+  `isCorrelatedCreditType`) — κάθε άλλο πιστωτικό (5.2 / 11.4 / 13.31 / 14.31), και κάθε άγνωστος τύπος, μένει
+  μη-συσχετιζόμενο. Το ήδη-δημιουργημένο πιστωτικό ξαναϋποβάλλεται από τη σελίδα του. Regression test για 11.4.
 - **Παραγωγικό σφάλμα «There was an error while attempting to load this page» στη δημιουργία
   παραστατικού/πληρωμής.** Ο κοινός επιλογέας τραπεζικού λογαριασμού (`BankAccountField`, Select) κατέγραφε
   τον tenant-guard ως **γυμνό Laravel closure μέσα σε `->rules([...])`**. Το Filament v5 αποτιμά **κάθε**
