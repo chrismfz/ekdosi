@@ -131,6 +131,7 @@ class Invoice extends Model
         'bank_account_id',
         'conv_invoice_id',
         'credited_invoice_id',
+        'reissued_from_invoice_id',
         'whmcs_pending_id',
         'service_contract_id',
         'local_status',
@@ -720,6 +721,15 @@ class Invoice extends Model
         return $this->belongsTo(self::class, 'credited_invoice_id');
     }
 
+    /**
+     * PROV-019: if this invoice is a reissue/replacement (created by
+     * ReissueInvoiceAsDraft / «Ακύρωση & επανέκδοση»), the original it replaces.
+     */
+    public function reissuedFrom(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'reissued_from_invoice_id');
+    }
+
     /** Delivery notes (δελτία αποστολής) that dispatch this sale (delivery_notes.invoice_id → this). */
     public function deliveryNotes(): HasMany
     {
@@ -744,6 +754,73 @@ class Invoice extends Model
         return $this->credited_invoice_id === null
             && $payable > 0.005
             && (float) $this->credited_total >= $payable - 0.005;
+    }
+
+    /**
+     * PROV-019: is this original LEGALLY reversed — safe to present as «ακυρώθηκε»
+     * and safe to re-bill — as opposed to merely reduced by a still-draft credit?
+     *
+     * `isFullyCredited()` is the LOCAL commercial measure: it counts issued-but-
+     * unfiled (draft) correlated credits, which is correct for the ledger and for
+     * off-mode tenants that never reach VALID. But a draft credit is NOT a legal
+     * reversal at AADE — the original's turnover is still standing there. This
+     * predicate separates the two so the badge / PDF / notifications never claim a
+     * legal cancellation that hasn't happened.
+     *
+     * Legally reversed when:
+     *   - the original was cancelled directly at AADE (mydata_state=CANCELLED —
+     *     terminal on its own); OR
+     *   - it is fully credited AND either it never was a live AADE filing
+     *     (mydata_state ≠ VALID → off-mode/draft: local full-credit IS the
+     *     reversal, and there is no standing turnover to contradict it), OR every
+     *     LIVE correlated credit note is itself VALID at AADE.
+     *
+     * Legacy-safe: this only ever evaluates for CORRELATED credits
+     * (credited_invoice_id → our IssueCreditNote path); legacy ΠΙΣ/returns import
+     * as STANDALONE credit docs with no correlation, so a null credit state here
+     * unambiguously means «our draft, not filed», never «legacy, state unknown».
+     */
+    public function isLegallyReversed(): bool
+    {
+        if ($this->credited_invoice_id !== null) {
+            return false; // a credit note is not itself "reversed"
+        }
+        if ($this->mydata_state === 'CANCELLED') {
+            return true; // terminal AADE cancellation
+        }
+        if (! $this->isFullyCredited()) {
+            return false; // not (fully) reduced commercially
+        }
+        if ($this->mydata_state !== 'VALID') {
+            return true; // never a live AADE filing → local full-credit IS the reversal
+        }
+
+        // Live at AADE: reversed only when NO live correlated credit is still
+        // un-filed (null / non-VALID). A CANCELLED credit is excluded by live().
+        $hasUnfiledLiveCredit = InvoiceScope::live($this->creditNotes())
+            ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'VALID'))
+            ->exists();
+
+        return ! $hasUnfiledLiveCredit;
+    }
+
+    /**
+     * PROV-019: this invoice is a replacement (reissued_from set) whose reversed
+     * original is STILL STANDING at AADE — the original is VALID and not yet
+     * legally reversed (its cancelling credit is an un-filed draft). Filing this
+     * replacement now would declare the turnover twice; the UI soft-warns on it.
+     */
+    public function replacementReversalPending(): bool
+    {
+        if ($this->reissued_from_invoice_id === null) {
+            return false;
+        }
+
+        $original = $this->reissuedFrom; // lazy relation load
+
+        return $original !== null
+            && $original->mydata_state === 'VALID'
+            && ! $original->isLegallyReversed();
     }
 
     /**

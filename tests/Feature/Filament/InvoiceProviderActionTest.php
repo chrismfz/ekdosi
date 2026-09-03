@@ -17,6 +17,7 @@ use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -277,11 +278,13 @@ class InvoiceProviderActionTest extends TestCase
             ->assertSee($invoice->invcode);           // credit note → the invoice it reverses
     }
 
-    public function test_fully_credited_original_reads_as_cancelled_and_only_offers_reissue(): void
+    public function test_fully_credited_by_draft_reads_as_reduced_not_cancelled_then_flips_once_filed(): void
     {
-        // After a full credit the original is reversed: badge «Ακυρώθηκε με
-        // πιστωτικό», the credit/cancel actions are gone (nothing to reverse),
-        // and only «Επανέκδοση» remains.
+        // PROV-019: after a full DRAFT credit the original is fully reduced LOCALLY
+        // (reissue offered, further credit/cancel gone) — but it is NOT legally
+        // cancelled at AADE yet, so the badge must say «Μειώθηκε με πρόχειρο
+        // πιστωτικό», never «Ακυρώθηκε με πιστωτικό». Only once the credit is filed
+        // VALID does it read as cancelled.
         $tenant = $this->providerTenant();
         $creditType = $this->creditType($tenant);
         Filament::setTenant($tenant);
@@ -291,13 +294,23 @@ class InvoiceProviderActionTest extends TestCase
             ->callAction('cancel_via_credit', data: ['credit_type_id' => $creditType->id, 'submit_now' => false]);
 
         $this->assertTrue($invoice->fresh()->isFullyCredited());
+        $this->assertFalse($invoice->fresh()->isLegallyReversed(), 'a draft credit is not a legal reversal');
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
-            ->assertSee('Ακυρώθηκε με πιστωτικό')          // the badge
+            ->assertSee('Μειώθηκε με πρόχειρο πιστωτικό')   // honest, un-filed state
+            ->assertDontSee('Ακυρώθηκε με πιστωτικό')
             ->assertActionVisible('reissue_only')
             ->assertActionHidden('cancel_via_credit')
             ->assertActionHidden('storno_and_reissue')
             ->assertActionHidden('issue_credit_note');
+
+        // File the credit at AADE → now it IS a legal reversal.
+        $credit = Invoice::where('credited_invoice_id', $invoice->id)->firstOrFail();
+        $credit->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400000000000002'])->save();
+
+        $this->assertTrue($invoice->fresh()->isLegallyReversed());
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertSee('Ακυρώθηκε με πιστωτικό');
     }
 
     public function test_reissue_only_creates_a_fresh_draft_copy(): void
@@ -325,6 +338,44 @@ class InvoiceProviderActionTest extends TestCase
         $this->assertNull($reissue->mydata_state);
         $this->assertSame($invoice->invoice_type_id, $reissue->invoice_type_id);
         $this->assertCount(1, $reissue->lines);
+    }
+
+    public function test_filing_a_replacement_soft_warns_but_is_not_blocked_and_leaves_a_trace(): void
+    {
+        // PROV-019 soft-warn: the operator chose soft-warn over hard-block, so
+        // filing a replacement whose reversed original is still standing at AADE
+        // (draft credit) must SUCCEED — not be refused — while leaving a durable
+        // trace so «έγινε ενώ το αρχικό στεκόταν» is answerable later.
+        $tenant = $this->providerTenant();
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        // Storno & reissue with the credit left as a DRAFT → the original stays
+        // VALID at AADE, the reissue is linked back to it.
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->callAction('storno_and_reissue', data: ['credit_type_id' => $creditType->id, 'submit_now' => false]);
+
+        $reissue = Invoice::where('reissued_from_invoice_id', $invoice->id)->firstOrFail();
+        $this->assertTrue($reissue->replacementReversalPending(), 'original still standing → warn condition holds');
+
+        Http::fake([self::DEMO.'/*' => Http::response(
+            '<?xml version="1.0"?><ResponseDoc><response><invoiceMark>400001957062099</invoiceMark>'
+            .'<authenticationCode>A</authenticationCode><statusCode>Success</statusCode></response></ResponseDoc>', 200)]);
+        Log::spy();
+
+        // Filing the replacement is NOT blocked (soft-warn) — it files at AADE…
+        Livewire::test(ViewInvoice::class, ['record' => $reissue->getRouteKey()])
+            ->callAction('submit_to_mydata')
+            ->assertHasNoActionErrors()
+            ->assertRedirect();
+
+        $this->assertSame('VALID', $reissue->fresh()->mydata_state, 'soft-warn did not block the filing');
+
+        // …and left the durable trace.
+        Log::shouldHaveReceived('warning')
+            ->withArgs(fn (string $message) => str_contains($message, 'PROV-019'))
+            ->once();
     }
 
     public function test_provider_delivery_note_keeps_the_real_cancel(): void

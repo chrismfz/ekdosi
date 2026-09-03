@@ -546,6 +546,26 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   do. Deliberate: the resolver reads pre-mutation while the loop re-reads under its own mid-loop writes
   (correctness over micro-opt); a single keyed prefetch reused by both would collapse it. Negligible on real
   invoice line counts — revisit only if a reversal ever touches many lines under contention.
+- **PROV-019 declined-scope + soft-warn posture** _(conscious calls in the PROV-019 change, 2026-09-03)._
+  Two deliberate decisions, recorded so they aren't re-litigated blindly: **(a)** the original required-change
+  proposed a full 5-state «correction bundle» state machine (`credit_draft|credit_pending|credit_failed|
+  reversed|replacement_ready`) linking original+credit+replacement — NOT built; disproportionate at ~70
+  docs/month. The shipped fix (a `reissued_from_invoice_id` link + `isLegallyReversed()` + a soft-warn)
+  covers the real duplicate-turnover risk without the machine. Revisit only if a tenant with routine,
+  high-volume provider credits needs a richer correction workflow. **(b)** The replacement gate is a
+  **soft-warn**, not a hard-block (operator choice): the operator can file a replacement while the reversed
+  original still stands, after an explicit confirmation, and the act is logged. If double-turnover incidents
+  ever show up in reconciliation, a per-tenant hard-block toggle is the escalation — cheap to add on top of
+  the existing `replacementReversalPending()` predicate.
+- **PROV-019 review P2 edge-notes** _(robustness-only, no live-flow impact; from the PROV-019 adversarial
+  review)._ **(1)** `isLegallyReversed()` degenerate case: a VALID original whose `credited_total` came from
+  a stale/ETL-written cache with NO live correlated credits reads as «ακυρώθηκε» (the "all live credits
+  VALID" test is vacuously true). Harmless — recompute guarantees live credits exist when
+  `credited_total ≥ payable`, and it matches pre-PROV-019 behavior — but a `->exists()` guard on
+  `creditNotes()` would harden it. **(2)** Soft-deleting a still-standing original clears the warn:
+  `reissuedFrom()` is a `belongsTo` on a SoftDeletes model, so a soft-deleted original resolves to null →
+  `replacementReversalPending()` returns false while the AADE double-turnover risk persists. Edge (deleting a
+  filed original isn't a normal flow); `->withTrashed()` on the relation would close it if it ever matters.
 - **MYD-019 follow-up — 2-way delivery reconciliation (VALID/un-cancel direction)** _(P2, declined in the
   MYD-019 review as a conscious scope call)._ `refreshStatus()` auto-applies only the terminal AADE
   `CANCELLED` direction; it does NOT un-cancel a δελτίο that is locally `CANCELLED` while AADE reports it

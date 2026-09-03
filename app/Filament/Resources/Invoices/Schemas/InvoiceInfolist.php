@@ -179,14 +179,19 @@ class InvoiceInfolist
                         || $record->creditNotes()->exists()
                         || $record->deliveryNotes()->exists())
                     ->schema([
-                        // Prominent «cancelled» badge for a fully-reversed original
-                        // (credited_total reached gross) — the credit-note equivalent
-                        // of a myDATA CANCELLED state, without flipping local_status.
+                        // Prominent badge for a fully-reversed original (credited_total
+                        // reached gross). PROV-019: only claim a LEGAL cancellation
+                        // when it actually happened (isLegallyReversed) — a still-draft
+                        // credit reduces the local balance but leaves the turnover
+                        // standing at AADE, so it reads as «μειώθηκε με πρόχειρο
+                        // πιστωτικό — δεν υποβλήθηκε», not «ακυρώθηκε».
                         TextEntry::make('reversal_status')
                             ->label('Κατάσταση παραστατικού')
-                            ->state('Ακυρώθηκε με πιστωτικό')
+                            ->state(fn ($record) => $record->isLegallyReversed()
+                                ? 'Ακυρώθηκε με πιστωτικό'
+                                : 'Μειώθηκε με πρόχειρο πιστωτικό — δεν υποβλήθηκε στην ΑΑΔΕ')
                             ->badge()
-                            ->color('danger')
+                            ->color(fn ($record) => $record->isLegallyReversed() ? 'danger' : 'warning')
                             ->columnSpanFull()
                             ->visible(fn ($record) => $record->isFullyCredited()),
 

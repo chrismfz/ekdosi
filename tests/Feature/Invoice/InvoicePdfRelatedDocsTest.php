@@ -3,9 +3,11 @@
 namespace Tests\Feature\Invoice;
 
 use App\Models\Company;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\InvoicePdfRenderer;
+use App\Support\Pdf\PdfLabels;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -65,8 +67,8 @@ class InvoicePdfRelatedDocsTest extends TestCase
             'qrDataUri' => null,
             'logoDataUri' => null,
             'totals' => $totals,
-            'L' => \App\Support\Pdf\PdfLabels::for(
-                \App\Support\Pdf\PdfLabels::resolveLanguage($invoice->language, $invoice->country)
+            'L' => PdfLabels::for(
+                PdfLabels::resolveLanguage($invoice->language, $invoice->country)
             ),
         ])->render();
     }
@@ -76,7 +78,10 @@ class InvoicePdfRelatedDocsTest extends TestCase
         $original = $this->invoice();
         // Create the credit note FIRST (its creation may recompute the original's
         // credited_total), then set the caches LAST so isFullyCredited() holds.
-        $this->invoice(['code' => 10, 'invcode' => 'ΠΙΣ10', 'credited_invoice_id' => $original->id]);
+        // PROV-019: the credit is filed VALID too — a LEGAL reversal, so the strong
+        // «Ακυρώθηκε» wording is warranted (a draft credit would read as «μειώθηκε»).
+        $credit = $this->invoice(['code' => 10, 'invcode' => 'ΠΙΣ10', 'credited_invoice_id' => $original->id]);
+        $credit->forceFill(['mydata_state' => 'VALID', 'mydata_mark' => '400000000000010'])->save();
         // mydata_state VALID so the «παραμένει VALID στην ΑΑΔΕ» note is allowed to show.
         $original->forceFill(['gross_total' => 100, 'credited_total' => 100, 'mydata_state' => 'VALID'])->save();
 
@@ -86,6 +91,24 @@ class InvoicePdfRelatedDocsTest extends TestCase
         $this->assertStringContainsString('Ακυρώθηκε / πιστώθηκε με', $html);
         $this->assertStringContainsString('ΠΙΣ10', $html);                      // the credit note code
         $this->assertStringContainsString('παραμένει VALID στην ΑΑΔΕ', $html);  // VALID → note shown
+    }
+
+    public function test_original_fully_credited_by_a_draft_reads_as_reduced_not_cancelled(): void
+    {
+        // PROV-019: a VALID original fully reduced by an UN-FILED (draft/null-state)
+        // credit is NOT legally cancelled at AADE — the printed document must say
+        // «μειώθηκε με πρόχειρο πιστωτικό», never «Ακυρώθηκε με πιστωτικό».
+        $original = $this->invoice();
+        // Active (shown to the customer) but NOT filed at AADE → mydata_state null.
+        $this->invoice(['code' => 12, 'invcode' => 'ΠΙΣ12', 'credited_invoice_id' => $original->id]);
+        $original->forceFill(['gross_total' => 100, 'credited_total' => 100, 'mydata_state' => 'VALID'])->save();
+
+        $html = $this->renderHtml($original);
+
+        $this->assertStringContainsString('Μειώθηκε με πρόχειρο πιστωτικό', $html);
+        $this->assertStringContainsString('Μειώθηκε (πρόχειρο πιστωτικό) με', $html);
+        $this->assertStringContainsString('ΠΙΣ12', $html);
+        $this->assertStringNotContainsString('Ακυρώθηκε με πιστωτικό', $html);   // no false legal-cancel claim
     }
 
     public function test_partial_credit_uses_softer_wording_and_no_valid_claim(): void
@@ -123,12 +146,12 @@ class InvoicePdfRelatedDocsTest extends TestCase
         // A draft / cancelled δελτίο must NOT appear on the customer invoice — only
         // issued (active) ones, same rule as credit notes.
         $inv = $this->invoice();
-        \App\Models\DeliveryNote::create([
+        DeliveryNote::create([
             'company_id' => $this->tenant->id, 'invcode' => 'ΔΑΕΝΕΡΓΟ', 'code' => 1,
             'delivery_type_id' => $this->type->id, 'issued_at' => now(),
             'invoice_id' => $inv->id, 'local_status' => 'active',
         ]);
-        \App\Models\DeliveryNote::create([
+        DeliveryNote::create([
             'company_id' => $this->tenant->id, 'invcode' => 'ΔΑΠΡΟΧΕΙΡΟ', 'code' => 2,
             'delivery_type_id' => $this->type->id, 'issued_at' => now(),
             'invoice_id' => $inv->id, 'local_status' => 'draft',

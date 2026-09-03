@@ -54,6 +54,9 @@ class ReissueInvoiceAsDraft
                 'code' => $allocation->code,
                 'invcode' => $allocation->invcode,
                 'local_status' => 'draft',
+                // PROV-019: remember what this replaces, so filing it can soft-warn
+                // while the reversed original is still standing at AADE.
+                'reissued_from_invoice_id' => $original->id,
                 'header_discount_percent' => $original->header_discount_percent,
                 // Taxes are recompute-owned (RecomputeInvoiceTaxes): carry the RATES +
                 // categories; the amounts rebuild from the reissue's own net on save.
