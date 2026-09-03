@@ -37,11 +37,16 @@ class DeliveryMarksRelationManager extends RelationManager
                 TextColumn::make('mydata_action')
                     ->label('Ενέργεια')
                     ->badge()
+                    // Human-readable Greek label (INSERT → «Καταχώρηση», STATE_SYNC →
+                    // «Συγχρονισμός κατάστασης (ΑΑΔΕ)», …) while colour/sort/filter keep
+                    // keying on the raw code.
+                    ->formatStateUsing(fn ($state, $record) => $record->actionLabel())
                     ->color(fn (?string $state) => match ($state) {
                         'INSERT', 'PROVIDER_INSERT' => 'success',           // έκδοση — MARK εκδόθηκε
                         'REGISTER_TRANSFER' => 'info',   // έναρξη διακίνησης
                         'CONFIRM_OUTCOME' => 'success',  // παράδοση
                         'CANCEL' => 'danger',            // ακύρωση
+                        'STATE_SYNC' => 'warning',       // MYD-019: ακύρωση εκτός ekdosi, συγχρονίστηκε
                         'REJECTED', 'PROVIDER_REJECTED', 'PROVIDER_FAILED' => 'danger',          // αποτυχία με request/response forensic row
                         default => 'gray',
                     }),

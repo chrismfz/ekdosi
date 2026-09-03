@@ -60,7 +60,15 @@ class DeliveryMark extends Model
         return match ($this->mydata_action) {
             'INSERT' => 'Καταχώρηση',
             'PROVIDER_INSERT' => 'Καταχώρηση (πάροχος)',
+            'REGISTER_TRANSFER' => 'Έναρξη διακίνησης',
+            'CONFIRM_OUTCOME' => 'Δήλωση παράδοσης',
             'CANCEL' => 'Ακύρωση',
+            // MYD-019: a terminal AADE cancellation detected & synced via
+            // «Έλεγχος κατάστασης» — distinct from a CANCEL we initiated.
+            'STATE_SYNC' => 'Συγχρονισμός κατάστασης (ΑΑΔΕ)',
+            'REJECTED' => 'Απόρριψη ΑΑΔΕ',
+            'PROVIDER_REJECTED' => 'Απόρριψη (πάροχος)',
+            'PROVIDER_FAILED' => 'Αποτυχία (πάροχος)',
             default => (string) $this->mydata_action,
         };
     }
