@@ -641,7 +641,10 @@ cross-tenant αδύνατο. `list_companies` δίνει τα slugs. **Per-tool 
 επιβεβαιώνει **μέσα** στο ekdosi (καμία εξωτερική auto-εκτέλεση). **Νέα ops/debug tools για remote
 troubleshooting** (super_admin, read-only): `app_health` (= `ops:health`: queues/crons/backup/mail/
 WHMCS/myDATA/disk + severity), `failed_jobs` (failed queue jobs + κεφαλή exception), `log_tail`
-(Laravel log με φίλτρα level/substring). **Νέα myDATA/provider forensics** (super_admin, cross-tenant,
+(Laravel log με φίλτρα level/substring), `error_log_tail` (το PHP/FPM/web-server ERROR log — fatals/
+recursion/worker-deaths που ΔΕΝ φτάνουν στο laravel.log, δηλ. το «Error while loading page» με κενό app
+log· primary source το `ini_get('error_log')`, portable σε cPanel/DirectAdmin/Virtualmin/standalone).
+**Νέα myDATA/provider forensics** (super_admin, cross-tenant,
 read-only — «γιατί έσκασε ΑΥΤΟ το παραστατικό;» απ' έξω, χωρίς panel): `invoice_filing` (ένα
 παραστατικό με invcode/id → τοπική×myDATA κατάσταση + όλο το ιστορικό `mydata_marks`: ΜΑΡΚ, ακύρωσης,
 πάροχος, auth code, κωδικοί σφάλματος· `include_xml`/`mark_id` για το raw XML), `mydata_failures`

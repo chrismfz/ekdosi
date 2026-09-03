@@ -18,6 +18,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **MCP: `error_log_tail` — το PHP/FPM/web-server ERROR log από απόσταση.** Δίδυμο του `log_tail`, αλλά για
+  τα σφάλματα που **δεν φτάνουν ποτέ** στο `laravel.log`: fatals (nesting/χρόνος/μνήμη), άπειρη αναδρομή,
+  θάνατος FPM worker, 500 πριν τον handler — δηλαδή το «Error while loading page» με **κενό** app log (ακριβώς
+  η περίπτωση του self-referential Placeholder). Portable χωρίς hardcoded paths: primary source το
+  `ini_get('error_log')` (ο PHP το γράφει ως ο account user → πάντα readable, σε cPanel/DirectAdmin/Virtualmin/
+  standalone), + best-effort probing κοινών fpm/nginx/apache/panel locations (τα root-owned απλώς παραλείπονται
+  και αναφέρονται στο `checked`). super_admin, read-only, bounded tail. Φίλτρα `lines`/`contains`.
+
 ### Fixed
 - **«Error while loading page» στο κουμπί «Έκδοση πιστωτικού».** Το modal είχε per-line Repeater με ένα
   `Placeholder::make('label')` του οποίου το `->content(fn (Get $get) => $get('label'))` **αναφερόταν στον
