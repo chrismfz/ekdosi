@@ -499,10 +499,14 @@ class ViewInvoice extends ViewRecord
                 ->label('Έκδοση πιστωτικού')
                 ->icon('heroicon-o-receipt-refund')
                 ->color('warning')
-                // Only on an ACTIVE (finalised) original: a credit note reverses
-                // declared income/VAT, so it makes no sense on a πρόχειρο (edit or
-                // delete the draft instead) or on a cancelled document.
-                ->visible(fn (Invoice $record) => $record->local_status === 'active'
+                // Only on an ISSUED original — one that declares income/VAT a credit
+                // note can reverse: finalised locally (active) OR filed at AADE
+                // (mydata_state VALID, which a doc filed via an external channel can be
+                // while its local_status is still 'draft' after reconciliation). Hidden
+                // on a genuine πρόχειρο (edit/delete it instead) and on anything
+                // cancelled (locally or at AADE — its reversal is handled elsewhere).
+                ->visible(fn (Invoice $record) => ($record->local_status === 'active' || $record->mydata_state === 'VALID')
+                    && $record->local_status !== 'cancelled'
                     && $record->credited_invoice_id === null
                     && $record->mydata_state !== 'CANCELLED'
                     && ! $record->isFullyCredited()

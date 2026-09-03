@@ -70,15 +70,28 @@ class IssueCreditNoteModalTest extends TestCase
         $this->assertSame('11.4', $credit->invoiceType->mydata_type);
     }
 
-    public function test_issue_credit_note_is_hidden_on_a_draft_original(): void
+    public function test_issue_credit_note_is_hidden_on_a_genuine_draft(): void
     {
-        // A credit note reverses declared income/VAT — it makes no sense on a
-        // πρόχειρο (the operator edits or deletes the draft instead).
+        // A credit note reverses declared income/VAT — it makes no sense on an
+        // unfiled πρόχειρο (the operator edits or deletes the draft instead).
         $invoice = $this->retailInvoice();
-        $invoice->update(['local_status' => 'draft']);
+        $invoice->update(['local_status' => 'draft', 'mydata_state' => null]);
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
             ->assertActionHidden('issue_credit_note');
+    }
+
+    public function test_issue_credit_note_visible_on_a_filed_but_still_draft_original(): void
+    {
+        // Multi-channel edge: a doc filed at AADE via an external channel is
+        // mydata_state=VALID while its local_status can still read 'draft' after
+        // reconciliation. It IS declared income → the credit note must stay available.
+        $invoice = $this->retailInvoice();
+        // mydata_* are cache columns (not fillable) → forceFill, like the submitter.
+        $invoice->forceFill(['local_status' => 'draft', 'mydata_state' => 'VALID', 'mydata_mark' => '400001970343457'])->save();
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionVisible('issue_credit_note');
     }
 
     private function retailInvoice(): Invoice
