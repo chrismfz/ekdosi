@@ -102,6 +102,58 @@ class GaplessAtSendTest extends TestCase
         $this->assertSame(1, $this->type->fresh()->invcount, 'counter rolled back — no gap');
     }
 
+    public function test_reserve_adopts_a_concurrently_assigned_number_instead_of_burning_one(): void
+    {
+        // finding 2 (holistic review): the local-issuance paths (ViewInvoice finalize /
+        // NullSubmitter) hold no per-document single-flight lock, so two reservations of
+        // the SAME draft could each read code===null and each allocate — the later save
+        // overwriting the earlier and BURNING its number → a gap. reserve() re-reads the
+        // row's code under a lock: the loser adopts the winner's number, bumping the
+        // counter only ONCE.
+        //
+        // This asserts the ADOPT path (the loser sees the committed winner code and
+        // no-ops): it numbers a fresh instance first, then reserves through the stale one.
+        // The lockForUpdate that makes it safe under GENUINE concurrency (two overlapping
+        // open transactions) is MariaDB-only — a no-op on sqlite — and is exercised by the
+        // `test:invoice-numbering-concurrent` MariaDB CI job, per CLAUDE.md's row-lock note.
+        $draft = $this->draft();                       // code=null in this instance
+
+        $winner = Invoice::findOrFail($draft->id);     // a separate instance = the "winner"
+        $this->assertTrue(app(InvoiceNumberer::class)->assign($winner), 'winner allocated ΤΠΥ1');
+
+        // A pending edit on the stale instance (finding 1, round 5): the adopt path must
+        // sync ONLY the three number columns, never clobber other dirty attributes.
+        $draft->company_name = 'ΕΠΩΝΥΜΙΑ ΠΡΙΝ ΤΟ ADOPT';
+
+        // The stale $draft still has code===null in memory; reserve must NOT allocate a 2nd.
+        $reserved = app(InvoiceNumberer::class)->assign($draft);
+
+        $this->assertFalse($reserved, 'did not reserve — adopted the existing number');
+        $this->assertSame(1, (int) $draft->code, 'in-memory model synced to the winner\'s ΑΑ');
+        $this->assertSame('ΤΠΥ1', $draft->invcode);
+        $this->assertSame(2, $this->type->fresh()->invcount, 'counter bumped once — no gap');
+        $this->assertTrue($draft->isDirty('company_name'), 'the caller\'s pending edit survives the adopt');
+    }
+
+    public function test_reserve_throws_and_burns_no_number_for_a_vanished_row(): void
+    {
+        // findings 2 (round 4 + round 5): if the row is hard-deleted between the outer
+        // code===null check and the locked re-read, reserve() must NOT allocate (that would
+        // bump the counter into a 0-row UPDATE — a gap with no document) AND must fail
+        // loudly/distinctly rather than return the "already numbered, carry on" false.
+        $draft = $this->draft();
+        Invoice::whereKey($draft->id)->forceDelete();     // row is gone
+
+        try {
+            app(InvoiceNumberer::class)->assign($draft);  // stale in-memory model
+            $this->fail('expected a loud failure for a vanished row');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('no longer exists', $e->getMessage());
+        }
+
+        $this->assertSame(1, $this->type->fresh()->invcount, 'counter NOT bumped — no gap');
+    }
+
     public function test_abandoned_drafts_leave_the_transmitted_sequence_gapless(): void
     {
         // Three drafts made; only the middle-created one is ever "sent".

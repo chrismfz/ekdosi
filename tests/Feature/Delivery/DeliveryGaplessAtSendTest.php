@@ -99,6 +99,25 @@ class DeliveryGaplessAtSendTest extends TestCase
         $this->assertSame(1, $this->type->fresh()->invcount, 'counter rolled back — no gap');
     }
 
+    public function test_assign_delivery_adopts_a_concurrently_assigned_number_instead_of_burning_one(): void
+    {
+        // finding 2 (holistic review): two reservations of the SAME ΔΑ draft must not each
+        // allocate (which would burn the first number → a gap). reserve() re-reads the
+        // row's code under a lock: the loser adopts the winner's number, counter bumps once.
+        // Asserts the ADOPT path; the lockForUpdate itself is MariaDB-only (no-op on sqlite).
+        $draft = $this->draft();                            // code=null in this instance
+
+        $winner = DeliveryNote::findOrFail($draft->id);      // a separate instance
+        $this->assertTrue(app(InvoiceNumberer::class)->assignDelivery($winner), 'winner allocated ΔΑΠ1');
+
+        $reserved = app(InvoiceNumberer::class)->assignDelivery($draft);
+
+        $this->assertFalse($reserved, 'did not reserve — adopted the existing number');
+        $this->assertSame(1, (int) $draft->code, 'in-memory model synced to the winner\'s ΑΑ');
+        $this->assertSame('ΔΑΠ1', $draft->invcode);
+        $this->assertSame(2, $this->type->fresh()->invcount, 'counter bumped once — no gap');
+    }
+
     public function test_abandoned_drafts_leave_the_transmitted_sequence_gapless(): void
     {
         // Three drafts made; only two are ever "sent", in a different order.

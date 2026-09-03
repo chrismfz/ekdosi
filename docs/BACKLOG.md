@@ -520,6 +520,25 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   set code), so a gap needs infra-error + abandon. Shared with the invoice submitters. **(h) CMR from a provisional
   draft** — «Δημιουργία CMR» is available on a draft, so `reference_no` records the provisional «ΠΡΟΣ-…»; the CMR
   is an editable ΠΡΟΧΕΙΡΟ the operator fixes before printing._
+  _Round 3 (whole-ΑΑ holistic review, Phase 1+2 together) — two edge bugs FIXED at root, three P2 kept:
+  **fixed:** a concurrent-reservation GAP on the lock-less local-issuance paths (finalize/NullSubmitter) —
+  `reserve()` now re-reads the row's `code` under a row lock so a loser adopts the winner's number
+  (counter bumped once); and finalize now `assign()`s BEFORE the `local_status→active` flip so a failed
+  allocation leaves a recoverable draft, not an active-but-unnumbered document. **P2 kept: (i) provisional
+  LABEL type-segment can go stale** — the invcode «ΠΡΟΣ-ΤΠΥ-{id}» is frozen by the `created` hook and not
+  refreshed if the draft's `invoice_type` is changed (EditInvoice), and `revert()` rebuilds it from the
+  current type; the real ΑΑ at send is always correct and the «ΠΡΟΣ» marker signals non-final, so this is
+  cosmetic (id-keyed → unique either way). Dropping the type segment from the format would remove it but the
+  operator explicitly chose «ΠΡΟΣ-ΤΠΥ-6885». **(j) `ProvisionalCode::is()`** is exercised by the numbering
+  tests (not dead); app readers use the equivalent `code === null` (the authoritative DB signal) — both valid._
+  _Rounds 4–5 (verify-the-fix passes) hardened the round-3 fixes: `reserve()` now THROWS (not burns) if the
+  row vanished mid-operation; the adopt path syncs only the three number columns (a caller's other pending
+  edit survives); `revert()` locks document→invoice_types in the SAME order as `reserve()` (provably
+  deadlock-free); finalize wraps assign+flip in one transaction (savepoint rollback undoes the counter bump).
+  One P2 accepted, not fixed: **(k) transient stale in-memory model after a rolled-back finalize** — if the
+  status-flip fails, the outer transaction reverts code/invcount in the DB but the in-memory $record still
+  shows them; the action errored (no redirect, no success toast) and the row refetches on the next load, so
+  there is no persisted corruption. Severity converged P1→P1→P2→P2 across the rounds (no P0/P1 in round 5)._
 - **OPS-001 cron↔worker attribution — inherent 5-min boundary ambiguity** _(P2, DECLINED across the OPS-001
   review loop — documented, not a bug to keep patching)._ `OperatorHealthSeverity` disambiguates «cron down»
   from «worker down» via the queue heartbeat (a job cron dispatches): when cron is down it suppresses the

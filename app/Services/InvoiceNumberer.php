@@ -276,16 +276,58 @@ final class InvoiceNumberer
             return false;
         }
 
-        $this->db->transaction(function () use ($doc, $company, $typeCode, $allowMovementType): void {
+        return $this->db->transaction(function () use ($doc, $company, $typeCode, $allowMovementType): bool {
+            // Concurrency: two reservations of the SAME document both read code===null
+            // above and would each allocate — the later save overwrites the earlier,
+            // BURNING the first number → a gap. The submitters serialise on a per-document
+            // `Cache::lock`, but the local-issuance paths (ViewInvoice finalize, NullSubmitter)
+            // hold no such lock, so close the race HERE for every caller: re-read THIS row's
+            // code under a row lock. The loser adopts the winner's number and no-ops.
+            // (Lock order is always document → invoice_types — here, then allocate() below;
+            // revert() takes the same order, so the two can never form a lock cycle.)
+            $locked = $this->db->table($doc->getTable())
+                ->where($doc->getKeyName(), $doc->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            // The row vanished (hard-deleted) between the outer check and this locked
+            // re-read: there is nothing to number, so DON'T allocate — that would bump the
+            // counter into a 0-row UPDATE (a gap with no document carrying the number).
+            // THROW rather than return false: a false is "already numbered, carry on", which
+            // would let a submitter build with code=null or a finalize run a 0-row no-op
+            // under a success toast. A gone document must fail loudly and distinctly.
+            if ($locked === null) {
+                throw new RuntimeException(sprintf(
+                    'Cannot allocate an ΑΑ for %s #%s — the row no longer exists (deleted mid-operation).',
+                    $doc->getTable(),
+                    $doc->getKey(),
+                ));
+            }
+
+            if ($locked->code !== null) {
+                // Sync the in-memory model to the winner's persisted values (no write) so
+                // the caller — and its release-gate — sees an already-numbered document.
+                // syncOriginalAttributes (NOT syncOriginal): mark ONLY these three columns
+                // clean, so any other attribute the caller set before assign() stays dirty
+                // and is still persisted by a later save().
+                $doc->forceFill([
+                    'code' => $locked->code,
+                    'invcode' => $locked->invcode,
+                    'series' => $locked->series,
+                ])->syncOriginalAttributes(['code', 'invcode', 'series']);
+
+                return false;
+            }
+
             $allocation = $this->allocate($company, $typeCode, $allowMovementType);
             $doc->forceFill([
                 'code' => $allocation->code,
                 'invcode' => $allocation->invcode,
                 'series' => $allocation->series,
             ])->save();
-        });
 
-        return true;
+            return true;
+        });
     }
 
     /**
@@ -301,6 +343,15 @@ final class InvoiceNumberer
         }
 
         $this->db->transaction(function () use ($doc, $typeId, $typeCode): void {
+            // Lock the DOCUMENT row FIRST, then invoice_types — the SAME order reserve()
+            // uses — so reserve() and revert() on the same (document, type) can never form
+            // a lock cycle. Provably deadlock-free by construction, not by relying on tenant
+            // mode-gating to keep the two paths off the same document.
+            $this->db->table($doc->getTable())
+                ->where($doc->getKeyName(), $doc->getKey())
+                ->lockForUpdate()
+                ->first();
+
             $type = InvoiceType::query()
                 ->whereKey($typeId)
                 ->lockForUpdate()

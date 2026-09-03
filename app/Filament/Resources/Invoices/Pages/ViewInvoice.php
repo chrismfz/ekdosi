@@ -180,8 +180,6 @@ class ViewInvoice extends ViewRecord
                 ->modalHeading('Οριστικοποίηση παραστατικού')
                 ->modalDescription('Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
                 ->action(function (Invoice $record) {
-                    $record->update(['local_status' => 'active']);
-
                     // Gapless-at-send: a tenant that does NOT transmit to AADE has no
                     // submission event, so finalisation IS its issuance — allocate the
                     // real ΑΑ here. Uses the mode-AWARE submitsElectronically() (not
@@ -189,9 +187,19 @@ class ViewInvoice extends ViewRecord
                     // routes to NullSubmitter and would otherwise stay provisional forever.
                     // Live-filing tenants keep the provisional identity until they transmit
                     // (where InvoiceNumberer::assign runs instead).
-                    if ($record->code === null && ! $record->company->submitsElectronically()) {
-                        app(InvoiceNumberer::class)->assign($record);
-                    }
+                    //
+                    // ATOMIC assign + status flip: wrapped in ONE transaction so a failure of
+                    // either rolls back BOTH. Neither half-state is possible — not active-but-
+                    // unnumbered (no UI path to a number), and not numbered-but-draft (a
+                    // reserved ΑΑ the operator could abandon into a gap). A retry re-runs
+                    // cleanly (assign no-ops once the invoice carries a code).
+                    DB::transaction(function () use ($record): void {
+                        if ($record->code === null && ! $record->company->submitsElectronically()) {
+                            app(InvoiceNumberer::class)->assign($record);
+                        }
+
+                        $record->update(['local_status' => 'active']);
+                    });
 
                     // S2.5: non-blocking heads-up if the sale pushed any tracked
                     // product to negative stock (the issue ALWAYS proceeds).

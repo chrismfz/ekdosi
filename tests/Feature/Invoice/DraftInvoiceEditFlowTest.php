@@ -120,6 +120,40 @@ class DraftInvoiceEditFlowTest extends TestCase
         $this->assertSame('TIM1', $fresh->invcode);
     }
 
+    public function test_a_finalize_whose_allocation_fails_leaves_the_invoice_a_draft(): void
+    {
+        // Holistic-review finding 3: finalize now allocates the real ΑΑ BEFORE flipping
+        // local_status→active. So if allocation fails, the invoice stays a DRAFT — this
+        // action is still visible and the operator retries — instead of landing
+        // active-but-unnumbered with no UI path to obtain an ΑΑ.
+        $tenant = $this->tenant(); // gr-mydata, mode=off (non-transmitting)
+        $this->bootPanel($tenant);
+        $customer = $this->customer($tenant);
+        $type = InvoiceType::firstOrCreate(
+            ['company_id' => $tenant->id, 'code' => 'TIM'],
+            ['name' => 'Τιμολόγιο', 'invcount' => 1, 'mydata_type' => '2.1'],
+        );
+        $invoice = Invoice::create([
+            'company_id' => $tenant->id, 'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
+            'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+        $this->assertNull($invoice->code);
+
+        // Break allocation: the type is gone, so the numberer cannot resolve it.
+        $type->delete();
+
+        try {
+            Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+                ->callAction('finalize');
+        } catch (\Throwable) {
+            // expected — allocation failed
+        }
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('draft', $fresh->local_status, 'stays a recoverable draft on allocation failure');
+        $this->assertNull($fresh->code, 'no ΑΑ was assigned');
+    }
+
     public function test_view_page_hides_edit_once_filed(): void
     {
         $tenant = $this->tenant();
