@@ -56,7 +56,11 @@ class InboxColumnsTest extends TestCase
             ->assertSee('#31345')       // WHMCS # (main)
             ->assertSee('2026-04-17')   // invoice date folded into the # column description
             ->assertSee('245,52 EUR')   // amount (main of the merged Ποσό column)
-            ->assertSee('Απλήρωτο');    // paid status folded into the Ποσό description
+            ->assertSee('Απλήρωτο')     // paid status folded into the Ποσό description
+            // …coloured amber via an HtmlString span (green «Πληρωμένο» / amber
+            // «Απλήρωτο»), rendered unescaped because a column description passes
+            // through e() which lets an Htmlable through.
+            ->assertSee('text-warning-600', false);
     }
 
     public function test_filed_row_links_to_the_ekdosi_invoice_by_code(): void

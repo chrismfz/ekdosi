@@ -176,7 +176,11 @@ class WhmcsInvoiceMapper
                 'country' => (string) ($customer->country ?? 'GR'),
                 'occupation' => (string) ($customer->occupation ?? ''),
                 'email' => (string) ($customer->email ?? ''),
-                'notes' => 'Από WHMCS #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
+                // «Προτιμολόγιο» = how the operator refers to a WHMCS invoice
+                // internally; this note is customer-facing (prints on the PDF
+                // ΠΑΡΑΤΗΡΗΣΕΙΣ), so the business term reads better than the
+                // billing-system name «WHMCS».
+                'notes' => 'Από προτιμολόγιο #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
             ],
             'lines' => $lines,
             'totals' => $totals,
