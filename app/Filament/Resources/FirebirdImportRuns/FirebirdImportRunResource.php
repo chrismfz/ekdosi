@@ -34,7 +34,7 @@ class FirebirdImportRunResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedArrowDownTray;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static string|UnitEnum|null $navigationGroup = 'myDATA & Διασυνδέσεις';
 
     protected static ?string $navigationLabel = 'Data Import';
 
@@ -42,7 +42,7 @@ class FirebirdImportRunResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Data imports';
 
-    protected static ?int $navigationSort = 90;
+    protected static ?int $navigationSort = 70;
 
     protected static ?string $recordTitleAttribute = 'file_name';
 

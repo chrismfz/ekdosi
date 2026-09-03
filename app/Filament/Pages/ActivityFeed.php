@@ -20,6 +20,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use UnitEnum;
 
 /**
  * Tenant-wide «Πρόσφατη δραστηριότητα» — every audited change (invoices,
@@ -37,7 +38,9 @@ class ActivityFeed extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clock';
 
-    protected static ?int $navigationSort = 95;
+    protected static string|UnitEnum|null $navigationGroup = 'Σύστημα';
+
+    protected static ?int $navigationSort = 40;
 
     protected string $view = 'filament.pages.activity-feed';
 

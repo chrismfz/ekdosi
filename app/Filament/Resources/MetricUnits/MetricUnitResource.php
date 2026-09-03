@@ -26,9 +26,16 @@ class MetricUnitResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedScale;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 70;
+
+    protected static ?string $modelLabel = 'Μονάδα μέτρησης';
+
+    protected static ?string $pluralModelLabel = 'Μονάδες μέτρησης';
+
+    // Verbatim nav label — else Filament title-cases the plural.
+    protected static ?string $navigationLabel = 'Μονάδες μέτρησης';
 
     protected static ?string $recordTitleAttribute = 'name';
 

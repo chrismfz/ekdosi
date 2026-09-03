@@ -28,9 +28,16 @@ class DeliveryMethodResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 30;
+
+    protected static ?string $modelLabel = 'Τρόπος αποστολής';
+
+    protected static ?string $pluralModelLabel = 'Τρόποι αποστολής';
+
+    // Verbatim nav label — else Filament title-cases the plural.
+    protected static ?string $navigationLabel = 'Τρόποι αποστολής';
 
     protected static ?string $recordTitleAttribute = 'description';
 

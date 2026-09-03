@@ -21,6 +21,7 @@ use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
 use Filament\Schemas\Schema;
 use Filament\Widgets\Widget;
 use Illuminate\Support\Carbon;
+use UnitEnum;
 
 /**
  * «Αναφορές & Στατιστικά» — a second dashboard dedicated to the operator's
@@ -40,7 +41,9 @@ class Reports extends BaseDashboard
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-presentation-chart-line';
 
-    protected static ?int $navigationSort = 1;
+    protected static string|UnitEnum|null $navigationGroup = 'Λογιστικά';
+
+    protected static ?int $navigationSort = 40;
 
     public static function getNavigationLabel(): string
     {

@@ -33,7 +33,7 @@ class WhmcsInboxResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-inbox-arrow-down';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static string|UnitEnum|null $navigationGroup = 'Καθημερινά';
 
     // Bridges/Connectors: the inbox is source-neutral in the UI (one «Εισερχόμενα»
     // for every billing bridge; each row carries its source badge). The model +
@@ -45,7 +45,7 @@ class WhmcsInboxResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Εισερχόμενα';
 
-    protected static ?int $navigationSort = 80;
+    protected static ?int $navigationSort = 20;
 
     protected static ?string $recordTitleAttribute = 'whmcs_invoice_id';
 

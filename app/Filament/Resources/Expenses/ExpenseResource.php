@@ -19,6 +19,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use UnitEnum;
 
 /**
  * Έξοδα — supplier documents (εισροές). myDATA-sourced records (sync /
@@ -36,13 +37,15 @@ class ExpenseResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-document-arrow-down';
 
+    protected static string|UnitEnum|null $navigationGroup = 'Είδη & Προμήθειες';
+
     protected static ?string $navigationLabel = 'Έξοδα';
 
     protected static ?string $modelLabel = 'έξοδο';
 
     protected static ?string $pluralModelLabel = 'Έξοδα';
 
-    protected static ?int $navigationSort = 16;
+    protected static ?int $navigationSort = 40;
 
     public static function form(Schema $schema): Schema
     {

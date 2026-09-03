@@ -39,7 +39,7 @@ class MyDataCodeGuide extends Page
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Setup';
+        return 'Ρυθμίσεις';
     }
 
     public static function canAccess(): bool

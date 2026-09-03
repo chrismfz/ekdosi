@@ -26,9 +26,16 @@ class ProductCategoryResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTag;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Setup';
+    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
 
     protected static ?int $navigationSort = 50;
+
+    protected static ?string $modelLabel = 'Κατηγορία προϊόντος';
+
+    protected static ?string $pluralModelLabel = 'Κατηγορίες προϊόντων';
+
+    // Verbatim nav label — else Filament title-cases the plural.
+    protected static ?string $navigationLabel = 'Κατηγορίες προϊόντων';
 
     protected static ?string $recordTitleAttribute = 'description_short';
 

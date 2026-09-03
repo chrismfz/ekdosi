@@ -28,9 +28,9 @@ class MyDataCluster extends Cluster
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cloud';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Data';
+    protected static string|UnitEnum|null $navigationGroup = 'myDATA & Διασυνδέσεις';
 
-    protected static ?int $navigationSort = 91;
+    protected static ?int $navigationSort = 20;
 
     protected static ?string $slug = 'mydata';
 

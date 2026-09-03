@@ -33,7 +33,7 @@ class Bridges extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-puzzle-piece';
 
-    protected static ?int $navigationSort = 81;
+    protected static ?int $navigationSort = 10;
 
     protected string $view = 'filament.pages.bridges';
 
@@ -106,7 +106,7 @@ class Bridges extends Page
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Data';
+        return 'myDATA & Διασυνδέσεις';
     }
 
     public static function shouldRegisterNavigation(): bool

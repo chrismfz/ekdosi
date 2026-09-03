@@ -21,6 +21,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use UnitEnum;
 
 /**
  * Leads — υποψήφιοι πελάτες (mini-CRM). Sits right under «Πελάτες» in the
@@ -33,6 +34,8 @@ class LeadResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedFunnel;
 
+    protected static string|UnitEnum|null $navigationGroup = 'Leads';
+
     protected static ?string $navigationLabel = 'Leads';
 
     protected static ?string $modelLabel = 'lead';
@@ -41,10 +44,7 @@ class LeadResource extends Resource
 
     protected static ?string $recordTitleAttribute = 'name';
 
-    // Filament maps a null sort to -1; the unsorted resources (Customers,
-    // Products, …) all sit there, ordered by discovery (alphabetical). -1 keeps
-    // Leads in that leading block, right after Customers.
-    protected static ?int $navigationSort = -1;
+    protected static ?int $navigationSort = 10;
 
     /**
      * @return array<int, string>

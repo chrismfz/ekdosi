@@ -234,7 +234,7 @@ class CompanySettings extends Page implements HasForms
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Setup';
+        return 'Ρυθμίσεις';
     }
 
     public static function shouldRegisterNavigation(): bool

@@ -23,6 +23,7 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use UnitEnum;
 
 class CustomerResource extends Resource
 {
@@ -30,7 +31,15 @@ class CustomerResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedUserGroup;
 
+    protected static string|UnitEnum|null $navigationGroup = 'Καθημερινά';
+
+    protected static ?int $navigationSort = 50;
+
     protected static ?string $recordTitleAttribute = 'name';
+
+    protected static ?string $modelLabel = 'Πελάτης';
+
+    protected static ?string $pluralModelLabel = 'Πελάτες';
 
     /**
      * Top-bar global search across customer name + AFM. Tenant-scoped

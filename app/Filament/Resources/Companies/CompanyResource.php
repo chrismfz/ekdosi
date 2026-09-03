@@ -15,12 +15,21 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use UnitEnum;
 
 class CompanyResource extends Resource
 {
     protected static ?string $model = Company::class;
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedBuildingOffice2;
+
+    protected static string|UnitEnum|null $navigationGroup = 'Σύστημα';
+
+    protected static ?int $navigationSort = 20;
+
+    protected static ?string $modelLabel = 'Εταιρεία';
+
+    protected static ?string $pluralModelLabel = 'Εταιρείες';
 
     /**
      * Company IS the tenant model — it can't be tenant-scoped to itself.
