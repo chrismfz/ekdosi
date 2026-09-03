@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Services\EInvoice\Transports\InvoSignDocument;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyData\Codes;
 use App\Support\OperatorHealth\OperatorHealthReport;
@@ -73,6 +74,8 @@ class GoLiveCheckReport
             $this->productionCredsGate($tenant, $isGrMyData),
             $this->modeGate($tenant, $isGrMyData),
             $this->providerLiveGate($tenant, $isGrProvider),
+            $this->issuerAfmGate($tenant, $filesToAade),
+            $this->issuerFieldsGate($tenant, $isGrProvider),
             $this->numberingGate($tenant),
             $this->driftGate($tenant),
             $this->backupGate($tenant),
@@ -309,6 +312,62 @@ class GoLiveCheckReport
         }
 
         return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'pass', "{$tenant->einvoice_provider_key} ({$mode})");
+    }
+
+    /**
+     * PROV-005: the issuer ΑΦΜ is the AADE-core issuer identity (`Issuer.vatNumber`)
+     * that EVERY AADE-filing tenant needs — direct-myDATA and provider alike — and no
+     * other go-live gate validated it (the credential gates check the AADE USER id /
+     * provider key, not the company ΑΦΜ). A blank one is a wire-level rejection on the
+     * first real document, so it FAILS the cutover.
+     *
+     * @return array{key:string,label:string,status:string,detail:string}
+     */
+    private function issuerAfmGate(Company $tenant, bool $filesToAade): array
+    {
+        $label = 'ΑΦΜ εκδότη';
+        if (! $filesToAade) {
+            return $this->gate('issuer_afm', $label, 'skip', 'δεν υποβάλλει σε ΑΑΔΕ');
+        }
+
+        return blank($tenant->afm)
+            ? $this->gate('issuer_afm', $label, 'fail', 'λείπει το ΑΦΜ της εταιρείας — η ΑΑΔΕ απαιτεί issuer vatNumber')
+            : $this->gate('issuer_afm', $label, 'pass', (string) $tenant->afm);
+    }
+
+    /**
+     * PROV-005: a gr-provider tenant must ALSO carry the full issuer identity
+     * InvoSign's <API_Issuer> EXTENSION requires (επωνυμία/ΚΑΔ/ΔΟΥ/διεύθυνση) — the
+     * fields the direct-myDATA path never sends. Missing any is a wire-level rejection
+     * on the first real document, so it FAILS the cutover. The ΑΦΜ is validated
+     * separately (issuerAfmGate — it belongs to the AADE core, not this extension).
+     * Contact fields (email/phone) are advisory (WARN) — the provider likely uses them
+     * to deliver the document to the customer. Shares
+     * InvoSignDocument::missingIssuerLabels with the Πάροχος Console preflight (single
+     * source, no drift).
+     *
+     * @return array{key:string,label:string,status:string,detail:string}
+     */
+    private function issuerFieldsGate(Company $tenant, bool $isGrProvider): array
+    {
+        $label = 'Στοιχεία εκδότη (πάροχος)';
+
+        if (! $isGrProvider) {
+            return $this->gate('provider_issuer', $label, 'skip', 'μη-provider tenant');
+        }
+
+        $missing = InvoSignDocument::missingIssuerLabels($tenant);
+
+        if ($missing['required'] !== []) {
+            return $this->gate('provider_issuer', $label, 'fail',
+                'λείπουν υποχρεωτικά πεδία που απαιτεί ο πάροχος: '.implode(', ', $missing['required']));
+        }
+        if ($missing['recommended'] !== []) {
+            return $this->gate('provider_issuer', $label, 'warn',
+                'λείπει (συνιστάται — ο πάροχος πιθανώς για αποστολή στον πελάτη): '.implode(', ', $missing['recommended']));
+        }
+
+        return $this->gate('provider_issuer', $label, 'pass', 'πλήρη στοιχεία εκδότη');
     }
 
     /** @return array{key:string,label:string,status:string,detail:string} */

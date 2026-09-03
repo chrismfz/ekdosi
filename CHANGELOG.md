@@ -19,6 +19,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Fixed
+- **Provider preflight: πλήρης ταυτότητα εκδότη + σωστό ζευγάρωμα myDATA creds (PROV-005 local half).** Το
+  preflight (και το `ekdosi:go-live-check`) έλεγχαν μόνο το ΑΦΜ εκδότη — ένας tenant παρόχου χωρίς
+  ΔΟΥ/ΚΑΔ/διεύθυνση περνούσε **πράσινος** και τον απέρριπτε ο InvoSign στο πρώτο κανονικό παραστατικό.
+  Πλέον απαιτούνται **όλα** τα πεδία που κουβαλά το `<API_Issuer>` (επωνυμία/ΚΑΔ/ΔΟΥ/οδός/Τ.Κ./πόλη →
+  `fail`· email/τηλέφωνο → `warn`, ο πάροχος πιθανώς τα χρησιμοποιεί για αποστολή στον πελάτη), από **μία
+  πηγή** (`InvoSignDocument::ISSUER_FIELDS` — ό,τι ακριβώς στέλνεται). Επίσης τα myDATA read-creds
+  επικυρώνονται πλέον ως **πλήρες ζεύγος** (aade-id + key) για το ενεργό `mydataReadMode()` αντί για
+  ανάμεικτο sandbox/production. Νέο go-live gate `provider_issuer`. (Το authenticated credential probe
+  μένει vendor-blocked → BACKLOG.)
 - **Συγχρονισμός εξωτερικής ακύρωσης δελτίου κατά τον «Έλεγχο κατάστασης» (MYD-019).** Αν ένα δελτίο
   ακυρωνόταν **εκτός ekdosi** (π.χ. απευθείας στην πύλη ΑΑΔΕ), το `refreshStatus()` ενημέρωνε μόνο το
   `delivery_state` κι άφηνε `mydata_state=VALID`/`local_status=active` — ασυνεπής κατάσταση όπου
