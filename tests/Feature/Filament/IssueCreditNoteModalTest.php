@@ -70,6 +70,17 @@ class IssueCreditNoteModalTest extends TestCase
         $this->assertSame('11.4', $credit->invoiceType->mydata_type);
     }
 
+    public function test_issue_credit_note_is_hidden_on_a_draft_original(): void
+    {
+        // A credit note reverses declared income/VAT — it makes no sense on a
+        // πρόχειρο (the operator edits or deletes the draft instead).
+        $invoice = $this->retailInvoice();
+        $invoice->update(['local_status' => 'draft']);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionHidden('issue_credit_note');
+    }
+
     private function retailInvoice(): Invoice
     {
         $tenant = Company::create([

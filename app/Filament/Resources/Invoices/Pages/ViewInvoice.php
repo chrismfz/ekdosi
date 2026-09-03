@@ -499,7 +499,11 @@ class ViewInvoice extends ViewRecord
                 ->label('Έκδοση πιστωτικού')
                 ->icon('heroicon-o-receipt-refund')
                 ->color('warning')
-                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
+                // Only on an ACTIVE (finalised) original: a credit note reverses
+                // declared income/VAT, so it makes no sense on a πρόχειρο (edit or
+                // delete the draft instead) or on a cancelled document.
+                ->visible(fn (Invoice $record) => $record->local_status === 'active'
+                    && $record->credited_invoice_id === null
                     && $record->mydata_state !== 'CANCELLED'
                     && ! $record->isFullyCredited()
                     && self::creditTypes($record)->isNotEmpty())
