@@ -112,6 +112,36 @@ class ErrorLogTailToolTest extends TestCase
         @unlink($tmp);
     }
 
+    public function test_diagnoses_the_php_logging_setup(): void
+    {
+        $tmp = tempnam(sys_get_temp_dir(), 'ekdosi-phperr-').'.log';
+        file_put_contents($tmp, "boot\n");
+        ini_set('error_log', $tmp);
+
+        $response = EkdosiMcpServer::actingAs($this->superAdmin($this->company()))
+            ->tool(ErrorLogTailTool::class, []);
+
+        $response->assertOk();
+        $response->assertSee('php_logging');
+        $response->assertSee('writable_by_app');
+
+        @unlink($tmp);
+    }
+
+    public function test_warns_when_php_is_told_to_log_where_the_app_cannot_write(): void
+    {
+        // PHP configured to log into a directory that doesn't exist / isn't writable
+        // → its fatals are silently DROPPED. The tool must flag this loudly (it is
+        // the exact reason a crash can leave no trace), not just say «nothing found».
+        ini_set('error_log', '/nonexistent-ekdosi-'.uniqid().'/php-error.log');
+
+        $response = EkdosiMcpServer::actingAs($this->superAdmin($this->company()))
+            ->tool(ErrorLogTailTool::class, []);
+
+        $response->assertOk();
+        $response->assertSee('ΧΑΝΟΝΤΑΙ'); // «τα PHP fatals ΧΑΝΟΝΤΑΙ» misconfiguration warning
+    }
+
     public function test_not_offered_to_a_tenant_member(): void
     {
         // Error logs can carry sensitive paths/queries — super_admin only.

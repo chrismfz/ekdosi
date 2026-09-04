@@ -29,11 +29,16 @@ class WhmcsInboxDeleteTest extends TestCase
         ]);
     }
 
+    /** Monotonic so every row gets a DISTINCT whmcs_invoice_id — random_int(1,999999)
+     *  across 4+ rows per test could birthday-collide and violate the
+     *  unique(company_id, whmcs_invoice_id) constraint (a real, RNG-seed-dependent flake). */
+    private static int $nextWhmcsId = 500000;
+
     private function row(Company $t, string $status, ?string $mark = null): PendingWhmcsInvoice
     {
         return PendingWhmcsInvoice::create([
             'company_id' => $t->id,
-            'whmcs_invoice_id' => random_int(1, 999999),
+            'whmcs_invoice_id' => self::$nextWhmcsId++,
             'payload' => [],
             'match_reason' => PendingWhmcsInvoice::REASON_UNMATCHED,
             'status' => $status,
@@ -73,7 +78,7 @@ class WhmcsInboxDeleteTest extends TestCase
         $this->assertModelExists($filed);   // legal record preserved
     }
 
-    public function test_isDeletable_excludes_rows_with_a_linked_invoice_or_mark(): void
+    public function test_is_deletable_excludes_rows_with_a_linked_invoice_or_mark(): void
     {
         $t = $this->tenant();
 
