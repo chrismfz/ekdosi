@@ -234,7 +234,9 @@ class PendingWhmcsInvoice extends Model
         }
 
         $fields = $this->payload['customfields'] ?? [];
-        if ($fields === [] || $fields === null) {
+        // A scalar/empty customfields (WHMCS returns "" when a client has none)
+        // must not reach array_is_list() below — that TypeErrors. Guard it.
+        if (! is_array($fields) || $fields === []) {
             return null;
         }
         // WHMCS returns a list of {id,name,value} — or a single such object

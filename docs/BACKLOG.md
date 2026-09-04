@@ -28,15 +28,10 @@ The rule that governs the order (learned from the ten-round P2 PRs): **a finding
 priority is not a property of the finding — it is the finding × this business × this
 date.** Cutover (1 Oct provider obligation) sorts everything.
 
-**TIER 0 — Cutover gate: ✅ CLEAR (verified live 2026-09-05).** All bucket-A code
-shipped; the two residual *decisions* are made and are not repo work: **MYD-007** (the
-intra-community 0% was essentially one large invoice to Estonia — per-line §8.3 field +
-`VatExemptionGuidance` ship; GR→EE service = code 4) and **MYD-006**
-(`business_activity_type` chosen per tenant; income class also configurable per product-
-category — a per-*product* override is only a UI follow-up). **Live prod check:** **myip 0**
-myDATA discrepancies — the old «92» was a **stale-devbox artifact, never real** (myip is
-filing again, last MARK 2026-09-04); **nexon 2** (last filed 2026-06-16 — reconcile those
-before nexon cuts over). The dry-run is the operators' daily VM routine, not a task.
+> *The **Cutover gate** (ex-TIER 0) is **CLOSED** — all bucket-A code shipped, MYD-006/007
+> decided, and a live prod check (2026-09-05) found **0 real myDATA discrepancies** (the
+> earlier «92/2» came from a stale devbox backup, never real). The daily dry-run on the VM
+> is the operators' routine, not a backlog task. Kept as a closed record under «Cutover gate».*
 
 **TIER 1 — Real in-scope code work, next deadline (delivery-note family + provider):**
 1. **Delivery-note family** (before the ψηφιακή-διακίνηση deadline, NOT 1 Oct):
@@ -83,31 +78,28 @@ profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
 
 ---
 
-## 🚀 Cutover / go-live gate — bucket A (folded from known-issues «Go-live triage»)
+## 🚀 Cutover / go-live gate — bucket A: ✅ CLOSED (closed record)
 
 **Cutover:** ekdosi replaces the legacy C++Builder app for real invoicing; the
 ΥΠΑΗΕΣ/provider obligation lands **2026-10-01**. Delivery notes (9.x) follow on their
 own ψηφιακή-διακίνηση deadline — that family is TIER 1, **not** gated on 1 Oct.
 
 **All bucket-A code is DONE** (PROV-010, OBS-001, PROV-003-print #406, MYD-004 0% #410,
-MYD-006 #413, MYD-007 code #410, PROV-006 retail-via-provider sandbox-verified 2026-09-03).
-**The gate is effectively CLEAR — what's left is ongoing ops / a nexon reconcile:**
-- **Cutover dry-run — ongoing, NOT a task.** Two operators run every day-one document
-  type (ΤΠΥ, ΤΙΜ, ΠΙΣ **and αποδείξεις λιανικής 11.x**: issue → PDF → reconcile) plus
-  edge cases on the dev/test VM **daily** — that daily hammering *is* the rehearsal, and
-  it's enough. Don't track it as a backlog item.
-- **Discrepancy backlog — the «92» was a mirage.** Live prod check **2026-09-05**: **myip
-  0** discrepancies (myip is filing again, last MARK 2026-09-04). The «92» seen on
-  2026-09-02 came from a **stale devbox backup** measured while prod moved ahead — never a
-  real prod backlog. **nexon 2** remains (last filed 2026-06-16) — run a live reconcile and
-  clear those two before nexon cuts over. Watch this with `app_health` / `mydata_discrepancies`.
+MYD-006 #413, MYD-007 code #410, PROV-006 retail-via-provider sandbox-verified 2026-09-03),
+and the two residual decisions are made:
 - **MYD-007 — decided.** The intra-community 0% was essentially one large invoice to
   Estonia; per-line §8.3 field + `VatExemptionGuidance` ship (GR→EE service = code 4).
   Preflight still FLAGS any reason-less/wrong 0% rows for review (no auto-guess).
 - **MYD-006 — chosen.** `business_activity_type` selected per tenant (go-live gate forces
   it); income class also configurable per product-category. Per-product override = UI follow-up.
-- **PROV-007** — verify InvoSign discount semantics cent-for-cent inside the dry-run
-  (one discounted invoice); no separate project.
+- **Discrepancies — none real.** Live prod check **2026-09-05**: **myip 0**. The earlier
+  «92/2» came from a **stale devbox backup** measured while prod moved ahead (myip filing
+  again, last MARK 2026-09-04; nexon's 2 were the same stale artifact) — never a real
+  backlog. Watch with `app_health` / `mydata_discrepancies` going forward.
+- **Cutover dry-run — ongoing, NOT a task.** Two operators run every day-one document type
+  (ΤΠΥ, ΤΙΜ, ΠΙΣ + αποδείξεις λιανικής 11.x) plus edge cases on the dev/test VM **daily** —
+  that IS the rehearsal, and it's enough. **PROV-007** rides along (verify InvoSign discount
+  semantics cent-for-cent on one discounted invoice); no separate project.
 
 *Runtime facts that de-risk the provider path (measured, sandbox 2026-07-07): the
 InvoSign channel **de-duplicates** a blind re-POST of the same (series, ΑΑ), and

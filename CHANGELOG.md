@@ -107,6 +107,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
     status ξεχωρίζει πλέον **«no access (parent dir)»** από «absent» (permissions vs πραγματικά λείπει).
 
 ### Fixed
+- **Τρία μικρά latent bugs (BACKLOG tech-debt).** (α) `ExpenseClassificationSubmitter` έγραφε
+  μη-fillable `'date'` στο `expense_marks` → η στήλη `mark_date` έμενε πάντα NULL για τους
+  χαρακτηρισμούς εξόδων· γράφει πλέον `mark_date` **και `mark_time`** (όπως τα άλλα submitters).
+  (β) `PendingWhmcsInvoice::resolveWhmcsCustomField` έκανε `array_is_list()` πάνω σε scalar
+  `customfields` (το WHMCS επιστρέφει `""` όταν ο πελάτης δεν έχει κανένα) → **TypeError**·
+  μπήκε `is_array` guard. (γ) `AgedReceivables` CSV export καλούσε `fputcsv` χωρίς ρητό
+  `escape:` → PHP 8.4 `E_DEPRECATED`· πέρασε `escape: ''` (ίδια σύμβαση με `SalesActivityReport`).
 - **Company import: rewire των WHMCS default τύπων «απόδειξη»/«απλήρωτο».** Το import ξανάδενε μόνο το
   `whmcs_default_invoice_type_id` στον εισαγόμενο invoice_type· τα `whmcs_default_receipt_type_id` και
   `whmcs_default_unpaid_type_id` κρατούσαν το **stale source id** → σε φρέσκο (`--new`) import είτε FK
