@@ -77,6 +77,22 @@ class Gate
         return $pilot === [] || in_array($clientId, $pilot, true);
     }
 
+    /**
+     * Second knob for the «Εκδοθέντα Παραστατικά» page: whether it ALSO lists
+     * pre-bridge (imported) παραστατικά. Independent of the master switch, default
+     * OFF — so the page can ship with only bridge-derived rows, and the historical
+     * part can be turned off instantly without hiding the whole page.
+     */
+    public static function issuedHistoricalEnabled(): bool
+    {
+        $v = Capsule::table('tbladdonmodules')
+            ->where('module', 'ekdosi_bridge')
+            ->where('setting', 'show_client_issued_historical')
+            ->value('value');
+
+        return in_array(strtolower((string) $v), ['on', 'yes', '1', 'true'], true);
+    }
+
     /** Parse the comma/space-separated pilot client-id list. */
     public static function pilotIds(string $raw): array
     {

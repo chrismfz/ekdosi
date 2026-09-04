@@ -10,6 +10,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.47.0] — 2026-09-04
+### Added
+- **«Εκδοθέντα Παραστατικά»: historical (pre-bridge) παραστατικά + context-aware verify label.**
+  Η σελίδα δείχνει πλέον ΚΑΙ τα εισαγμένα (pre-bridge) παραστατικά του πελάτη: το plugin στέλνει τα
+  δικά του WHMCS invoice ids (`tblinvoices.userid`) στο (πλέον **POST**) `issued-for-client`, και το
+  ekdosi τα ματσάρει ντετερμινιστικά με `invoices.whmcs_invoice_id` — leak-proof (boundary = τα invoices
+  **που πλήρωσε ο ίδιος**, όχι ο ΑΦΜ τρίτου). Το κουμπί επαλήθευσης είναι πλέον context-aware μέσω
+  `verify_kind`: «Προβολή παρόχου (ΥΠΑΕΣ)» για provider-signed vs «Επαλήθευση ΑΑΔΕ» για direct-myDATA.
+
 ## [0.46.0] — 2026-09-04
 ### Added
 - **Client-area σελίδα «Εκδοθέντα Παραστατικά».** Νέο link στο «Τιμολόγηση» dropdown του πελάτη

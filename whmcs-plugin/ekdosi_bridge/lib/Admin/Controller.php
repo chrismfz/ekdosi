@@ -130,14 +130,42 @@ EOF;
         $lastPoll = BridgeLogStore::lastInboundPollAt();
         $pollCell = $this->pollFreshnessCell($lastPoll);
 
+        // Client-facing «Εκδοθέντα Παραστατικά» knobs, shown here so an admin sees
+        // (and can find where to flip) the two switches at a glance — the master
+        // «show page» kill-switch and the «also show old» historical toggle. The
+        // switches live on the addon's Configure screen (configaddonmods.php);
+        // this is read-only status + a jump link.
+        $clientCfg = Capsule::table('tbladdonmodules')
+            ->where('module', 'ekdosi_bridge')
+            ->whereIn('setting', ['show_client_issued', 'show_client_issued_historical', 'issued_pilot_clients'])
+            ->pluck('value', 'setting');
+        $isOn = static fn (string $k): bool => in_array(strtolower((string) ($clientCfg[$k] ?? '')), ['on', 'yes', '1', 'true'], true);
+        $onOff = static fn (bool $on): string => $on
+            ? '<span class="label label-success">ενεργό</span>'
+            : '<span class="label label-default">ανενεργό</span>';
+        $issuedOn = $isOn('show_client_issued');
+        $pilotRaw = trim((string) ($clientCfg['issued_pilot_clients'] ?? ''));
+        $pilotNote = ($issuedOn && $pilotRaw !== '')
+            ? ' <span class="text-muted">(pilot: '.htmlspecialchars($pilotRaw).')</span>'
+            : '';
+        $issuedCell = $onOff($issuedOn).$pilotNote;
+        // Historical only matters while the page itself is on.
+        $histCell = $issuedOn
+            ? $onOff($isOn('show_client_issued_historical'))
+            : '<span class="text-muted">—</span>';
+        $configLink = '<a href="configaddonmods.php">Ρυθμίσεις γέφυρας (Configure)</a>';
+
         return <<<EOF
 <table class="table table-condensed" style="max-width:640px">
-    <tr><th style="width:200px">Γέφυρα</th><td>{$configured}</td></tr>
+    <tr><th style="width:220px">Γέφυρα</th><td>{$configured}</td></tr>
     <tr><th>Ekdosi</th><td>{$target}</td></tr>
     <tr><th>Έκδοση plugin</th><td>{$version}</td></tr>
     <tr><th>Τελευταίο ερώτημα ekdosi</th><td>{$pollCell}</td></tr>
     <tr><th>Παραστατικά τρίτων</th><td>{$tp}</td></tr>
+    <tr><th>Σελίδα «Εκδοθέντα» (πελάτες)</th><td>{$issuedCell}</td></tr>
+    <tr><th>— Παλαιά παραστατικά (historical)</th><td>{$histCell}</td></tr>
 </table>
+<p class="text-muted" style="margin-top:-6px">Άλλαξε τους διακόπτες πελατών στο {$configLink}.</p>
 EOF;
     }
 

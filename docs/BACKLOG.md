@@ -404,15 +404,29 @@ data model + phase gates: **`PLAN.md`**.
 - **T-4 manual split tools** (transfer_invoice / relid_remover) — χαμηλή προτεραιότητα.
 - **«All of a client's third parties» 2ο dropdown** (θέλει `contacts-by-userid` bridge endpoint).
 - **«Εκδοθέντα Παραστατικά» — πλήρες pagination (P2, από review)** — το `issued-for-client` endpoint επιστρέφει
-  όλα τα pending rows του reseller (capped στα **500**, newest-first) σε έναν αδιαίρετο client-area πίνακα.
-  Για reseller με εκατοντάδες τιμολόγια θέλει σελιδοποίηση (endpoint `limit`/`cursor` + plugin UI). Ο cap
-  αποτρέπει το pathological memory/latency· η σελιδοποίηση είναι follow-up.
-- **«Εκδοθέντα Παραστατικά» — historical (pre-bridge) παραστατικά (idea)** — η σελίδα δείχνει μόνο τα
-  bridge-derived (`pending_whmcs_invoices`). Τα legacy-imported του πελάτη θα μπορούσαν να προστεθούν μέσω του
-  υπάρχοντος AFM/legacy-id path — αλλά ΜΟΝΟ τα δικά του (ο ΑΦΜ ως boundary θα διέρρεε άσχετα τρίτου). Χαμηλή.
+  bridge-derived (capped **500** newest) + historical (capped **500** newest· τα δικά του WHMCS ids capped **2000**
+  newest στο plugin) σε έναν αδιαίρετο client-area πίνακα. Για reseller με χιλιάδες τιμολόγια θέλει σελιδοποίηση
+  (endpoint `limit`/`cursor` + plugin UI)· τα caps αποτρέπουν το pathological memory/latency αλλά **σιωπηλά κόβουν**
+  παλαιότερα (>2000 WHMCS invoices ή >500 historical rows) — η σελιδοποίηση είναι follow-up.
+- ~~**«Εκδοθέντα Παραστατικά» — historical (pre-bridge) παραστατικά**~~ — ΕΓΙΝΕ (plugin v0.47): matched
+  ντετερμινιστικά με `invoices.whmcs_invoice_id` πάνω στα **δικά του** WHMCS invoice ids (`tblinvoices.userid`,
+  τα στέλνει το plugin) — όχι ΑΦΜ, οπότε δεν διαρρέει άσχετο παραστατικό τρίτου. Τα legacy third-party splits
+  εμφανίζονται σωστά μόνο αν το legacy `invoiced` κουβαλά τον σύνδεσμο (1:1)· ό,τι δεν έχει `whmcs_invoice_id`
+  (πολύ παλιά, ΕΑΦΔΣΣ) απλώς δεν εμφανίζεται.
 - **Declined (από review): tenant-slug existence oracle στο `issued-doc-pdf`** — το tenant lookup προηγείται
   του signature check (404 vs 401), όπως σε ΟΛΑ τα sibling webhook controllers· τα slugs δεν είναι μυστικά και
   το πραγματικό auth (HMAC secret) δεν επηρεάζεται. Αφήνεται συνεπές με το υπάρχον pattern.
+- **«Εκδοθέντα» — PDF proxy για historical (P2, follow-up)** — τα historical rows επιστρέφουν `has_pdf:false`
+  (το GET `issued-doc-pdf` εξουσιοδοτεί μόνο μέσω pending rows, που τα pre-bridge δεν έχουν). Για proxied PDF
+  και στα historical θα χρειαστεί POST variant του PDF endpoint που δέχεται τα δικά του WHMCS ids (ίδιο leak-proof
+  boundary με τη λίστα). Σήμερα τα historical δείχνουν το verify link (για ΥΠΑΕΣ = η επίσημη προβολή) χωρίς PDF.
+- **Declined (από review): `verify_kind` ανά-tenant, όχι ανά-invoice** — παράγεται από `company.einvoice_provider`,
+  σωστό για single-provider tenant· μπερδεύει μόνο σε tenant που ΑΛΛΑΞΕ πάροχο με mixed ιστορικό (cosmetic label,
+  ο σύνδεσμος δουλεύει). Per-invoice θα ήθελε `latestProviderMark()` = N+1. Αφήνεται.
+- **Declined (από review): historical is_own fallback → «own» όταν ο reseller δεν έχει linked customer** — καθαρά
+  cosmetic grouping (και τα δύο του ανήκουν, το party_name φαίνεται)· το «fix» (seed από pending.customer_id)
+  ρισκάρει το αντίστροφο mislabel σε single-third-party. Default «own» = σωστό στη συνήθη περίπτωση (pre-bridge
+  ιστορικό = κυρίως δικά του).
 - **WHMCS-inbox resolver memoization (P2, από review)** — ο `WhmcsPaymentMethodResolver` (και ο δίδυμος
   `WhmcsIncomeClassifier`) χτίζονται per-`map()` call, οπότε preview+persist και κάθε split-party κάνουν
   ξεχωριστό query. Invoice-invariant → θα μπορούσαν να περνιούνται μία φορά από τον caller. Αμελητέο (ένα
