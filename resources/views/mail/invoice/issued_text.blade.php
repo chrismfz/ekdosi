@@ -5,13 +5,14 @@
 
 @endif
 {{ $bodyText }}
-@if($tenant?->phone || $tenant?->email || $tenant?->afm)
+@if($tenant?->phone || $tenant?->email || $tenant?->afm || $tenant?->gemi)
 
 @php
     $contact = [];
     if ($tenant?->phone) { $contact[] = 'Τηλέφωνο: '.$tenant->phone; }
     if ($tenant?->email) { $contact[] = 'Email: '.$tenant->email; }
     if ($tenant?->afm)   { $contact[] = 'ΑΦΜ: '.$tenant->afm; }
+    if ($tenant?->gemi)  { $contact[] = 'ΓΕΜΗ: '.$tenant->gemi; }
 @endphp
 {{ implode(' · ', $contact) }}
 @endif
