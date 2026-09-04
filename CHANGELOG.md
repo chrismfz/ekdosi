@@ -20,15 +20,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ### Added
 - **«Εκδοθέντα Παραστατικά» για τον πελάτη μέσα στο WHMCS.** Δύο νέα HMAC-signed webhook
-  endpoints (`issued-for-client/{userid}` + `issued-doc-pdf/{userid}/{invoice}`) τροφοδοτούν μια
+  endpoints (`issued-for-client` POST + `issued-doc-pdf/{userid}/{invoice}` GET) τροφοδοτούν μια
   νέα σελίδα του WHMCS plugin, όπου ο reseller βλέπει τα παραστατικά που εκδόθηκαν γι' αυτόν
   μέσω της γέφυρας — **δικά του ΚΑΙ όσα δρομολόγησε σε τρίτους** — με ΤΠΥ/ΜΑΡΚ/κατάσταση, επίσημο
-  PDF και σύνδεσμο επαλήθευσης ΑΑΔΕ/παρόχου. Το ekdosi είναι η αυθεντία (ένα split → πολλά
-  παραστατικά, που το 1:1 WHMCS-side mark store δεν χωράει): το authorization boundary είναι το
-  σύνολο των παραστατικών που προκύπτουν από WHMCS invoices **που πλήρωσε ο ίδιος** (`whmcs_userid`),
-  ΟΧΙ ο ΑΦΜ του τρίτου — άρα δεν διαρρέουν άσχετα παραστατικά τρίτου. Το PDF περνά **proxy** (τα bytes
-  ρέουν server-side πάνω από το HMAC κανάλι· το signed public URL δεν φτάνει ποτέ στον browser), και
-  κάθε αίτημα PDF ξανα-ελέγχει membership + `isPubliclyViewable()` (drafts/ακυρωμένα → 404). Read-only.
+  PDF και σύνδεσμο επαλήθευσης ΑΑΔΕ/παρόχου. Δύο leak-proof πηγές: **bridge-derived**
+  (`pending_whmcs_invoices.whmcs_userid` — το ekdosi είναι η αυθεντία, ένα split → πολλά παραστατικά που
+  το 1:1 WHMCS-side mark store δεν χωράει) **και historical (pre-bridge)** — ekdosi invoices matched
+  ντετερμινιστικά με `invoices.whmcs_invoice_id` πάνω στα **δικά του** WHMCS invoice ids (που στέλνει το
+  plugin από `tblinvoices.userid`). Το authorization boundary είναι πάντα τα invoices **που πλήρωσε ο
+  ίδιος**, ΟΧΙ ο ΑΦΜ του τρίτου — άρα δεν διαρρέουν άσχετα παραστατικά τρίτου. Κάθε γραμμή κουβαλά
+  `verify_kind` (`provider` ΥΠΑΕΣ vs `aade`) για σωστό label. Το PDF περνά **proxy** (τα bytes ρέουν
+  server-side πάνω από το HMAC κανάλι· το signed public URL δεν φτάνει ποτέ στον browser), και κάθε
+  αίτημα PDF ξανα-ελέγχει membership + `isPubliclyViewable()` (drafts/ακυρωμένα → 404). Read-only.
 
 ### Changed
 - **Έξω το εσωτερικό app-name «ekdosi» από τα emails πελατών.** Το προεπιλεγμένο markdown-mail chrome του

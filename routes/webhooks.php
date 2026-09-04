@@ -104,19 +104,20 @@ Route::post(
 
 /**
  * Customer-facing (via WHMCS): the "Εκδοθέντα Παραστατικά" list a reseller sees
- * in their own WHMCS client area. Keyed by WHMCS client id, it returns every
- * ISSUED ekdosi παραστατικό produced from a WHMCS invoice that reseller paid —
- * their own AND the ones routed to third parties they set up (decision (B)).
- * ekdosi is the authority (a split maps one WHMCS invoice to many παραστατικά,
- * which the 1:1 WHMCS-side mark store can't represent). Same HMAC scheme as
- * invoice-map, canonical "{slug}:issued:{whmcs_userid}". Read-only.
+ * in their own WHMCS client area. Returns every ISSUED ekdosi παραστατικό
+ * produced from a WHMCS invoice that reseller paid — their own AND the ones
+ * routed to third parties they set up (decision (B)) — folding BOTH the
+ * bridge-derived rows (pending_whmcs_invoices, keyed by whmcs_userid; ekdosi is
+ * the authority since a split maps one WHMCS invoice to many παραστατικά) AND
+ * the pre-bridge historical rows (matched by the deterministic
+ * invoices.whmcs_invoice_id FK against the reseller's own WHMCS invoice ids,
+ * which the plugin sends in the body). POST (the body carries the id list + the
+ * userid); HMAC over the raw body, same scheme as invoices-by-afm. Read-only.
  */
-Route::get(
-    'whmcs/{slug}/issued-for-client/{whmcs_userid}',
+Route::post(
+    'whmcs/{slug}/issued-for-client',
     WhmcsClientIssuedInvoicesController::class,
-)->middleware('throttle:120,1')
-    ->where('whmcs_userid', '[0-9]+')
-    ->name('whmcs.issued-for-client');
+)->middleware('throttle:120,1')->name('whmcs.issued-for-client');
 
 /**
  * Customer-facing (via WHMCS): stream ONE issued invoice's official PDF for the

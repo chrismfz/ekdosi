@@ -3,6 +3,7 @@
 namespace WHMCS\Module\Addon\EkdosiBridge\Client;
 
 use Throwable;
+use WHMCS\Database\Capsule;
 use WHMCS\Module\Addon\EkdosiBridge\EkdosiClient;
 
 /**
@@ -38,8 +39,18 @@ class IssuedController
             return $this->alert('info', 'Η υπηρεσία δεν είναι διαθέσιμη αυτή τη στιγμή.');
         }
 
+        // The client's OWN WHMCS invoice ids (tblinvoices.userid) — the leak-proof
+        // boundary ekdosi uses to also surface PRE-BRIDGE historical παραστατικά
+        // via the deterministic invoices.whmcs_invoice_id FK. Only gathered/sent
+        // when the «show OLD documents» knob is ON (default OFF); flipping it off
+        // instantly drops the historical rows without touching the rest. Best-
+        // effort: on any DB hiccup we just send none (only bridge-derived rows).
+        $ownWhmcsIds = Gate::issuedHistoricalEnabled()
+            ? $this->ownWhmcsInvoiceIds($clientId)
+            : [];
+
         try {
-            $result = $client->getIssuedForClient($clientId);
+            $result = $client->getIssuedForClient($clientId, $ownWhmcsIds);
         } catch (Throwable $e) {
             return $this->alert('warning', 'Δεν ήταν δυνατή η ανάκτηση των παραστατικών. Δοκίμασε ξανά σε λίγο.');
         }
@@ -229,14 +240,43 @@ HTML;
         }
         $verify = (string) ($r['verify_url'] ?? '');
         if ($verify !== '' && preg_match('#^https?://#i', $verify)) {
+            // Context-aware label: a ΥΠΑΕΣ (provider) document points at the
+            // πάροχος's official-copy page (e.g. InvoSign viewinvoice.php); a
+            // direct-myDATA one points at the AADE QR verification page.
+            $isProvider = ((string) ($r['verify_kind'] ?? '')) === 'provider';
+            $label = $isProvider ? 'Προβολή παρόχου (ΥΠΑΕΣ)' : 'Επαλήθευση ΑΑΔΕ';
+            $title = $isProvider ? 'Άνοιγμα του παραστατικού στον πάροχο (ΥΠΑΕΣ)' : 'Επαλήθευση του παραστατικού στην ΑΑΔΕ';
             $out .= '<a class="btn btn-xs btn-default" href="'.htmlspecialchars($verify, ENT_QUOTES).'" target="_blank" rel="noopener noreferrer" '
-                .'title="Επαλήθευση/προβολή στην ΑΑΔΕ"><i class="fa fa-external-link"></i> Επαλήθευση</a>';
+                .'title="'.htmlspecialchars($title, ENT_QUOTES).'"><i class="fa fa-external-link"></i> '.htmlspecialchars($label).'</a>';
         }
         if ($out === '') {
             $out = '<span class="text-muted">—</span>';
         }
 
         return $out;
+    }
+
+    /**
+     * The logged-in client's OWN WHMCS invoice ids (newest first, capped),
+     * gathered from tblinvoices.userid — the authoritative WHMCS-side scope for
+     * the historical lookup. Best-effort: any DB error yields an empty list (the
+     * page still shows the bridge-derived rows).
+     *
+     * @return list<int>
+     */
+    private function ownWhmcsInvoiceIds(int $clientId): array
+    {
+        try {
+            return Capsule::table('tblinvoices')
+                ->where('userid', $clientId)
+                ->orderByDesc('id')
+                ->limit(2000)
+                ->pluck('id')
+                ->map(static fn ($v): int => (int) $v)
+                ->all();
+        } catch (Throwable $e) {
+            return [];
+        }
     }
 
     private function alert(string $type, string $msg): string

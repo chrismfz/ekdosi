@@ -67,7 +67,7 @@ function ekdosi_bridge_config(): array
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.46.0',
+        'version' => '0.47.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [
@@ -123,6 +123,16 @@ function ekdosi_bridge_config(): array
                 'Type' => 'text',
                 'Size' => '40',
                 'Description' => 'Optional. Comma-separated WHMCS client IDs. When set, ONLY these clients see the «Εκδοθέντα Παραστατικά» page (everyone else sees nothing, even with the switch on). Leave blank for all clients.',
+            ],
+            // Second knob: whether the «Εκδοθέντα» page ALSO lists pre-bridge
+            // (imported) παραστατικά. Independent of the master switch so you can
+            // ship the page with only the safe bridge-derived rows first, then
+            // opt into historical — and disable JUST the historical part instantly
+            // if anything looks wrong, without hiding the whole page.
+            'show_client_issued_historical' => [
+                'FriendlyName' => 'Also show OLD (pre-bridge) documents',
+                'Type' => 'yesno',
+                'Description' => 'On the «Εκδοθέντα Παραστατικά» page, ALSO list the client\'s pre-bridge (imported) παραστατικά, matched by the deterministic invoices.whmcs_invoice_id link to their OWN WHMCS invoices (never by ΑΦΜ — no third-party leak). OFF by default: only bridge-issued documents show until you flip this on.',
             ],
         ],
     ];

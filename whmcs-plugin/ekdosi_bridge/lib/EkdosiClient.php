@@ -212,23 +212,31 @@ class EkdosiClient
     }
 
     /**
-     * GET the "Εκδοθέντα Παραστατικά" list for a WHMCS client — every ISSUED
+     * POST the "Εκδοθέντα Παραστατικά" list for a WHMCS client — every ISSUED
      * ekdosi παραστατικό produced from a WHMCS invoice that client paid (their
-     * own + third-party routed). Canonical "{slug}:issued:{whmcs_userid}"; the
-     * "issued:" infix keeps it distinct from map/status signatures. data['rows']
-     * carries the documents. Read-only; ekdosi enforces the per-client scope.
+     * own + third-party routed). The body carries the client id AND the client's
+     * OWN WHMCS invoice ids (from tblinvoices.userid) so ekdosi can also light up
+     * PRE-BRIDGE historical παραστατικά via the deterministic
+     * invoices.whmcs_invoice_id FK — leak-proof, because the boundary is the
+     * client's own WHMCS invoice ids, not a third party's ΑΦΜ. HMAC over the raw
+     * body (same scheme as invoices-by-afm). data['rows'] carries the documents.
+     *
+     * @param  list<int>  $ownWhmcsInvoiceIds  the client's own WHMCS invoice ids
      */
-    public function getIssuedForClient(int $whmcsUserId): array
+    public function getIssuedForClient(int $whmcsUserId, array $ownWhmcsInvoiceIds = []): array
     {
-        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug)
-            .'/issued-for-client/'.$whmcsUserId;
-        $canonical = $this->slug.':issued:'.$whmcsUserId;
-        $sig = 'sha256='.hash_hmac('sha256', $canonical, $this->secret);
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug).'/issued-for-client';
+        $body = json_encode([
+            'whmcs_userid' => $whmcsUserId,
+            'whmcs_invoice_ids' => array_values($ownWhmcsInvoiceIds),
+        ], JSON_THROW_ON_ERROR);
+        $sig = 'sha256='.hash_hmac('sha256', $body, $this->secret);
 
-        return $this->httpRequest('GET', $url, null, [
+        return $this->httpRequest('POST', $url, $body, [
+            'Content-Type: application/json',
             'Accept: application/json',
             'X-Webhook-Signature: '.$sig,
-        ], 10, 3);
+        ], 12, 3);
     }
 
     /**
