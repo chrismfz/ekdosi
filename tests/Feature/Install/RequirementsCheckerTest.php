@@ -121,6 +121,69 @@ class RequirementsCheckerTest extends TestCase
         $this->assertTrue($reqs['cache_writable']->blocks());
     }
 
+    public function test_unwritable_app_root_blocks_before_the_db_is_touched(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->envWritable = false;
+
+        $reqs = $this->byKey($checker);
+
+        // The installer writes .env in the app root AFTER migrating the DB, so
+        // an unwritable root must be a hard blocker caught at preflight.
+        $this->assertTrue($reqs['env_writable']->blocks());
+        $this->assertSame('error', $reqs['env_writable']->severity());
+        $this->assertTrue($checker->hasBlockers($checker->check()));
+    }
+
+    public function test_env_probe_passes_on_a_writable_dir_and_writes_nothing(): void
+    {
+        $dir = sys_get_temp_dir().'/ekdosi-envprobe-'.bin2hex(random_bytes(4));
+        mkdir($dir, 0o777, true);
+
+        try {
+            $checker = new class($dir) extends RequirementsChecker
+            {
+                public function __construct(private string $dir) {}
+
+                protected function envTargetDir(): string
+                {
+                    return $this->dir;
+                }
+
+                public function probe(): bool
+                {
+                    return $this->envTargetWritable();
+                }
+            };
+
+            $this->assertTrue($checker->probe(), 'a writable dir must pass the .env preflight');
+            // The preflight is READ-ONLY — it must never create a file (incl. a
+            // dotfile) in the target dir; it runs on every wizard render.
+            $entries = array_values(array_diff(scandir($dir) ?: [], ['.', '..']));
+            $this->assertSame([], $entries, 'the env-writable preflight must not write anything');
+        } finally {
+            @rmdir($dir);
+        }
+    }
+
+    public function test_env_probe_fails_on_a_missing_directory(): void
+    {
+        $checker = new class extends RequirementsChecker
+        {
+            protected function envTargetDir(): string
+            {
+                return '/nonexistent-'.bin2hex(random_bytes(4)).'/ekdosi';
+            }
+
+            public function probe(): bool
+            {
+                return $this->envTargetWritable();
+            }
+        };
+
+        $this->assertFalse($checker->probe());
+    }
+
     public function test_low_upload_limit_warns_but_does_not_block(): void
     {
         $checker = new ConfigurableRequirementsChecker;

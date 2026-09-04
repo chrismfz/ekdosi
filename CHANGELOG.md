@@ -63,6 +63,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
     status ξεχωρίζει πλέον **«no access (parent dir)»** από «absent» (permissions vs πραγματικά λείπει).
 
 ### Fixed
+- **Ο web installer μπλοκάρει πλέον έγκαιρα αν ο ριζικός φάκελος δεν είναι εγγράψιμος (OPS-002).** Ο οδηγός
+  γράφει το `.env` στη ρίζα ΩΣ ΤΕΛΕΥΤΑΙΟ βήμα — **μετά** το `migrate`/`ekdosi:install`. Μέχρι τώρα, μη-εγγράψιμη
+  ρίζα σήμαινε «φτιαγμένη βάση, χωρίς `.env`». Νέος **ΥΠΟΧΡΕΩΤΙΚΟΣ** έλεγχος `env_writable` στο preflight
+  (`RequirementsChecker`) ελέγχει τον **ΑΚΡΙΒΗ** φάκελο-στόχο του `.env` (`base_path()`) — read-only stat
+  (`is_dir` + `is_writable`, ίδιο μοτίβο με τους `storage`/`bootstrap/cache`), που πιάνει και read-only mount.
+  Επειδή είναι υποχρεωτικός, το POST της εγκατάστασης απορρίπτεται **πριν** αγγίξει τη βάση (server-side re-check).
 - **«Error while loading page» στο κουμπί «Έκδοση πιστωτικού».** Το modal είχε per-line Repeater με ένα
   `Placeholder::make('label')` του οποίου το `->content(fn (Get $get) => $get('label'))` **αναφερόταν στον
   εαυτό του** — στο Filament v5 αυτό μπαίνει σε **άπειρη αναδρομή** (το πεδίο αποτιμά το δικό του content →

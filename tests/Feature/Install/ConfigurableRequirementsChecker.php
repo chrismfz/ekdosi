@@ -19,6 +19,8 @@ class ConfigurableRequirementsChecker extends RequirementsChecker
 
     public bool $writable = true;
 
+    public bool $envWritable = true;
+
     public bool $procOpen = true;
 
     public bool $secure = true;
@@ -43,6 +45,11 @@ class ConfigurableRequirementsChecker extends RequirementsChecker
     protected function pathWritable(string $path): bool
     {
         return $this->writable;
+    }
+
+    protected function envTargetWritable(): bool
+    {
+        return $this->envWritable;
     }
 
     protected function requestIsSecure(): bool

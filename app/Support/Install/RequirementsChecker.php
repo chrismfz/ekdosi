@@ -110,6 +110,20 @@ class RequirementsChecker
                 detail: 'Ο φάκελος bootstrap/cache/ πρέπει να είναι εγγράψιμος (compiled config/routes).',
                 fix: 'chmod -R ug+rwX bootstrap/cache && chown -R <web-user> bootstrap/cache',
             ),
+            // The installer writes `.env` in the app root as its LAST step —
+            // AFTER migrate + ekdosi:install have already mutated the DB (see
+            // InstallController::run). If the root isn't writable, the operator
+            // ends up with a built database but NO `.env` to boot it. Catch that
+            // here (a hard blocker, re-checked server-side before the DB is
+            // touched) instead of at the very end when it's too late.
+            new Requirement(
+                key: 'env_writable',
+                label: 'Εγγράψιμος ριζικός φάκελος (.env)',
+                passed: $this->envTargetWritable(),
+                required: true,
+                detail: 'Ο οδηγός γράφει το .env στον ριζικό φάκελο ΩΣ ΤΕΛΕΥΤΑΙΟ βήμα (μετά τη βάση). Αν δεν είναι εγγράψιμος, η εγκατάσταση αφήνει τη βάση φτιαγμένη αλλά χωρίς .env.',
+                fix: 'Δώσε δικαίωμα εγγραφής στον ριζικό φάκελο (αυτόν που περιέχει το composer.json) στον χρήστη της PHP-FPM: chmod ug+rwX <root> && chown <web-user> <root>.',
+            ),
         ];
     }
 
@@ -265,5 +279,27 @@ class RequirementsChecker
     protected function cachePath(): string
     {
         return base_path('bootstrap/cache');
+    }
+
+    protected function envTargetDir(): string
+    {
+        return base_path();
+    }
+
+    /**
+     * Is the exact directory the installer writes `.env` into writable?
+     * {@see EnvWriter::write()} does temp-file + `rename()` in this dir — both
+     * need the SAME write+execute bits on the directory that `is_writable()`
+     * tests, and `is_writable()` also reports a read-only mount, so a plain stat
+     * is faithful here without the side effects of an actual write-probe (this
+     * runs on every wizard render — the class stays read-only, like the sibling
+     * storage/cache checks). ACL/SELinux corner cases where `access()` and a real
+     * write disagree are host misconfigurations the operator must fix regardless.
+     */
+    protected function envTargetWritable(): bool
+    {
+        $dir = $this->envTargetDir();
+
+        return is_dir($dir) && is_writable($dir);
     }
 }
