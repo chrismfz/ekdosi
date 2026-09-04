@@ -403,6 +403,16 @@ data model + phase gates: **`PLAN.md`**.
 - **Multi-party SPLIT write-back** στο WHMCS (ένα MARK ≠ N invoices).
 - **T-4 manual split tools** (transfer_invoice / relid_remover) — χαμηλή προτεραιότητα.
 - **«All of a client's third parties» 2ο dropdown** (θέλει `contacts-by-userid` bridge endpoint).
+- **«Εκδοθέντα Παραστατικά» — πλήρες pagination (P2, από review)** — το `issued-for-client` endpoint επιστρέφει
+  όλα τα pending rows του reseller (capped στα **500**, newest-first) σε έναν αδιαίρετο client-area πίνακα.
+  Για reseller με εκατοντάδες τιμολόγια θέλει σελιδοποίηση (endpoint `limit`/`cursor` + plugin UI). Ο cap
+  αποτρέπει το pathological memory/latency· η σελιδοποίηση είναι follow-up.
+- **«Εκδοθέντα Παραστατικά» — historical (pre-bridge) παραστατικά (idea)** — η σελίδα δείχνει μόνο τα
+  bridge-derived (`pending_whmcs_invoices`). Τα legacy-imported του πελάτη θα μπορούσαν να προστεθούν μέσω του
+  υπάρχοντος AFM/legacy-id path — αλλά ΜΟΝΟ τα δικά του (ο ΑΦΜ ως boundary θα διέρρεε άσχετα τρίτου). Χαμηλή.
+- **Declined (από review): tenant-slug existence oracle στο `issued-doc-pdf`** — το tenant lookup προηγείται
+  του signature check (404 vs 401), όπως σε ΟΛΑ τα sibling webhook controllers· τα slugs δεν είναι μυστικά και
+  το πραγματικό auth (HMAC secret) δεν επηρεάζεται. Αφήνεται συνεπές με το υπάρχον pattern.
 - **WHMCS-inbox resolver memoization (P2, από review)** — ο `WhmcsPaymentMethodResolver` (και ο δίδυμος
   `WhmcsIncomeClassifier`) χτίζονται per-`map()` call, οπότε preview+persist και κάθε split-party κάνουν
   ξεχωριστό query. Invoice-invariant → θα μπορούσαν να περνιούνται μία φορά από τον caller. Αμελητέο (ένα

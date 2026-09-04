@@ -43,6 +43,7 @@
 use WHMCS\Module\Addon\EkdosiBridge\Admin\AdminDispatcher;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Controller;
 use WHMCS\Module\Addon\EkdosiBridge\Client\Gate;
+use WHMCS\Module\Addon\EkdosiBridge\Client\IssuedController;
 use WHMCS\Module\Addon\EkdosiBridge\SchemaGuard;
 
 if (! defined('WHMCS')) {
@@ -59,13 +60,14 @@ require_once __DIR__.'/lib/ThirdPartyStore.php';
 require_once __DIR__.'/lib/RelidInspector.php';
 require_once __DIR__.'/lib/Client/Gate.php';
 require_once __DIR__.'/lib/Client/Controller.php';
+require_once __DIR__.'/lib/Client/IssuedController.php';
 
 function ekdosi_bridge_config(): array
 {
     return [
         'name' => 'Ekdosi Bridge',
         'description' => 'Push WHMCS invoices to ekdosi for AADE filing + receive MARK write-back. Replaces prepare_for_ekdosi.',
-        'version' => '0.45.0',
+        'version' => '0.46.0',
         'author' => 'MyIP Networks',
         'fields' => [
             'ekdosi_base_url' => [
@@ -105,6 +107,22 @@ function ekdosi_bridge_config(): array
                 'FriendlyName' => 'Show official PDF to customers',
                 'Type' => 'yesno',
                 'Description' => 'Show a «Επίσημο παραστατικό (ΑΑΔΕ)» button on the client-area invoice view page. OFF by default (admin-only). Flip on to let customers open the official ekdosi PDF (signed link, only their own invoices).',
+            ],
+            // "Εκδοθέντα Παραστατικά" client-area page — an INDEPENDENT switch
+            // from show_client_v2 (a tenant may let customers VIEW their issued
+            // documents without exposing the third-party routing editor). The
+            // list is fetched live from ekdosi, scoped to the logged-in client;
+            // the PDF is proxied (the signed ekdosi URL never reaches the browser).
+            'show_client_issued' => [
+                'FriendlyName' => 'Show client "Εκδοθέντα Παραστατικά" page',
+                'Type' => 'yesno',
+                'Description' => 'Show the client-area «Εκδοθέντα Παραστατικά» link — the customer sees the ekdosi παραστατικά issued for them (their own + third-party routed), with official PDF + AADE verification. OFF by default; customers see nothing while off.',
+            ],
+            'issued_pilot_clients' => [
+                'FriendlyName' => '"Εκδοθέντα" pilot client IDs',
+                'Type' => 'text',
+                'Size' => '40',
+                'Description' => 'Optional. Comma-separated WHMCS client IDs. When set, ONLY these clients see the «Εκδοθέντα Παραστατικά» page (everyone else sees nothing, even with the switch on). Leave blank for all clients.',
             ],
         ],
     ];
@@ -150,15 +168,49 @@ function ekdosi_bridge_output($vars): void
 }
 
 /**
- * T-2: client-area page "Παραστατικά σε τρίτους (v2)". Gated by
- * Gate::visibleTo (the show_client_v2 switch + the optional pilot allowlist) —
- * enforced HERE too, not just on the navbar link, so a hidden page can't be
- * reached by URL-guessing.
+ * Client-area entry for the addon. One WHMCS module has a SINGLE
+ * {module}_clientarea function, so it routes on `act`:
+ *   - act=issued / act=pdf → the "Εκδοθέντα Παραστατικά" page (Gate::issuedVisibleTo),
+ *   - anything else        → the "Παραστατικά σε τρίτους (v2)" page (Gate::visibleTo).
+ * Each branch enforces its OWN gate HERE (not just on the navbar link), so a
+ * hidden page can't be reached by URL-guessing; the two switches are independent.
  */
 function ekdosi_bridge_clientarea($vars): array
 {
     $clientId = (int) ($_SESSION['uid'] ?? 0);
+    $act = isset($_REQUEST['act']) ? (string) $_REQUEST['act'] : '';
 
+    // "Εκδοθέντα Παραστατικά" — the customer's issued-documents list + PDF proxy.
+    if ($act === 'issued' || $act === 'pdf') {
+        if (! Gate::issuedVisibleTo($clientId)) {
+            return [
+                'pagetitle' => 'Εκδοθέντα Παραστατικά',
+                'breadcrumb' => ['index.php?m=ekdosi_bridge&act=issued' => 'Εκδοθέντα Παραστατικά'],
+                'templatefile' => 'issuedpage',
+                'requirelogin' => true,
+                'vars' => ['pagecontent' => '<div class="alert alert-info">Η σελίδα δεν είναι διαθέσιμη.</div>'],
+            ];
+        }
+
+        $issued = new IssuedController;
+        if ($act === 'pdf') {
+            // Streams the PDF and exits on success; only returns (an error
+            // string) when it could NOT stream — shown on the page below.
+            $html = $issued->streamPdf($vars, $clientId, (int) ($_GET['doc'] ?? 0));
+        } else {
+            $html = $issued->render($vars, $clientId);
+        }
+
+        return [
+            'pagetitle' => 'Εκδοθέντα Παραστατικά',
+            'breadcrumb' => ['index.php?m=ekdosi_bridge&act=issued' => 'Εκδοθέντα Παραστατικά'],
+            'templatefile' => 'issuedpage',
+            'requirelogin' => true,
+            'vars' => ['pagecontent' => $html],
+        ];
+    }
+
+    // Default: the "Παραστατικά σε τρίτους (v2)" third-party routing editor.
     if (! Gate::visibleTo($clientId)) {
         return [
             'pagetitle' => 'Παραστατικά σε τρίτους',
