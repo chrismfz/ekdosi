@@ -402,7 +402,7 @@ class InvoSignDocument
             'CounterpartAddressPostalCode' => $postalCode,
             'CounterpartAddressCity' => $city,
             'CounterpartPhone' => (string) ($contact?->phone ?? ''),
-            'CounterpartEmail' => (string) ($contact?->email ?? ''),
+            'CounterpartEmail' => self::customerEmail($invoice->company, $contact?->email),
         ];
     }
 
@@ -431,8 +431,24 @@ class InvoSignDocument
             'CounterpartAddressPostalCode' => (string) ($note->delivery_postcode ?: $customer?->postcode ?? ''),
             'CounterpartAddressCity' => (string) ($note->delivery_city ?: $customer?->city ?? ''),
             'CounterpartPhone' => (string) ($customer?->phone ?? ''),
-            'CounterpartEmail' => (string) ($customer?->email ?? ''),
+            'CounterpartEmail' => self::customerEmail($note->company, $customer?->email),
         ];
+    }
+
+    /**
+     * <CounterpartEmail> is what the provider uses to DELIVER (email) the document
+     * to the customer. It ships only when the tenant opts in via the per-company knob
+     * companies.einvoice_include_customer_email (default OFF) — otherwise EMPTY, the
+     * same shape as a customer with no email on file, so the provider never emails a
+     * customer from ekdosi's XML by accident (the dev-environment footgun this closes).
+     * ekdosi's own SendInvoiceEmail flow is unaffected — this is provider-side delivery
+     * only, and only on the gr-provider channel (the AADE payload carries no email).
+     */
+    private static function customerEmail(?Company $company, ?string $email): string
+    {
+        return $company?->einvoice_include_customer_email
+            ? (string) ($email ?? '')
+            : '';
     }
 
     /** @param  array<string, string>  $fields */

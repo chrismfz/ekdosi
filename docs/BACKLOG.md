@@ -160,6 +160,11 @@ surfaced in the open-items sections further down.
   φτάνει το σημερινό email είναι το σωστό. **Αν** ποτέ χρειαστεί να είναι αναπαραγώγιμα (π.χ.
   «τι email είχε τότε;» σε έλεγχο), θέλουν **δικές τους στήλες snapshot** — όχι σιωπηλό πάγωμα
   μέσα στον builder. Καταγράφεται ως συνειδητή απόφαση, όχι ως παράλειψη.
+  - **`CounterpartPhone` ungated (P2, από review)** — ο διακόπτης `einvoice_include_customer_email`
+    (default OFF) πυλώνει μόνο το `CounterpartEmail`, όπως ζητήθηκε ρητά. Το `CounterpartPhone` μένει
+    πάντα ζωντανό. Σήμερα ο InvoSign παραδίδει με email (όχι SMS), οπότε δεν είναι footgun· **αν** ποτέ
+    προστεθεί SMS-παράδοση, το τηλέφωνο γίνεται ανάλογη περίπτωση → είτε δεύτερος διακόπτης είτε
+    επέκταση του ίδιου (rename σε `einvoice_include_customer_contact`).
 - **Χώρα πελάτη/προμηθευτή σε ISO picker (follow-up MYD-011)** — το `suppliers.country` έχει
   **default 'GR'** (NOT NULL) και το `customers.country` είναι ελεύθερο κείμενο, οπότε ένας ξένος
   προμηθευτής μπορεί να παγώσει `GR` σε ΔΑ. Δοκιμάστηκε μέσα στο MYD-011 και **αναιρέθηκε**: ένα

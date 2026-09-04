@@ -228,6 +228,11 @@
   (`remaining_invoices`) + τα emails παραλήπτη (`receptionEmails`), που αποθηκεύονται δομημένα στο
   `mydata_marks`. Dashboard widget **«Πάροχος ΥΠΑΗΕΣ»** με το τρέχον υπόλοιπο (χρωματισμένο κοντά στο
   όριο) + προειδοποίηση στο log σε χαμηλό υπόλοιπο — χωρίς polling.
+- **Διακόπτης «Αποστολή email πελάτη στον πάροχο»** (`einvoice_include_customer_email`, καρτέλα «Πάροχος
+  (ΥΠΑΗΕΣ)», default OFF) — το `<CounterpartEmail>` που ο πάροχος χρησιμοποιεί για να στείλει το νόμιμο
+  παραστατικό στον πελάτη μπαίνει στο XML **μόνο** όταν ο tenant το ανάψει· σβηστό → κενό πεδίο (δεν φεύγει
+  email δοκιμαστικά σε πραγματικούς πελάτες). Ισχύει σε τιμολόγια + δελτία αποστολής, μόνο στον δίαυλο
+  παρόχου· η δική του ροή email του ekdosi (`SendInvoiceEmail`) είναι ανεξάρτητη.
 - **PEPPOL Phase 1** (Εσθονία) — provider-independent **BIS Billing 3.0 / EN 16931 UBL**
   builder (`PeppolInvoiceDocument` μέσω `josemmo/einvoicing`) + `peppol:test-submit`
   (dry-run + validate). Phase 2 (Access-Point transport) = backlog.

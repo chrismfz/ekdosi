@@ -42,6 +42,7 @@ class Company extends Model
         'einvoice_provider_key',
         'einvoice_provider_config',
         'einvoice_provider_mode',
+        'einvoice_include_customer_email',
         'afm',
         'tax_office',
         'kad_primary',
@@ -143,6 +144,7 @@ class Company extends Model
             // Provider credential blob — JSON (api key / token / endpoint /
             // provider AFM + ΥΠΑΗΕΣ licence no.). Same at-rest pattern as the keys above.
             'einvoice_provider_config' => MaybeEncrypted::class.':array',
+            'einvoice_include_customer_email' => 'boolean',
             'gsis_password' => MaybeEncrypted::class,
             'mail_smtp_password' => MaybeEncrypted::class,
             'whmcs_api_secret' => MaybeEncrypted::class,
