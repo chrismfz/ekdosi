@@ -55,7 +55,7 @@
         </div>
     @endif
 
-    <form method="POST" action="{{ url('/install') }}" id="install-form">
+    <form method="POST" action="{{ url('/install') }}" id="install-form" enctype="multipart/form-data">
         {{-- Καμία CSRF: ο installer τρέχει χωρίς session· η ασφάλεια είναι ο κωδικός επιβεβαίωσης. --}}
 
         {{-- 1. Επιβεβαίωση πρόσβασης --}}
@@ -240,27 +240,59 @@
                 </div>
             </div>
 
-            <div class="row">
-                <div class="field">
-                    <label for="company_name">Επωνυμία εταιρίας <span class="req">*</span></label>
-                    <input type="text" id="company_name" name="company_name" value="{{ $val('company_name') }}">
-                </div>
-                <div class="field">
-                    <label for="company_slug">Slug (προαιρετικό)</label>
-                    <input type="text" id="company_slug" name="company_slug" value="{{ $val('company_slug') }}" placeholder="αυτόματο από την επωνυμία">
+            @php $mode = $old['install_mode'] ?? $defaults['install_mode'] ?? 'new'; @endphp
+            <div class="field" style="margin-top: 6px;">
+                <label>Πρώτη εταιρία <span class="req">*</span></label>
+                <div class="mode-toggle">
+                    <label class="mode-opt">
+                        <input type="radio" name="install_mode" value="new" {{ $mode === 'new' ? 'checked' : '' }}>
+                        <span><strong>Νέα εταιρία</strong> — συμπλήρωσε τα στοιχεία παρακάτω</span>
+                    </label>
+                    <label class="mode-opt">
+                        <input type="radio" name="install_mode" value="import" {{ $mode === 'import' ? 'checked' : '' }}>
+                        <span><strong>Εισαγωγή από αρχείο (.zip)</strong> — ανέβασε ένα backup εταιρίας (<code>company:export</code>)· τα στοιχεία, οι ρυθμίσεις, τα κλειδιά και οι χειριστές έρχονται από αυτό</span>
+                    </label>
                 </div>
             </div>
-            <div class="row">
+
+            {{-- Νέα εταιρία --}}
+            <div id="company-fields" class="{{ $mode === 'import' ? 'hidden' : '' }}">
+                <div class="row">
+                    <div class="field">
+                        <label for="company_name">Επωνυμία εταιρίας <span class="req">*</span></label>
+                        <input type="text" id="company_name" name="company_name" value="{{ $val('company_name') }}">
+                    </div>
+                    <div class="field">
+                        <label for="company_slug">Slug (προαιρετικό)</label>
+                        <input type="text" id="company_slug" name="company_slug" value="{{ $val('company_slug') }}" placeholder="αυτόματο από την επωνυμία">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="field">
+                        <label for="company_country">Χώρα <span class="req">*</span></label>
+                        <select id="company_country" name="company_country">
+                            <option value="GR" {{ $sel('company_country', 'GR') }}>Ελλάδα (myDATA)</option>
+                            <option value="EE" {{ $sel('company_country', 'EE') }}>Εσθονία (PEPPOL)</option>
+                        </select>
+                    </div>
+                    <div class="field">
+                        <label for="company_afm">ΑΦΜ (προαιρετικό)</label>
+                        <input type="text" id="company_afm" name="company_afm" value="{{ $val('company_afm') }}">
+                    </div>
+                </div>
+            </div>
+
+            {{-- Εισαγωγή από .zip --}}
+            <div id="import-fields" class="{{ $mode === 'import' ? '' : 'hidden' }}">
                 <div class="field">
-                    <label for="company_country">Χώρα <span class="req">*</span></label>
-                    <select id="company_country" name="company_country">
-                        <option value="GR" {{ $sel('company_country', 'GR') }}>Ελλάδα (myDATA)</option>
-                        <option value="EE" {{ $sel('company_country', 'EE') }}>Εσθονία (PEPPOL)</option>
-                    </select>
+                    <label for="bundle">Αρχείο εταιρίας (.zip) <span class="req">*</span></label>
+                    <input type="file" id="bundle" name="bundle" accept=".zip,application/zip">
+                    <p class="hint">Το .zip που έβγαλε το <code>php artisan company:export</code> στην άλλη εγκατάσταση.</p>
                 </div>
                 <div class="field">
-                    <label for="company_afm">ΑΦΜ (προαιρετικό)</label>
-                    <input type="text" id="company_afm" name="company_afm" value="{{ $val('company_afm') }}">
+                    <label for="bundle_passphrase">Συνθηματικό αρχείου</label>
+                    <input type="password" id="bundle_passphrase" name="bundle_passphrase" autocomplete="new-password" placeholder="άφησέ το κενό αν το .zip είναι χωρίς κρυπτογράφηση">
+                    <p class="hint">Χρειάζεται <strong>μόνο</strong> αν το export έγινε με συνθηματικό. Για μη-κρυπτογραφημένο (raw) .zip, άφησέ το κενό.</p>
                 </div>
             </div>
         </div>
@@ -288,6 +320,19 @@
         }
         mailer.addEventListener('change', toggleSmtp);
         toggleSmtp();
+
+        // Mode toggle: «Νέα εταιρία» vs «Εισαγωγή από .zip».
+        var modeRadios = document.querySelectorAll('input[name="install_mode"]');
+        var companyFields = document.getElementById('company-fields');
+        var importFields = document.getElementById('import-fields');
+        function toggleMode() {
+            var checked = document.querySelector('input[name="install_mode"]:checked');
+            var isImport = checked && checked.value === 'import';
+            companyFields.classList.toggle('hidden', isImport);
+            importFields.classList.toggle('hidden', !isImport);
+        }
+        Array.prototype.forEach.call(modeRadios, function (r) { r.addEventListener('change', toggleMode); });
+        toggleMode();
 
         // Δοκιμή σύνδεσης (AJAX).
         var btn = document.getElementById('test-db-btn');

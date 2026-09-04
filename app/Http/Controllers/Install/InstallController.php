@@ -3,6 +3,8 @@
 namespace App\Http\Controllers\Install;
 
 use App\Services\Install\MariaDbConnectionTester;
+use App\Services\Portability\BundleArchive;
+use App\Services\Portability\SecretsCodec;
 use App\Support\Install\EnvWriter;
 use App\Support\Install\InstallState;
 use App\Support\Install\InstallTokenManager;
@@ -86,6 +88,15 @@ class InstallController
     {
         $this->guardPristine();
 
+        // (0) An upload larger than PHP's post_max_size arrives with the body
+        //     DROPPED — $_POST/$_FILES are empty though Content-Length is set. Catch
+        //     it so an oversized bundle doesn't masquerade as a «wrong token» error.
+        //     (Other empty-body causes are possible but the wizard never produces
+        //     them, so the size hint is the useful one — worded as «usually».)
+        if ((int) $request->server('CONTENT_LENGTH', 0) > 0 && $request->all() === []) {
+            return $this->redisplay($request, ['Το αίτημα έφτασε κενό — συνήθως γιατί το ανεβασμένο αρχείο ξεπερνά τα όρια του διακομιστή (post_max_size / upload_max_filesize). Μείωσε το μέγεθος του .zip ή αύξησε τα όρια στο php.ini (fpm ΚΑΙ cli) και ξαναπροσπάθησε.']);
+        }
+
         // (1) Token gate — proof of server access, re-checked here.
         if (! $this->tokens->verify($request->input('verify_token'))) {
             return $this->redisplay($request, ['Λάθος κωδικός επιβεβαίωσης. Άνοιξε το αρχείο '.$this->relativeTokenPath().' στον διακομιστή και επικόλλησε τον κωδικό.']);
@@ -133,6 +144,34 @@ class InstallController
             return $this->redisplay($request, [$probe->message]);
         }
 
+        // (3b) Import mode: read the uploaded bundle + verify its passphrase NOW,
+        //      before we migrate — a bad file or wrong passphrase must not leave a
+        //      migrated-but-empty DB. The company identity comes from the bundle,
+        //      not the form. A raw (un-encrypted) bundle needs no passphrase.
+        $importMode = ($data['install_mode'] ?? 'new') === 'import';
+        $bundlePath = null;
+        $companyLabel = (string) ($data['company_name'] ?? '');
+
+        if ($importMode) {
+            $bundlePath = (string) $request->file('bundle')->getRealPath();
+            try {
+                // Only the small manifest+secrets are needed here — don't inflate
+                // the whole (possibly large) archive twice (the command re-reads it).
+                $header = app(BundleArchive::class)->readHeader($bundlePath);
+                $mode = (string) ($header['secrets']['mode'] ?? 'passphrase');
+                if ($mode !== 'raw') {
+                    $pass = (string) ($data['bundle_passphrase'] ?? '');
+                    app(SecretsCodec::class)->open($header['secrets'], $pass !== '' ? $pass : null);
+                }
+                $companyLabel = (string) ($header['manifest']['company']['name']
+                    ?? $header['manifest']['company']['slug'] ?? 'Εταιρία');
+            } catch (\Throwable) {
+                // No raw exception text (it can carry the server temp path) — the
+                // two real causes are a bad file or a wrong passphrase.
+                return $this->redisplay($request, ['Το αρχείο εταιρίας (.zip) δεν διαβάζεται ή το συνθηματικό είναι λάθος. Έλεγξε ότι ανέβασες το σωστό .zip και ότι το συνθηματικό ταιριάζει.']);
+            }
+        }
+
         // (4) Point the framework at the target DB for the rest of this request.
         $appKey = $this->env->generateAppKey();
         $this->applyRuntimeConfig($data, $appKey);
@@ -144,20 +183,30 @@ class InstallController
         try {
             Artisan::call('migrate', ['--force' => true]);
 
-            $exit = Artisan::call('ekdosi:install', [
-                '--name' => $data['admin_name'],
-                '--email' => $data['admin_email'],
-                '--password' => $data['admin_password'],
-                '--company' => $data['company_name'],
-                '--slug' => $this->slug($data),
-                '--country' => $data['company_country'],
-                '--provider' => $data['company_country'] === 'EE' ? 'ee-peppol' : 'gr-mydata',
-                '--afm' => $data['company_afm'] ?? '',
-                // Complete a half-built tenant from a prior attempt without
-                // tripping the «users already exist» safeguard (all steps idempotent).
-                '--force' => true,
-                '--no-interaction' => true,
-            ]);
+            // Complete a half-built tenant from a prior attempt without tripping
+            // the «users already exist» safeguard (blank path is idempotent).
+            $exit = $importMode
+                ? Artisan::call('ekdosi:install', [
+                    '--bundle' => (string) $bundlePath,
+                    '--bundle-passphrase' => (string) ($data['bundle_passphrase'] ?? ''),
+                    '--name' => $data['admin_name'],
+                    '--email' => $data['admin_email'],
+                    '--password' => $data['admin_password'],
+                    '--force' => true,
+                    '--no-interaction' => true,
+                ])
+                : Artisan::call('ekdosi:install', [
+                    '--name' => $data['admin_name'],
+                    '--email' => $data['admin_email'],
+                    '--password' => $data['admin_password'],
+                    '--company' => $data['company_name'],
+                    '--slug' => $this->slug($data),
+                    '--country' => $data['company_country'],
+                    '--provider' => $data['company_country'] === 'EE' ? 'ee-peppol' : 'gr-mydata',
+                    '--afm' => $data['company_afm'] ?? '',
+                    '--force' => true,
+                    '--no-interaction' => true,
+                ]);
 
             if ($exit !== 0) {
                 return $this->redisplay($request, [
@@ -183,7 +232,7 @@ class InstallController
             'installed_at' => now()->toIso8601String(),
             'version' => (string) config('app.version'),
             'admin_email' => $data['admin_email'],
-            'company' => $data['company_name'],
+            'company' => $companyLabel,
         ]);
         $this->tokens->clear();
         $this->clearConfigCache();
@@ -191,7 +240,7 @@ class InstallController
         return response()->view('install.done', [
             'appUrl' => rtrim($data['app_url'], '/'),
             'adminEmail' => $data['admin_email'],
-            'company' => $data['company_name'],
+            'company' => $companyLabel,
             'checklist' => $this->postInstallChecklist(),
         ]);
     }
@@ -212,7 +261,7 @@ class InstallController
             'tokenIssued' => $this->tokens->token() !== null,
             'tokenPath' => $this->relativeTokenPath(),
             'errors' => $errors,
-            'old' => $request->except(['admin_password', 'admin_password_confirmation', 'db_password', 'mail_password', 'verify_token']),
+            'old' => $request->except(['admin_password', 'admin_password_confirmation', 'db_password', 'mail_password', 'bundle_passphrase', 'verify_token', 'bundle']),
             'defaults' => $this->defaults(),
             'requirements' => $requirements,
             'hasBlockers' => $this->requirements->hasBlockers($requirements),
@@ -250,9 +299,22 @@ class InstallController
             'admin_name' => ['required', 'string', 'max:255'],
             'admin_email' => ['required', 'email', 'max:255'],
             'admin_password' => ['required', 'string', 'min:8', 'confirmed'],
-            'company_name' => ['required', 'string', 'max:255'],
+
+            // «Νέα εταιρία» vs «Εισαγωγή από .zip». In import mode the company
+            // identity + settings come from the bundle, so the company_* fields
+            // below are not required and are ignored. Nullable + defaulted to
+            // «new» in run() so a request without the field behaves as before.
+            'install_mode' => ['nullable', 'in:new,import'],
+            'bundle' => ['required_if:install_mode,import', 'file', 'max:'.(50 * 1024)],
+            // Optional: only sealed (non-raw) bundles need one; the server enforces
+            // it against the bundle's own secrets.mode (see run()).
+            'bundle_passphrase' => ['nullable', 'string'],
+
+            // required UNLESS importing → required for «new» AND for a request that
+            // omits install_mode entirely (which run() treats as «new»).
+            'company_name' => ['required_unless:install_mode,import', 'nullable', 'string', 'max:255'],
             'company_slug' => ['nullable', 'string', 'max:255'],
-            'company_country' => ['required', 'in:GR,EE'],
+            'company_country' => ['required_unless:install_mode,import', 'nullable', 'in:GR,EE'],
             'company_afm' => ['nullable', 'string', 'max:20'],
         ];
     }
@@ -352,6 +414,7 @@ class InstallController
             'mail_encryption' => 'null',
             'mail_from_address' => 'no-reply@example.gr',
             'company_country' => 'GR',
+            'install_mode' => 'new',
         ];
     }
 

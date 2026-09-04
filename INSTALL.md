@@ -393,6 +393,14 @@ is listed as an operator in the bundle. Operators the bundle lists are
 re-created with a random password — they set one via the
 «ξέχασα τον κωδικό» flow (no credential ever travels in a bundle).
 
+**No shell? Use the web wizard instead.** The `/install` wizard offers the
+same thing without a console: pick **«Εισαγωγή από .zip»**, upload the
+bundle (and its passphrase if it was exported encrypted — leave it blank
+for a raw one), fill in the DB creds + admin, and submit. Hand a partner
+the code + the `.zip`, have them create an empty MariaDB and point a
+browser at the site — that's it. (The wizard's «Νέα εταιρία» mode is the
+blank-company install as before.)
+
 After this you have schema + an admin user + three empty tenants. If
 you also want actual ekdosi data to play with (71 customers, 161
 invoices, etc.), continue to §12 — the ETL fills the `myip` tenant
