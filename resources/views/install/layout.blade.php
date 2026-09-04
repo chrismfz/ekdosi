@@ -37,6 +37,17 @@
             border-radius: 8px; font-size: 14px; color: var(--ink); background: #fff;
         }
         input:focus, select:focus { outline: 2px solid var(--brand); border-color: var(--brand); }
+        input[type=file] {
+            width: 100%; padding: 8px; border: 1px dashed var(--line);
+            border-radius: 8px; font-size: 13px; background: #f8fafc; color: var(--ink);
+        }
+        .mode-toggle { display: flex; flex-direction: column; gap: 8px; }
+        .mode-opt {
+            display: flex; gap: 10px; align-items: flex-start; font-weight: 400;
+            border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; cursor: pointer;
+        }
+        .mode-opt input { width: auto; margin-top: 3px; flex: none; }
+        .mode-opt span { font-size: 13px; color: var(--ink); }
         .row { display: flex; gap: 12px; flex-wrap: wrap; }
         .row > .field { flex: 1; min-width: 160px; }
         .hint { color: var(--muted); font-size: 12px; margin-top: 4px; }

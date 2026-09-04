@@ -54,30 +54,48 @@ class BundleArchive
     }
 
     /**
+     * Read ONLY the small header files (manifest + secrets) WITHOUT inflating the
+     * whole archive — for a caller that just needs the company identity and to
+     * verify the passphrase (the web installer's pre-migrate gate). Avoids
+     * decoding every setup/data/files entry into memory twice on a big bundle.
+     *
+     * @return array{manifest: array<string,mixed>, secrets: array<string,mixed>}
+     */
+    public function readHeader(string $path): array
+    {
+        $zip = $this->openOrFail($path);
+
+        $manifest = $this->readJsonEntry($zip, 'manifest.json');
+        $secrets = $this->readJsonEntry($zip, 'secrets.json');
+        // company.json isn't needed here, but verify it EXISTS: the full read()
+        // requires it, so the gate must fail on its absence BEFORE migrate rather
+        // than letting the command fail after (leaving a migrated, empty DB).
+        $hasCompany = $zip->locateName('company.json') !== false;
+        $zip->close();
+
+        if ($manifest === null || $secrets === null || ! $hasCompany) {
+            throw new RuntimeException('Μη έγκυρο αρχείο: λείπει manifest/company/secrets.');
+        }
+
+        return compact('manifest', 'secrets');
+    }
+
+    /**
      * @return array<string,mixed> CompanyExporter::build() shape
      */
     public function read(string $path): array
     {
-        $zip = new ZipArchive;
-        if ($zip->open($path) !== true) {
-            throw new RuntimeException("Αδυναμία ανάγνωσης zip: {$path}");
-        }
+        $zip = $this->openOrFail($path);
 
-        $read = static function (string $name) use ($zip): ?array {
-            $raw = $zip->getFromName($name);
-
-            return $raw === false ? null : json_decode($raw, true);
-        };
-
-        $manifest = $read('manifest.json');
-        $company = $read('company.json');
-        $secrets = $read('secrets.json');
+        $manifest = $this->readJsonEntry($zip, 'manifest.json');
+        $company = $this->readJsonEntry($zip, 'company.json');
+        $secrets = $this->readJsonEntry($zip, 'secrets.json');
         if ($manifest === null || $company === null || $secrets === null) {
             $zip->close();
             throw new RuntimeException('Μη έγκυρο αρχείο: λείπει manifest/company/secrets.');
         }
         // Optional (absent in older bundles) → default to no assigned operators.
-        $users = $read('users.json') ?? [];
+        $users = $this->readJsonEntry($zip, 'users.json') ?? [];
 
         $setup = [];
         $data = [];
@@ -97,5 +115,34 @@ class BundleArchive
         $zip->close();
 
         return compact('manifest', 'company', 'secrets', 'users', 'setup', 'data', 'files');
+    }
+
+    private function openOrFail(string $path): ZipArchive
+    {
+        $zip = new ZipArchive;
+        if ($zip->open($path) !== true) {
+            throw new RuntimeException("Αδυναμία ανάγνωσης zip: {$path}");
+        }
+
+        return $zip;
+    }
+
+    /**
+     * Decode one JSON entry to an array, or null when it is absent OR not a JSON
+     * object/array (a bare scalar would otherwise raise a TypeError instead of the
+     * intended «invalid file» error).
+     *
+     * @return array<mixed>|null
+     */
+    private function readJsonEntry(ZipArchive $zip, string $name): ?array
+    {
+        $raw = $zip->getFromName($name);
+        if ($raw === false) {
+            return null;
+        }
+
+        $decoded = json_decode($raw, true);
+
+        return is_array($decoded) ? $decoded : null;
     }
 }
