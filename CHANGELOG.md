@@ -41,6 +41,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   από το inbox — ο όρος που χρησιμοποιεί ο χειριστής, και δεν εκθέτει το όνομα του billing system στο
   πελατειακό PDF.
 ### Added
+- **`ekdosi:install --bundle=<zip>` — στήσιμο φρέσκου install από company-export bundle.** Αντί για κενή
+  πρώτη εταιρία, ο installer ΕΠΑΝΑΦΕΡΕΙ ολόκληρο tenant από ένα `company:export` .zip (ταυτότητα/ΑΦΜ/ΓΕΜΗ,
+  ρυθμίσεις, **σφραγισμένα secrets**, setup tables, χειριστές) και μετά φτιάχνει τον install-admin ως
+  super_admin. `--bundle-passphrase` (ή prompt· raw bundle → χωρίς). Ο admin δημιουργείται **ΠΡΩΤΑ** με τον
+  κωδικό που δίνεις, ώστε αν το bundle αναφέρει το email του ως χειριστή να μην τον φτιάξει ο importer με
+  τυχαίο κωδικό. Το lookup-seeding παραλείπεται (το bundle κουβαλά ΦΠΑ/τύπους/τρόπους). Έτσι ένα νέο
+  cPanel/DirectAdmin box σηκώνεται προ-ρυθμισμένο με μία εντολή.
 - **Οι χειριστές (operators) ταξιδεύουν πλέον μέσα στο company bundle — χωρίς κωδικό.** Το
   `company:export` κουβαλά τους ανατεθειμένους χρήστες της εταιρίας (email + όνομα + ο ένας managed ρόλος
   τους: super_admin/company_admin/operator) σε νέο `users.json` — **ΠΟΤΕ** password/id/credential. Στο

@@ -855,6 +855,12 @@ fail-closed/self-disabling, filesystem-token gate — βλ. FEATURES §17) · `e
 `MyDataLookupSeeder` (VAT/invoice types/payment-delivery methods/aims/units, με one-click
 `StandardLookupSeedAction` ανά resource) · `DemoCompanySeeder` · GSIS/VIES lookup · `suppliers:sync` ·
 «Πρότυπα τελών». Ιδέες για ευκολότερο στήσιμο από το 0:_
+- **`ekdosi:install --bundle` partial-failure recovery** _(P2, from the install-bundle review)._ If the
+  importer COMMITS the company but its post-commit role provisioning throws, `installFromBundle` fails before
+  attaching the admin, and a re-run can't finish: `--new` refuses an existing slug. The importer already prints
+  «τρέξε shield:sync-super-admin», and manual attach + that command recover it, but there's no clean re-run path.
+  Fix = on a `--force` re-run where the slug exists, attach the admin + re-provision (or route through `--into`)
+  instead of refusing. Rare (role provisioning seldom throws after a clean company commit).
 - **Web installer — follow-ups:** (α) προαιρετικό `CREATE DATABASE` όταν ο DB χρήστης έχει δικαίωμα (τώρα
   απαιτεί προ-δημιουργημένη κενή βάση — το σωστό default σε shared hosting)· (β) ~~auto-detect writable
   dirs / PHP extensions ως preflight βήμα~~ **DONE** (`RequirementsChecker`, incl. `env_writable` OPS-002)·

@@ -374,6 +374,25 @@ all — run `php artisan ekdosi:install` (prompts for real credentials +
 first company), or `php artisan ekdosi:create-admin` to add/reset a
 super_admin once a company exists.
 
+**Standing up a pre-configured company from a bundle.** If you already
+run this company elsewhere, export it there
+(`php artisan company:export --tenant=<slug>`, passphrase-prompted) and
+provision the new box from that .zip in one command — the whole tenant
+(identity, settings, sealed credentials, setup tables, assigned
+operators) is restored and the install admin is made super_admin:
+
+```bash
+php artisan ekdosi:install --bundle=/path/to/<slug>.zip \
+    --email=you@co.gr --password='…' --no-interaction \
+    --bundle-passphrase='…'
+```
+
+Lookup seeding is skipped (the bundle carries VAT/types/payment
+methods). The admin is created with YOUR `--password` even if that email
+is listed as an operator in the bundle. Operators the bundle lists are
+re-created with a random password — they set one via the
+«ξέχασα τον κωδικό» flow (no credential ever travels in a bundle).
+
 After this you have schema + an admin user + three empty tenants. If
 you also want actual ekdosi data to play with (71 customers, 161
 invoices, etc.), continue to §12 — the ETL fills the `myip` tenant

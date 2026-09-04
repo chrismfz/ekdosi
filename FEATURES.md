@@ -485,6 +485,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
     χωρίς να ταξιδεύει credential.
   - **WHMCS default τύποι (απόδειξη/απλήρωτο)** rewire σωστά στο import (μαζί με τον τύπο τιμολογίου) —
     δείχνουν στον εισαγόμενο invoice_type αντί για stale source id.
+  - **Install από bundle** — `ekdosi:install --bundle=<zip> [--bundle-passphrase=…]` σηκώνει φρέσκο box
+    με προ-ρυθμισμένη πρώτη εταιρία (όλα τα παραπάνω) + install-admin ως super_admin σε μία εντολή· skip
+    lookup-seeding (το bundle τα κουβαλά). Ιδανικό για νέα cPanel/DirectAdmin installs (MyIP/nexon).
 - **Επιλεκτική εξαγωγή CSV** (Phase 3) — checkboxes «τι να τραβήξω» → .zip με CSV ανά
   entity (Excel-ready, UTF-8 BOM)· tenant-scoped + redaction μυστικών· «Εξαγωγή CSV»
   στο panel + `company:export-csv` (`CsvEntityExporter`).
