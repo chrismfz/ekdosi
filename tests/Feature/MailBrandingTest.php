@@ -7,7 +7,9 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\Quote;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Mail\Markdown;
 use Tests\TestCase;
 
 /**
@@ -103,5 +105,29 @@ class MailBrandingTest extends TestCase
 
         $this->assertStringContainsString('ΑΦΜ: 800561849', $text);
         $this->assertStringNotContainsString('ΓΕΜΗ:', $text, 'no ΓΕΜΗ label when the company has none');
+    }
+
+    public function test_auto_derived_plaintext_has_no_app_name_chrome(): void
+    {
+        // The quote email specifies NO explicit text view, so Laravel auto-derives the
+        // plaintext through text/message.blade.php → the vendor text/header + text/footer
+        // overrides. (The invoice's text part is a CUSTOM view, so only this exercises
+        // those two overrides.) Locks that they drop the app-name header + «© <app>»
+        // footer from the plaintext MIME part.
+        config(['app.name' => 'EKDOSI-INTERNAL-XYZ']);
+
+        $tenant = Company::create([
+            'name' => 'MyIP Networks OE', 'slug' => 'brand-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        $quote = (new Quote)->forceFill(['code' => 'PROSF-1', 'gross_total' => 100]);
+
+        $text = (string) app(Markdown::class)->renderText('mail.quote.offer', [
+            'tenant' => $tenant, 'quote' => $quote,
+        ]);
+
+        $this->assertStringContainsString('MyIP Networks OE', $text, 'company branding present');
+        $this->assertStringNotContainsString('EKDOSI-INTERNAL-XYZ', $text, 'no app-name banner in the plaintext');
+        $this->assertStringNotContainsString('All rights reserved', $text, 'no © app-name footer in the plaintext');
     }
 }
