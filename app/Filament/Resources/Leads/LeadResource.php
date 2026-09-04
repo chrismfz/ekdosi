@@ -26,7 +26,7 @@ use UnitEnum;
 /**
  * Leads — υποψήφιοι πελάτες (mini-CRM). Sits right under «Πελάτες» in the
  * menu. Tenant-scoped via the `company()` relation like CustomerResource.
- * Design: docs/leads-mini-crm.md.
+ * Design: docs/archive/leads-mini-crm.md.
  */
 class LeadResource extends Resource
 {

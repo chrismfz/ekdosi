@@ -39,7 +39,7 @@ MCP client ──Bearer <ekdosi Sanctum token, tenant-bound>──▶  ekdosi  /
 έσκασε ΑΥΤΟ το παραστατικό;» from outside the panel. They surface what the filing
 path already persists (byte-exact request/response XML per attempt, the forensic
 `REJECTED`/`*_FAILED` `mydata_marks` rows, `mydata_pending_since`), so this is
-**access, not extra instrumentation** (see `known-issues.md §OBS-001`). Base:
+**access, not extra instrumentation** (origin: OBS-001, see `FEATURES.md §4`). Base:
 `App\Mcp\Tools\Concerns\ForensicMcpTool` (extends `SuperAdminMcpTool`; an optional
 `company` slug narrows the sweep, omitted = every tenant).
 

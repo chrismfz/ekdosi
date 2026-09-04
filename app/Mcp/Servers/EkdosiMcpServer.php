@@ -135,7 +135,7 @@ class EkdosiMcpServer extends Server
         // while loading page» with an empty app log).
         ErrorLogTailTool::class,
         // myDATA / provider forensics (super_admin only, cross-tenant, read-only) —
-        // «γιατί έσκασε ΑΥΤΟ το παραστατικό;». See known-issues.md §OBS-001.
+        // «γιατί έσκασε ΑΥΤΟ το παραστατικό;». Origin: OBS-001 (see FEATURES.md §4).
         InvoiceFilingMcpTool::class,
         MyDataFailuresMcpTool::class,
         StuckDocumentsMcpTool::class,

@@ -15,7 +15,7 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 use UnitEnum;
 
 /**
- * «Απολογισμός πωλήσεων» — Leads L2 (docs/leads-mini-crm.md §7): per-operator
+ * «Απολογισμός πωλήσεων» — Leads L2 (docs/archive/leads-mini-crm.md §7): per-operator
  * activity counts for a period (calls/emails/meetings/quotes/conversions), the
  * status funnel and the day log, with a CSV export. Read-only, built on
  * App\Services\Leads\SalesActivityReport. Gated on View:SalesActivityReport

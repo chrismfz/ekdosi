@@ -59,7 +59,7 @@ class TenantRoleProvisioner
         'Quote' => ['ViewAny', 'View', 'Create', 'Update'],
         'Customer' => ['ViewAny', 'View', 'Create', 'Update'],
         // Leads (mini-CRM): the «κυνηγός» IS an operator — no separate role
-        // (owner decision, docs/leads-mini-crm.md §9).
+        // (owner decision, docs/archive/leads-mini-crm.md §9).
         'Lead' => ['ViewAny', 'View', 'Create', 'Update'],
         // …and the two alternative views of the same leads (kanban / calendar).
         'LeadsBoard' => ['View'],

@@ -21,7 +21,7 @@ use Laravel\Mcp\Request;
  * for debugging the deployment, so system super_admin only, read-only. The
  * response can carry counterpart ΑΦΜ/name and raw XML — exactly the data an
  * operator could already read on the box — which is why it is not offered to a
- * tenant member. See known-issues.md §OBS-001.
+ * tenant member. Origin: OBS-001 (forensic MCP tools; see FEATURES.md §4 + git history).
  */
 abstract class ForensicMcpTool extends SuperAdminMcpTool
 {

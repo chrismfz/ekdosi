@@ -11,7 +11,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
  * CMR — international road consignment note. A self-contained TRANSPORT document
- * (no myDATA/AADE, no VAT): see docs/cmr-international-delivery.md. It can stand
+ * (no myDATA/AADE, no VAT): see docs/archive/cmr-international-delivery.md. It can stand
  * alone or reference one of our documents (DeliveryNote | Invoice) via the
  * optional polymorphic `source`; either way it owns its own goods lines so a
  * standalone CMR works and a sourced one is freely editable (English).

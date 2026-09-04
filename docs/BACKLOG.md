@@ -12,6 +12,158 @@ delete it from here → **δ)** if it was a «known latent» note in `CLAUDE.md`
 
 Don't re-pick the **«Done recently»** or **«looks like a gap but isn't»** lists below.
 
+> **`known-issues.md` was folded into this file (2026-09-04)** and deleted. It was a
+> 283 KB readiness ledger that was **~65% already-DONE/DISARMED**; its Go-live triage
+> and its ~16 genuinely-open entries live here now (see «Cutover gate» + «Provider/
+> myDATA — folded from known-issues» + «Parked» below). The DONE detail sections stay
+> in git history. The BUILT design-docs `leads-mini-crm.md`, `cmr-international-delivery.md`
+> and `delivery-provider-split-brain.md` moved to `docs/archive/`.
+
+---
+
+## 🎯 Master priority index (start here — 2026-09-04)
+
+The one ordered view of what's left. Each tier links to the detailed section below.
+The rule that governs the order (learned from the ten-round P2 PRs): **a finding's
+priority is not a property of the finding — it is the finding × this business × this
+date.** Cutover (1 Oct provider obligation) sorts everything.
+
+**TIER 0 — Cutover gate: ✅ CLEAR (verified live 2026-09-05).** All bucket-A code
+shipped; the two residual *decisions* are made and are not repo work: **MYD-007** (the
+intra-community 0% was essentially one large invoice to Estonia — per-line §8.3 field +
+`VatExemptionGuidance` ship; GR→EE service = code 4) and **MYD-006**
+(`business_activity_type` chosen per tenant; income class also configurable per product-
+category — a per-*product* override is only a UI follow-up). **Live prod check:** **myip 0**
+myDATA discrepancies — the old «92» was a **stale-devbox artifact, never real** (myip is
+filing again, last MARK 2026-09-04); **nexon 2** (last filed 2026-06-16 — reconcile those
+before nexon cuts over). The dry-run is the operators' daily VM routine, not a task.
+
+**TIER 1 — Real in-scope code work, next deadline (delivery-note family + provider):**
+1. **Delivery-note family** (before the ψηφιακή-διακίνηση deadline, NOT 1 Oct):
+   MYD-023 strict-refusal + already-cancelled adoption on ΔΑ/provider paths (**P1**,
+   ties to PROV-015) · MYD-019 · MYD-026 · PROV-002 · STOCK-001 follow-ups · unblock
+   9.1/9.2 + combined ΤΔΑ. Do as one block with a 9.3 sandbox rehearsal.
+2. **MYD-011 country→ISO normalization** — foreign supplier/customer can freeze a
+   wrong `GR` on a ΔΑ. Needs normalise-on-load + column backfill + ETL alignment
+   (tried & reverted once — do it carefully).
+3. **PROV-005** (**P1**, vendor-blocked) — authenticated provider credential/quota
+   probe; `ping()` is an unauthenticated GET. Needs an InvoSign non-issuing endpoint.
+4. **WHMCS bridge Phase 2 — outbound payment sync** (money-write, opt-in, design-first).
+
+**TIER 2 — High-value net-new features / migration tooling:**
+5. **Generic CSV importer** (products/customers) — «biggest win for catalog/customer
+   migration»; column-map + dry-run + tenant-scope.
+6. **Cashflow / recurring-expenses** epic (accountant-gated; anti-double-count vs myDATA).
+7. **Dunning ladder** (escalating 3/7/15/30-day reminders on the existing auto-email).
+8. **Bank-statement import → payment match** (CSV/MT940 → proposed `Payment` rows).
+
+**TIER 3 — Strategic epic «Αντικατάσταση WHMCS» (`PLAN.md`, largely greenfield):**
+9. **Πυλώνας A — Domains** (A0→A5; design-only today, first pillar).
+10. **Πυλώνας B — Payment gateways** (IRIS first → card-POS; `payment-connectors.md`).
+11. **Πυλώνας C — Provisioning modules** (real cPanel/DA/… on the existing seam).
+12. **Πυλώνας D — Customer portal** (2nd panel; deliberately last, needs A+B).
+
+**TIER 4 — Blocked-on-external (not actionable now — keep parked, don't re-pick):**
+- **GR Πάροχος live** + **PEPPOL Phase 2** — need real provider creds + sandbox.
+- **PROV-003 archive half** — no InvoSign download endpoint. **PROV-011** — versioned
+  InvoSign API contract (empirically resolved already).
+
+**TIER 5 — Out of current tenants' scope (re-raise if scope changes):** exotic VAT
+(island/ν.5057), multi-branch (MYD-010), B2G/POS (PROV-012), offline/Transmission
+Failure (PROV-008), fresh-install onboarding (SETUP-001/002, OPS-001, TEST-001),
+PROV-004/013/015/016. → see «Parked» below.
+
+**TIER 6 — Tech-debt / P2 pile** (DB-state-correct; cosmetic/perf/edge). Mostly leave;
+knock off the genuine one-liners opportunistically → see «Tech debt / latent». Real
+small bugs worth doing: `ExpenseClassificationSubmitter` non-fillable `'date'` ·
+`resolveWhmcsCustomField` `is_array` guard · `AgedReceivables` missing `escape:` (PHP 8.4).
+
+**TIER 7 — Ideas / low-commitment** (multi-currency, shared Contacts CRM, setup
+profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
+
+---
+
+## 🚀 Cutover / go-live gate — bucket A (folded from known-issues «Go-live triage»)
+
+**Cutover:** ekdosi replaces the legacy C++Builder app for real invoicing; the
+ΥΠΑΗΕΣ/provider obligation lands **2026-10-01**. Delivery notes (9.x) follow on their
+own ψηφιακή-διακίνηση deadline — that family is TIER 1, **not** gated on 1 Oct.
+
+**All bucket-A code is DONE** (PROV-010, OBS-001, PROV-003-print #406, MYD-004 0% #410,
+MYD-006 #413, MYD-007 code #410, PROV-006 retail-via-provider sandbox-verified 2026-09-03).
+**The gate is effectively CLEAR — what's left is ongoing ops / a nexon reconcile:**
+- **Cutover dry-run — ongoing, NOT a task.** Two operators run every day-one document
+  type (ΤΠΥ, ΤΙΜ, ΠΙΣ **and αποδείξεις λιανικής 11.x**: issue → PDF → reconcile) plus
+  edge cases on the dev/test VM **daily** — that daily hammering *is* the rehearsal, and
+  it's enough. Don't track it as a backlog item.
+- **Discrepancy backlog — the «92» was a mirage.** Live prod check **2026-09-05**: **myip
+  0** discrepancies (myip is filing again, last MARK 2026-09-04). The «92» seen on
+  2026-09-02 came from a **stale devbox backup** measured while prod moved ahead — never a
+  real prod backlog. **nexon 2** remains (last filed 2026-06-16) — run a live reconcile and
+  clear those two before nexon cuts over. Watch this with `app_health` / `mydata_discrepancies`.
+- **MYD-007 — decided.** The intra-community 0% was essentially one large invoice to
+  Estonia; per-line §8.3 field + `VatExemptionGuidance` ship (GR→EE service = code 4).
+  Preflight still FLAGS any reason-less/wrong 0% rows for review (no auto-guess).
+- **MYD-006 — chosen.** `business_activity_type` selected per tenant (go-live gate forces
+  it); income class also configurable per product-category. Per-product override = UI follow-up.
+- **PROV-007** — verify InvoSign discount semantics cent-for-cent inside the dry-run
+  (one discounted invoice); no separate project.
+
+*Runtime facts that de-risk the provider path (measured, sandbox 2026-07-07): the
+InvoSign channel **de-duplicates** a blind re-POST of the same (series, ΑΑ), and
+`invoice_status.php` answers in real time — so a blind retry cannot create a second
+legal document on this provider. A **provider-filed 2.1/11.x cannot be cancelled at
+all** (AADE `[249]`, InvoSign `[283]`); reversal is a 5.1 credit, gated to 9.3 only.*
+
+---
+
+## 🅱️ Provider / myDATA — folded from known-issues (after-cutover, in-scope)
+
+Open entries from the old ledger not already tracked in their own sections below.
+The dupes (MYD-023, MYD-024, PROV-001/003/005/009/017/018, delivery family) live in
+the myDATA/Provider sections lower down — not repeated here.
+
+- **PROV-011 (P2/VERIFY)** — ask InvoSign for a **versioned/written** API contract; the
+  cancellation-endpoint ambiguity is already resolved empirically (`[283]`). *Blocked on vendor.*
+- **DEP-001 (WATCH)** — AADE **v2.0.2** delivery-lifecycle spec gates a durable
+  attempt-record for MYD-026/PROV-002; only a protocol-agnostic cache-lock is safe until then.
+- **MYD-005 (P2)** — ordinary invoice XML omits the optional myDATA `measurementUnit`
+  (data-fidelity enhancement; goods-tenant-conditional).
+- **SETUP-004 (P2)** — Estonian (EE) tenant skips even non-AADE neutral lookups.
+- **SETUP-003 (P2, was «stale»)** — only a *null* payment method defaults to cash
+  silently (an unmapped-but-chosen one already warns + surfaces in preflight). Remaining
+  = one config check that each tenant's methods are mapped. The originally-required
+  hard-block was judged wrong.
+- **OPS-003 (P2)** — shared-hosting cron/worker recipe + `ops:cron` done; the install
+  completion-page deep-link is a UI follow-up.
+- **TEST-001 (P2)** — no full web-installer success-path test (fresh-install quality).
+
+---
+
+## 🅲 Parked — out of current tenants' scope (re-raise if scope changes)
+
+Genuinely correct findings that **cannot occur for these two single-establishment,
+domestic-services tenants**. Not deleted — parked with the trigger that reactivates them.
+
+- **Exotic VAT** — 3% (code 9), island 4% (code 6) vs ν.5057 4% (code 10), goods-export
+  exemptions → the non-0% half of MYD-004 and the goods rows of MYD-007. *No island/ν.5057
+  activity.* (The intra-community 0% case IS in scope — MYD-007, TIER 0.)
+- **Multi-branch** — **MYD-010** (WATCH). Both tenants single-establishment; `branch=0` is truth.
+- **B2G / POS scopes** — **PROV-012** (public contracts, All-in-one POS). Requirement is
+  only that ekdosi not *claim* them — it doesn't.
+- **Offline / Transmission Failure** — **PROV-008**. «Design with InvoSign, do not
+  improvise»; at ~70 docs/month a provider outage is handled by *waiting*.
+- **Provider cancellation-evidence / historical-channel freeze** — **PROV-015 / PROV-016**.
+  A provider-filed 2.1/11.x can't be cancelled at all (see above), so almost no live surface.
+- **Credit-compatibility matrix** — **PROV-004** (5.1/5.2/11.4). Practical fix: set ΠΙΣ = 5.1,
+  one credit type configured; enforce in code later.
+- **Sandbox acceptance matrix (~30 rows)** — **PROV-013**. Superseded in practice by the
+  bucket-A dry-run on the document types these tenants issue. Keep as aspiration.
+- **Fresh-install onboarding** — **SETUP-001 / SETUP-002 / OPS-001**. Host is installed,
+  provisioned, green (`ops:health`). Product-quality for the *next* installation.
+- **The whole UPD-* family** — already DISARMED; `deploy/update.sh <tag>` is the path.
+  Re-arming needs UPD-001…004 closed first (see `versioning-and-updates.md`).
+
 ---
 
 ## 📚 Kept design / reference docs (indexed here, not deleted)
@@ -30,9 +182,9 @@ surfaced in the open-items sections further down.
   ΥΠΑΗΕΣ provider + EU PEPPOL. PEPPOL Phase 1 (UBL builder, `peppol:test-submit`) **DONE**;
   provider P0–P5 built/gated (mode=off); **PEPPOL Phase 2 + live provider = OPEN**.
 - **`payment-connectors.md`** — card-POS + IRIS design. **NOT-STARTED** (blueprint).
-- **`leads-mini-crm.md`** — **Leads / mini-CRM** (υποψήφιοι πελάτες + χρονολόγιο επαφών + μετατροπή
-  σε πελάτη + απολογισμός ανά χειριστή). **L0 + L1 + L2 + L3-όψεις (kanban/ημερολόγιο) DONE** (§10)·
-  email-από-lead + AI `lead_summary` = **συνειδητά ΟΧΙ** (owner 2026-09-02: «too much»).
+- **`archive/leads-mini-crm.md`** — **Leads / mini-CRM** (υποψήφιοι πελάτες + χρονολόγιο επαφών +
+  μετατροπή σε πελάτη + απολογισμός ανά χειριστή). **L0 + L1 + L2 + L3-όψεις (kanban/ημερολόγιο) DONE**
+  (§10)· email-από-lead + AI `lead_summary` = **συνειδητά ΟΧΙ** (owner 2026-09-02). **BUILT → archived.**
 - **`payments` (AR)** — core **DONE** (cockpit/allocator/bank-accounts/refunds); deferred
   connectors → `payment-connectors.md`.
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 (registry seam) **DONE**;
@@ -43,8 +195,10 @@ surfaced in the open-items sections further down.
   `connection_health` tool (WHMCS/myDATA freshness), curated-KB `knowledge_search` (item ζ below).
 - **`whmcs-legacy-plugin-map.md`** — legacy WHMCS plugins → `ekdosi_bridge`. T-1/T-2 **DONE**;
   T-3 cutover **OPEN**.
-- **`delivery-provider-split-brain.md`** — ΔΑ provider-vs-direct-myDATA routing (architecture
-  lock, **DONE/reference**).
+- **`archive/delivery-provider-split-brain.md`** — ΔΑ provider-vs-direct-myDATA routing (architecture
+  lock, **RESOLVED + provider-confirmed in writing → archived**).
+- **`archive/cmr-international-delivery.md`** — CMR διεθνής φορτωτική ως αυτόνομο έγγραφο
+  (Phases 1–4 **BUILT** → archived· Phase 0 = φορολογική απόφαση own-gear, non-blocking).
 - **`operator-health.md`** · **`dr-without-app-key.md`** · **`go-live-usage-checks.sql.md`** —
   ops runbooks (reference).
 - **`archive/`** — closed historical records (the sandbox-validation reports, the
@@ -219,7 +373,7 @@ surfaced in the open-items sections further down.
   `CmrResource` (standalone) + action «Δημιουργία CMR» σε Τιμολόγιο/ΔΑ (pre-fill + μεταγραφή
   ΕΛΟΤ-743), editable draft, `CmrPdf` 24-box, αγγλικά στοιχεία εταιρείας._ **Εκκρεμεί Φάση 0**
   (φορολογικά own-gear: move_purpose/ΦΠΑ = λογιστής, ΔΕΝ μπλοκάρει) + προαιρ. Φάση 5 («πακέτο
-  εξαγωγής»). **`docs/cmr-international-delivery.md`**. _Μετά deploy: `shield:generate`._
+  εξαγωγής»). **`docs/archive/cmr-international-delivery.md`**. _Μετά deploy: `shield:generate`._
 
 ---
 
@@ -282,7 +436,7 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   ήδη (δεδομένα + MARK + UID + auth + request/response XML + ο δείκτης verification URL). Επίσης
   απομένει **(γ) το πλήρες «compare» panel** (τοπικό snapshot × AADE reconciliation) στην καρτέλα.
   _(β snapshot αδείας-εν-ισχύ ανά παραστατικό: ✅ DONE — `mydata_marks.provider_identity`.)_
-  `known-issues.md §PROV-003`.
+  _(PROV-003 — archive half is TIER 4, blocked on an InvoSign download endpoint.)_
 - **Provider endpoint hardening (PROV-017 follow-ups)** — το core URL guard (public-https-only,
   no userinfo/query/port≠443, no private/loopback/link-local/CGNAT host, no credentialed redirects)
   ✅ SHIPPED. Είναι **best-effort accident-prevention** (το URL το βάζει έμπιστος operator). Deferred
@@ -359,7 +513,7 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   **«Απολογισμός πωλήσεων»** page (τηλέφωνα/emails/μετατροπές ανά χειριστή×εβδομάδα — «δούλεψε ο
   άνθρωπος;») + `next_action_at` reminders. **DESIGN ONLY, αποφάσεις κλειδωμένες** (§9: ρόλος =
   `operator`, όλοι βλέπουν όλα, παντού/multi-tenant, ελεύθερη επεξεργασία, μόνο χειροκίνητα, keep it
-  simple) → `leads-mini-crm.md`. **L0 + L1 ✅ SHIPPED** (resource + χρονολόγιο + καταστάσεις + dedupe +
+  simple) → `archive/leads-mini-crm.md`. **L0 + L1 ✅ SHIPPED** (resource + χρονολόγιο + καταστάσεις + dedupe +
   μετατροπή σε πελάτη + «Προέλευση» + προσφορά από lead, FEATURES §7β). **L2 ✅ SHIPPED**
   (`SalesActivityReport` + CSV, `leads:notify-due`, dashboard widget). **Μένει (προαιρετικά):** εβδομαδιαίο
   digest email του απολογισμού στον company_admin (μοτίβο backup-failure alert). **L3 όψεις (kanban +
@@ -408,11 +562,6 @@ data model + phase gates: **`PLAN.md`**.
   newest στο plugin) σε έναν αδιαίρετο client-area πίνακα. Για reseller με χιλιάδες τιμολόγια θέλει σελιδοποίηση
   (endpoint `limit`/`cursor` + plugin UI)· τα caps αποτρέπουν το pathological memory/latency αλλά **σιωπηλά κόβουν**
   παλαιότερα (>2000 WHMCS invoices ή >500 historical rows) — η σελιδοποίηση είναι follow-up.
-- ~~**«Εκδοθέντα Παραστατικά» — historical (pre-bridge) παραστατικά**~~ — ΕΓΙΝΕ (plugin v0.47): matched
-  ντετερμινιστικά με `invoices.whmcs_invoice_id` πάνω στα **δικά του** WHMCS invoice ids (`tblinvoices.userid`,
-  τα στέλνει το plugin) — όχι ΑΦΜ, οπότε δεν διαρρέει άσχετο παραστατικό τρίτου. Τα legacy third-party splits
-  εμφανίζονται σωστά μόνο αν το legacy `invoiced` κουβαλά τον σύνδεσμο (1:1)· ό,τι δεν έχει `whmcs_invoice_id`
-  (πολύ παλιά, ΕΑΦΔΣΣ) απλώς δεν εμφανίζεται.
 - **Declined (από review): tenant-slug existence oracle στο `issued-doc-pdf`** — το tenant lookup προηγείται
   του signature check (404 vs 401), όπως σε ΟΛΑ τα sibling webhook controllers· τα slugs δεν είναι μυστικά και
   το πραγματικό auth (HMAC secret) δεν επηρεάζεται. Αφήνεται συνεπές με το υπάρχον pattern.
@@ -806,7 +955,7 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   και το ETL δεν την παίρνει μόνο του. Αν η parallel-run εβδομάδα το κάνει ενοχλητικό: ένα `--afm-keep=CUST_ID`
   per ΑΦΜ (ρητή απόφαση χειριστή) + το άλλο row εισάγεται με `afm_key=NULL` και ⚠ στο log.
 - **Issuer name/address snapshot — το υπόλοιπο του MYD-024 (P2, συνειδητά deferred)** _(η **σειρά**
-  πάγωσε 2026-09-02· το ΑΦΜ/ΓΕΜΗ βγάζει πλέον προειδοποίηση· βλ. `known-issues.md` MYD-024)._
+  πάγωσε 2026-09-02· το ΑΦΜ/ΓΕΜΗ βγάζει πλέον προειδοποίηση· MYD-024)._
   Το issuer block **τιμολογίου** στην ΑΑΔΕ είναι μόνο `vatNumber + country + branch` (τα `[219]`/`[220]`
   **απαγορεύουν** όνομα/διεύθυνση για ελληνικό μέρος), οπότε αλλαγή επωνυμίας/έδρας/ΔΟΥ/ΚΑΔ **δεν**
   μπορεί να ξαναγράψει υποβληθέν τιμολόγιο. Μένουν δύο πραγματικά αλλά περιορισμένα σημεία: (α) το
@@ -815,7 +964,7 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   Αλλάζει η **αναπαράσταση** ενός παρελθόντος εγγράφου, όχι η κατατεθειμένη ταυτότητά του — το
   απομακρυσμένο αρχείο μένει ανέπαφο. Ξανα-άνοιγμα όταν κάποιος tenant αλλάξει πραγματικά έδρα.
 - **Filing-policy snapshot — το υπόλοιπο του MYD-018 (P2, συνειδητά deferred)** _(η **σειρά** πάγωσε
-  2026-09-02· βλ. `known-issues.md` MYD-018)._ Δεν παγώνουν ακόμα: `mydata_type`, income
+  2026-09-02· MYD-018)._ Δεν παγώνουν ακόμα: `mydata_type`, income
   classification ανά γραμμή, quantity flag, payment-method mapping, κωδικός ΦΠΑ/απαλλαγής. Αυτά
   αλλάζουν το **περιεχόμενο** του payload, όχι την **ταυτότητά** του — δεν μπορούν να προκαλέσουν
   διπλή υποβολή ή χαμένο recovery (αυτό ήταν το P0 και έκλεισε), είναι συνειδητές πράξεις
@@ -923,7 +1072,7 @@ _Από το interface sweep. Το **#1 Outbox** + **dashboard tiles** + **#2 δ
   λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει** — θέλει διερεύνηση ρόλων/δικαιωμάτων.
   _(#6 Βιβλίο→period report + Panel utility CSS: ✅ SHIPPED — βλ. «Done recently».)_
 
-## 🔎 MCP forensics για το cutover — **OBS-001** (`known-issues.md`, bucket A)
+## 🔎 MCP forensics για το cutover — **OBS-001** (bucket A, SHIPPED)
 **✅ SHIPPED** τα 5 read-only tools (`invoice_filing`, `mydata_failures`, `stuck_documents`,
 `mydata_discrepancies`, `preflight`, βάση `ForensicMcpTool`) — βλ. `CHANGELOG.md` [Unreleased] +
 `FEATURES.md §16γ` + `MCP.md`. Τα στοιχεία υπήρχαν ήδη (byte-exact XML ανά προσπάθεια)· προστέθηκε η
