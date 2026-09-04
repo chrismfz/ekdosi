@@ -81,7 +81,8 @@ class ExpenseClassificationSubmitter
             'company_id' => $expense->company_id,
             'mydata_action' => 'SendExpensesClassification',
             'mark' => $classificationMark ?: null,
-            'date' => now(),
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
             'request' => $requestXml ?: null,
             // firebed quirk: SendExpensesClassification::handle() leaves
             // responseDom null and parks the RESPONSE reader's DOM in requestDom —

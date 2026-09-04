@@ -84,20 +84,20 @@ class AgedReceivables extends Page
         return response()->streamDownload(function () use ($result, $num, $safe): void {
             $h = fopen('php://output', 'w');
             fwrite($h, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
-            fputcsv($h, ['Πελάτης', 'ΑΦΜ', '0-30', '31-60', '61-90', '90+', 'Σύνολο', 'Παλαιότερο (ημέρες)'], ';');
+            fputcsv($h, ['Πελάτης', 'ΑΦΜ', '0-30', '31-60', '61-90', '90+', 'Σύνολο', 'Παλαιότερο (ημέρες)'], ';', escape: '');
             foreach ($result->rows as $row) {
                 fputcsv($h, [
                     $safe($row->customerName), $safe($row->afm ?? ''),
                     $num($row->b0_30), $num($row->b31_60), $num($row->b61_90), $num($row->b90plus),
                     $num($row->total), $row->oldestDays ?? '',
-                ], ';');
+                ], ';', escape: '');
             }
-            fputcsv($h, [], ';');
+            fputcsv($h, [], ';', escape: '');
             fputcsv($h, [
                 'Σύνολα', '',
                 $num($result->total0_30()), $num($result->total31_60()), $num($result->total61_90()),
                 $num($result->total90plus()), $num($result->grandTotal()), '',
-            ], ';');
+            ], ';', escape: '');
             fclose($h);
         }, $name, ['Content-Type' => 'text/csv; charset=UTF-8']);
     }

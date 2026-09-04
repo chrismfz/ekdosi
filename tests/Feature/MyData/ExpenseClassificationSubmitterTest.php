@@ -148,6 +148,8 @@ class ExpenseClassificationSubmitterTest extends TestCase
         $this->assertNotNull($auditRow);
         $this->assertNotEmpty($auditRow->request);
         $this->assertNotEmpty($auditRow->response);
+        $this->assertNotNull($auditRow->mark_date);       // regression: was NULL via non-fillable 'date'
+        $this->assertNotNull($auditRow->mark_time);       // audit trail: filed-at time, like the sibling writers
     }
 
     #[Test]
