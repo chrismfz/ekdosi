@@ -13,7 +13,7 @@ use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
 
 /**
- * Leads L2 — the small dashboard card (docs/leads-mini-crm.md §6): open leads,
+ * Leads L2 — the small dashboard card (docs/archive/leads-mini-crm.md §6): open leads,
  * overdue next steps, stale ones and this month's conversions, each linking to
  * the matching list tab. Only for users who may see leads (ViewAny:Lead).
  */

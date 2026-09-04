@@ -468,7 +468,7 @@ A few **don't-re-port / don't-re-litigate** decisions worth keeping inline:
 - **Delivery notes (Ψηφιακό ΔΑ): firebed already implements the whole v2.0.x tracking API** —
   don't re-port the protocol, only wire it. Issue+cancel → provider; movement lifecycle
   (έναρξη/παράδοση/έλεγχος/history) → direct myDATA for everyone (confirmed by InvoSign).
-  Full model: `docs/delivery-provider-split-brain.md`.
+  Full model: `docs/archive/delivery-provider-split-brain.md`.
 - **Credit notes**: legacy `CREATE_RETURN_INVOICE` was an empty stub → `IssueCreditNote` is a
   clean reimplementation, not a risky port.
 

@@ -34,6 +34,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   αίτημα PDF ξανα-ελέγχει membership + `isPubliclyViewable()` (drafts/ακυρωμένα → 404). Read-only.
 
 ### Changed
+- **Docs cleanup — ένα backlog αντί για 10 md files.** Το `known-issues.md` (283 KB, ~65%
+  ήδη DONE/DISARMED) **διαγράφηκε**· το «Go-live triage» και τα ~16 πραγματικά ανοιχτά items
+  διπλώθηκαν στο `docs/BACKLOG.md`, που απέκτησε **Master priority index** (TIER 0–7),
+  ενότητα «Cutover gate» και «Parked (out-of-scope)». Τα BUILT design-docs
+  `leads-mini-crm.md`, `cmr-international-delivery.md`, `delivery-provider-split-brain.md`
+  μετακόμισαν στο `docs/archive/`· διορθώθηκαν οι σχετικοί pointers σε `FEATURES.md`/`CLAUDE.md`/
+  `MCP.md` + δύο MCP source-comments (η αναφορά OBS-001). Καθαρά τεκμηρίωση — καμία αλλαγή κώδικα συμπεριφοράς.
 - **Έξω το εσωτερικό app-name «ekdosi» από τα emails πελατών.** Το προεπιλεγμένο markdown-mail chrome του
   Laravel έβαζε το `config('app.name')` (=«ekdosi», το ΕΣΩΤΕΡΙΚΟ όνομα του εργαλείου) σε **τρία** σημεία —
   το header banner, το footer «© <έτος> ekdosi. All rights reserved.», και τον αόρατο `<title>` — οπότε

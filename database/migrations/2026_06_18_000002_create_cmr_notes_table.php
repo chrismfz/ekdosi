@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Schema;
  * CMR — international road consignment note (CMR Convention). A TRANSPORT
  * document, NOT a myDATA παραστατικό: no AADE submission, no ΑΑ counter, no VAT.
  *
- * First-class + self-contained (see docs/cmr-international-delivery.md): it can
+ * First-class + self-contained (see docs/archive/cmr-international-delivery.md): it can
  * stand alone (third-party goods passing through us) OR reference one of our
  * documents via the OPTIONAL polymorphic `source` (DeliveryNote | Invoice).
  * When sourced, it's pre-filled (Greek→Latin transliteration) into an editable

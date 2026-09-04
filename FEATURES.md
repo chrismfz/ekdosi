@@ -213,7 +213,7 @@
   Τιμολόγιο/ΔΑ → **προσχέδιο** με μεταγραφή ΕΛΟΤ-743 (ελληνικά→λατινικά), editable πριν την
   εκτύπωση. Προαιρετική πηγή (Τιμολόγιο | ΔΑ | standalone)· `cmr_notes`/`cmr_lines`, `CmrPdf`
   (φόρμα 24 κουτιών), per-company counter. Αγγλικά στοιχεία εταιρείας (Sender). Σχεδίαση:
-  `docs/cmr-international-delivery.md`.
+  `docs/archive/cmr-international-delivery.md`.
 
 ## 6. Πάροχοι e-invoicing & PEPPOL
 - **Δίαυλος αποστολής** per-tenant: `gr-mydata` (απευθείας ΑΑΔΕ), `gr-provider`
@@ -272,7 +272,7 @@
 
 ## 7β. Leads / mini-CRM (pre-customer)
 Υποψήφιοι πελάτες ΠΡΙΝ γίνουν `Customer` — χωρίς money semantics (ποτέ παραστατικά/υπόλοιπα/myDATA).
-Design + gates: `docs/leads-mini-crm.md`. **Χτισμένο (L0):**
+Design + gates: `docs/archive/leads-mini-crm.md`. **Χτισμένο (L0):**
 - **`Leads` resource** κάτω από τους Πελάτες: όσα στοιχεία έχουμε (μόνο η επωνυμία υποχρεωτική),
   χειριστής, πηγή, σύσταση από πελάτη, επόμενο βήμα, tags/σημειώσεις/συνημμένα/ιστορικό.
 - **Χρονολόγιο** (`lead_activities`): quick-add Τηλέφωνο / Email / Ραντεβού / Σημείωση με
@@ -685,7 +685,7 @@ read-only — «γιατί έσκασε ΑΥΤΟ το παραστατικό;» 
 ως γραμμές: cached count + τοπικό phase-1· `live=true` = πραγματικό `SalesReconciler` AADE pull),
 `preflight` (`MyDataConfigAudit` = `mydata:preflight` απ' έξω· `error_count>0` = go-live blocker).
 Βάση `ForensicMcpTool`· τα στοιχεία **υπάρχουν ήδη** (byte-exact XML ανά προσπάθεια) — πρόσβαση, όχι
-επιπλέον logging (βλ. `known-issues.md §OBS-001`). **Νέα state tools** (και στα δύο κανάλια): `app_version`
+επιπλέον logging (OBS-001· βλ. `docs/BACKLOG.md §MCP forensics`). **Νέα state tools** (και στα δύο κανάλια): `app_version`
 (τρέχον build + διαθέσιμη ενημέρωση) και `recent_activity` (audit trail). Τα write tools ΔΕΝ κάνουν
 fan-out (`"all"` απαγορεύεται — blast-radius). **Always-on** (χωρίς env flag· η ασφάλεια είναι το auth
 + token). Πλήρες: **`MCP.md`**.

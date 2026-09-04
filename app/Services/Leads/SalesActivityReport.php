@@ -12,7 +12,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Support\Facades\DB;
 
 /**
- * «Απολογισμός πωλήσεων» — «δούλεψε ο άνθρωπος;» (docs/leads-mini-crm.md §7).
+ * «Απολογισμός πωλήσεων» — «δούλεψε ο άνθρωπος;» (docs/archive/leads-mini-crm.md §7).
  *
  * Read-only aggregates over `lead_activities` + `leads` for a period, per
  * operator: new leads, calls (answered), emails (replied), meetings (held),

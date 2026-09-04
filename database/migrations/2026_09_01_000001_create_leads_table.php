@@ -7,7 +7,7 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Leads — υποψήφιοι πελάτες (mini-CRM, pre-customer). Net-new concept, no
  * legacy source. Everything except the name is optional: a lead is whoever we
- * found, with whatever we know about them so far. See docs/leads-mini-crm.md.
+ * found, with whatever we know about them so far. See docs/archive/leads-mini-crm.md.
  *
  * `converted_customer_id` is THE lead↔customer link (unique — one lead becomes
  * one customer; the customer side reads it back via Customer::originLead()).
