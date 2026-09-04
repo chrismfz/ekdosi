@@ -88,6 +88,64 @@ class InvoSignTransportTest extends TestCase
         $this->assertNotFalse(simplexml_load_string($xml));
     }
 
+    public function test_counterpart_email_is_withheld_unless_the_tenant_opts_in(): void
+    {
+        // The provider uses <CounterpartEmail> to EMAIL the document to the customer.
+        // Default OFF → the email never leaves in the XML (dev-safety); opt-in → it does.
+        $this->customer->update(['email' => 'pelatis@example.gr']);
+        $invoice = $this->makeInvoice();
+        $aade = (new AadeInvoiceDocument($this->tenant))->toXml((new AadeInvoiceDocument($this->tenant))->build($invoice));
+
+        // Default OFF: element still present (shape unchanged) but EMPTY.
+        $off = InvoSignDocument::augment($aade, $invoice->fresh('lines'));
+        $this->assertStringContainsString('<CounterpartEmail', $off, 'the element is still emitted (empty)');
+        $this->assertStringNotContainsString('pelatis@example.gr', $off, 'no customer email while OFF');
+
+        // Opt in → the email rides along for the provider to deliver.
+        $this->tenant->update(['einvoice_include_customer_email' => true]);
+        $on = InvoSignDocument::augment($aade, $invoice->fresh('lines'));
+        $this->assertStringContainsString('<CounterpartEmail>pelatis@example.gr</CounterpartEmail>', $on);
+    }
+
+    public function test_delivery_counterpart_email_respects_the_opt_in(): void
+    {
+        Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
+
+        $recipient = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Παραλήπτης ΑΕ', 'afm' => '123456789',
+            'email' => 'paraliptis@example.gr',
+        ]);
+        $deliveryType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'DA', 'name' => 'ΔΑ',
+            'invcount' => 1, 'mydata_type' => '9.3',
+        ]);
+        $note = DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΔΑΠ9', 'code' => 9,
+            'delivery_type_id' => $deliveryType->id,
+            'customer_id' => $recipient->id, 'recipient_name' => 'Παραλήπτης ΑΕ', 'recipient_afm' => '123456789',
+            'issued_at' => now(), 'mydata_type' => '9.3', 'move_purpose' => 8, 'local_status' => 'draft',
+        ]);
+        $note->lines()->create([
+            'company_id' => $this->tenant->id, 'qty' => 1, 'measurement_unit' => 1, 'product_descr' => 'Δέμα',
+        ]);
+        $xml = '<?xml version="1.0" encoding="utf-8"?>'
+            .'<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><invoice><invoiceDetails>'
+            .'<lineNumber>1</lineNumber><itemDescr>Δέμα</itemDescr></invoiceDetails></invoice></InvoicesDoc>';
+
+        // OFF (default): the recipient's email is withheld from the provider.
+        $off = (string) (new InvoSignTransport)
+            ->sendDelivery($note->fresh('lines'), $xml, ProviderCredentials::fromCompany($this->tenant))
+            ->requestPayload;
+        $this->assertStringNotContainsString('paraliptis@example.gr', $off);
+
+        // ON: included for provider-side delivery.
+        $this->tenant->update(['einvoice_include_customer_email' => true]);
+        $on = (string) (new InvoSignTransport)
+            ->sendDelivery($note->fresh('lines'), $xml, ProviderCredentials::fromCompany($this->tenant->fresh()))
+            ->requestPayload;
+        $this->assertStringContainsString('<CounterpartEmail>paraliptis@example.gr</CounterpartEmail>', $on);
+    }
+
     public function test_send_success_parses_mark_and_uses_sandbox_creds(): void
     {
         Http::fake([self::DEMO.'/*' => Http::response($this->successXml(), 200)]);
