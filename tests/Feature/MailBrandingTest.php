@@ -32,6 +32,7 @@ class MailBrandingTest extends TestCase
             'name' => 'MyIP Networks OE', 'slug' => 'brand-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
             'phone' => '2101234567', 'email' => 'info@myip.gr', 'afm' => '800561849',
+            'gemi' => '123456789000',
         ]);
         $customer = Customer::create([
             'company_id' => $tenant->id, 'name' => 'Πελάτης ΑΕ', 'email' => 'cust@example.com',
@@ -59,5 +60,48 @@ class MailBrandingTest extends TestCase
         $this->assertStringNotContainsString('EKDOSI-INTERNAL-XYZ', $html);
         // The default "© <year> <app name>. All rights reserved." footer is gone too.
         $this->assertStringNotContainsString('All rights reserved', $html);
+        // The tenant contact footer carries ΑΦΜ and — when present — ΓΕΜΗ.
+        $this->assertStringContainsString('ΑΦΜ: 800561849', $html);
+        $this->assertStringContainsString('ΓΕΜΗ: 123456789000', $html);
+    }
+
+    public function test_plaintext_footer_carries_afm_and_gemi_and_no_app_name(): void
+    {
+        config(['app.name' => 'EKDOSI-INTERNAL-XYZ']);
+
+        $tenant = Company::create([
+            'name' => 'MyIP Networks OE', 'slug' => 'brand-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'phone' => '2101234567', 'email' => 'info@myip.gr', 'afm' => '800561849',
+            'gemi' => '123456789000',
+        ]);
+
+        // The plaintext MIME part (custom text view — no markdown chrome).
+        $text = view('mail.invoice.issued_text', [
+            'tenant' => $tenant,
+            'bodyText' => 'Σας αποστέλλουμε το παραστατικό.',
+        ])->render();
+
+        $this->assertStringContainsString('MyIP Networks OE', $text);
+        $this->assertStringContainsString('ΑΦΜ: 800561849', $text);
+        $this->assertStringContainsString('ΓΕΜΗ: 123456789000', $text);
+        $this->assertStringNotContainsString('EKDOSI-INTERNAL-XYZ', $text);
+    }
+
+    public function test_gemi_line_is_omitted_when_the_company_has_none(): void
+    {
+        $tenant = Company::create([
+            'name' => 'Απλή Εταιρεία ΟΕ', 'slug' => 'brand-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'afm' => '800561849', // no gemi
+        ]);
+
+        $text = view('mail.invoice.issued_text', [
+            'tenant' => $tenant,
+            'bodyText' => 'Σας αποστέλλουμε το παραστατικό.',
+        ])->render();
+
+        $this->assertStringContainsString('ΑΦΜ: 800561849', $text);
+        $this->assertStringNotContainsString('ΓΕΜΗ:', $text, 'no ΓΕΜΗ label when the company has none');
     }
 }

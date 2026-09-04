@@ -10,11 +10,12 @@
      operator-edited template strings and rendered HTML. --}}
 {!! nl2br(e($body)) !!}
 
-@if($tenant?->phone || $tenant?->email || $tenant?->afm)
+@if($tenant?->phone || $tenant?->email || $tenant?->afm || $tenant?->gemi)
 @component('mail::subcopy')
 @if($tenant?->phone) Τηλέφωνο: {{ $tenant->phone }} @endif
 @if($tenant?->email) · Email: {{ $tenant->email }} @endif
 @if($tenant?->afm) · ΑΦΜ: {{ $tenant->afm }} @endif
+@if($tenant?->gemi) · ΓΕΜΗ: {{ $tenant->gemi }} @endif
 @endcomponent
 @endif
 @endcomponent
