@@ -1266,6 +1266,129 @@ sudo -u ekdosi php artisan up
 `chmod +x /usr/local/bin/ekdosi-deploy.sh`. Then deploys are
 `sudo /usr/local/bin/ekdosi-deploy.sh`.
 
+### 13a. Private repo — authentication for clone + deploy
+
+Both the runbook above **and** the bundled `deploy/update.sh` /
+`deploy/rollback.sh` are **auth-agnostic**: they only ever run
+`git fetch origin` + `git checkout` inside an **already-cloned** repo. They
+never `clone`, never embed a token, and have **no hard-coded URL** — they use
+whatever the repo's `origin` remote is wired to. So the only thing to arrange is
+that `git fetch origin` succeeds **non-interactively** (deploys run unattended,
+with no chance to type a password).
+
+- **Public repo (HTTPS):** `git fetch` needs no credentials → nothing to set up,
+  the deploy just works.
+- **Private repo:** pick **ONE** of the three below. The deploy scripts stay
+  **exactly the same** — you only change how git authenticates once, at setup.
+
+On a VM every git command below is run as the app user (`sudo -u ekdosi …`, so
+the key/credentials live in `/home/ekdosi`); on shared hosting (cPanel /
+DirectAdmin) you're already logged in as that user, so drop the `sudo -u ekdosi`
+prefix and `~` is your account home. `<APP_DIR>` = where the code lives
+(`/var/www/ekdosi` on a VM, `~/ekdosi` or similar on shared hosting).
+
+#### Option 1 — SSH deploy key (recommended) 🥇
+
+A read-only key scoped to **this one repo**, with **no expiry** — the least
+maintenance and the smallest blast radius. (§5b above is the VM quick-start of
+this same option; this is the full picture, incl. shared hosting.)
+
+```bash
+# 1) Generate a passphrase-less key ON THE SERVER (one per server).
+ssh-keygen -t ed25519 -N '' -f ~/.ssh/ekdosi_deploy -C "ekdosi-deploy@$(hostname)"
+
+# 2) Trust github.com's host key so the first fetch doesn't prompt.
+ssh-keyscan -t rsa,ecdsa,ed25519 github.com >> ~/.ssh/known_hosts
+
+# 3) Print the PUBLIC key and paste it into GitHub:
+#      repo → Settings → Deploy keys → Add deploy key
+#    Leave "Allow write access" UNCHECKED — deploys only pull.
+cat ~/.ssh/ekdosi_deploy.pub
+
+# 4) Tell ssh to use this key for github.com (needed when it's not the
+#    default ~/.ssh/id_ed25519, e.g. a dedicated deploy key):
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  IdentityFile ~/.ssh/ekdosi_deploy
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+
+# 5) Point origin at the SSH URL (skip if you already cloned over SSH).
+git -C <APP_DIR> remote set-url origin git@github.com:chrismfz/ekdosi.git
+
+# 6) Verify — must return WITHOUT any prompt:
+git -C <APP_DIR> fetch origin
+```
+
+Pros: read-only, one repo only, never expires, no secret sitting in a file that
+tools might log. Cons: none worth mentioning for a single private repo — this is
+the default choice.
+
+#### Option 2 — HTTPS + a fine-grained Personal Access Token (PAT)
+
+Use this when SSH is awkward on the host (some locked-down panels). A
+**fine-grained** token scoped to the one repo, read-only.
+
+```bash
+# 1) GitHub → Settings → Developer settings → Fine-grained tokens → Generate:
+#      Resource owner: your account/org
+#      Repository access: "Only select repositories" → chrismfz/ekdosi
+#      Permissions → Repository → Contents: Read-only
+#    (Contents:Read is all a pull needs. Set an expiry you'll actually renew.)
+
+# 2) Let git CACHE the credential so the deploy never prompts. Two ways:
+
+#   (a) Persistent store (simplest; token lands in ~/.git-credentials, 0600):
+git config --global credential.helper store
+git -C <APP_DIR> remote set-url origin https://github.com/chrismfz/ekdosi.git
+git -C <APP_DIR> fetch origin
+#     → Username: chrismfz     Password: <paste the PAT>   (saved for next time)
+
+#   (b) OR feed it once, non-interactively (good for scripted provisioning):
+printf 'protocol=https\nhost=github.com\nusername=chrismfz\npassword=%s\n' "$PAT" \
+  | git credential approve
+```
+
+Do **NOT** bake the token into the remote URL
+(`https://<token>@github.com/…`): it ends up in `.git/config`, in `ps` output,
+and in any git trace/log. Keep it in the credential store instead. Cons vs.
+Option 1: the token **expires** (you must rotate it), and it's a secret at rest
+on disk.
+
+#### Option 3 — the GitHub CLI (`gh`) as git's credential helper
+
+Works, but adds a dependency (`gh` must be installed) and under the hood still
+uses a token — so it's rarely worth it over a deploy key on a plain server. Use
+it only where `gh` already exists.
+
+```bash
+# 1) Install gh (if not present) — see cli.github.com. Then authenticate
+#    NON-interactively with a token that has Contents:Read on the repo:
+echo "$PAT" | gh auth login --hostname github.com --git-protocol https --with-token
+
+# 2) Make git reuse gh's stored token for github.com HTTPS:
+gh auth setup-git
+
+# 3) origin over HTTPS + verify:
+git -C <APP_DIR> remote set-url origin https://github.com/chrismfz/ekdosi.git
+git -C <APP_DIR> fetch origin      # no prompt — gh answers the credential request
+```
+
+`gh auth status` shows the active token; `gh auth logout` revokes it locally.
+
+#### At a glance
+
+| Option | Non-interactive | Scope | Expires | Best for |
+| --- | --- | --- | --- | --- |
+| **1. SSH deploy key** | ✅ | this repo, read-only | never | **default** — VM & shared hosting |
+| 2. HTTPS + fine-grained PAT | ✅ | this repo, read-only | yes (rotate) | hosts where SSH is blocked |
+| 3. `gh` CLI | ✅ | whatever the PAT grants | yes | only where `gh` is already installed |
+
+Whichever you pick, once `git -C <APP_DIR> fetch origin` returns without a
+prompt, **the deploy scripts need no changes** — the same
+`deploy/update.sh <tag>` / `ekdosi-deploy.sh` keeps working on a private repo.
+
 ## 14. Verification checklist
 
 After install:
