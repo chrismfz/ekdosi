@@ -142,7 +142,8 @@ so a P0 that cannot occur here outranks a P1 that will occur on day one.
 | MYD-023 | **PARTIAL** (storage DONE via #404) | The distinct cancellation MARK is now stored in its own field on **every** path — `mydata_marks` and (as of #404) `delivery_marks` both have `cancellation_mark`. Only the strict-refusal half (refuse a terminal cancel that returns no cancellation MARK) is deferred → BACKLOG. |
 | MYD-024 | already PARTIAL | Series is frozen (MYD-018); ΑΦΜ/ΓΕΜΗ edits warn. Snapshotting issuer name/address is a nicety at two single-branch tenants. |
 | **Delivery-note family** — MYD-019, MYD-026, PROV-002, STOCK-001, delivery half of MYD-023 | **P1, before the digital-delivery deadline** | These tenants issue δελτία αποστολής today (legacy) and digital delivery becomes mandatory on its own AADE deadline. Real work, correctly scoped — just **not gated on 1 Oct**. MYD-013 and MYD-016 in this family are already DONE. Do the rest as one block before the ΔΑ deadline, with a sandbox rehearsal of 9.3 issue/register/confirm/cancel. |
-| MYD-005, SETUP-004, OPS-002, OPS-003, TEST-001, DEP-001 | unchanged P2/WATCH | Correctly parked already. |
+| ~~OPS-002~~ **DONE 2026-09-04** | Installer | Writable env/app-root is now a REQUIRED hard preflight (`env_writable`), blocking before any DB mutation. See detail. |
+| MYD-005, SETUP-004, OPS-003, TEST-001, DEP-001 | unchanged P2/WATCH | Correctly parked already. |
 
 ### C — NOT FOR US (genuinely out of these tenants' scope)
 
@@ -528,7 +529,7 @@ Priorities:
 | SETUP-003 | P2 | OPEN | D | Payment | An *unmapped* method already warns + shows in preflight; only a null method defaults to cash. Hard-blocking a filing over this is worse than type 3 |
 | SETUP-004 | P2 | OPEN | B | Estonia | EE tenant skips even non-AADE standard lookups |
 | OPS-001 | P1 | PARTIAL | C | Scheduler/queue | **Prove + helper DONE** (this PR): a synchronous **scheduler heartbeat** lets `ops:health`/go-live tell «cron down» from «worker down» (and stop blaming the worker for a dead cron); **`ops:cron`** prints the exact crontab + worker lines for THIS host. Auto-provisioning the OS cron/worker stays inherently a host action |
-| OPS-002 | P2 | OPEN | B | Installer | Writable env/application root is not a hard preflight |
+| OPS-002 | P2 | **DONE 2026-09-04** | B | Installer | Writable env/application root IS now a hard preflight (`env_writable`, REQUIRED) — read-only `is_dir`+`is_writable` stat on the exact `.env` target dir (`base_path()`), blocks BEFORE any DB mutation. See detail. |
 | OPS-003 | P2 | PARTIAL | B | Shared hosting | **Recipe + command + test DONE** (this PR): `docs/shared-hosting-deploy.md` + `ops:cron` generate the cPanel/DirectAdmin cron-driven worker recipe per host. The install completion-page deep-link → UI follow-up |
 | TEST-001 | P2 | OPEN | B | Tests/CI | No full web installer success-path test; inspected CI was not green |
 | DEP-001 | P2 | WATCH | B | Dependency | firebed/aade-mydata is current; watch AADE v2.0.2 |
@@ -3696,24 +3697,30 @@ configuration.
 
 ### OPS-002 — Env/application-root writability is not a hard preflight
 
-**Status:** OPEN · **Priority:** P2
+**Status:** DONE 2026-09-04 · **Priority:** P2
 
-**Evidence**
+**Resolution.** `RequirementsChecker::coreChecks()` now emits a **REQUIRED**
+`env_writable` check on the EXACT directory the installer writes `.env` into
+(`envTargetWritable()` → `is_dir` + `is_writable` on `base_path()`). The write is
+a temp-file + `rename()` in that dir (`EnvWriter::write()`); both need the same
+write+execute bits `is_writable()` tests, and `is_writable()` also reports a
+read-only mount — so a read-only stat is faithful here without the side effects
+of an actual write-probe on the code root (it runs on every wizard render). The
+check mirrors the sibling `storage`/`bootstrap/cache` ones. Because it's
+REQUIRED, `InstallController::run()` step (1b) (`hasBlockers()`, re-checked
+server-side) now refuses the POST **before** `migrate`/`ekdosi:install` touch the
+DB — the half-install (built DB, no `.env`) can no longer arise from this cause.
+Retry idempotency (firstOrCreate + `--force`) still backstops it. Covered by
+`RequirementsCheckerTest` (double-blocks + real-dir probe passes-and-writes-nothing
++ missing-dir fails) and
+`InstallRequirementsTest::test_an_unwritable_app_root_refuses_the_post_before_the_db_is_touched`.
+
+**Evidence (original)**
 
 - `EnvWriter` performs an atomic env-file replacement.
 - Migrations and `ekdosi:install` run before the final env write/installed marker.
-- `RequirementsChecker` validates extensions and storage/cache paths but does
+- `RequirementsChecker` validated extensions and storage/cache paths but did
   not prove that the application root/`.env` target is writable.
-
-This means the env write can fail after the database already contains migrated
-schema/company/admin data. Retry is designed to be idempotent, but the complete
-install is not one atomic transaction.
-
-**Required change**
-
-- Add a safe writability/replacement preflight for the exact env target directory.
-- Surface a hard blocker before any DB mutation.
-- Add a failure/retry test proving no duplicate tenant/admin is created.
 
 ### OPS-003 — Shared-hosting/cPanel deployment path is incomplete
 

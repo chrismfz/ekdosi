@@ -840,9 +840,17 @@ fail-closed/self-disabling, filesystem-token gate — βλ. FEATURES §17) · `e
 `StandardLookupSeedAction` ανά resource) · `DemoCompanySeeder` · GSIS/VIES lookup · `suppliers:sync` ·
 «Πρότυπα τελών». Ιδέες για ευκολότερο στήσιμο από το 0:_
 - **Web installer — follow-ups:** (α) προαιρετικό `CREATE DATABASE` όταν ο DB χρήστης έχει δικαίωμα (τώρα
-  απαιτεί προ-δημιουργημένη κενή βάση — το σωστό default σε shared hosting)· (β) auto-detect writable
-  dirs / PHP extensions ως preflight βήμα με πράσινο/κόκκινο πριν το submit· (γ) optional «γράψε το cron
-  line / systemd unit» helper αντί για απλή λίστα ελέγχου.
+  απαιτεί προ-δημιουργημένη κενή βάση — το σωστό default σε shared hosting)· (β) ~~auto-detect writable
+  dirs / PHP extensions ως preflight βήμα~~ **DONE** (`RequirementsChecker`, incl. `env_writable` OPS-002)·
+  (γ) optional «γράψε το cron line / systemd unit» helper αντί για απλή λίστα ελέγχου (μερικώς: `ops:cron`).
+- **OPS-002 residual — exotic-host writability false-positive** _(P2, from the OPS-002 round-2 review)._ The
+  `env_writable` preflight is a read-only `is_dir`+`is_writable` stat, which `access()` can misreport on a
+  few host classes (POSIX ACL mask, SELinux/AppArmor, NFS `root_squash`, a remounted-ro overlay): it passes,
+  the DB gets built, then `EnvWriter::write()` fails — the exact half-install OPS-002 guards, on those hosts
+  only. **Bounded + backstopped:** the retry is idempotent (no duplicate tenant/admin) and the operator gets
+  a clear «διόρθωσε δικαιώματα ρίζας και ξαναπροσπάθησε» message. A truly faithful test needs an actual
+  temp-file+`rename()` write-probe, which was deliberately NOT taken (side-effects on the code root, per the
+  OPS-002 round-1 review). Revisit only if a real host hits it.
 - **Generic CSV importer (προϊόντα / πελάτες)** — bulk onboarding από άλλο σύστημα (έχουμε CSV *export*
   `CsvEntityExporter`· λείπει το *import*). Column-map + dry-run preview + tenant-scope. _Το μεγαλύτερο
   win για μεταφορά καταλόγου/πελατολογίου._
