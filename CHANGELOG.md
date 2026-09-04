@@ -41,6 +41,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   από το inbox — ο όρος που χρησιμοποιεί ο χειριστής, και δεν εκθέτει το όνομα του billing system στο
   πελατειακό PDF.
 ### Added
+- **Οι χειριστές (operators) ταξιδεύουν πλέον μέσα στο company bundle — χωρίς κωδικό.** Το
+  `company:export` κουβαλά τους ανατεθειμένους χρήστες της εταιρίας (email + όνομα + ο ένας managed ρόλος
+  τους: super_admin/company_admin/operator) σε νέο `users.json` — **ΠΟΤΕ** password/id/credential. Στο
+  `company:import`: υπάρχων χρήστης (match με email) συνδέεται στην εταιρία + παίρνει τον ρόλο του·
+  χρήστης που λείπει **δημιουργείται** με τυχαίο 32-char κωδικό (login μόνο μέσω «ξέχασα τον κωδικό»),
+  συνδέεται + παίρνει ρόλο. Best-effort ανά χρήστη (μία αποτυχία δεν ρίχνει ολόκληρο import που έχει ήδη
+  γίνει commit)· dry-run προβλέπει το split (νέοι/σύνδεση)· η γραμμή φαίνεται στο CLI ΚΑΙ στο panel
+  notification. Έτσι στήνεται η ομάδα σε φρέσκο VM χωρίς χειροκίνητη ξαναπρόσθεση.
 - **Διακόπτης «Αποστολή email πελάτη στον πάροχο» ανά εταιρεία (καρτέλα ΥΠΑΗΕΣ, `einvoice_include_customer_email`).**
   Το `<CounterpartEmail>` στο XML του παρόχου (InvoSign) είναι αυτό που ο πάροχος χρησιμοποιεί για να **στείλει
   το νόμιμο παραστατικό στον πελάτη** με email. Σε δοκιμαστικό/dev αυτό σήμαινε ότι **δοκιμαστικά τιμολόγια
@@ -63,6 +71,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
     status ξεχωρίζει πλέον **«no access (parent dir)»** από «absent» (permissions vs πραγματικά λείπει).
 
 ### Fixed
+- **Company import: rewire των WHMCS default τύπων «απόδειξη»/«απλήρωτο».** Το import ξανάδενε μόνο το
+  `whmcs_default_invoice_type_id` στον εισαγόμενο invoice_type· τα `whmcs_default_receipt_type_id` και
+  `whmcs_default_unpaid_type_id` κρατούσαν το **stale source id** → σε φρέσκο (`--new`) import είτε FK
+  violation είτε (χειρότερα) σιωπηλό δείξιμο σε τύπο ΑΛΛΟΥ tenant. Και τα τρία περνούν πλέον από το ίδιο
+  rewire (`COMPANY_INVOICE_TYPE_FKS`) — null πριν το save, remap μέσω του invoice_types map.
 - **Ο web installer μπλοκάρει πλέον έγκαιρα αν ο ριζικός φάκελος δεν είναι εγγράψιμος (OPS-002).** Ο οδηγός
   γράφει το `.env` στη ρίζα ΩΣ ΤΕΛΕΥΤΑΙΟ βήμα — **μετά** το `migrate`/`ekdosi:install`. Μέχρι τώρα, μη-εγγράψιμη
   ρίζα σήμαινε «φτιαγμένη βάση, χωρίς `.env`». Νέος **ΥΠΟΧΡΕΩΤΙΚΟΣ** έλεγχος `env_writable` στο preflight
