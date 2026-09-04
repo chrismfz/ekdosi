@@ -60,6 +60,25 @@ add_hook('ClientAreaPrimaryNavbar', 50, function (MenuItem $primaryNavbar) {
 });
 
 /**
+ * "Εκδοθέντα Παραστατικά" — the customer's issued-documents list. Same «Billing»
+ * / «Τιμολόγηση» dropdown, an INDEPENDENT switch from v2 (Gate::issuedVisibleTo).
+ * Default OFF, so customers see nothing until the operator flips it on.
+ */
+add_hook('ClientAreaPrimaryNavbar', 51, function (MenuItem $primaryNavbar) {
+    $clientId = (int) ($_SESSION['uid'] ?? 0);
+    if (! Gate::issuedVisibleTo($clientId)) {
+        return;
+    }
+    $billing = $primaryNavbar->getChild('Billing');
+    $parent = $billing ?? $primaryNavbar;
+    $parent->addChild('ekdosi_issued', [
+        'label' => 'Εκδοθέντα Παραστατικά',
+        'uri' => 'index.php?m=ekdosi_bridge&act=issued',
+        'order' => 101,
+    ]);
+});
+
+/**
  * Visibility: a link on the admin client profile to the per-client 3-way
  * mapping page (WHMCS # → ekdosi παραστατικό → ΜΑΡΚ, drafts included). Uses the
  * supported AdminClientProfileTabFields hook (renders an extra field row);

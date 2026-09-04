@@ -412,6 +412,14 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   **3-way map** (WHMCS#→ΤΠΥ→ΜΑΡΚ), συγκεντρωτική λίστα, AFM-keyed + deterministic
   `invoiced===legacy_id` historical link. **«Άμεσο» κόκκινη γραμμή** στη λίστα τιμολογίων
   (plugin v0.40) — οι πελάτες άμεσης τιμολόγησης με αστάλτο τιμολόγιο βάφονται κόκκινοι.
+- **«Εκδοθέντα Παραστατικά» για τον πελάτη** (client-area, plugin v0.46, `show_client_issued`,
+  default OFF): ο reseller βλέπει σε πίνακα τα ekdosi παραστατικά που εκδόθηκαν γι' αυτόν μέσω της
+  γέφυρας — **στο όνομά του ΚΑΙ σε τρίτους που δρομολόγησε ο ίδιος** — με ΤΠΥ/ΜΑΡΚ/κατάσταση,
+  **επίσημο PDF** και σύνδεσμο **επαλήθευσης ΑΑΔΕ/παρόχου**. Δύο HMAC endpoints
+  (`issued-for-client` + `issued-doc-pdf`)· το ekdosi είναι η αυθεντία (split → πολλά παραστατικά)
+  και το authorization boundary είναι τα invoices **που πλήρωσε ο ίδιος** (`whmcs_userid`), όχι ο ΑΦΜ
+  του τρίτου (κανένα leak). Το **PDF περνά proxy** (bytes server-side πάνω από το HMAC· το signed URL
+  δεν εκτίθεται)· κάθε αίτημα ξανα-ελέγχει membership + `isPubliclyViewable()` (drafts/ακυρωμένα → 404).
 - **timologia v2 / τρίτοι** — resolution, single-party billing, **multi-party guided
   split** (όχι σιωπηλό ανακάτεμα), editable routing. **Τύπος ανά δικαιούχο**: η ΙΔΙΑ μερίδα
   του μεταπωλητή τυποποιείται από το ΔΙΚΟ του ΑΦΜ (χωρίς ΑΦΜ → Απόδειξη), οι routed γραμμές

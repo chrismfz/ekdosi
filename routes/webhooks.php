@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Webhooks\WhmcsClientInvoiceMapController;
+use App\Http\Controllers\Webhooks\WhmcsClientIssuedInvoicesController;
+use App\Http\Controllers\Webhooks\WhmcsClientIssuedPdfController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicePaidController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicesByAfmController;
 use App\Http\Controllers\Webhooks\WhmcsInvoicesByLegacyIdController;
@@ -99,3 +101,36 @@ Route::post(
     'whmcs/{slug}/invoices-by-legacy-id',
     WhmcsInvoicesByLegacyIdController::class,
 )->middleware('throttle:120,1')->name('whmcs.invoices-by-legacy-id');
+
+/**
+ * Customer-facing (via WHMCS): the "Εκδοθέντα Παραστατικά" list a reseller sees
+ * in their own WHMCS client area. Keyed by WHMCS client id, it returns every
+ * ISSUED ekdosi παραστατικό produced from a WHMCS invoice that reseller paid —
+ * their own AND the ones routed to third parties they set up (decision (B)).
+ * ekdosi is the authority (a split maps one WHMCS invoice to many παραστατικά,
+ * which the 1:1 WHMCS-side mark store can't represent). Same HMAC scheme as
+ * invoice-map, canonical "{slug}:issued:{whmcs_userid}". Read-only.
+ */
+Route::get(
+    'whmcs/{slug}/issued-for-client/{whmcs_userid}',
+    WhmcsClientIssuedInvoicesController::class,
+)->middleware('throttle:120,1')
+    ->where('whmcs_userid', '[0-9]+')
+    ->name('whmcs.issued-for-client');
+
+/**
+ * Customer-facing (via WHMCS): stream ONE issued invoice's official PDF for the
+ * plugin to proxy to the reseller (so the signed public URL never reaches the
+ * browser). Membership is re-derived here (the invoice must be reachable from a
+ * pending row with this whmcs_userid) and the document must be publicly
+ * viewable — every failure is a flat 404. Canonical
+ * "{slug}:issued-pdf:{whmcs_userid}:{invoice_id}" (the invoice id is bound in so
+ * a signature can't be replayed across documents).
+ */
+Route::get(
+    'whmcs/{slug}/issued-doc-pdf/{whmcs_userid}/{invoice}',
+    WhmcsClientIssuedPdfController::class,
+)->middleware('throttle:120,1')
+    ->where('whmcs_userid', '[0-9]+')
+    ->where('invoice', '[0-9]+')
+    ->name('whmcs.issued-doc-pdf');

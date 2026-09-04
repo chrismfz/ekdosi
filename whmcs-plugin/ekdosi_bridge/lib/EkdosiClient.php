@@ -212,6 +212,50 @@ class EkdosiClient
     }
 
     /**
+     * GET the "Εκδοθέντα Παραστατικά" list for a WHMCS client — every ISSUED
+     * ekdosi παραστατικό produced from a WHMCS invoice that client paid (their
+     * own + third-party routed). Canonical "{slug}:issued:{whmcs_userid}"; the
+     * "issued:" infix keeps it distinct from map/status signatures. data['rows']
+     * carries the documents. Read-only; ekdosi enforces the per-client scope.
+     */
+    public function getIssuedForClient(int $whmcsUserId): array
+    {
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug)
+            .'/issued-for-client/'.$whmcsUserId;
+        $canonical = $this->slug.':issued:'.$whmcsUserId;
+        $sig = 'sha256='.hash_hmac('sha256', $canonical, $this->secret);
+
+        return $this->httpRequest('GET', $url, null, [
+            'Accept: application/json',
+            'X-Webhook-Signature: '.$sig,
+        ], 10, 3);
+    }
+
+    /**
+     * GET the raw PDF bytes of ONE issued invoice, so the plugin can proxy them
+     * to the logged-in reseller (the signed public URL never reaches the
+     * browser). Canonical "{slug}:issued-pdf:{whmcs_userid}:{invoice_id}" — the
+     * invoice id is bound into the signature so it can't be replayed across
+     * documents. ekdosi re-derives membership (own OR routed) and refuses
+     * (404) anything outside this client's scope or not publicly viewable.
+     *
+     * Returns the standard httpRequest() shape; on success `body` holds the raw
+     * PDF bytes ('data' is null — a PDF isn't JSON, which is expected here).
+     */
+    public function getIssuedDocPdf(int $whmcsUserId, int $invoiceId): array
+    {
+        $url = $this->baseUrl.'/webhooks/whmcs/'.rawurlencode($this->slug)
+            .'/issued-doc-pdf/'.$whmcsUserId.'/'.$invoiceId;
+        $canonical = $this->slug.':issued-pdf:'.$whmcsUserId.':'.$invoiceId;
+        $sig = 'sha256='.hash_hmac('sha256', $canonical, $this->secret);
+
+        return $this->httpRequest('GET', $url, null, [
+            'Accept: application/pdf',
+            'X-Webhook-Signature: '.$sig,
+        ], 30, 5);
+    }
+
+    /**
      * Minimal cURL wrapper. WHMCS hosts vary in what HTTP libraries
      * are available; cURL is the lowest-common-denominator and
      * available on every supported PHP install.

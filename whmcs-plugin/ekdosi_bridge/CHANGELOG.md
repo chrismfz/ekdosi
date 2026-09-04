@@ -10,6 +10,17 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.46.0] — 2026-09-04
+### Added
+- **Client-area σελίδα «Εκδοθέντα Παραστατικά».** Νέο link στο «Τιμολόγηση» dropdown του πελάτη
+  (ανεξάρτητος διακόπτης `show_client_issued` + προαιρετικό `issued_pilot_clients`, default OFF).
+  Ο reseller βλέπει σε πίνακα τα ekdosi παραστατικά που εκδόθηκαν γι' αυτόν μέσω της γέφυρας —
+  **στο όνομά του ΚΑΙ σε τρίτους που δρομολόγησε ο ίδιος** — με ημ/νία, ΤΠΥ, τύπο, κατάσταση, ΜΑΡΚ,
+  επίσημο PDF και σύνδεσμο επαλήθευσης ΑΑΔΕ/παρόχου. Η λίστα έρχεται live από το ekdosi
+  (`EkdosiClient::getIssuedForClient`, scoped στον `$_SESSION['uid']`). Το **PDF περνά proxy**
+  (`EkdosiClient::getIssuedDocPdf` → stream των bytes· το signed URL του ekdosi δεν εκτίθεται στον
+  browser). Ο ίδιος `Gate` προστατεύει και το navbar link και τους handlers (κανένα URL-guessing).
+
 ## [0.45.0] — 2026-09-03
 ### Added
 - **Invoice-feed carries the payment gateway (`paymentmethod`).** Each bridge invoice
