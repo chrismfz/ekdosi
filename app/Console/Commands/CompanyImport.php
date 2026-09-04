@@ -71,6 +71,15 @@ class CompanyImport extends Command
             $this->line(sprintf('  %-22s +%d new, ~%d update',
                 $table, $counts['insert'] ?? 0, $counts['update'] ?? 0));
         }
+
+        $users = $summary['users'] ?? ['attach' => 0, 'create' => 0];
+        if (($users['create'] ?? 0) + ($users['attach'] ?? 0) > 0) {
+            // create = new local user (random pw → login via reset); attach = an
+            // existing user (matched by email) re-linked to the company.
+            $this->line(sprintf('  %-22s +%d new, ~%d linked',
+                'users (operators)', $users['create'] ?? 0, $users['attach'] ?? 0));
+        }
+
         if ($summary['dry_run']) {
             $this->warn('Dry-run: τίποτα δεν γράφτηκε. Ξανατρέξε με --execute για εφαρμογή.');
         }

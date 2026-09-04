@@ -478,6 +478,13 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   (passphrase ή raw, με σαφή plaintext προειδοποίηση στο raw)· `company:export`/`company:import`
   + panel actions. Η κατάσταση κρυπτογράφησης **καθολικών** αντιγράφων (env `BACKUP_ARCHIVE_PASSWORD`)
   φαίνεται read-only («🔒/⚠ χωρίς κωδικό») στις «Ρυθμίσεις συστήματος».
+  - **Χειριστές (operators) μέσα στο bundle** — το export κουβαλά τους ανατεθειμένους χρήστες της
+    εταιρίας (email + όνομα + ο ένας managed ρόλος: super_admin/company_admin/operator), **ΠΟΤΕ κωδικό**.
+    Στο import: υπάρχων χρήστης (match με email) συνδέεται + παίρνει τον ρόλο του· χρήστης που λείπει
+    **δημιουργείται** με τυχαίο κωδικό (login μόνο μέσω «ξέχασα τον κωδικό») → στήνεται η ομάδα σε φρέσκο VM
+    χωρίς να ταξιδεύει credential.
+  - **WHMCS default τύποι (απόδειξη/απλήρωτο)** rewire σωστά στο import (μαζί με τον τύπο τιμολογίου) —
+    δείχνουν στον εισαγόμενο invoice_type αντί για stale source id.
 - **Επιλεκτική εξαγωγή CSV** (Phase 3) — checkboxes «τι να τραβήξω» → .zip με CSV ανά
   entity (Excel-ready, UTF-8 BOM)· tenant-scoped + redaction μυστικών· «Εξαγωγή CSV»
   στο panel + `company:export-csv` (`CsvEntityExporter`).

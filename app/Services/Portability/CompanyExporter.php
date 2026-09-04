@@ -4,6 +4,7 @@ namespace App\Services\Portability;
 
 use App\Casts\MaybeEncrypted;
 use App\Models\Company;
+use App\Services\TenantRoleProvisioner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
@@ -111,7 +112,10 @@ class CompanyExporter
         'server_groups' => ['secret_encrypted'],
     ];
 
-    public function __construct(private readonly SecretsCodec $codec) {}
+    public function __construct(
+        private readonly SecretsCodec $codec,
+        private readonly TenantRoleProvisioner $roles,
+    ) {}
 
     /**
      * @return array{
@@ -120,6 +124,7 @@ class CompanyExporter
      *     secrets: array{mode:string, salt?:string, values:array<string,?string>},
      *     setup: array<string, list<array<string,mixed>>>,
      *     data: array<string, list<array<string,mixed>>>,
+     *     users: list<array{email:string, name:string, role:?string}>,
      *     files: array<string,string>
      * }
      */
@@ -153,6 +158,11 @@ class CompanyExporter
         $setup = $this->dump(self::SETUP_TABLES, $company->id, $counts);
         $data = $full ? $this->dump(self::TRANSACTIONAL_TABLES, $company->id, $counts) : [];
 
+        // Assigned operators — part of SETTINGS (who can log in), always carried
+        // (not gated on --full). No passwords/ids travel (see exportUsers()).
+        $users = $this->exportUsers($company);
+        $counts['users'] = count($users);
+
         $files = [];
         if (($logo = $this->logo($company)) !== null) {
             $files['files/'.$logo['name']] = $logo['bytes'];
@@ -179,8 +189,34 @@ class CompanyExporter
             'secrets' => $sealed,
             'setup' => $setup,
             'data' => $data,
+            'users' => $users,
             'files' => $files,
         ];
+    }
+
+    /**
+     * The operators assigned to this company — email + name + their single
+     * managed role (super_admin|company_admin|operator|null), so a restore can
+     * re-attach the team on a fresh VM. Deliberately NO passwords, ids or other
+     * credentials: users are panel-global, so only the MEMBERSHIP + role are
+     * portable. On import an existing user is matched by email; a missing one is
+     * created with a random password (login only via password-reset). Always in
+     * the bundle (SETTINGS, not gated on --full) — «who can log in» is config.
+     *
+     * @return list<array{email:string, name:string, role:?string}>
+     */
+    private function exportUsers(Company $company): array
+    {
+        $out = [];
+        foreach ($company->users()->get(['users.id', 'users.name', 'users.email']) as $user) {
+            $out[] = [
+                'email' => (string) $user->email,
+                'name' => (string) $user->name,
+                'role' => $this->roles->roleInCompany($user, $company),
+            ];
+        }
+
+        return $out;
     }
 
     /**

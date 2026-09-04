@@ -493,6 +493,22 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   ίδιο πέρασμα (super-admin-only, mutations `false`) όταν ακουμπήσουμε ξανά τα δικαιώματα.
 
 ## 🔒 Backup / DR / Portability
+- **Operator export/import role queries are N+1** _(P2, from the operators-in-bundle review)._
+  `CompanyExporter::exportUsers()` reuses `TenantRoleProvisioner::roleInCompany()` (up to 3 `userHoldsRole`
+  queries per user); `planUsers`/`importUsers` add ~1 query per user each. A 40-operator tenant is ~120+ tiny
+  indexed queries per export/import. Deliberately kept as REUSE of the team-aware role helper over a hand-rolled
+  ranking join (export/import are manual, infrequent; tenants have single-digit operators). Collapse to one
+  `model_has_roles→roles` join filtered to the company if a tenant ever grows a large operator roster.
+- **Operators in bundle: leads/activities lose operator attribution on --full import** _(P2, from the review)._
+  Now that operators travel, `leads.assigned_user_id` / `lead_activities.user_id` COULD be restored, but
+  `FK_REWIRES` still nulls them (no user-id map — the users section carries email/name/role, no source id).
+  Only bites `--full` (transactional) bundles, not the settings-bundle install path. Fix = carry the source
+  user id in the users section + an email→new-user-id patch pass over the two lead FK columns.
+- **--into restore can null a carried-but-unresolvable invoice_type default** _(P2, rare, from the review)._
+  On `--into`, a `whmcs_default_*_type_id` the bundle carries but whose target invoice_type isn't in the dumped
+  set (soft-deleted / dangling source FK) is nulled at save and the patch can't re-resolve it → the target's
+  live default is lost with no warning. Same-company dumps normally include all types, so rare. Fix = on --into,
+  keep the target's pre-import value (or at least log) when a carried type FK can't be remapped.
 - **Durable native portable key (μετά το legacy_id sunset).** Ο `CompanyImporter` κλειδώνει
   το idempotent matching σε `legacy_id` (+ content-signature fallback). Όταν σβήσει το legacy
   (Delphi/Firebird), τα native rows (legacy_id NULL) δεν συγκλίνουν αξιόπιστα σε re-import-πάνω-

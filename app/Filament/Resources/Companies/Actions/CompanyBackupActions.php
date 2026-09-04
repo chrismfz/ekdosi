@@ -481,6 +481,11 @@ class CompanyBackupActions
             $lines[] = $table.': +'.($counts['insert'] ?? 0).' / ~'.($counts['update'] ?? 0);
         }
 
+        $users = $summary['users'] ?? ['attach' => 0, 'create' => 0];
+        if (($users['create'] ?? 0) + ($users['attach'] ?? 0) > 0) {
+            $lines[] = 'χειριστές: +'.($users['create'] ?? 0).' νέοι / ~'.($users['attach'] ?? 0).' σύνδεση';
+        }
+
         $notification = Notification::make()
             ->title($summary['dry_run'] ? 'Προεπισκόπηση — τίποτα δεν γράφτηκε' : 'Η εισαγωγή ολοκληρώθηκε')
             ->body(($summary['company'] === 'create' ? 'Δημιουργία' : 'Ενημέρωση')

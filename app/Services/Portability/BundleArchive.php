@@ -9,8 +9,8 @@ use ZipArchive;
  * Serialises a CompanyExporter bundle to / from a `.zip`, so the command AND the
  * Filament UI share one reader/writer instead of duplicating ZipArchive glue.
  *
- * Layout: manifest.json + company.json + secrets.json + setup/<table>.json +
- * data/<table>.json (full bundle only) + files/<name>.
+ * Layout: manifest.json + company.json + secrets.json + users.json +
+ * setup/<table>.json + data/<table>.json (full bundle only) + files/<name>.
  */
 class BundleArchive
 {
@@ -35,6 +35,9 @@ class BundleArchive
         $zip->addFromString('manifest.json', $json($bundle['manifest']));
         $zip->addFromString('company.json', $json($bundle['company']));
         $zip->addFromString('secrets.json', $json($bundle['secrets']));
+        // Assigned operators (email/name/role, no passwords). Optional key so an
+        // older bundle without it still round-trips.
+        $zip->addFromString('users.json', $json($bundle['users'] ?? []));
         foreach ($bundle['setup'] as $table => $rows) {
             $zip->addFromString("setup/{$table}.json", $json($rows));
         }
@@ -73,6 +76,8 @@ class BundleArchive
             $zip->close();
             throw new RuntimeException('Μη έγκυρο αρχείο: λείπει manifest/company/secrets.');
         }
+        // Optional (absent in older bundles) → default to no assigned operators.
+        $users = $read('users.json') ?? [];
 
         $setup = [];
         $data = [];
@@ -91,6 +96,6 @@ class BundleArchive
         }
         $zip->close();
 
-        return compact('manifest', 'company', 'secrets', 'setup', 'data', 'files');
+        return compact('manifest', 'company', 'secrets', 'users', 'setup', 'data', 'files');
     }
 }

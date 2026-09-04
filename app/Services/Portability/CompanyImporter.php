@@ -3,12 +3,14 @@
 namespace App\Services\Portability;
 
 use App\Models\Company;
+use App\Models\User;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -88,6 +90,19 @@ class CompanyImporter
         'quotes', 'quote_lines', 'quote_mail_logs',
         'expenses', 'expense_lines', 'expense_marks',
         'cmr_notes', 'cmr_lines',
+    ];
+
+    /**
+     * `companies` columns that FK-reference invoice_types (the WHMCS auto-issue
+     * defaults). Nulled before the company row is saved, then rewired through the
+     * imported invoice_types map — the SOURCE ids they carry would otherwise
+     * FK-violate on a fresh (--new) import, or silently point at ANOTHER tenant's
+     * invoice type on a box that already has some. All three share one rewire path.
+     */
+    private const COMPANY_INVOICE_TYPE_FKS = [
+        'whmcs_default_invoice_type_id',
+        'whmcs_default_receipt_type_id',
+        'whmcs_default_unpaid_type_id',
     ];
 
     /** Invoice self-reference columns — nulled on insert, patched after the pass. */
@@ -200,6 +215,7 @@ class CompanyImporter
             'slug' => $new ? $slug : $existing->slug,
             'dry_run' => ! $execute,
             'tables' => $this->plan($bundle, $existing),
+            'users' => $this->planUsers($bundle['users'] ?? []),
         ];
 
         if (! $execute) {
@@ -208,8 +224,19 @@ class CompanyImporter
 
         $company = DB::transaction(function () use ($bundle, $secrets, $new, $existing): Company {
             $attrs = $this->companyAttributes($bundle['company'], $secrets);
-            $whmcsTypeOld = $attrs['whmcs_default_invoice_type_id'] ?? null;
-            $attrs['whmcs_default_invoice_type_id'] = null; // rewired after invoice_types
+            // Null every invoice_types FK the bundle CARRIES before the save; each
+            // is rewired below through the imported invoice_types map (see
+            // COMPANY_INVOICE_TYPE_FKS). Skip a column the bundle omits (an older
+            // pre-column bundle) so an --into restore never nulls the target's
+            // live value for a knob the bundle knows nothing about.
+            $typeFkOld = [];
+            foreach (self::COMPANY_INVOICE_TYPE_FKS as $col) {
+                if (! array_key_exists($col, $attrs)) {
+                    continue;
+                }
+                $typeFkOld[$col] = $attrs[$col];
+                $attrs[$col] = null;
+            }
 
             $company = $new ? new Company : $existing;
             // Suppress the created-observer's role provisioning INSIDE this big
@@ -226,8 +253,15 @@ class CompanyImporter
                 $maps[$table] = $this->importTable($table, $bundle['setup'][$table] ?? [], $company->id, $maps);
             }
 
-            if ($whmcsTypeOld !== null && isset($maps['invoice_types'][$whmcsTypeOld])) {
-                Company::withoutEvents(fn () => $company->forceFill(['whmcs_default_invoice_type_id' => $maps['invoice_types'][$whmcsTypeOld]])->save());
+            $typeFkPatch = [];
+            foreach (self::COMPANY_INVOICE_TYPE_FKS as $col) {
+                $old = $typeFkOld[$col] ?? null;
+                if ($old !== null && isset($maps['invoice_types'][$old])) {
+                    $typeFkPatch[$col] = $maps['invoice_types'][$old];
+                }
+            }
+            if ($typeFkPatch !== []) {
+                Company::withoutEvents(fn () => $company->forceFill($typeFkPatch)->save());
             }
 
             // Bucket C (full bundle): transactional, parents before children.
@@ -274,7 +308,163 @@ class CompanyImporter
             );
         }
 
+        // Re-attach the assigned operators now the company + its roles exist.
+        // Best-effort (a single user failure never aborts a committed import).
+        $summary['users'] = $this->importUsers($company, $bundle['users'] ?? []);
+
         return $summary;
+    }
+
+    /**
+     * Predict the operator re-attach (no writes) for the dry-run plan: each
+     * bundle user is an ATTACH if a local user with that email already exists,
+     * else a CREATE.
+     *
+     * @param  list<array<string,mixed>>  $users
+     * @return array{attach:int, create:int}
+     */
+    private function planUsers(array $users): array
+    {
+        $attach = 0;
+        $create = 0;
+        $seen = [];
+        foreach ($users as $u) {
+            $email = trim((string) ($u['email'] ?? ''));
+            // Dedupe on a case-folded key: the email column is utf8mb4_unicode_ci
+            // (case-insensitive), so «Bob@x» and «bob@x» are the SAME account.
+            $key = mb_strtolower($email);
+            if ($email === '' || isset($seen[$key])) {
+                continue; // dedupe so the plan matches importUsers (each email once)
+            }
+            $seen[$key] = true;
+            User::query()->where('email', $email)->exists() ? $attach++ : $create++;
+        }
+
+        return ['attach' => $attach, 'create' => $create];
+    }
+
+    /**
+     * Re-attach the bundle's assigned operators to the imported company. An
+     * existing user (matched by email) is attached and given their exported
+     * managed role; a MISSING one is created with a random, unknowable password —
+     * login is possible only via the password-reset flow, so no credential ever
+     * rides in a bundle (the user's own choice). Best-effort per user: a single
+     * failure is logged and skipped, never aborting an already-committed import.
+     *
+     * ROLE policy: a user the import CREATED always gets their (capped) role. A
+     * user that ALREADY existed on this box is roled only when they hold NO role
+     * in THIS company yet (roleInCompany === null). That provisions a --new
+     * import (fresh company, no roles) AND an existing user newly added to the
+     * company on an --into restore, while NEVER silently re-roling a live team
+     * member whose role post-dates the bundle. Attach/create is counted BEFORE the
+     * (secondary) role write, so a role-write failure can't undercount vs the plan.
+     *
+     * @param  list<array<string,mixed>>  $users
+     * @return array{attach:int, create:int}
+     */
+    private function importUsers(Company $company, array $users): array
+    {
+        $attached = 0;
+        $created = 0;
+        $seen = [];
+
+        foreach ($users as $u) {
+            $email = trim((string) ($u['email'] ?? ''));
+            $key = mb_strtolower($email); // case-fold: email is case-insensitive at rest
+            if ($email === '' || isset($seen[$key])) {
+                continue; // one row per email (keeps counts consistent with planUsers)
+            }
+            $seen[$key] = true;
+
+            try {
+                $user = User::query()->where('email', $email)->first();
+                $isNew = $user === null;
+
+                if ($isNew) {
+                    $user = User::query()->create([
+                        'name' => trim((string) ($u['name'] ?? '')) ?: $email,
+                        'email' => $email,
+                        // Random 32-char password → the row can't be logged into
+                        // until the operator sets one via password-reset. The
+                        // 'hashed' cast hashes it on save; nobody ever knows it.
+                        'password' => Str::password(32),
+                        // NOT pre-verified: the address was never confirmed on this
+                        // VM. Completing the password-reset flow (email to that
+                        // address) is what proves control of it.
+                        'email_verified_at' => null,
+                    ]);
+                }
+
+                $user->companies()->syncWithoutDetaching([$company->id]);
+                // Membership is the attach/create fact — count it now, before the
+                // secondary role write, so a role-write failure can't undercount.
+                $isNew ? $created++ : $attached++;
+
+                // Role a created user always; a pre-existing one only when it holds
+                // no role in THIS company yet (never re-role a live team member).
+                if ($isNew || $this->provisioner->roleInCompany($user, $company) === null) {
+                    try {
+                        $this->assignImportedRole($user, $company, isset($u['role']) ? (string) $u['role'] : null);
+                    } catch (\Throwable $e) {
+                        Log::warning('CompanyImporter: operator imported but role assignment failed.', [
+                            'company_id' => $company->id,
+                            'email' => $email,
+                            'error' => $e->getMessage(),
+                        ]);
+                    }
+                }
+            } catch (\Throwable $e) {
+                Log::warning('CompanyImporter: could not import an assigned operator.', [
+                    'company_id' => $company->id,
+                    'email' => $email,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        }
+
+        return ['attach' => $attached, 'create' => $created];
+    }
+
+    /**
+     * Give a re-attached operator their exported managed role in the company.
+     * Only the three managed roles (super_admin|company_admin|operator) are
+     * honoured; a null/unknown role leaves the user attached with NO managed role
+     * (a company_admin re-grants from the role picker).
+     *
+     * ADDITIVE on purpose (assign*, not setRoleInCompany): on a fresh --new
+     * import the user has no prior role so «add» == «set», and on an --into
+     * restore we must never STRIP a role — that could downgrade or even lock out
+     * an admin whose live grant post-dates the bundle. Team-safe (raw writes with
+     * the explicit company_id) and ensures the role rows exist first.
+     */
+    private function assignImportedRole(User $user, Company $company, ?string $role): void
+    {
+        if ($role === null || $role === '') {
+            return;
+        }
+
+        $managed = $this->provisioner->managedRoleNames();
+        if (! in_array($role, $managed, true)) {
+            return; // unknown role → attached with no managed role
+        }
+
+        // super_admin (managedRoleNames()[0], Shield-configurable) is a GLOBAL,
+        // cross-tenant Gate::before bypass — it must NEVER be granted implicitly
+        // from imported data, or a bundle authored by another party could mint a
+        // cross-tenant admin on a shared box just by listing an email as
+        // super_admin. Cap it at company_admin (per-tenant, can't escalate:
+        // User/Company/Role are ADMIN_FORBIDDEN); the platform operator grants
+        // super_admin EXPLICITLY (install --email / shield:sync-super-admin / the
+        // role picker), never a bundle.
+        if ($role === $managed[0]) {
+            Log::info('CompanyImporter: an exported super_admin was capped to company_admin on import (a global role is never granted from a bundle).', [
+                'company_id' => $company->id,
+                'user_id' => $user->id,
+            ]);
+            $role = TenantRoleProvisioner::ROLE_COMPANY_ADMIN;
+        }
+
+        $this->provisioner->assignStandardRole($user, $company, $role);
     }
 
     /**
