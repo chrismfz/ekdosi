@@ -67,14 +67,15 @@ class BundleArchive
 
         $manifest = $this->readJsonEntry($zip, 'manifest.json');
         $secrets = $this->readJsonEntry($zip, 'secrets.json');
-        // company.json isn't needed here, but verify it EXISTS: the full read()
-        // requires it, so the gate must fail on its absence BEFORE migrate rather
-        // than letting the command fail after (leaving a migrated, empty DB).
-        $hasCompany = $zip->locateName('company.json') !== false;
+        // company.json isn't returned here, but decode it too (it's one small
+        // row) so the gate matches read()'s EXACT invariant — a present-but-
+        // corrupt company.json must fail BEFORE migrate, not after (which would
+        // leave a migrated, empty DB). Existence alone wouldn't catch corruption.
+        $company = $this->readJsonEntry($zip, 'company.json');
         $zip->close();
 
-        if ($manifest === null || $secrets === null || ! $hasCompany) {
-            throw new RuntimeException('Μη έγκυρο αρχείο: λείπει manifest/company/secrets.');
+        if ($manifest === null || $secrets === null || $company === null) {
+            throw new RuntimeException('Μη έγκυρο αρχείο: λείπει/κατεστραμμένο manifest/company/secrets.');
         }
 
         return compact('manifest', 'secrets');
@@ -104,10 +105,10 @@ class BundleArchive
             $name = (string) $zip->getNameIndex($i);
             if (str_starts_with($name, 'setup/') && str_ends_with($name, '.json')) {
                 $table = substr($name, strlen('setup/'), -strlen('.json'));
-                $setup[$table] = json_decode((string) $zip->getFromName($name), true) ?? [];
+                $setup[$table] = $this->requireJsonEntry($zip, $name);
             } elseif (str_starts_with($name, 'data/') && str_ends_with($name, '.json')) {
                 $table = substr($name, strlen('data/'), -strlen('.json'));
-                $data[$table] = json_decode((string) $zip->getFromName($name), true) ?? [];
+                $data[$table] = $this->requireJsonEntry($zip, $name);
             } elseif (str_starts_with($name, 'files/')) {
                 $files[$name] = (string) $zip->getFromName($name);
             }
@@ -144,5 +145,23 @@ class BundleArchive
         $decoded = json_decode($raw, true);
 
         return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * A present setup/data table entry that fails to decode to an array is
+     * CORRUPT — throw rather than silently import it as an empty table (silent
+     * data loss on a restore). An empty table legitimately serialises as `[]`.
+     *
+     * @return array<mixed>
+     */
+    private function requireJsonEntry(ZipArchive $zip, string $name): array
+    {
+        $decoded = $this->readJsonEntry($zip, $name);
+        if ($decoded === null) {
+            $zip->close();
+            throw new RuntimeException("Κατεστραμμένο αρχείο στο bundle: {$name}");
+        }
+
+        return $decoded;
     }
 }

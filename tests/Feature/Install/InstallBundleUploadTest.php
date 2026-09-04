@@ -165,6 +165,55 @@ class InstallBundleUploadTest extends TestCase
         $this->assertTrue($threw, 'readHeader must reject a bundle missing company.json');
     }
 
+    public function test_read_header_rejects_a_present_but_corrupt_company_json(): void
+    {
+        // Existence alone isn't enough: a present-but-corrupt company.json must
+        // also fail the gate (else it slips to migrate then fails in read()).
+        $tmp = tempnam(sys_get_temp_dir(), 'ekb').'.zip';
+        $zip = new \ZipArchive;
+        $zip->open($tmp, \ZipArchive::CREATE);
+        $zip->addFromString('manifest.json', (string) json_encode(['company' => ['slug' => 'x']]));
+        $zip->addFromString('secrets.json', (string) json_encode(['mode' => 'raw', 'values' => []]));
+        $zip->addFromString('company.json', 'not-json-at-all');
+        $zip->close();
+
+        $threw = false;
+        try {
+            app(BundleArchive::class)->readHeader($tmp);
+        } catch (\RuntimeException) {
+            $threw = true;
+        } finally {
+            @unlink($tmp);
+        }
+
+        $this->assertTrue($threw, 'readHeader must reject a corrupt company.json, not just an absent one');
+    }
+
+    public function test_read_rejects_a_corrupt_table_entry_instead_of_importing_it_empty(): void
+    {
+        // A corrupt setup/data table must ERROR on restore, never silently import
+        // as an empty table (silent data loss on a legal-document restore).
+        $tmp = tempnam(sys_get_temp_dir(), 'ekb').'.zip';
+        $zip = new \ZipArchive;
+        $zip->open($tmp, \ZipArchive::CREATE);
+        $zip->addFromString('manifest.json', (string) json_encode(['company' => ['slug' => 'x']]));
+        $zip->addFromString('company.json', (string) json_encode(['slug' => 'x']));
+        $zip->addFromString('secrets.json', (string) json_encode(['mode' => 'raw', 'values' => []]));
+        $zip->addFromString('setup/invoice_types.json', '{ this is not valid json');
+        $zip->close();
+
+        $threw = false;
+        try {
+            app(BundleArchive::class)->read($tmp);
+        } catch (\RuntimeException) {
+            $threw = true;
+        } finally {
+            @unlink($tmp);
+        }
+
+        $this->assertTrue($threw, 'read() must reject a corrupt table entry, not import it as empty');
+    }
+
     public function test_import_mode_rejects_a_sealed_bundle_with_a_wrong_passphrase_before_migrating(): void
     {
         $this->fakeEmptyDb();
