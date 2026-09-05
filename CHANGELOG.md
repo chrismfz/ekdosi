@@ -26,6 +26,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   καμία φορολογική οδηγία (το `tax-notes.md` μένει accountant-confirmed-only).
 
 ### Added
+- **Customer portal — reset password + invited-login «claim».** `/user/forgot-password` +
+  `/user/reset-password/{token}` πάνω στον απομονωμένο `customer_users` broker. Η **ίδια ροή** ορίζει
+  και τον ΠΡΩΤΟ κωδικό ενός operator-invited login (invited→active claim), οπότε ο operator ανοίγει
+  invited login για γνωστό πελάτη και ο πελάτης αυτο-ενεργοποιείται — **operator-gated onboarding χωρίς
+  open φόρμα**. **Anti-abuse:** ένα generic μήνυμα για κάθε έκβαση (no enumeration), **honeypot**,
+  throttle **ανά email (5/ώρα) + ανά IP** πάνω από το 60s broker throttle, queued mail (send-time εκτός
+  request), και **κανένα email σε suspended** login. Portal-scoped `PortalResetPasswordNotification`
+  (link στο portal route, ποτέ στο operator). Link «Ξέχασα τον κωδικό» στη σελίδα εισόδου.
 - **MYD-011: κανονικοποιημένη χώρα ISO (`country_code`) σε πελάτες/προμηθευτές.** Νέα καθαρή στήλη
   `country_code` (ISO-3166-1 alpha-2) δίπλα στο ελεύθερο `country`, με **ISO picker** στη φόρμα
   (πελάτη & προμηθευτή) δεμένο σε αυτήν — ώστε μια legacy τιμή «ΙΤΑΛΙΑ» να μη σπάει πλέον το save

@@ -5,6 +5,7 @@ use App\Http\Controllers\ExpenseDocumentDownloadController;
 use App\Http\Controllers\Portal\DocumentPdfController as PortalDocumentPdfController;
 use App\Http\Controllers\Portal\HomeController as PortalHomeController;
 use App\Http\Controllers\Portal\LoginController as PortalLoginController;
+use App\Http\Controllers\Portal\PasswordResetController as PortalPasswordResetController;
 use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
@@ -31,6 +32,18 @@ Route::post('/user/login', [PortalLoginController::class, 'login'])
     ->middleware('throttle:10,1')
     ->name('portal.login.attempt');
 Route::post('/user/logout', [PortalLoginController::class, 'logout'])->name('portal.logout');
+
+// Password reset / invited-login claim (guest — for logged-out customers). The
+// request endpoint is generic + honeypotted + throttled per-IP here and per-email
+// in the controller. See PasswordResetController.
+Route::get('/user/forgot-password', [PortalPasswordResetController::class, 'showLinkRequest'])
+    ->name('portal.password.request');
+Route::post('/user/forgot-password', [PortalPasswordResetController::class, 'sendLink'])
+    ->middleware('throttle:20,60')->name('portal.password.email');
+Route::get('/user/reset-password/{token}', [PortalPasswordResetController::class, 'showReset'])
+    ->name('portal.password.reset');
+Route::post('/user/reset-password', [PortalPasswordResetController::class, 'reset'])
+    ->middleware('throttle:20,60')->name('portal.password.update');
 Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
     Route::get('/user', [PortalHomeController::class, 'index'])->name('portal.home');
     // Official PDF of one of the customer's own documents (grant-scoped, streamed).

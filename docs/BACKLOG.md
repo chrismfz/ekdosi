@@ -725,6 +725,17 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Customer portal — self-register concept (design locked, NOT built).** Reset-password + the invited-login
+  «claim» shipped (operator opens an invited login → customer self-sets password via `/user/forgot-password`),
+  which IS the safe near-term onboarding — no open form, operator decides who gets a login. If open-ish
+  self-registration is ever wanted, go **tier-2 CLAIM only, never open signup (tier-3)**: a form where the
+  visitor proves they are an EXISTING customer (ΑΦΜ + email that matches a `customers` row, or an invoice
+  number) → **email verification** → the row is created, but **the data grant is still operator-approved**
+  (or deterministically WHMCS-derived), never auto. Key safety fact: because of the grants boundary a login
+  with **no grant sees nothing**, so even a successful spam/bot registration is inert — the real vectors are
+  email-bombing (mitigate with the same throttle+honeypot pattern as reset), DB junk (email-verify before the
+  row is «real»), and impersonation (mitigated by the ΑΦΜ-match + operator grant approval). Do not build until
+  a tenant actually asks; reset-password covers onboarding for now.
 - **Customer portal — Slice 2 documents view: P2/P3 survivors (from the adversarial gate).**
   _(consciously deferred)._ The security boundary (grant-scoped reads, fail-closed PDF authz, per-request
   status re-check) passed with no P0/P1. Fixed in the same PR: PDF-route throttle, `target=_blank`
