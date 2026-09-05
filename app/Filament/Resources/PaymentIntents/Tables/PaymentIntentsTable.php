@@ -86,7 +86,13 @@ class PaymentIntentsTable
                             actualAmount: (float) $data['actual_amount'],
                             paymentMethodId: filled($data['payment_method_id'] ?? null) ? (int) $data['payment_method_id'] : null,
                         );
-                        Notification::make()->title("Καταχωρίστηκε η πληρωμή {$record->reference}")->success()->send();
+                        // Honest even on a race: settle() is a no-op if the intent
+                        // was concurrently cancelled/settled — report the real state.
+                        if ($record->fresh()?->status === PaymentIntent::STATUS_SETTLED) {
+                            Notification::make()->title("Καταχωρίστηκε η πληρωμή {$record->reference}")->success()->send();
+                        } else {
+                            Notification::make()->title('Η κατάσταση άλλαξε — δεν καταχωρίστηκε.')->warning()->send();
+                        }
                     }),
                 Action::make('cancel')
                     ->label('Ακύρωση')
@@ -98,7 +104,11 @@ class PaymentIntentsTable
                         abort_unless(Gate::allows('create', Payment::class), 403);
                         // Guarded pending→cancelled (locked) so it can't race/overwrite a settle.
                         app(PaymentIntentService::class)->cancel($record);
-                        Notification::make()->title("Ακυρώθηκε η εκκρεμότητα {$record->reference}")->success()->send();
+                        if ($record->fresh()?->status === PaymentIntent::STATUS_CANCELLED) {
+                            Notification::make()->title("Ακυρώθηκε η εκκρεμότητα {$record->reference}")->success()->send();
+                        } else {
+                            Notification::make()->title('Δεν ακυρώθηκε — η πληρωμή είχε ήδη καταχωριστεί.')->warning()->send();
+                        }
                     }),
             ]);
     }
