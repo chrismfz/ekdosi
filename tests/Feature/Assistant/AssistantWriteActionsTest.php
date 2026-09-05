@@ -8,10 +8,15 @@ use App\Models\AiPendingAction;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerContact;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Models\User;
 use App\Services\Assistant\AiActionExecutor;
 use App\Services\Assistant\ToolRegistry;
 use App\Services\Assistant\Tools\CreateReminderTool;
+use App\Services\Assistant\Tools\RecordPaymentTool;
 use App\Services\Assistant\Tools\SendCustomerStatementTool;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -189,7 +194,8 @@ class AssistantWriteActionsTest extends TestCase
         $names = array_column((new ToolRegistry)->definitionsFor($this->user), 'name');
         $this->assertContains('send_customer_statement', $names);
         $this->assertContains('create_reminder', $names);
-        $this->assertCount(15, $names);
+        $this->assertContains('record_payment', $names);
+        $this->assertCount(16, $names);
     }
 
     public function test_widget_confirm_flow_executes_the_action(): void
@@ -241,5 +247,97 @@ class AssistantWriteActionsTest extends TestCase
         $this->assertNotContains('send_customer_statement', $names);
         // Reminder has no permission gate → still offered.
         $this->assertContains('create_reminder', $names);
+    }
+
+    /** An active, credit-term invoice with an open balance for allocation tests. */
+    private function creditInvoice(Customer $c, float $gross): Invoice
+    {
+        $method = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Πίστωση', 'due_days' => 30]);
+        $type = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1, 'mydata_type' => '2.1']);
+
+        return Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'I'.uniqid(), 'code' => random_int(1, 99999),
+            'invoice_type_id' => $type->id, 'payment_method_id' => $method->id, 'customer_id' => $c->id,
+            'issued_at' => now()->subDay(), 'local_status' => 'active',
+            'net_total' => round($gross / 1.24, 2), 'gross_total' => $gross, 'header_discount_percent' => 0,
+        ]);
+    }
+
+    public function test_record_payment_stages_then_confirm_allocates_a_real_payment(): void
+    {
+        Gate::before(fn () => true); // operator has Create:Payment
+        $c = $this->customer('Οφειλέτης ΑΕ', email: null);
+        $inv = $this->creditInvoice($c, 100);
+
+        // Stage — nothing recorded yet.
+        $res = (new RecordPaymentTool)->run($this->tenant, ['customer' => 'Οφειλέτης', 'amount' => 100]);
+        $this->assertTrue($res['proposed']);
+        $this->assertSame(0, Payment::where('company_id', $this->tenant->id)->count());
+
+        $action = AiPendingAction::find($res['action_id']);
+        $this->assertSame(AiPendingAction::TYPE_RECORD_PAYMENT, $action->type);
+        $this->assertSame($c->id, $action->customer_id);
+        $this->assertEqualsWithDelta(100.0, (float) $action->payload['amount'], 0.01);
+
+        // Confirm — the Payment is created and allocated onto the open invoice.
+        $line = app(AiActionExecutor::class)->confirm($action, $this->user);
+
+        $this->assertStringContainsString('Καταχωρήθηκε είσπραξη', $line);
+        $this->assertStringContainsString((string) $inv->invcode, $line);
+        $this->assertSame(AiPendingAction::STATUS_CONFIRMED, $action->fresh()->status);
+        $this->assertEqualsWithDelta(100.0, (float) Payment::where('invoice_id', $inv->id)->sum('amount'), 0.01);
+        $this->assertEqualsWithDelta(0.0, (float) $inv->fresh()->balanceData()->balance, 0.01);
+
+        // Audit back-reference: the confirmed action stores the allocation reference,
+        // which every created Payment carries.
+        $ref = $action->fresh()->payload['payment_reference'] ?? null;
+        $this->assertNotNull($ref);
+        $this->assertSame(1, Payment::where('reference', $ref)->count());
+
+        // Double-confirm must NOT create a second payment (atomic claim).
+        $again = app(AiActionExecutor::class)->confirm($action->fresh(), $this->user);
+        $this->assertSame('Η ενέργεια δεν εκκρεμεί πλέον.', $again);
+        $this->assertEqualsWithDelta(100.0, (float) Payment::where('invoice_id', $inv->id)->sum('amount'), 0.01);
+    }
+
+    public function test_record_payment_reads_a_greek_ddmmyyyy_date_unambiguously(): void
+    {
+        Gate::before(fn () => true);
+        $this->customer('Ημερομηνία', email: null);
+
+        // 06/09/2026 = 6 Sep (Greek), NOT 9 Jun (US) — Carbon::parse would misread it.
+        $res = (new RecordPaymentTool)->run($this->tenant, ['customer' => 'Ημερομηνία', 'amount' => 10, 'date' => '06/09/2026']);
+
+        $this->assertSame('2026-09-06', $res['date']);
+    }
+
+    public function test_record_payment_refuses_an_ambiguous_customer(): void
+    {
+        Gate::before(fn () => true);
+        $this->customer('Παπαδόπουλος Α', email: null);
+        $this->customer('Παπαδόπουλος Β', email: null);
+
+        $res = (new RecordPaymentTool)->run($this->tenant, ['customer' => 'Παπαδόπουλος', 'amount' => 50]);
+
+        $this->assertArrayHasKey('error', $res);
+        $this->assertSame(0, AiPendingAction::where('company_id', $this->tenant->id)->count());
+    }
+
+    public function test_record_payment_confirm_rechecks_the_money_permission(): void
+    {
+        // NO Gate::before allow-all — so the real policy denies Create:Payment to a
+        // roleless stranger. Staging bypasses the gate (we call run() directly);
+        // the confirm re-check is what must refuse.
+        $c = $this->customer('Οφειλέτης', email: null);
+        $res = (new RecordPaymentTool)->run($this->tenant, ['customer' => 'Οφειλέτης', 'amount' => 20]);
+        $action = AiPendingAction::find($res['action_id']);
+
+        // A user WITHOUT Create:Payment must be refused at confirm (defence in depth).
+        $stranger = User::create(['name' => 'NoPerm', 'email' => 'np-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $line = app(AiActionExecutor::class)->confirm($action, $stranger);
+
+        $this->assertSame('Δεν έχετε πρόσβαση.', $line);
+        $this->assertSame(AiPendingAction::STATUS_FAILED, $action->fresh()->status);
+        $this->assertSame(0, Payment::where('company_id', $this->tenant->id)->count());
     }
 }

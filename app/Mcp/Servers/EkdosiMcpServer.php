@@ -23,6 +23,7 @@ use App\Mcp\Tools\MyDataSettingsMcpTool;
 use App\Mcp\Tools\OutstandingReceivablesMcpTool;
 use App\Mcp\Tools\RecentActivityMcpTool;
 use App\Mcp\Tools\RecentInvoicesMcpTool;
+use App\Mcp\Tools\RecordPaymentMcpTool;
 use App\Mcp\Tools\SendCustomerStatementMcpTool;
 use App\Mcp\Tools\StuckDocumentsMcpTool;
 use App\Mcp\Tools\TopProductsMcpTool;
@@ -79,9 +80,11 @@ Business (tenant-scoped, offered only if your user holds the permission):
   monthly cap and % of it, and a per-user breakdown. Gated on View:CompanySettings; with
   company="all" a super-admin gets the per-company spend across every tenant.
 - app_version — deployed build + whether an update is available (read-only).
-- send_customer_statement / create_reminder — WRITE actions that are PROPOSE-ONLY here:
-  they stage a pending action and return its id; nothing is sent/armed until an operator
-  CONFIRMS it inside the ekdosi panel. Say it was prepared, not done.
+- send_customer_statement / create_reminder / record_payment — WRITE actions that are
+  PROPOSE-ONLY here: they stage a pending action and return its id; nothing is sent/armed/
+  recorded until an operator CONFIRMS it inside the ekdosi panel. record_payment stages a
+  customer receipt (FIFO onto open invoices, remainder on-account) — the Payment is created
+  only on confirm; a write never fans out over "all". Say it was prepared, not done.
 
 Ops / debugging (super-admin only, cross-tenant infrastructure, read-only):
 - app_health — deploy health: queue worker + pending/failed jobs, scheduler/cron per-task
@@ -141,6 +144,7 @@ class EkdosiMcpServer extends Server
         // Business — write (PROPOSE-ONLY; operator confirms in-app).
         SendCustomerStatementMcpTool::class,
         CreateReminderMcpTool::class,
+        RecordPaymentMcpTool::class,
         // Ops / debug (super_admin only, cross-tenant infra).
         AppHealthTool::class,
         FailedJobsTool::class,
