@@ -6,6 +6,7 @@ use App\Models\CustomerUser;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password;
 use Tests\TestCase;
 
 /**
@@ -88,5 +89,39 @@ class PortalSessionInvalidationTest extends TestCase
 
         $this->actingAs($user, 'portal')->get('/user')->assertOk();
         $this->assertAuthenticatedAs($user, 'portal');
+    }
+
+    public function test_reset_rotates_remember_token_so_stale_remember_cookies_die(): void
+    {
+        // Remembered sessions on other/stolen devices are cut off by rotating the
+        // remember_token (the recaller then fails retrieveByToken) — the mechanism
+        // the «assume compromise» goal leans on for remembered devices.
+        $user = $this->activeUser();
+        $user->forceFill(['remember_token' => 'stale-remember-token-value'])->save();
+
+        $token = Password::broker('customer_users')->createToken($user);
+        $this->post('/user/reset-password', [
+            'token' => $token, 'email' => $user->email,
+            'password' => 'a-New-Password-9', 'password_confirmation' => 'a-New-Password-9',
+        ])->assertRedirect(route('portal.login'));
+
+        $this->assertNotSame('stale-remember-token-value', $user->fresh()->remember_token);
+    }
+
+    public function test_profile_password_change_rotates_remember_token(): void
+    {
+        $user = $this->activeUser();
+        $user->forceFill(['remember_token' => 'stale-remember-token-value'])->save();
+
+        $this->post('/user/login', ['email' => $user->email, 'password' => 'secret-pass-123']);
+        $this->get('/user')->assertOk();
+
+        $this->post(route('portal.profile.password'), [
+            'current_password' => 'secret-pass-123',
+            'password' => 'a-New-Password-9',
+            'password_confirmation' => 'a-New-Password-9',
+        ])->assertSessionHasNoErrors();
+
+        $this->assertNotSame('stale-remember-token-value', $user->fresh()->remember_token);
     }
 }

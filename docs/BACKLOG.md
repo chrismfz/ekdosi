@@ -725,6 +725,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Customer portal — acting device's remember-me after own password change (P2, pre-existing UX).** When a
+  customer changes their OWN password (profile), `remember_token` is rotated (kills «remember me» on every
+  device, incl. this one) but the acting device's recaller cookie is NOT re-issued — so once its session
+  cookie expires, the very device that changed the password is asked to log in again instead of being
+  remembered. Pre-existing (the rotation predates the session-invalidation slice). Proper fix re-issues the
+  current recaller (à la `logoutOtherDevices`), but the obvious path re-fires the Login event; deferred rather
+  than widen the change. Security-neutral (only a remembered convenience is lost on the acting device).
 - **Customer portal — invited-claim vs revoked grant (reviewed, BY DESIGN — not a bug).** If an operator
   invites a login (invited + grant) then revokes the grant before the invitee claims, the claim still flips
   invited→active and the login can authenticate (seeing NOTHING, since grants gate the documents view). This is

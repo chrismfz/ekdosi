@@ -49,6 +49,14 @@ class EnsurePortalAuthenticated
         // sighting — so a pre-existing session (or an actingAs() test) is not
         // force-logged-out — then a later hash mismatch means the password changed
         // elsewhere and THIS session is stale.
+        //
+        // Limitation (inherent to seed-on-first-sight, same as Laravel's
+        // AuthenticateSession): a session that authenticated BEFORE this middleware
+        // first observed it — e.g. one already open at deploy — is seeded, not
+        // terminated, so a reset can't retroactively kill it until it's been seen
+        // once. Steady state closes the window (login → first /user request seeds
+        // immediately); remember-me cookies are covered separately by remember_token
+        // rotation on every password change.
         $stored = $request->session()->get(self::PW_HASH_KEY);
         $current = (string) $user->getAuthPassword();
 
@@ -56,6 +64,10 @@ class EnsurePortalAuthenticated
             $request->session()->put(self::PW_HASH_KEY, $current);
         } elseif (! hash_equals($stored, $current)) {
             Auth::guard('portal')->logout();
+            // Full invalidate() destroys the session server-side. The record is
+            // shared with the operator 'web' guard, so this also ends a co-logged-in
+            // operator's /admin session in the same browser — the same accepted
+            // trade-off as LoginController::logout() (see config/auth.php).
             $request->session()->invalidate();
             $request->session()->regenerateToken();
 
