@@ -16,6 +16,7 @@ use App\Services\EInvoice\Transports\InvoSignTransport;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Support\EInvoice\ProviderCredentials;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -166,6 +167,32 @@ class InvoSignTransportTest extends TestCase
                 && $request['token'] === 'DEMO-TOKEN'
                 && str_contains((string) $request['xml_arxeio'], 'API_InvoiceDetails');
         });
+    }
+
+    public function test_ping_is_a_free_reachability_get_that_sends_no_document(): void
+    {
+        // PROV-005 (closed won't-do): «Έλεγχος σύνδεσης» must be a plain unauthenticated
+        // GET to the base URL — it costs NO credits because it carries no token and no
+        // xml_arxeio document. Locking this so a future "improve the probe" never turns
+        // it into a credit-consuming call.
+        // ping() GETs the BARE base URL (no path), so the wildcard must match it too.
+        Http::fake([self::DEMO.'*' => Http::response('OK', 200)]);
+
+        $ok = (new InvoSignTransport)->ping(ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertTrue($ok);
+        Http::assertSent(fn ($request) => $request->method() === 'GET'
+            && ! isset($request['xml_arxeio'])   // no document → nothing billable
+            && ! isset($request['token']));       // unauthenticated
+    }
+
+    public function test_ping_throws_when_the_endpoint_is_unreachable(): void
+    {
+        // A dead endpoint surfaces as a refusal, not a silent green.
+        Http::fake(fn () => throw new ConnectionException('no route to host'));
+
+        $this->expectException(RuntimeException::class);
+        (new InvoSignTransport)->ping(ProviderCredentials::fromCompany($this->tenant));
     }
 
     public function test_send_refuses_a_non_https_base_url_before_any_request(): void

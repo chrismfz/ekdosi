@@ -34,10 +34,10 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
 > is the operators' routine, not a backlog task. Kept as a closed record under «Cutover gate».*
 
 > **Sequencing (owner, 2026-09-05):** the **delivery-note family is HELD until the myDATA
-> API v2.0.2** ships (DEP-001) — don't start it before then. **MYD-011 (country→ISO) ✅ DONE**;
-> the remaining **actionable-now** item is **PROV-005** (vendor-blocked but worth chasing the
-> endpoint). TIER 2 is **not urgent** («δεν καιγόμαστε»). The **AI «Βοηθός» Phase 2c** is
-> **✅ COMPLETE** (α read tools · ε ai_usage · β record_payment · ζ knowledge_search).
+> API v2.0.2** ships (DEP-001) — don't start it before then. **MYD-011 (country→ISO) ✅ DONE**
+> and **PROV-005 ✅ CLOSED (won't-do)** — no actionable-now item remains in TIER 1. TIER 2 is
+> **not urgent** («δεν καιγόμαστε»). The **AI «Βοηθός» Phase 2c** is **✅ COMPLETE** (α read
+> tools · ε ai_usage · β record_payment · ζ knowledge_search).
 
 **TIER 1 — Real in-scope code work, next deadline (delivery-note family + provider):**
 1. **Delivery-note family** — ⏳ **HELD until myDATA API v2.0.2** (DEP-001). Before the
@@ -49,8 +49,11 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
    nullable/no-default (τέλος το silent-GR freeze). Οι resolvers έκδοσης διαβάζουν
    `isoCountryCode()` (zero-regression fallback). Βλ. «Done recently».
-3. **PROV-005** (**P1**, vendor-blocked) — authenticated provider credential/quota
-   probe; `ping()` is an unauthenticated GET. Needs an InvoSign non-issuing endpoint.
+3. **PROV-005** — ✅ **CLOSED (won't-do, owner 2026-09-05).** Ο authenticated credential/quota
+   probe εγκαταλείφθηκε συνειδητά: κάθε InvoSign κλήση (και δοκιμαστικό παραστατικό) **χρεώνεται
+   credits** και δεν υπάρχει non-issuing status endpoint, οπότε δεν έχει νόημα. Κρατάμε το **δωρεάν
+   reachability ping** (unauthenticated GET)· τα διαπιστευτήρια/quota αποδεικνύονται στην πρώτη
+   πραγματική αποστολή. Τα success messages λένε πλέον ρητά «έλεγχος μόνο διαθεσιμότητας».
 4. **WHMCS bridge Phase 2 — outbound payment sync** (money-write, opt-in, design-first).
 
 **TIER 2 — High-value net-new features / migration tooling:**
@@ -884,13 +887,16 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   the tenant's OWN latest reading, correct for one InvoSign contract per tenant (our setup); if a single
   provider account ever backed several tenants, each would see a per-tenant partial view of the shared
   quota. Revisit only if a reseller/accountant shared-account setup appears.
-- **PROV-005 remaining half — authenticated provider credential probe** _(P1, vendor-blocked)._
-  The local config false-greens are fixed (issuer-field completeness + active-env credential pairing,
-  in `ProviderPreflight` + go-live). What stays: `InvoSignTransport::ping()` is an **unauthenticated**
-  GET to the base URL, so «Έλεγχος σύνδεσης» can read green with a dead/invalid token; and the preflight
-  cannot prove contract/declaration activation or remaining quota. All three need an **InvoSign-approved
-  non-issuing status/credential endpoint** (never a dummy production invoice). Wire the real probe once
-  the vendor confirms the endpoint; until then the cutover dry-run (bucket A) is the backstop.
+- **PROV-005 authenticated provider credential/quota probe — ✅ CLOSED (won't-do, owner 2026-09-05).**
+  The local config false-greens were fixed earlier (issuer-field completeness + active-env credential
+  pairing, in `ProviderPreflight` + go-live). The remaining authenticated half is **deliberately not
+  pursued**: InvoSign exposes **no non-issuing status/credential endpoint**, so the only real probe
+  would be an actual document — and **every InvoSign call, test included, consumes credits**. Not worth
+  it. Decision: keep `InvoSignTransport::ping()` as a **free unauthenticated GET** (reachability only —
+  «Έλεγχος σύνδεσης» can read green with a dead token, and its success messages now say so explicitly:
+  «έλεγχος μόνο διαθεσιμότητας… δεν επαληθεύει διαπιστευτήρια/quota»). Credentials/quota are proven on
+  the **first real submission**; the cutover dry-run (bucket A) remains the backstop. Re-open only if
+  InvoSign later ships a free non-issuing status endpoint.
 - **STOCK-001 follow-ups — remainder-aware, recompute-style stock reversal** _(P2 survivors of the
   STOCK-001 review; the reachable P1 order-regression was fixed in that PR)._ Three residual edges, all
   the SAME root — the reversal fires incremental deltas at each cancel event while the "correct"
