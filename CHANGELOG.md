@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Customer portal — Slice 0 (auth shell).** Θεμέλια για portal πελατών: πίνακας/model `customer_users`
+  (global login identity, ξεχωριστός από τους operators `users`), νέος **`portal` auth guard**, `/login` +
+  `/logout` + placeholder `/portal` (custom Blade), και `php artisan portal:create-user`. Κανένα customer
+  data ακόμα — μόνο το κέλυφος auth, με έμφαση στον **διαχωρισμό guard** (portal login ≠ operator, δεν φτάνει
+  ποτέ στο `/admin`). Ο πίνακας είναι λιτός (auth + account-safety)· forward-looking στήλες (2FA à la Fortify,
+  username/locale/phone) κάθονται dormant ώστε να μη ξανα-αλλάξει το migration. Grants ανά εταιρία/πελάτη +
+  παραστατικά = επόμενα slices.
 - **«Εκδοθέντα Παραστατικά» για τον πελάτη μέσα στο WHMCS.** Δύο νέα HMAC-signed webhook
   endpoints (`issued-for-client` POST + `issued-doc-pdf/{userid}/{invoice}` GET) τροφοδοτούν μια
   νέα σελίδα του WHMCS plugin, όπου ο reseller βλέπει τα παραστατικά που εκδόθηκαν γι' αυτόν

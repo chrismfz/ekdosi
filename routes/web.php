@@ -2,12 +2,31 @@
 
 use App\Http\Controllers\CompanyBackupDownloadController;
 use App\Http\Controllers\ExpenseDocumentDownloadController;
+use App\Http\Controllers\Portal\HomeController as PortalHomeController;
+use App\Http\Controllers\Portal\LoginController as PortalLoginController;
 use App\Http\Controllers\PublicInvoicePdfController;
+use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Support\Facades\Route;
 
 // The app is the Filament admin panel; there is no public landing page.
 // Send the root straight to the panel (which then routes to login / tenant).
 Route::redirect('/', '/admin');
+
+/**
+ * Customer portal (Slice 0) — a customer-facing login on the dedicated `portal`
+ * guard, wholly separate from the operator/Filament panel (/admin). This slice
+ * is the auth SHELL only: login/logout + an authenticated placeholder. No
+ * customer data is exposed here yet. The login (throttled) is at /login; `/`
+ * still goes to /admin for operators.
+ */
+Route::get('/login', [PortalLoginController::class, 'show'])->name('portal.login');
+Route::post('/login', [PortalLoginController::class, 'login'])
+    ->middleware('throttle:10,1')
+    ->name('portal.login.attempt');
+Route::post('/logout', [PortalLoginController::class, 'logout'])->name('portal.logout');
+Route::get('/portal', [PortalHomeController::class, 'index'])
+    ->middleware(EnsurePortalAuthenticated::class)
+    ->name('portal.home');
 
 // Legacy redirects — the three myDATA consoles moved under the «Κονσόλα myDATA»
 // cluster (admin/{tenant}/mydata/{sales,expenses,e3}). Keep old bookmarks alive.
