@@ -75,6 +75,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
   **σκόπιμα κενό placeholder** (δεν αποκαλύπτει ούτε `/admin` ούτε `/user` — πρώην redirect → `/admin`). Οι
   operators μπαίνουν στο `/admin`, οι πελάτες στο `/user`. (Τα route names μένουν `portal.*` εσωτερικά· μόνο το
   URL prefix άλλαξε.)
+- **Customer portal — foundation hardening (whole-subsystem audit).** Adversarial review όλης της
+  βάσης του portal (guard/models/grants/controllers/middleware/feed/operator-resource/CLI): και τα 5
+  load-bearing properties (guard isolation · grants boundary · auth flows · operator-side gating ·
+  CLI safety) **κρατάνε — κανένα P0/P1**. Κλείσαμε 6 P2/defense-in-depth: **(1)** ξεχωριστός
+  `customer_users_password_reset_tokens` πίνακας για τον portal reset-broker (ο κοινός, email-keyed
+  πίνακας θα συγκρουόταν όταν το ίδιο email είναι και operator και πελάτης) · **(2)** `CustomerUser`
+  προστέθηκε στο `ADMIN_FORBIDDEN_RESOURCES` (ο company_admin δεν κρατά πλέον καν τα permissions —
+  defense-in-depth πάνω από το super-admin `canAccess()`) · **(3)** το portal logout κάνει
+  `session()->regenerate()` αντί για `invalidate()`, ώστε να μη σβήνει η παράλληλη `/admin` session
+  ενός operator στο ίδιο browser · **(4)** το PDF gate (`loginCanAccess`) ελέγχει `whereHas('customer')`
+  ώστε ένα soft-deleted customer να μη σερβίρει PDF ενώ έχει φύγει από τη λίστα · **(5)** ο operator-set
+  κωδικός χρησιμοποιεί `Password::defaults()` (ίδια πολιτική με το self-service) · **(6)** TrashedFilter +
+  Restore/ForceDelete στο «Χρήστες πύλης» (soft-deleted login δεν είναι πια αόρατο dead-end που μπλοκάρει
+  το email). **Post-deploy:** re-provision roles (`shield:sync-super-admin` / role-picker) λόγω του (2).
 - **Dependency:** `livewire/flux` (Flux UI Free) για το customer portal UI.
 - **AI «Βοηθός» Phase 2c-(ε): σελίδα «Χρήση & κόστος AI».** Read-only surface πάνω στο υπάρχον
   `ai_usage_log` (καμία νέα οντότητα δεδομένων), **μέσα στην περιοχή «AI Βοηθός»** (group «Σύστημα»,

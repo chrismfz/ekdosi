@@ -67,8 +67,13 @@ class LoginController extends Controller
     public function logout(Request $request): RedirectResponse
     {
         Auth::guard('portal')->logout();
-        $request->session()->invalidate();
-        $request->session()->regenerateToken();
+
+        // Regenerate the session id (defense against fixation) instead of a full
+        // invalidate(): the guard logout already cleared the portal login keys,
+        // and a flush would also wipe a co-logged-in operator's /admin (web guard)
+        // session in the same browser — the coexistence auth.php promises.
+        // regenerate() rotates the CSRF token too.
+        $request->session()->regenerate();
 
         return redirect()->route('portal.login');
     }

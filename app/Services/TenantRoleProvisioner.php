@@ -30,8 +30,10 @@ use Spatie\Permission\PermissionRegistrar;
  *   - super_admin   : Gate::before bypass (global); needs no permissions.
  *   - company_admin : every permission of THIS tenant EXCEPT the cross-tenant /
  *                     platform-level resources in ADMIN_FORBIDDEN_RESOURCES
- *                     (User/Company/Role) — so a tenant admin can't reach the
- *                     panel-global user/company roster or escalate roles.
+ *                     (User/Company/Role/UpdateRun/CustomerUser) — so a tenant
+ *                     admin can't reach the panel-global user/company roster,
+ *                     escalate roles, or manage portal logins (defense in depth
+ *                     alongside CustomerUserResource::canAccess() super-admin gate).
  *   - operator      : the curated daily-work subset (OPERATOR_PERMISSION_MAP).
  *
  * Teams-mode discipline: every role read AND write goes through RAW queries with
@@ -93,7 +95,7 @@ class TenantRoleProvisioner
      *
      * @var list<string>
      */
-    public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role', 'UpdateRun'];
+    public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role', 'UpdateRun', 'CustomerUser'];
 
     // ── super_admin ────────────────────────────────────────────────────────
 

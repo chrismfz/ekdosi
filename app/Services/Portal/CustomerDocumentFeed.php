@@ -122,6 +122,13 @@ class CustomerDocumentFeed
         return $login->activeAccessGrants()
             ->where('company_id', $invoice->company_id)
             ->where('customer_id', $invoice->customer_id)
+            // The customer must still exist (not soft-deleted) — whereHas uses the
+            // grant's customer() relation, which drops CompanyScope but keeps the
+            // SoftDeletes scope, so this gate agrees with forLogin() (which skips a
+            // group whose customer resolved to null). Without it a deep-linked PDF
+            // for a soft-deleted customer's still-active invoice would stay
+            // downloadable after the list stopped showing it.
+            ->whereHas('customer')
             ->exists();
     }
 }

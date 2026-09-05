@@ -7,12 +7,18 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
+use Filament\Actions\ForceDeleteAction;
+use Filament\Actions\ForceDeleteBulkAction;
+use Filament\Actions\RestoreAction;
+use Filament\Actions\RestoreBulkAction;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class CustomerUsersTable
 {
@@ -62,6 +68,9 @@ class CustomerUsersTable
                         CustomerUser::STATUS_ACTIVE => 'Ενεργός',
                         CustomerUser::STATUS_SUSPENDED => 'Σε αναστολή',
                     ]),
+                // Surfaces soft-deleted logins so an operator can restore one
+                // instead of hitting a dead-end «email taken» on a hidden row.
+                TrashedFilter::make(),
             ])
             ->recordActions([
                 EditAction::make(),
@@ -96,7 +105,10 @@ class CustomerUsersTable
                             ->password()
                             ->revealable()
                             ->required()
-                            ->minLength(8),
+                            // Same policy the customer's own change enforces
+                            // (ProfileController), so an operator can't set a
+                            // weaker password than the customer is allowed to.
+                            ->rule(Password::defaults()),
                     ])
                     ->action(function (array $data, CustomerUser $record): void {
                         $record->forceFill([
@@ -105,10 +117,15 @@ class CustomerUsersTable
                         ])->save();
                         Notification::make()->title("Ορίστηκε κωδικός για {$record->email}")->success()->send();
                     }),
+                // Only shown on trashed rows (via the TrashedFilter above).
+                RestoreAction::make(),
+                ForceDeleteAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
+                    RestoreBulkAction::make(),
+                    ForceDeleteBulkAction::make(),
                 ]),
             ]);
     }

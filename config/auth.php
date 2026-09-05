@@ -128,11 +128,14 @@ return [
             'throttle' => 60,
         ],
 
-        // Portal password-reset broker (wired when the reset flow ships; the
-        // token table is shared — rows are namespaced by email + guard usage).
+        // Portal password-reset broker (wired when the reset flow ships). Its
+        // token table is SEPARATE from the operator broker's: both are keyed by
+        // email alone, so a shared table would collide for an address that is
+        // both an operator (`users`) and a customer (`customer_users`) — a token
+        // for one guard could then be redeemed against the other.
         'customer_users' => [
             'provider' => 'customer_users',
-            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+            'table' => env('PORTAL_PASSWORD_RESET_TOKEN_TABLE', 'customer_users_password_reset_tokens'),
             'expire' => 60,
             'throttle' => 60,
         ],

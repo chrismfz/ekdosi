@@ -164,6 +164,26 @@ class PortalDocumentsTest extends TestCase
         }
     }
 
+    public function test_pdf_404_when_the_customer_is_soft_deleted(): void
+    {
+        // The list gate drops a soft-deleted customer's group; the PDF gate must
+        // agree, or a bookmarked link would keep streaming after the customer is
+        // gone from the list.
+        $this->mock(InvoicePdfRenderer::class)->shouldNotReceive('render');
+
+        $t = $this->company();
+        $it = $this->type($t);
+        $cust = Customer::create(['company_id' => $t->id, 'name' => 'Gone', 'afm' => '1']);
+        $inv = $this->invoice($t, $it, $cust, 'ΤΠΥ7', 7, 'active', 'VALID');
+        $login = $this->login();
+        $this->grant($login, $cust);
+
+        $cust->delete();   // soft delete
+
+        $this->assertCount(0, app(CustomerDocumentFeed::class)->forLogin($login));
+        $this->actingAs($login, 'portal')->get("/user/document/{$inv->id}/pdf")->assertStatus(404);
+    }
+
     public function test_pdf_requires_portal_auth(): void
     {
         $this->mock(InvoicePdfRenderer::class)->shouldNotReceive('render');

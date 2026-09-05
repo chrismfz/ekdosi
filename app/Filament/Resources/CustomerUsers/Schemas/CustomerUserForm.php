@@ -7,6 +7,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Validation\Rules\Password;
 
 class CustomerUserForm
 {
@@ -60,9 +61,9 @@ class CustomerUserForm
                             // immediate set/reset. The model's `hashed` cast hashes
                             // it — we pass plaintext (no double-hash), and skip the
                             // column entirely when left blank.
-                            ->rules(fn (?string $state): array => filled($state) ? ['min:8'] : [])
+                            ->rules(fn (?string $state): array => filled($state) ? [Password::defaults()] : [])
                             ->dehydrated(fn (?string $state): bool => filled($state))
-                            ->helperText('Άφησέ το κενό για πρόσκληση (ο πελάτης θα ορίσει κωδικό). Συμπλήρωσέ το για άμεσο set/reset (min 8).'),
+                            ->helperText('Άφησέ το κενό για πρόσκληση (ο πελάτης θα ορίσει κωδικό). Συμπλήρωσέ το για άμεσο set/reset.'),
                     ]),
             ]);
     }
