@@ -7,6 +7,7 @@ use App\Http\Controllers\Portal\HomeController as PortalHomeController;
 use App\Http\Controllers\Portal\LoginController as PortalLoginController;
 use App\Http\Controllers\Portal\PasswordResetController as PortalPasswordResetController;
 use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
+use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Support\Facades\Route;
@@ -46,6 +47,9 @@ Route::post('/user/reset-password', [PortalPasswordResetController::class, 'rese
     ->middleware('throttle:20,60')->name('portal.password.update');
 Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
     Route::get('/user', [PortalHomeController::class, 'index'])->name('portal.home');
+    // «Η καρτέλα μου» — read-only balance + ledger (same figures as the operator
+    // Καρτέλα, grant-scoped). No «pay» yet — that lands with the gateway pillar.
+    Route::get('/user/statement', [PortalStatementController::class, 'index'])->name('portal.statement');
     // Official PDF of one of the customer's own documents (grant-scoped, streamed).
     // Throttled: each hit is a heavy DomPDF render (raises memory_limit/time_limit),
     // so cap the rate to keep a tight loop (or a hijacked session) from exhausting

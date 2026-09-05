@@ -19,6 +19,7 @@
             @auth('portal')
                 <nav class="flex items-center gap-3 text-sm">
                     <flux:link href="{{ route('portal.home') }}">Αρχική</flux:link>
+                    <flux:link href="{{ route('portal.statement') }}">Η καρτέλα μου</flux:link>
                     <flux:link href="{{ route('portal.profile') }}">Στοιχεία</flux:link>
                     <form method="POST" action="{{ route('portal.logout') }}">
                         @csrf

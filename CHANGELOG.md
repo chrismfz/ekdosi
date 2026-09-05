@@ -31,6 +31,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   καμία φορολογική οδηγία (το `tax-notes.md` μένει accountant-confirmed-only).
 
 ### Added
+- **Customer portal — «Η καρτέλα μου» (Slice 3, read-only).** Ο πελάτης βλέπει στο `/user/statement` το
+  **υπόλοιπό** του ανά (εταιρία, πελάτη) + τη **χρονολογική καρτέλα** (χρέωση/πίστωση/τρέχον υπόλοιπο:
+  παραστατικά, πληρωμές, πιστωτικά, επιστροφές, on-account προκαταβολές). Νέα υπηρεσία `CustomerLedgerFeed`
+  που **δεν ξαναϋπολογίζει τίποτα** — διαβάζει το ίδιο canonical `CustomerLedgerBuilder` με την καρτέλα του
+  operator (ίδιος `GET_CUSTOMER_BALANCE`/credit-term/on-account κανόνας), και μοιράζεται το **ίδιο grant
+  boundary** με τα παραστατικά (`CustomerDocumentFeed::grantedTargets`, ώστε να μη διαφύγουν). Αρνητικό
+  υπόλοιπο → **«πιστωτικό υπόλοιπο»** (η θέση όπου κουμπώνει το μελλοντικό prepaid credit). Χωρίς «πληρωμή»
+  ακόμη — προσκολλάται όταν έρθει ο payment-gateway πυλώνας.
 - **Customer portal — «η αλλαγή κωδικού τερματίζει τις άλλες συνεδρίες».** Κάθε session δένεται με το
   password hash του login (server-side στο session payload)· μια αλλαγή κωδικού ΟΠΟΥΔΗΠΟΤΕ (reset από άλλη
   συσκευή, operator reset, ή η ίδια η αλλαγή στο προφίλ) αποσυνδέει κάθε ΑΛΛΗ session στο επόμενο request,
