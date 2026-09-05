@@ -795,7 +795,11 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   `payment_gateway_connections` (gateway/label/is_active/sort/**encrypted** config) = WHMCS-style λίστα·
   Filament «Τρόποι online πληρωμής» (Ρυθμίσεις, **super-admin**): add/enable(inline)/name/order/settings-ανά-
   gateway + «Έλεγχος». Πρώτο: **manual** (κατάθεση, offline). Design+threat-model: `docs/payment-gateways-design.md`.
-- **Επόμενα:** B0b «Πλήρωσε» (intents + offline confirm) → B1 πρώτο hosted (Stripe/IRIS, webhook) → B2 PayPal
+- **B0b — η ροή «Πλήρωσε» (SHIPPED):** στο `/user/statement` ο πελάτης πληρώνει (ποσό + τρόπος) → `payment_intents`
+  (pending) → οδηγίες. Το **manual «Τραπεζική κατάθεση»** αναδεικνύει τους υπάρχοντες `bank_accounts` (toggle
+  ποιοι φαίνονται· κενό = όλοι). Operator «Εκκρεμείς πληρωμές πύλης» → «Καταχώριση πληρωμής» → `Payment` μέσω
+  `PaymentAllocator` (FIFO + credit) → `InvoiceBalance`. **Idempotent** settle· ο browser δεν εξοφλεί ποτέ.
+- **Επόμενα:** B1 πρώτο hosted (Stripe/IRIS — `initiate` redirect/QR + **signed webhook** → settle) → B2 PayPal
   → B3 Eurobank → B4 reconcile/prepaid/refund.
 
 ---

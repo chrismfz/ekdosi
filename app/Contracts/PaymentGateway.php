@@ -3,8 +3,10 @@
 namespace App\Contracts;
 
 use App\Models\PaymentGatewayConnection;
+use App\Models\PaymentIntent;
 use App\Support\Payments\ConnectionTestResult;
 use App\Support\Payments\PaymentGatewayCapabilities;
+use App\Support\Payments\PaymentInitiation;
 use Filament\Forms\Components\Component;
 
 /**
@@ -12,10 +14,10 @@ use Filament\Forms\Components\Component;
  * deposit, Stripe, PayPal, Eurobank, IRIS, card-POS …). See
  * docs/payment-gateways-design.md.
  *
- * B0 scope (mirrors how BillingSource scoped its Phase 0): IDENTITY + CAPABILITIES
- * + CONFIG only. The charge lifecycle (initiate / handleWebhook / refund) lands in
- * B0b/B1 with the real portal flow — the second consumer needed to get the
- * abstraction right, rather than baking one provider's shape into it now.
+ * Scope grows with real consumers (as BillingSource did): B0a = identity +
+ * capabilities + config; B0b adds `initiate()` now that the portal «Πλήρωσε» flow
+ * exists to exercise it. `handleWebhook()` / `refund()` follow in B1 with the
+ * first online gateway (their shapes need a real provider, not the offline one).
  *
  * Adding a gateway = one class implementing this + one line in
  * config/ekdosi.php → payments.gateways. Per-tenant selection/creds live in the
@@ -39,6 +41,15 @@ interface PaymentGateway
      * @return array<int, Component>
      */
     public function configFields(): array;
+
+    /**
+     * Begin collecting the intent's amount out-of-band. Returns WHERE to send the
+     * customer (a redirect URL for hosted gateways; offline bank details +
+     * instructions for `manual`) — never a success flag. Settlement is confirmed
+     * later (operator confirmation for manual; a signed webhook for online, B1).
+     * Reads per-connection creds/settings from $connection->config.
+     */
+    public function initiate(PaymentIntent $intent, PaymentGatewayConnection $connection): PaymentInitiation;
 
     /** Smoke-test the connection's creds + reachability (the admin «Test connection» action). */
     public function testConnection(PaymentGatewayConnection $connection): ConnectionTestResult;

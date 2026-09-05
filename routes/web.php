@@ -6,6 +6,7 @@ use App\Http\Controllers\Portal\DocumentPdfController as PortalDocumentPdfContro
 use App\Http\Controllers\Portal\HomeController as PortalHomeController;
 use App\Http\Controllers\Portal\LoginController as PortalLoginController;
 use App\Http\Controllers\Portal\PasswordResetController as PortalPasswordResetController;
+use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
 use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\PublicInvoicePdfController;
@@ -50,6 +51,15 @@ Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
     // «Η καρτέλα μου» — read-only balance + ledger (same figures as the operator
     // Καρτέλα, grant-scoped). No «pay» yet — that lands with the gateway pillar.
     Route::get('/user/statement', [PortalStatementController::class, 'index'])->name('portal.statement');
+    // «Πλήρωσε» (B0b) — start a payment against a granted company/customer, then
+    // see where to pay. The browser never settles money (manual = operator
+    // confirms; online webhook later). Store is throttled.
+    Route::get('/user/pay/{company}', [PortalPaymentController::class, 'create'])
+        ->where('company', '[0-9]+')->name('portal.payment.create');
+    Route::post('/user/pay/{company}', [PortalPaymentController::class, 'store'])
+        ->where('company', '[0-9]+')->middleware('throttle:20,1')->name('portal.payment.store');
+    Route::get('/user/payment/{intent}', [PortalPaymentController::class, 'show'])
+        ->where('intent', '[0-9]+')->name('portal.payment.show');
     // Official PDF of one of the customer's own documents (grant-scoped, streamed).
     // Throttled: each hit is a heavy DomPDF render (raises memory_limit/time_limit),
     // so cap the rate to keep a tight loop (or a hijacked session) from exhausting
