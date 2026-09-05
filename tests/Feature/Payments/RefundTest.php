@@ -42,6 +42,35 @@ class RefundTest extends TestCase
         $this->creditMethodId = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Επί Πιστώσει', 'due_days' => 30])->id;
     }
 
+    public function test_a_non_positive_amount_is_refused_at_the_model_regardless_of_kind(): void
+    {
+        // MON-8 invariant: amount is a positive MAGNITUDE; kind carries the sign.
+        // A negative «refund» (−15) would otherwise NET_AMOUNT to +15 and read as a
+        // payment — silently mis-signing the balance. The model refuses it outright,
+        // behind the form's minValue(0.01) — so no entry point can flip the sign.
+        foreach (['refund', 'payment'] as $kind) {
+            foreach ([-15.0, 0.0] as $bad) {
+                try {
+                    Payment::create([
+                        'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+                        'amount' => $bad, 'pay_date' => '2026-05-10', 'kind' => $kind,
+                    ]);
+                    $this->fail("A {$kind} of {$bad} should have been refused.");
+                } catch (\InvalidArgumentException) {
+                    $this->assertTrue(true);
+                }
+            }
+        }
+
+        // The valid positive refund of 15 is accepted (money OUT, kind carries it).
+        $p = Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'amount' => 15.0, 'pay_date' => '2026-05-10', 'kind' => 'refund',
+        ]);
+        $this->assertSame('15.00', (string) $p->fresh()->amount);
+        $this->assertTrue($p->isRefund());
+    }
+
     private function invoice(float $gross = 100): Invoice
     {
         $inv = Invoice::create([

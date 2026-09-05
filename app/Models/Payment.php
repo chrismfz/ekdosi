@@ -79,6 +79,25 @@ class Payment extends Model
      */
     public const NET_AMOUNT_SQL = "CASE WHEN kind = 'refund' THEN -amount ELSE amount END";
 
+    /**
+     * The one money invariant (MON-8): `amount` is ALWAYS a positive magnitude —
+     * the DIRECTION is carried by `kind` (payment = money in, refund = money out,
+     * via NET_AMOUNT_SQL), never by the sign of `amount`. A negative amount would
+     * flip that sign silently (a «refund −15» would count as +15 = a payment), so
+     * refuse it at the model, not just at each form. Belt-and-suspenders behind the
+     * form's minValue(0.01) + PaymentAllocator's positive-amount guard.
+     */
+    protected static function booted(): void
+    {
+        static::saving(function (self $payment): void {
+            if ((float) $payment->amount <= 0) {
+                throw new \InvalidArgumentException(
+                    'Το ποσό πληρωμής/επιστροφής πρέπει να είναι θετικό — η κατεύθυνση ορίζεται από το «kind» (payment/refund).'
+                );
+            }
+        });
+    }
+
     public function isRefund(): bool
     {
         return $this->kind === 'refund';
