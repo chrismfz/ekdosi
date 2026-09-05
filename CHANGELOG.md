@@ -37,6 +37,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   «ένας adapter». Port field-for-field από το open-source WHMCS module του πελάτη.
 
 ### Fixed
+- **Τρόποι online πληρωμής: το Eurobank «γκρίνιαζε» required σε συμπληρωμένα Merchant ID / Shared Secret.** Το
+  config section των per-gateway πεδίων χτιζόταν με reactive `->schema(fn (Get))` closure — τα πεδία προστίθενταν
+  ΜΕΤΑ το `fill()`, οπότε δεν έκαναν hydrate/commit και τα `->default()` (lang/sandbox) αγνοούνταν· η τιμή έμενε
+  μόνο στο DOM και το save έριχνε ψευδές «required» (το προηγούμενο `->live(onBlur)` δεν βοηθούσε — φταίει το
+  σχήμα, όχι το blur). Πλέον STATIC schema: ένα Group ανά gateway, χτισμένο στο mount, ορατό μόνο το επιλεγμένο
+  (`$get('../gateway')`). Αναπαράχθηκε + επιβεβαιώθηκε το fix σε πραγματικό browser.
+- **Πύλη πελατών: η επιλογή «Τρόπος πληρωμής» εμφανιζόταν κενή** (ενεργός τρόπος πληρωμής δεν φαινόταν, δεν
+  γινόταν πληρωμή). Το `flux:radio.group variant="cards"` αποδίδει `<ui-radio>` web-component που δεν δείχνει
+  τίποτα χωρίς το Vite/Flux build (π.χ. box χωρίς `npm run build`), ενώ η ετικέτα φαινόταν. Πλέον native radios
+  που αποδίδονται πάντα (styled με build, λειτουργικά χωρίς).
 - **MON-13: υπόλοιπο πελάτη — πιστωτικό πάνω σε τιμολόγιο ΜΕΤΡΗΤΟΙΣ έδειχνε ΔΙΑΦΟΡΕΤΙΚΟ υπόλοιπο σε κάθε
   σημείο.** Η Καρτέλα έδειχνε το σωστό (το πιστωτικό είναι πιστωτικό υπόλοιπο, όχι επιστροφή → του χρωστάμε
   πίσω), αλλά η λίστα πελατών + το dashboard + το MCP «έχαναν» τη μείωση όταν το αρχικό τιμολόγιο ήταν μετρητοίς

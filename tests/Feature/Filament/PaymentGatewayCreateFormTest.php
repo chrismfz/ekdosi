@@ -14,10 +14,11 @@ use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * Regression: the reactive per-gateway `config` section must actually bind the
- * typed values so `required()` fields (Eurobank Merchant ID + Shared Secret)
- * validate and SAVE — the operator reported «required» errors on a fully-filled
- * form.
+ * Regression: the per-gateway `config` section must actually bind the typed
+ * values so `required()` fields (Eurobank Merchant ID + Shared Secret) validate
+ * and SAVE — the operator reported «required» errors on a fully-filled form
+ * (root cause: a reactive `->schema(fn (Get))` closure whose fields never
+ * hydrated; now a static per-gateway schema toggled by visibility).
  */
 class PaymentGatewayCreateFormTest extends TestCase
 {
@@ -59,5 +60,28 @@ class PaymentGatewayCreateFormTest extends TestCase
         $this->assertSame('0024000000', $conn->config['merchant_id']);
         $this->assertSame('6jLRuxSECRETvalue', $conn->config['shared_secret']);
         $this->assertNotNull($conn->company_id);
+    }
+
+    /**
+     * The real guard for the browser bug: `->set('data.config.*')` above bypasses
+     * the component binding, so it stayed green even when the config section was a
+     * reactive `->schema(fn (Get))` closure whose fields never rendered/hydrated.
+     * A STATIC per-gateway schema fixes it — assert the observable symptoms:
+     *  - only the selected gateway's fields render, and
+     *  - their `->default()`s are applied on selection (a reactively-BUILT field is
+     *    added after `fill()`, so it gets NO default — testmode/lang came up blank,
+     *    the tell-tale of the broken path).
+     */
+    public function test_selected_gateway_config_fields_render_with_defaults(): void
+    {
+        Livewire::test(CreatePaymentGatewayConnection::class)
+            ->set('data.gateway', 'eurobank')
+            ->assertSee('Merchant ID')
+            ->assertDontSee('Λογαριασμοί προς εμφάνιση')   // manual's field is hidden
+            ->assertSet('data.config.testmode', true)      // default applied…
+            ->assertSet('data.config.lang', 'el')          // …only a mounted field gets it
+            ->set('data.gateway', 'manual')
+            ->assertSee('Λογαριασμοί προς εμφάνιση')
+            ->assertDontSee('Merchant ID');
     }
 }
