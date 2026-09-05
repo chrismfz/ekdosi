@@ -734,6 +734,22 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 
 ---
 
+## 18. Πύλη πελατών (customer portal) — foundation
+- **Slice 0 (auth shell):** ξεχωριστός **`portal` auth guard** + πίνακας/model `customer_users`
+  (global login identity, unique email σε όλες τις εταιρίες· λιτός — auth + account-safety, καμία
+  νομική ταυτότητα). `/login`·`/logout`·`/portal`·**προφίλ** (στοιχεία + αλλαγή κωδικού· email/ΑΦΜ
+  όχι επεξεργάσιμα). **UI με Flux UI (Free)** πάνω στο υπάρχον Tailwind v4/Vite. Πλήρης **διαχωρισμός
+  guard** από τους operators (portal login ≠ operator· δεν φτάνει ποτέ στο `/admin`), throttled login,
+  no-enumeration errors, status gating (invited/active/suspended — μόνο active+κωδικός συνδέεται).
+  `php artisan portal:create-user` για χειροκίνητη δημιουργία (registration/invite/backfill = επόμενα).
+- **Operator-side «Χρήστες πύλης»** (Filament, group «Πύλη πελατών», **super-admin only**):
+  create/activate/suspend/ορισμός-κωδικού των logins. Forward-looking στήλες (2FA à la Fortify,
+  username/locale/phone) dormant.
+- **Επόμενα slices:** grants ανά εταιρία/πελάτη (ποιος βλέπει ποιον· `customer_user_access`) + λίστα
+  παραστατικών/υπηρεσιών + reset-password/self-register με claim.
+
+---
+
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·
 `FMysqlSync` MySQL mirror (→ WHMCS API) · `GET_COMB_*` (cross-DB με inline SYSDBA —

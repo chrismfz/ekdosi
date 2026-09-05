@@ -123,6 +123,23 @@ class PortalAuthTest extends TestCase
         $this->assertGuest('web');   // never an operator on the Filament guard
     }
 
+    public function test_create_user_command_restores_a_soft_deleted_login(): void
+    {
+        $user = CustomerUser::factory()->create(['email' => 'gone@example.com']);
+        $user->delete();   // soft delete — the unique(email) row still exists
+
+        $this->artisan('portal:create-user', [
+            'email' => 'gone@example.com',
+            '--name' => 'Back Again',
+            '--password' => 'fresh-pass-123',
+        ])->assertSuccessful();
+
+        $fresh = CustomerUser::query()->where('email', 'gone@example.com')->first();
+        $this->assertNotNull($fresh);   // restored (not trashed), no unique-constraint crash
+        $this->assertSame(CustomerUser::STATUS_ACTIVE, $fresh->status);
+        $this->assertTrue(Hash::check('fresh-pass-123', $fresh->password));
+    }
+
     public function test_an_operator_is_not_a_portal_user(): void
     {
         $operator = User::factory()->create();

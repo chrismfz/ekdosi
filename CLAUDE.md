@@ -109,13 +109,17 @@ after cutover.
   makes sense. utf8mb4 / utf8mb4_unicode_ci.
 - Money `decimal(14,2)`, qty `decimal(9,3)`, vat% `decimal(5,2)`.
 - Operator-facing UI text is Greek; code identifiers stay English.
-- **No-build CSS (gotcha).** The panel ships ONLY Filament's `.fi-*` component CSS —
-  there is **no Tailwind utility layer** and no asset build. Any utility class used in a
-  custom blade page (`grid`, `gap-3`, `text-sm`, `dark:*`, responsive `md:*`, even a
-  `.fi-*` override) must be **hand-defined in `resources/css/panel.css`** or it renders
-  **unstyled**. Add the class there (standard Tailwind values + the `dark:`/responsive
-  variant you use); it's registered via `FilamentAsset::register` and republished by
-  `filament:assets` on `composer install` — no npm/Vite.
+- **CSS: two worlds (gotcha).** The **Filament PANEL** ships ONLY Filament's `.fi-*`
+  component CSS — **no Tailwind utility layer** inside the panel. A utility class used in a
+  custom **panel** blade page (`grid`, `gap-3`, `text-sm`, `dark:*`, `md:*`, or a `.fi-*`
+  override) must be **hand-defined in `resources/css/panel.css`** (registered via
+  `FilamentAsset::register`, republished by `filament:assets` on `composer install`) or it
+  renders **unstyled** — this half needs no npm/Vite. **BUT standalone Blade pages OUTSIDE
+  the panel** (e.g. the customer portal, `resources/views/portal/*`, `welcome.blade.php`)
+  DO use a real **Tailwind v4 + Vite** build: `resources/css/app.css` (`@import 'tailwindcss'`
+  + Flux) compiled by `npm run build` → `public/build/` (gitignored), pulled in with `@vite`.
+  The deploy runs it (`deploy/update.sh`: `npm ci && npm run build`). So full Tailwind
+  utilities + Flux UI components ARE available there — just not inside the Filament panel.
 - **Pint scope (gotcha).** The tree is **not** fully Pint-clean, so
   `vendor/bin/pint app/ tests/` reformats ~200 **unrelated** pre-existing files and
   buries your change. **Only Pint the files you touched** (pass them explicitly); revert

@@ -40,19 +40,24 @@ class PortalCreateUser extends Command
             return self::FAILURE;
         }
 
-        $existing = CustomerUser::query()->where('email', $email)->exists();
+        // Look up WITH trashed: the unique(email) index still holds a soft-deleted
+        // row, so a plain updateOrCreate would try to INSERT and hit the constraint.
+        // Restore + update the existing (possibly trashed) login instead.
+        $user = CustomerUser::withTrashed()->where('email', $email)->first();
+        $existing = $user !== null;
+        if ($user === null) {
+            $user = new CustomerUser(['email' => $email]);
+        }
 
         // 'password' is a hashed cast → assigning the plaintext hashes it.
-        $user = CustomerUser::query()->updateOrCreate(
-            ['email' => $email],
-            [
-                'name' => $name,
-                'password' => $password,
-                'status' => CustomerUser::STATUS_ACTIVE,
-                'email_verified_at' => now(),
-                'password_changed_at' => now(),
-            ],
-        );
+        $user->forceFill([
+            'name' => $name,
+            'password' => $password,
+            'status' => CustomerUser::STATUS_ACTIVE,
+            'email_verified_at' => now(),
+            'password_changed_at' => now(),
+            'deleted_at' => null,   // un-trash if it was soft-deleted
+        ])->save();
 
         $this->info(($existing ? 'Updated' : 'Created')." portal login #{$user->id} <{$user->email}> (active).");
 

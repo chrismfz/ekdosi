@@ -4,6 +4,7 @@ use App\Http\Controllers\CompanyBackupDownloadController;
 use App\Http\Controllers\ExpenseDocumentDownloadController;
 use App\Http\Controllers\Portal\HomeController as PortalHomeController;
 use App\Http\Controllers\Portal\LoginController as PortalLoginController;
+use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Support\Facades\Route;
@@ -24,9 +25,16 @@ Route::post('/login', [PortalLoginController::class, 'login'])
     ->middleware('throttle:10,1')
     ->name('portal.login.attempt');
 Route::post('/logout', [PortalLoginController::class, 'logout'])->name('portal.logout');
-Route::get('/portal', [PortalHomeController::class, 'index'])
-    ->middleware(EnsurePortalAuthenticated::class)
-    ->name('portal.home');
+Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
+    Route::get('/portal', [PortalHomeController::class, 'index'])->name('portal.home');
+    Route::get('/portal/profile', [PortalProfileController::class, 'show'])->name('portal.profile');
+    Route::post('/portal/profile', [PortalProfileController::class, 'update'])
+        ->middleware('throttle:12,1')->name('portal.profile.update');
+    // Throttled: current_password is verified here, so cap guessing (a hijacked
+    // session brute-forcing the current password to take over the account).
+    Route::post('/portal/profile/password', [PortalProfileController::class, 'updatePassword'])
+        ->middleware('throttle:8,1')->name('portal.profile.password');
+});
 
 // Legacy redirects — the three myDATA consoles moved under the «Κονσόλα myDATA»
 // cluster (admin/{tenant}/mydata/{sales,expenses,e3}). Keep old bookmarks alive.
