@@ -756,8 +756,13 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Operator-side «Χρήστες πύλης»** (Filament, group «Πύλη πελατών», **super-admin only**):
   create/activate/suspend/ορισμός-κωδικού των logins. Forward-looking στήλες (2FA à la Fortify,
   username/locale/phone) dormant.
-- **Επόμενα slices:** grants ανά εταιρία/πελάτη (ποιος βλέπει ποιον· `customer_user_access`) + λίστα
-  παραστατικών/υπηρεσιών + reset-password/self-register με claim.
+- **Access grants (Slice 1):** `customer_user_access` = «ποιο login βλέπει ποιον πελάτη, σε ποια εταιρία»
+  (`customer_user × company × customer × role`), με audit (granted_by/granted_at) + soft revoke. Λύνει το
+  «ίδιο email σε πολλές εταιρίες». **Operator management** στο «Χρήστες πύλης» (RelationManager «Πρόσβαση σε
+  πελάτες»: προσθήκη/ανάκληση/επαναφορά ανά πελάτη/ΑΦΜ). Δεν το διαβάζει ακόμα customer-facing οθόνη.
+- **Επόμενα slices:** λίστα παραστατικών/υπηρεσιών του πελάτη (θα χρησιμοποιεί τα grants ως leak-proof
+  boundary, μέσω κοινού `CustomerDocumentFeed` με το WHMCS) + reset-password/self-register με claim +
+  auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους».
 
 ---
 

@@ -54,6 +54,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   Fortify, username/locale/phone) κάθονται dormant. **Operator-side «Χρήστες πύλης»** Filament resource (group
   «Πύλη πελατών», super-admin only) για create/activate/suspend/reset-password των logins. Grants ανά
   εταιρία/πελάτη + παραστατικά = επόμενα slices.
+- **Customer portal — Slice 1 (access grants foundation).** Νέος πίνακας/model `customer_user_access` — η
+  γέφυρα «ποιο login βλέπει ποιον πελάτη, σε ποια εταιρία» (`customer_user × company × customer × role`),
+  με **audit** (granted_by/granted_at) και **soft revoke** (revoked_at). Λύνει το «ίδιο email σε πολλές
+  εταιρίες» (ένα login → πολλά grants). **Operator management** μέσα στο «Χρήστες πύλης» (RelationManager
+  «Πρόσβαση σε πελάτες»: προσθήκη/ανάκληση/επαναφορά ανά πελάτη/ΑΦΜ). **Δεν** το διαβάζει ακόμα καμία
+  customer-facing οθόνη — είναι το data model + διαχείριση· η λίστα παραστατικών του πελάτη (που θα το
+  χρησιμοποιεί ως leak-proof boundary) είναι επόμενο slice.
 - **Dependency:** `livewire/flux` (Flux UI Free) για το customer portal UI.
 - **AI «Βοηθός» Phase 2c-(ε): σελίδα «Χρήση & κόστος AI».** Read-only surface πάνω στο υπάρχον
   `ai_usage_log` (καμία νέα οντότητα δεδομένων), **μέσα στην περιοχή «AI Βοηθός»** (group «Σύστημα»,
