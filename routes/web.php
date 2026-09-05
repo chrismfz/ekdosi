@@ -58,6 +58,10 @@ Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
         ->where('customer', '[0-9]+')->name('portal.payment.create');
     Route::post('/user/pay/{customer}', [PortalPaymentController::class, 'store'])
         ->where('customer', '[0-9]+')->middleware('throttle:20,1')->name('portal.payment.store');
+    // Hosted-gateway bounce page (flow=redirect): rebuilds + auto-submits the
+    // SIGNED provider form to the acquirer (B1, Eurobank vPOS). Grant-scoped.
+    Route::get('/user/payment/{intent}/redirect', [PortalPaymentController::class, 'redirect'])
+        ->where('intent', '[0-9]+')->name('portal.payment.redirect');
     Route::get('/user/payment/{intent}', [PortalPaymentController::class, 'show'])
         ->where('intent', '[0-9]+')->name('portal.payment.show');
     // Official PDF of one of the customer's own documents (grant-scoped, streamed).

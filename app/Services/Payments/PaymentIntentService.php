@@ -63,6 +63,9 @@ class PaymentIntentService
             'customer_id' => $customer->id,
             'customer_user_id' => $login?->id,
             'gateway' => $connection->gateway,
+            // Remember the method → its config (shared secret) so the online return
+            // webhook can verify the provider digest against the right connection.
+            'payment_gateway_connection_id' => $connection->id,
             'purpose' => $purpose,
             'amount' => $amount,
             'currency' => 'EUR',
@@ -97,8 +100,9 @@ class PaymentIntentService
         string $settledBy,
         ?float $actualAmount = null,
         ?int $paymentMethodId = null,
+        ?string $transactionId = null,
     ): void {
-        DB::transaction(function () use ($intent, $settledBy, $actualAmount, $paymentMethodId): void {
+        DB::transaction(function () use ($intent, $settledBy, $actualAmount, $paymentMethodId, $transactionId): void {
             /** @var PaymentIntent $locked */
             $locked = PaymentIntent::query()
                 ->withoutGlobalScope(CompanyScope::class)   // context-independent (operator now, webhook in B1)
@@ -117,14 +121,24 @@ class PaymentIntentService
 
             $amount = round($actualAmount ?? (float) $locked->amount, 2);
 
+            // Provenance («πώς ήρθε η συναλλαγή»): the Payment IS the transactions
+            // ledger. `reference` stays our ΠΛ- receipt key (groups the είσπραξη in
+            // the Καρτέλα); `transaction_id` carries the ACQUIRER's txn id when the
+            // gateway reported one (falls back to our reference for manual), and the
+            // gateway + txn id go into the notes for a human-readable trail.
+            $notes = 'Πληρωμή μέσω: '.$locked->gateway;
+            if (filled($transactionId)) {
+                $notes .= ' (κωδ. συναλλαγής: '.$transactionId.')';
+            }
+
             $this->allocator->allocate(
                 customer: $customer,
                 amount: $amount,
                 date: Carbon::now(),
                 paymentMethodId: $paymentMethodId,
                 reference: $locked->reference,
-                notes: 'Πληρωμή μέσω: '.$locked->gateway,
-                transactionId: $locked->reference,
+                notes: $notes,
+                transactionId: $transactionId ?: $locked->reference,
             );
 
             $locked->forceFill([

@@ -289,9 +289,8 @@ return [
     'payments' => [
         'gateways' => [
             'manual' => ManualPaymentGateway::class,
-            // 'stripe'   => App\Services\Payments\Gateways\StripeGateway::class,    // B1
+            'eurobank' => App\Services\Payments\Gateways\EurobankGateway::class,   // B1 (vPOS: card + Apple/Google Pay + IRIS)
             // 'paypal'   => App\Services\Payments\Gateways\PaypalGateway::class,    // B2
-            // 'eurobank' => App\Services\Payments\Gateways\EurobankGateway::class,  // B3
         ],
     ],
 

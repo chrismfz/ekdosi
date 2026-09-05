@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Portal;
 
+use App\Contracts\HostedRedirectGateway;
 use App\Http\Controllers\Controller;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
@@ -66,10 +67,52 @@ class PaymentController extends Controller
             login: Auth::guard('portal')->user(),
         );
 
+        // A hosted gateway (flow=redirect) bounces the customer to its own page
+        // (built + auto-submitted on our redirect route); the offline gateway just
+        // shows the bank details. The browser never settles money either way.
+        $initiation = $result['initiation'];
+        if ($initiation->flow !== 'offline' && filled($initiation->redirectUrl)) {
+            return redirect()->to($initiation->redirectUrl);
+        }
+
         return redirect()->route('portal.payment.show', $result['intent']->id);
     }
 
+    /**
+     * The bounce page for a hosted (flow=redirect) gateway: rebuild the SIGNED
+     * provider form and auto-submit the customer's browser to the acquirer. Rebuilt
+     * here (not stashed) so the signed payload is never persisted and survives a
+     * refresh. Grant-scoped; a non-pending intent falls back to its status page.
+     */
+    public function redirect(Request $request, int $intent): View|RedirectResponse
+    {
+        $model = $this->resolveOwnIntent($intent);
+
+        if (! $model->isPending()) {
+            return redirect()->route('portal.payment.show', $model->id);
+        }
+
+        $connection = $this->connectionFor($model);
+        $gateway = $this->registry->for($model->gateway);
+        if ($connection === null || ! $gateway instanceof HostedRedirectGateway) {
+            // Not a redirectable intent (offline, or the method was removed) — send
+            // the customer to the status/instructions page instead of erroring.
+            return redirect()->route('portal.payment.show', $model->id);
+        }
+
+        return view('portal.payment.redirect', [
+            'intent' => $model,
+            'form' => $gateway->redirectForm($model, $connection),
+        ]);
+    }
+
     public function show(Request $request, int $intent): View
+    {
+        return view('portal.payment.show', ['intent' => $this->resolveOwnIntent($intent)]);
+    }
+
+    /** One of the login's OWN intents by id (grant-scoped), or a flat 404. */
+    private function resolveOwnIntent(int $intent): PaymentIntent
     {
         $model = PaymentIntent::query()
             ->withoutGlobalScope(CompanyScope::class)
@@ -80,7 +123,27 @@ class PaymentController extends Controller
             abort(Response::HTTP_NOT_FOUND);
         }
 
-        return view('portal.payment.show', ['intent' => $model]);
+        return $model;
+    }
+
+    /**
+     * The intent's own ACTIVE connection (same company), or null. is_active is
+     * re-checked here (not just at start()): if the operator disabled the method
+     * after the intent was created, we must NOT auto-submit a live payment form
+     * through it — the customer falls back to the status page.
+     */
+    private function connectionFor(PaymentIntent $intent): ?PaymentGatewayConnection
+    {
+        if ($intent->payment_gateway_connection_id === null) {
+            return null;
+        }
+
+        return PaymentGatewayConnection::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $intent->company_id)
+            ->where('is_active', true)
+            ->whereKey($intent->payment_gateway_connection_id)
+            ->first();
     }
 
     /**

@@ -799,8 +799,15 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   (pending) → οδηγίες. Το **manual «Τραπεζική κατάθεση»** αναδεικνύει τους υπάρχοντες `bank_accounts` (toggle
   ποιοι φαίνονται· κενό = όλοι). Operator «Εκκρεμείς πληρωμές πύλης» → «Καταχώριση πληρωμής» → `Payment` μέσω
   `PaymentAllocator` (FIFO + credit) → `InvoiceBalance`. **Idempotent** settle· ο browser δεν εξοφλεί ποτέ.
-- **Επόμενα:** B1 πρώτο hosted (Stripe/IRIS — `initiate` redirect/QR + **signed webhook** → settle) → B2 PayPal
-  → B3 Eurobank → B4 reconcile/prepaid/refund.
+- **B1 — Eurobank / Cardlink vPOS (SHIPPED):** το πρώτο hosted gateway (`flow=redirect`) και ο **βασικός**
+  πάροχος του πελάτη — κάρτα + Apple/Google Pay + IRIS σε μία σελίδα. «Πλήρωσε» → auto-submit υπογεγραμμένης
+  φόρμας στη σελίδα της τράπεζας → η επιστροφή (vPOS **digest** πάνω στο raw body) επαληθεύεται → idempotent
+  `settle()` ΜΟΝΟ σε `CAPTURED` + ταίριασμα ποσού/νομίσματος/εταιρίας (T1/T3/T6). Per-tenant: Merchant ID +
+  **write-only** Shared Secret (κρυπτ.) + γλώσσα + sandbox. Νέες opt-in διεπαφές `HostedRedirectGateway`/
+  `WebhookGateway`/`HasSecretConfig` (το manual δεν υλοποιεί καμία). *Περιορισμός:* το module δεν έχει
+  server-to-server webhook — η εξόφληση περνά από το browser-return· δίχτυ = operator manual-settle + reconcile.
+- **Επόμενα:** B2 PayPal/Stripe (2ος redirect adapter) → B3 office rails (card-POS + ΑΑΔΕ) → B4 reconcile/
+  prepaid/refund + auto-expire εκκρεμών intents.
 
 ---
 
