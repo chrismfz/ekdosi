@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PaymentIntents\Tables;
 
+use App\Filament\Resources\Customers\CustomerResource;
 use App\Models\Payment;
 use App\Models\PaymentIntent;
 use App\Models\PaymentMethod;
@@ -26,6 +27,12 @@ class PaymentIntentsTable
         return $table
             ->defaultSort('created_at', 'desc')
             ->columns([
+                // The intent id IS the acquirer's orderid for redirect gateways
+                // (redirectForm: orderid = intent->id, orderDesc = «Ekdosi #{id}»), so
+                // it's what the Eurobank/Worldline notification shows as «Κωδικός
+                // Παραγγελίας»/«Ekdosi #N» — surface it to match a payment to its row.
+                TextColumn::make('id')->label('ID')->sortable()->copyable()
+                    ->tooltip('Κωδικός παραγγελίας (orderid) στο vPOS — «Ekdosi #ID» στην ειδοποίηση της τράπεζας.'),
                 TextColumn::make('created_at')->label('Ημ/νία')->dateTime('d/m/Y H:i')->sortable(),
                 TextColumn::make('reference')->label('Αναφορά')->searchable()->copyable(),
                 TextColumn::make('customer.name')->label('Πελάτης')->searchable(),
@@ -46,6 +53,17 @@ class PaymentIntentsTable
                         PaymentIntent::STATUS_PENDING => 'warning',
                         default => 'gray',
                     }),
+                // The money trail: how many Payment rows this intent produced, linked
+                // to the customer's Καρτέλα where they show («πλήρωσα, πού μπήκε;»).
+                TextColumn::make('payments_count')
+                    ->label('Πληρωμές')
+                    ->counts('payments')
+                    ->badge()
+                    ->formatStateUsing(fn (int $state): string => $state > 0 ? "{$state} ✓" : '—')
+                    ->color(fn (int $state): string => $state > 0 ? 'success' : 'gray')
+                    ->url(fn (PaymentIntent $record): ?string => $record->payments_count > 0
+                        ? CustomerResource::getUrl('ledger', ['record' => $record->customer_id])
+                        : null),
             ])
             ->filters([
                 SelectFilter::make('status')->label('Κατάσταση')->options([

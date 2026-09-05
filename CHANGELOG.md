@@ -19,6 +19,21 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Πύλη: «πλήρωσε ΑΥΤΟ το τιμολόγιο» (invoice-targeted payment).** Στη σελίδα πληρωμής ο πελάτης επιλέγει
+  «Όλο το υπόλοιπο» (FIFO, όπως πριν) Ή ένα ΣΥΓΚΕΚΡΙΜΕΝΟ παραστατικό· το `PaymentIntent` κρατά `invoice_id` και
+  το settle εφαρμόζει το ποσό σε ΕΚΕΙΝΟ το τιμολόγιο (capped στο υπόλοιπό του, τυχόν υπερβάλλον → έναντι
+  λογαριασμού). Αν το επιλεγμένο τιμολόγιο δεν είναι πλέον πληρωτέο κατά το settle (ακυρώθηκε), το χρήμα ΔΕΝ
+  χάνεται — πέφτει FIFO. Λύνει το «πλήρωσα το 6893 αλλά πήγε στο 6892».
+- **Πλήρες trail πληρωμής ↔ intent (hard link).** Νέο `payments.payment_intent_id` (FK, backfilled από το κοινό
+  reference): κάθε Payment που γεννά το settle δείχνει πίσω στο intent, clickable **και στις δύο μεριές** — στην
+  «Επεξεργασία Πληρωμής» φαίνεται «Προέλευση: Πληρωμή πύλης ΠΛ-… · gateway · κωδ. συναλλαγής», και στο
+  «Εκκρεμείς Πληρωμές Πύλης» στήλη «Πληρωμές» με link στην Καρτέλα. Στη λίστα intents προστέθηκε στήλη **ID**
+  (= vPOS `orderid` / «Ekdosi #N» στην ειδοποίηση τράπεζας) για άμεσο ταίριασμα με την τράπεζα.
+- **`payments:expire-stale-intents` — auto-λήξη εγκαταλελειμμένων εκκρεμών online intents** (πέρα από
+  `payments.intent_expiry_minutes`, default 120′), ώστε το «Εκκρεμείς Πληρωμές Πύλης» να μη γεμίζει από
+  μισοτελειωμένες προσπάθειες. Offline (τραπεζική κατάθεση) intents = worklist χειριστή, ΔΕΝ λήγουν ποτέ. Μια
+  καθυστερημένη verified είσπραξη settle-άρει ακόμη κι ένα expired intent (money truth). Scheduled + gated
+  (`EKDOSI_SCHEDULE_INTENT_EXPIRY`).
 - **Export εταιρίας: ταξιδεύουν πλέον οι τρόποι online πληρωμής (με secrets).** Τα `payment_gateway_connections`
   (Eurobank mid + Shared Secret, και μελλοντικά gateways — endpoints/IDs/usernames/passwords, ό,τι κρατά το
   encrypted `config`) μπαίνουν στο bundle με το config **σφραγισμένο στο passphrase** (όχι raw APP_KEY ciphertext),

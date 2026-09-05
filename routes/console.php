@@ -199,6 +199,18 @@ $trackSchedule(
     'whmcs_payment_reconcile'
 );
 
+// payments:expire-stale-intents — mark abandoned ONLINE portal payment intents
+// «Έληξε» past the age threshold so «Εκκρεμείς Πληρωμές Πύλης» reflects reality.
+// Cross-tenant, idempotent, non-destructive; a late verified capture still settles.
+$trackSchedule(
+    Schedule::command('payments:expire-stale-intents')
+        ->cron($scheduleCron('intent_expiry_cron', '*/30 * * * *'))
+        ->name('payments-expire-stale-intents')
+        ->when(fn () => $scheduleEnabled('intent_expiry_enabled'))
+        ->withoutOverlapping(30),
+    'intent_expiry'
+);
+
 // mydata:reconcile-sales — daily read-only local↔AADE cross-check, once
 // per myDATA-readable tenant (direct gr-mydata OR a provider reading its own
 // AADE picture back). Discrepancies surface in the command output (exit 2);

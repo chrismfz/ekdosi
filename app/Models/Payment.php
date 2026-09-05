@@ -44,7 +44,7 @@ class Payment extends Model
      */
     protected function loggedAttributes(): array
     {
-        return ['customer_id', 'invoice_id', 'kind', 'payment_method_id', 'bank_account_id', 'pay_date', 'amount', 'transaction_id', 'notes']; // kind: payment|refund
+        return ['customer_id', 'invoice_id', 'payment_intent_id', 'kind', 'payment_method_id', 'bank_account_id', 'pay_date', 'amount', 'transaction_id', 'notes']; // kind: payment|refund
     }
 
     protected $fillable = [
@@ -52,6 +52,7 @@ class Payment extends Model
         'legacy_id',
         'customer_id',
         'invoice_id',
+        'payment_intent_id',
         'kind',
         'payment_method_id',
         'bank_account_id',
@@ -122,6 +123,12 @@ class Payment extends Model
     public function invoice(): BelongsTo
     {
         return $this->belongsTo(Invoice::class);
+    }
+
+    /** The portal/gateway intent this payment was settled from (null for operator/FIFO/import rows). */
+    public function paymentIntent(): BelongsTo
+    {
+        return $this->belongsTo(PaymentIntent::class);
     }
 
     public function paymentMethod(): BelongsTo

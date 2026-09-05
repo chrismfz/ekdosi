@@ -806,8 +806,15 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   **write-only** Shared Secret (κρυπτ.) + γλώσσα + sandbox. Νέες opt-in διεπαφές `HostedRedirectGateway`/
   `WebhookGateway`/`HasSecretConfig` (το manual δεν υλοποιεί καμία). *Περιορισμός:* το module δεν έχει
   server-to-server webhook — η εξόφληση περνά από το browser-return· δίχτυ = operator manual-settle + reconcile.
+- **Invoice-targeted payment + πλήρες trail (SHIPPED):** στη «Πλήρωσε» ο πελάτης διαλέγει «Όλο το υπόλοιπο» ή
+  ΣΥΓΚΕΚΡΙΜΕΝΟ παραστατικό (`payment_intents.invoice_id`)· το settle το εφαρμόζει σε ΕΚΕΙΝΟ (capped, υπερβάλλον →
+  έναντι λογαριασμού· fallback FIFO αν έγινε μη-πληρωτέο). Κάθε Payment δείχνει πίσω στο intent (`payment_intent_id`,
+  hard FK) — «Προέλευση» clickable στην πληρωμή, στήλη «Πληρωμές»→Καρτέλα στα intents, στήλη **ID** (= vPOS orderid)
+  για ταίριασμα με την ειδοποίηση της τράπεζας.
+- **Auto-λήξη εκκρεμών intents (SHIPPED):** `payments:expire-stale-intents` λήγει εγκαταλελειμμένα *online* intents
+  (offline = worklist, ποτέ)· late verified capture settle-άρει ακόμη και expired (money truth).
 - **Επόμενα:** B2 PayPal/Stripe (2ος redirect adapter) → B3 office rails (card-POS + ΑΑΔΕ) → B4 reconcile/
-  prepaid/refund + auto-expire εκκρεμών intents.
+  prepaid/refund.
 
 ---
 

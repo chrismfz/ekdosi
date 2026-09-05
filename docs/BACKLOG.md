@@ -741,6 +741,17 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Invoice-targeted settle: no invoice row-lock → concurrent same-invoice settles can overpay (P2, edge).**
+  `PaymentAllocator::allocateToInvoice` reads the target balance without `lockForUpdate` on the invoice, so two
+  intents targeting the SAME invoice settling concurrently could each write the full balance (invoice → negative
+  instead of parking the 2nd on-account). Mirrors the pre-existing non-locking `allocate()` FIFO pattern (same
+  BACKLOG family as the InvoiceNumberer/recompute row-lock note), just more plausible now that a customer can retry
+  one invoice. Sequential settle is correct; only a rare double-capture race. Fix if it ever bites: lock the invoice
+  row (or a per-(customer,invoice) advisory lock) around the balance read+write.
+- **Portal `store()` validates one invoice id by rebuilding the whole payable list (P2, perf).** To 404-guard a
+  submitted `invoice_id`, `PaymentController::store` calls `payableInvoices()` which runs `balanceData()` per open
+  invoice (N+1). Negligible for a portal customer (few invoices) on a rare action; tighten to a single scoped
+  existence query (same InvoiceScope predicate + whereKey) if a customer with many open invoices makes it matter.
 - **Payment-gateway config fields share one `config` statePath — keys must be unique across gateways (P2, future).**
   The «Τρόποι online πληρωμής» form now builds a STATIC per-gateway `config` schema (one Group per gateway under a
   single `->statePath('config')`, only the selected one visible) — the fix for the false-«required» bug. All Groups
