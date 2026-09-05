@@ -26,6 +26,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   καμία φορολογική οδηγία (το `tax-notes.md` μένει accountant-confirmed-only).
 
 ### Added
+- **Customer portal — «η αλλαγή κωδικού τερματίζει τις άλλες συνεδρίες».** Κάθε session δένεται με το
+  password hash του login (server-side στο session payload)· μια αλλαγή κωδικού ΟΠΟΥΔΗΠΟΤΕ (reset από άλλη
+  συσκευή, operator reset, ή η ίδια η αλλαγή στο προφίλ) αποσυνδέει κάθε ΑΛΛΗ session στο επόμενο request,
+  ενώ η session που έκανε την αλλαγή επιβιώνει. Explicit υλοποίηση για τον `portal` guard
+  (`EnsurePortalAuthenticated` seed-on-first-sight + hash compare· το profile change ξανα-δένει τη δική του
+  session). Κλείνει το pre-existing κενό (το είχε και το profile password change).
 - **Customer portal — reset password + invited-login «claim».** `/user/forgot-password` +
   `/user/reset-password/{token}` πάνω στον απομονωμένο `customer_users` broker. Η **ίδια ροή** ορίζει
   και τον ΠΡΩΤΟ κωδικό ενός operator-invited login (invited→active claim), οπότε ο operator ανοίγει
