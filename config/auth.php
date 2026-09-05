@@ -58,9 +58,14 @@ return [
 
         // Customer portal (Slice 0) — session guard for CustomerUser, wholly
         // separate from the operator 'web' guard/Filament panel. A portal login
-        // never reaches /admin; an operator never authenticates here. Multi-guard
-        // sessions coexist (distinct session keys), so both can even be logged in
-        // in one browser without collision.
+        // never reaches /admin; an operator never authenticates here. LOGIN state
+        // coexists: the two guards use distinct, namespaced session keys and
+        // recaller cookies, so both can be logged in in one browser at once. Note
+        // they share ONE session record, so an explicit LOGOUT (which destroys the
+        // session server-side for security) tears down the whole browser session —
+        // a co-logged-in operator is logged out of /admin too. That is the correct
+        // trade-off: server-side session termination on logout beats preserving a
+        // rare operator+customer same-browser combo.
         'portal' => [
             'driver' => 'session',
             'provider' => 'customer_users',

@@ -82,9 +82,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `customer_users_password_reset_tokens` πίνακας για τον portal reset-broker (ο κοινός, email-keyed
   πίνακας θα συγκρουόταν όταν το ίδιο email είναι και operator και πελάτης) · **(2)** `CustomerUser`
   προστέθηκε στο `ADMIN_FORBIDDEN_RESOURCES` (ο company_admin δεν κρατά πλέον καν τα permissions —
-  defense-in-depth πάνω από το super-admin `canAccess()`) · **(3)** το portal logout κάνει
-  `session()->regenerate()` αντί για `invalidate()`, ώστε να μη σβήνει η παράλληλη `/admin` session
-  ενός operator στο ίδιο browser · **(4)** το PDF gate (`loginCanAccess`) ελέγχει `whereHas('customer')`
+  defense-in-depth πάνω από το super-admin `canAccess()`) · **(3)** αποσαφηνίστηκε το coexistence promise
+  στο `config/auth.php`: το portal logout κρατά `invalidate()` (server-side καταστροφή της session — κλεμμένο
+  cookie δεν επιβιώνει του logout)· επειδή το session record είναι κοινό, ένας παράλληλα συνδεδεμένος operator
+  αποσυνδέεται και από το `/admin` — σωστό trade-off (ασφαλές logout > σπάνιος συνδυασμός) · **(4)** το PDF
+  gate (`loginCanAccess`) ελέγχει `whereHas('customer')`
   ώστε ένα soft-deleted customer να μη σερβίρει PDF ενώ έχει φύγει από τη λίστα · **(5)** ο operator-set
   κωδικός χρησιμοποιεί `Password::defaults()` (ίδια πολιτική με το self-service) · **(6)** TrashedFilter +
   Restore/ForceDelete στο «Χρήστες πύλης» (soft-deleted login δεν είναι πια αόρατο dead-end που μπλοκάρει

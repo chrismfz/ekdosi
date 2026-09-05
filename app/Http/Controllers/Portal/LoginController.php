@@ -68,12 +68,14 @@ class LoginController extends Controller
     {
         Auth::guard('portal')->logout();
 
-        // Regenerate the session id (defense against fixation) instead of a full
-        // invalidate(): the guard logout already cleared the portal login keys,
-        // and a flush would also wipe a co-logged-in operator's /admin (web guard)
-        // session in the same browser — the coexistence auth.php promises.
-        // regenerate() rotates the CSRF token too.
-        $request->session()->regenerate();
+        // Full invalidate() — DESTROY the session server-side, so a stolen/hijacked
+        // pre-logout session cookie stops authenticating the moment the user logs
+        // out (regenerate() alone would leave the old id alive in the store). The
+        // session record is shared with the operator 'web' guard, so this also ends
+        // a co-logged-in operator's /admin session in the same browser — the correct
+        // trade-off (see config/auth.php: secure logout > a rare same-browser combo).
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
 
         return redirect()->route('portal.login');
     }

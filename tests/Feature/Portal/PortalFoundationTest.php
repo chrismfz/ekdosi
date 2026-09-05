@@ -37,7 +37,7 @@ class PortalFoundationTest extends TestCase
         $this->assertTrue(Schema::hasTable('customer_users_password_reset_tokens'));
     }
 
-    public function test_logout_regenerates_the_session_without_flushing_other_guard_data(): void
+    public function test_logout_destroys_the_session_server_side(): void
     {
         $user = CustomerUser::factory()->create([
             'password' => Hash::make('secret-pass-123'),
@@ -47,12 +47,14 @@ class PortalFoundationTest extends TestCase
         $this->post('/user/login', ['email' => $user->email, 'password' => 'secret-pass-123']);
         $this->assertAuthenticatedAs($user, 'portal');
 
-        // A stand-in for a co-logged-in operator's (web guard) session data.
-        $this->withSession(['operator_marker' => 'web-guard-data'])
+        // Logout invalidate()s the shared session: any prior session data is gone
+        // (so a stolen pre-logout cookie can't keep authenticating), and the portal
+        // guard is a guest. The whole-session teardown is intentional (a shared
+        // record can't be partially destroyed) — see config/auth.php.
+        $this->withSession(['pre_logout_marker' => 'x'])
             ->post('/user/logout')
             ->assertRedirect(route('portal.login'))
-            // regenerate() (not invalidate()) keeps unrelated session data alive.
-            ->assertSessionHas('operator_marker', 'web-guard-data');
+            ->assertSessionMissing('pre_logout_marker');
 
         $this->assertGuest('portal');
     }
