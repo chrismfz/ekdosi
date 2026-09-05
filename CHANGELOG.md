@@ -19,6 +19,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» Phase 2c-(ε): σελίδα «Χρήση & κόστος AI».** Read-only surface πάνω στο υπάρχον
+  `ai_usage_log` (καμία νέα οντότητα δεδομένων), **μέσα στην περιοχή «AI Βοηθός»** (group «Σύστημα»,
+  δίπλα στο «Βοηθός AI»), ΟΧΙ στο κεντρικό dashboard. Δείχνει ανά εταιρεία (αιτήματα, tokens in/out/
+  cache, χρεώσιμα, μηνιαίο όριο, % ορίου με badge, εκτ. κόστος USD), ανά χρήστη («ποιος έκαψε το
+  budget») και μηνιαία τάση, με επιλογή μήνα (12 μήνες) + εξαγωγή CSV. Νέο `AiUsageReport` (aggregation)
+  + `AiUsage` Filament page. **Cross-tenant → hard-gated σε system super_admin** (ρητό
+  `withoutGlobalScope(CompanyScope)`· ΠΟΤΕ Shield-grantable, ώστε ένας company_admin να μη βλέπει
+  κόστος άλλου tenant). Το κόστος είναι εκτίμηση USD (ανά μοντέλο), για συμφωνία με τον λογαριασμό Anthropic.
 - **«Εκδοθέντα Παραστατικά» για τον πελάτη μέσα στο WHMCS.** Δύο νέα HMAC-signed webhook
   endpoints (`issued-for-client` POST + `issued-doc-pdf/{userid}/{invoice}` GET) τροφοδοτούν μια
   νέα σελίδα του WHMCS plugin, όπου ο reseller βλέπει τα παραστατικά που εκδόθηκαν γι' αυτόν

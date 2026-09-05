@@ -33,11 +33,18 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
 > earlier «92/2» came from a stale devbox backup, never real). The daily dry-run on the VM
 > is the operators' routine, not a backlog task. Kept as a closed record under «Cutover gate».*
 
+> **Sequencing (owner, 2026-09-05):** the **delivery-note family is HELD until the myDATA
+> API v2.0.2** ships (DEP-001) — don't start it before then. The **actionable-now** items
+> are **MYD-011 (country→ISO)** and **PROV-005** (vendor-blocked but worth chasing the
+> endpoint). TIER 2 is **not urgent** («δεν καιγόμαστε»). In parallel, the **AI «Βοηθός»
+> Phase 2c** picks up: **(ε) usage/cost dashboard — 🚧 IN PROGRESS** (inside the «AI Βοηθός»
+> area, NOT the central dashboard), then **(ζ) `knowledge_search`**.
+
 **TIER 1 — Real in-scope code work, next deadline (delivery-note family + provider):**
-1. **Delivery-note family** (before the ψηφιακή-διακίνηση deadline, NOT 1 Oct):
-   MYD-023 strict-refusal + already-cancelled adoption on ΔΑ/provider paths (**P1**,
-   ties to PROV-015) · MYD-019 · MYD-026 · PROV-002 · STOCK-001 follow-ups · unblock
-   9.1/9.2 + combined ΤΔΑ. Do as one block with a 9.3 sandbox rehearsal.
+1. **Delivery-note family** — ⏳ **HELD until myDATA API v2.0.2** (DEP-001). Before the
+   ψηφιακή-διακίνηση deadline, NOT 1 Oct: MYD-023 strict-refusal + already-cancelled
+   adoption on ΔΑ/provider paths (**P1**, ties to PROV-015) · MYD-019 · MYD-026 · PROV-002 ·
+   STOCK-001 follow-ups · unblock 9.1/9.2 + combined ΤΔΑ. One block with a 9.3 sandbox rehearsal.
 2. **MYD-011 country→ISO normalization** — foreign supplier/customer can freeze a
    wrong `GR` on a ΔΑ. Needs normalise-on-load + column backfill + ETL alignment
    (tried & reverted once — do it carefully).
@@ -465,12 +472,14 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
     per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).
   - **(δ) Persistence συνομιλιών** — `ai_conversations` table (ιστορικό + πολλές
     συνομιλίες ανά χρήστη, αντί session) — απαιτεί και UI επιλογής συνομιλίας.
-  - **(ε) Usage dashboard — tokens/κόστος ανά εταιρεία.** Τα ΔΕΔΟΜΕΝΑ ΥΠΑΡΧΟΥΝ ΗΔΗ:
-    το `ai_usage_log` κρατά input/output/cache tokens + `cost_estimate` ανά
-    εταιρεία/χρήστη/συνομιλία/μοντέλο (είναι το source of truth για τα caps, βλ.
-    `AiUsageMeter`). Λείπει ΜΟΝΟ το surface: Filament page/widget με
-    `sum(tokens)`/`sum(cost)` group-by μήνα × εταιρεία (ποιος πληρώνει, ποιος κοντά
-    στο όριο), προαιρετικά export CSV. Καθαρά read-only πάνω σε υπάρχοντα πίνακα.
+  - **(ε) Usage dashboard — tokens/κόστος ανά εταιρεία. 🚧 IN PROGRESS (2026-09-05).**
+    Χτίζεται ως **super_admin σελίδα «Χρήση & κόστος AI» ΜΕΣΑ στην περιοχή «AI Βοηθός»**
+    (group «Σύστημα», δίπλα στο «Βοηθός AI») — **ΟΧΙ** στο κεντρικό dashboard (owner). Τα
+    ΔΕΔΟΜΕΝΑ ΥΠΑΡΧΟΥΝ ΗΔΗ: το `ai_usage_log` κρατά input/output/cache tokens +
+    `cost_estimate` ανά εταιρεία/χρήστη/συνομιλία/μοντέλο (source of truth για τα caps, βλ.
+    `AiUsageMeter`). Surface: `sum(tokens)`/`sum(cost)` group-by μήνα × εταιρεία (ποιος
+    πληρώνει, ποιος κοντά στο όριο) + per-user + μηνιαία τάση, προαιρετικά CSV. Read-only.
+    _Follow-up: per-tenant self-view για company_admin (η δική του κατανάλωση vs cap)._
   - **(στ) Streaming απαντήσεων** — τώρα είναι «σκέφτομαι…» μέχρι να ολοκληρωθεί το
     tool-loop· streaming θα ήθελε SSE/Livewire polling (μεγαλύτερη αλλαγή στο surface).
   - **(ζ) Helper / «βοήθεια & συμβουλή» με curated knowledge base.** Δύο ΞΕΧΩΡΙΣΤΑ

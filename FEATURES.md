@@ -657,6 +657,11 @@ default/Haiku/Opus) · μηνιαίο όριο tokens · προαιρ. per-compa
 (tokens+κόστος ανά εταιρεία/χρήστη) + caps (soft 80% / hard 100% / global backstop) · prompt-caching
 (`EKDOSI_AI_PROMPT_CACHE`). Global switch `EKDOSI_AI_ENABLED` (default OFF). Engine = Laravel HTTP
 (Messages API), χωρίς SDK.
+**Χρήση & κόστος AI** (Phase 2c-ε): σελίδα «Χρήση & κόστος AI» ΜΕΣΑ στην περιοχή «AI Βοηθός» (group
+«Σύστημα», δίπλα στο «Βοηθός AI») — read-only surface πάνω στο `ai_usage_log` («ποιος πληρώνει, ποιος
+κοντά στο όριο»): ανά εταιρεία (tokens in/out/cache, χρεώσιμα, όριο, % ορίου, εκτ. κόστος USD) + ανά
+χρήστη + μηνιαία τάση + επιλογή μήνα + CSV. **Cross-tenant → μόνο system super_admin** (`AiUsageReport`
+με ρητό `withoutGlobalScope`· ΠΟΤΕ Shield-grantable για να μη διαρρεύσει κόστος άλλου tenant).
 
 ## 16γ. Εξωτερικό MCP server (ίδια εργαλεία, από έξω)
 `POST /mcp` (`EkdosiMcpServer`, `laravel/mcp`) — **δεύτερο μεταφορικό πάνω στο ΙΔΙΟ registry**
