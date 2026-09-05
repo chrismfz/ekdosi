@@ -464,10 +464,15 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
     `whmcs_inbox`** (dual-surface, chat + MCP). **Remaining: `backups_status`** — αφέθηκε γιατί
     τα backups είναι super-admin/global (αδέξιο σε tenant-scoped operator chat)· καλύπτεται ήδη
     μερικώς από το super-admin `app_health` MCP tool. Χτίσε το μόνο αν χρειαστεί operator-facing.
-  - **(β) Περισσότερα write tools με confirm** — π.χ. «καταχώρισε είσπραξη/έμβασμα»
-    (reuse `PaymentAllocator`), «κόψε πρόχειρο παραστατικό» (το `find_customer` ήδη δίνει
-    link· εδώ θα στηνόταν draft μέσω `CreateInvoice`). Πάντα operator-confirm στο
-    `ai_pending_actions` — ίδιο pattern με 2b.
+  - **(β) Περισσότερα write tools με confirm** — **✅ `record_payment` SHIPPED (2026-09-05):**
+    «καταχώρισε είσπραξη» (reuse `PaymentAllocator::allocate`, `TYPE_RECORD_PAYMENT`, propose-only,
+    μονοσήμαντος πελάτης, gate `Create:Payment`, chat + MCP). **Remaining — «κόψε πρόχειρο
+    παραστατικό» (deferred):** τέμνει ανοιχτό design question — ένα draft «καίει» ΑΑ (βλ. pro-forma/
+    ΠΡΟΤ-N item παρακάτω) και θέλει πολλά structured inputs (τύπος + γραμμές/είδη/ΦΠΑ). Χτίσε το ΜΕΤΑ
+    την pro-forma απόφαση, με το ίδιο `ai_pending_actions` pattern.
+    _(P2 cleanup: το fuzzy customer-match (name/ΑΦΜ like) υπάρχει πλέον σε 3 tools —
+    `SendCustomerStatementTool`/`CreateReminderTool`/`RecordPaymentTool` με λίγο διαφορετικά
+    return shapes· ένας κοινός `AssistantCustomerResolver` (found/ambiguous/none) θα αφαιρούσε το drift.)_
   - **(γ) Per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `companies.ai_api_key` υπάρχει
     (στο `$hidden`)· λείπει το UI exposure (στο `CompanySettings` ή super-admin only) +
     per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).

@@ -19,6 +19,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» Phase 2c-(β): `record_payment` write tool — «καταχώρισε είσπραξη» με confirm (chat + MCP).**
+  Ο χειριστής λέει «πήρα 100 από τον Χ» και ο Βοηθός **ΠΡΟΕΤΟΙΜΑΖΕΙ** μια είσπραξη — καμία κίνηση
+  χρημάτων μέχρι να πατηθεί «Επιβεβαίωση». Στο confirm, ο `AiActionExecutor` re-validate + τρέχει
+  `PaymentAllocator::allocate` (FIFO στα ανοιχτά τιμολόγια, υπόλοιπο έναντι). Ο πελάτης πρέπει να
+  ταιριάζει **μονοσήμαντα** (αλλιώς ζητά διευκρίνιση — τα χρήματα δεν μαντεύονται)· gate `Create:Payment`
+  (re-checked στο confirm)· write → **δεν** κάνει fan-out «all» στο MCP. Νέο `TYPE_RECORD_PAYMENT`.
 - **AI «Βοηθός» Phase 2c-(ε): `ai_usage` tool — κόστος/όριο AI μέσα από τον Βοηθό (chat + MCP).**
   Ο χειριστής ρωτά «πόσο κόστισε το AI τον μήνα;» / «πλησιάζουμε το όριο;» και ο Βοηθός απαντά:
   αιτήματα, tokens (in/out/cache), εκτ. κόστος USD, μηνιαίο όριο + % ορίου, ανά χρήστη — **για την

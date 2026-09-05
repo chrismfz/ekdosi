@@ -16,6 +16,7 @@ use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
 use App\Services\Assistant\Tools\RecentActivityTool;
 use App\Services\Assistant\Tools\RecentInvoicesTool;
+use App\Services\Assistant\Tools\RecordPaymentTool;
 use App\Services\Assistant\Tools\SendCustomerStatementTool;
 use App\Services\Assistant\Tools\TopProductsTool;
 use App\Services\Assistant\Tools\VatSummaryTool;
@@ -57,6 +58,7 @@ class ToolRegistry
             // Write tools — PREPARE only; the operator confirms before execution.
             new SendCustomerStatementTool,
             new CreateReminderTool,
+            new RecordPaymentTool,
         ];
     }
 

@@ -28,6 +28,8 @@ class AiPendingAction extends Model
 
     public const TYPE_REMINDER = 'reminder';
 
+    public const TYPE_RECORD_PAYMENT = 'record_payment';
+
     public const STATUS_PENDING = 'pending';
 
     public const STATUS_CONFIRMED = 'confirmed';

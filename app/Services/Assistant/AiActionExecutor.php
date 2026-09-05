@@ -7,10 +7,12 @@ use App\Mail\CustomerStatementMail;
 use App\Models\AiPendingAction;
 use App\Models\User;
 use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
+use App\Services\Payments\PaymentAllocator;
 use App\Services\TenantMailerFactory;
 use App\Support\Tenancy\CompanyContext;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 
@@ -34,10 +36,26 @@ class AiActionExecutor
             return 'Η ενέργεια δεν εκκρεμεί πλέον.';
         }
 
+        // ATOMIC CLAIM: only one confirm may transition PENDING → CONFIRMED. A
+        // double-click / two tabs / MCP-stage + panel-confirm collision would
+        // otherwise both pass isPending() and both run the side effect — which for
+        // record_payment means DUPLICATE Payment rows. This single guarded UPDATE
+        // lets exactly one caller win; the loser sees 0 rows and bails. A handler
+        // that then fails flips the row to FAILED (see fail()).
+        $claimed = AiPendingAction::query()
+            ->whereKey($action->getKey())
+            ->where('status', AiPendingAction::STATUS_PENDING)
+            ->update(['status' => AiPendingAction::STATUS_CONFIRMED, 'confirmed_at' => now()]);
+        if ($claimed === 0) {
+            return 'Η ενέργεια δεν εκκρεμεί πλέον.';
+        }
+        $action->refresh();
+
         return app(CompanyContext::class)->actAs($action->company, function () use ($action, $user): string {
             return match ($action->type) {
                 AiPendingAction::TYPE_SEND_STATEMENT => $this->confirmSendStatement($action, $user),
                 AiPendingAction::TYPE_REMINDER => $this->confirmReminder($action),
+                AiPendingAction::TYPE_RECORD_PAYMENT => $this->confirmRecordPayment($action, $user),
                 default => $this->fail($action, 'Άγνωστος τύπος ενέργειας.'),
             };
         });
@@ -96,6 +114,64 @@ class AiActionExecutor
         ])->save();
 
         return $result;
+    }
+
+    private function confirmRecordPayment(AiPendingAction $action, User $user): string
+    {
+        // Defence in depth: re-check the money permission from the staged row, never
+        // from client input (the confirm button is also gated).
+        if (! Gate::forUser($user)->allows('Create:Payment')) {
+            return $this->fail($action, 'Δεν έχετε πρόσβαση.');
+        }
+
+        $customer = $action->customer;
+        if ($customer === null) {
+            return $this->fail($action, 'Ο πελάτης δεν βρέθηκε.');
+        }
+
+        $amount = round((float) ($action->payload['amount'] ?? 0), 2);
+        if ($amount <= 0) {
+            return $this->fail($action, 'Μη έγκυρο ποσό είσπραξης.');
+        }
+
+        try {
+            $date = Carbon::parse((string) ($action->payload['date'] ?? now()->toDateString()));
+            $result = app(PaymentAllocator::class)->allocate(
+                customer: $customer,
+                amount: $amount,
+                date: $date,
+                notes: $action->payload['note'] ?? null,
+            );
+        } catch (\Throwable $e) {
+            Log::error('AI record-payment failed', ['action_id' => $action->id, 'error' => $e->getMessage()]);
+
+            return $this->fail($action, 'Η καταχώριση της είσπραξης απέτυχε.');
+        }
+
+        $money = fn (float $v): string => number_format($v, 2, ',', '.').'€';
+        $parts = [];
+        foreach ($result->allocations as $a) {
+            $parts[] = $a['invcode'].' '.$money((float) $a['amount']);
+        }
+        $line = 'Καταχωρήθηκε είσπραξη '.$money($result->total).' από '.$customer->name;
+        if ($parts !== []) {
+            $line .= ' → '.implode(', ', $parts);
+        }
+        if ($result->onAccount > 0.005) {
+            $line .= ' · έναντι υπολοίπου '.$money($result->onAccount);
+        }
+
+        // Keep an audit back-reference: the Payment rows PaymentAllocator created all
+        // carry $result->reference (ΕΙΣ-…), so storing it links this AI-staged action
+        // to the money it produced (traceable / reversible later).
+        $action->forceFill([
+            'status' => AiPendingAction::STATUS_CONFIRMED,
+            'confirmed_at' => now(),
+            'result' => $line,
+            'payload' => [...(array) $action->payload, 'payment_reference' => $result->reference],
+        ])->save();
+
+        return $line;
     }
 
     private function confirmReminder(AiPendingAction $action): string
