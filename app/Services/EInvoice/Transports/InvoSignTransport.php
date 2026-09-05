@@ -116,9 +116,11 @@ class InvoSignTransport implements EInvoiceProviderTransport
 
     public function ping(ProviderCredentials $credentials): bool
     {
-        // InvoSign documents no health endpoint; verify the creds are present and
-        // the base URL is reachable (a real auth check needs an issuer + document,
-        // which «Έλεγχος σύνδεσης» doesn't have). Sandbox-refine later.
+        // Reachability only, BY DECISION (PROV-005 closed as won't-do): InvoSign
+        // documents no non-issuing status endpoint, so the only authenticated probe
+        // would be an actual document — and every InvoSign call, test included, burns
+        // credits. So «Έλεγχος σύνδεσης» stays a free unauthenticated GET to the base
+        // URL; credentials/quota are proven on the first REAL submission, never here.
         [$base] = $this->resolve($credentials);
 
         try {

@@ -19,6 +19,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Changed
+- **Πάροχος «Έλεγχος σύνδεσης» — ειλικρινές μήνυμα (PROV-005 closed as won't-do).** Το success
+  notification λέει πλέον ρητά «έλεγχος **μόνο διαθεσιμότητας** — ΔΕΝ επαληθεύει διαπιστευτήρια ή
+  υπόλοιπο (quota)», ώστε ο χειριστής να μην παρεξηγεί το πράσινο. Ο authenticated probe εγκαταλείφθηκε
+  συνειδητά: κάθε InvoSign κλήση (και δοκιμαστικό) χρεώνεται credits και δεν υπάρχει non-issuing
+  endpoint· κρατάμε το δωρεάν reachability ping (`InvoSignTransport::ping`).
 - **AI «Βοηθός» KB: εμπλουτισμός `docs/assistant-kb/app-howto.md`** — νέες ενότητες app how-to
   (κύκλος ζωής παραστατικού πρόχειρο/ενεργό/ακυρωμένο, επεξεργασία μόνο σε πρόχειρο, WHMCS
   «Εισερχόμενα» → «Δημιουργία Παραστατικού», έκδοση ΔΑ, καρτέλα «Ιστορικό», «Ρυθμίσεις εταιρείας»)
