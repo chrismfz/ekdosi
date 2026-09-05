@@ -1,5 +1,12 @@
 # Payment Connectors — card-POS & IRIS integrations
 
+> **See first: `docs/payment-gateways-design.md`** — the authoritative Πυλώνας B
+> design (online gateways Stripe/PayPal/Eurobank/manual + the WHMCS-style admin +
+> threat model + phase gates). This doc is the OFFICE-RAILS detail (card-POS +
+> IRIS request-to-pay) under the SAME `PaymentGateway` contract — they are the
+> `terminal` / `request_to_pay` capabilities there. Keep this for the acquirer +
+> ΑΑΔΕ POS↔ERP-mandate specifics.
+
 How an online ekdosi (Laravel, cloud-hosted) could take a **local office
 payment** — either on a physical **card POS terminal** or via **IRIS** (the
 DIAS instant-payment rail) — and turn it into an ekdosi `Payment` linked to the
