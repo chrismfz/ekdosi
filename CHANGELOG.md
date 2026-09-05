@@ -29,6 +29,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (`HostedRedirectGateway`/`WebhookGateway`/`HasSecretConfig`) — προσθήκη επόμενου gateway μένει
   «ένας adapter». Port field-for-field από το open-source WHMCS module του πελάτη.
 
+### Fixed
+- **«Τρόποι online πληρωμής» — τα required πεδία (Eurobank Merchant ID / Shared Secret) «γκρίνιαζαν» ενώ ήταν
+  συμπληρωμένα.** Τα πεδία ζουν σε reactively-εμφανιζόμενο section με deferred binding, οπότε ένα «required» από
+  προηγούμενη κενή υποβολή έμενε στην οθόνη κι όταν τα συμπλήρωνες (και μπορούσε να χαθεί στην υποβολή). Πλέον
+  συγχρονίζονται + επαναελέγχονται on-blur. Επίσης το `company_id` γράφεται ρητά στη δημιουργία (explicit tenancy).
+
 ### Changed
 - **Πάροχος «Έλεγχος σύνδεσης» — ειλικρινές μήνυμα (PROV-005 closed as won't-do).** Το success
   notification λέει πλέον ρητά «έλεγχος **μόνο διαθεσιμότητας** — ΔΕΝ επαληθεύει διαπιστευτήρια ή

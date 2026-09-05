@@ -81,11 +81,17 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
             TextInput::make('merchant_id')
                 ->label('Merchant ID (mid)')
                 ->required()
+                // Sync + re-validate on blur: these live in a reactively-revealed
+                // section, and a plain deferred field would keep showing a stale
+                // «required» from an earlier empty submit even after being filled
+                // (and could miss the submit). onBlur clears it as the operator types.
+                ->live(onBlur: true)
                 ->helperText('Ο κωδικός εμπόρου (mid) από τη Eurobank / Cardlink.'),
             TextInput::make('shared_secret')
                 ->label('Shared Secret')
                 ->password()
                 ->revealable()
+                ->live(onBlur: true)
                 // Required on CREATE (an active method with no secret can never
                 // verify a return — both legs fail closed). On EDIT it may be left
                 // blank = «keep the stored value»: the write-only «never hydrate,
