@@ -28,7 +28,7 @@ class PortalProfileTest extends TestCase
     public function test_profile_page_renders(): void
     {
         $this->actingAs($this->user(), 'portal')
-            ->get('/portal/profile')
+            ->get('/user/settings')
             ->assertOk()
             ->assertSee('Τα στοιχεία μου');
     }
@@ -38,7 +38,7 @@ class PortalProfileTest extends TestCase
         $user = $this->user();
 
         $this->actingAs($user, 'portal')
-            ->post('/portal/profile', ['name' => 'Νέο Όνομα', 'phone' => '2101234567', 'locale' => 'en'])
+            ->post('/user/settings', ['name' => 'Νέο Όνομα', 'phone' => '2101234567', 'locale' => 'en'])
             ->assertRedirect()
             ->assertSessionHas('status');
 
@@ -53,7 +53,7 @@ class PortalProfileTest extends TestCase
         $user = $this->user();
 
         $this->actingAs($user, 'portal')
-            ->post('/portal/profile/password', [
+            ->post('/user/settings/password', [
                 'current_password' => 'secret-pass-123',
                 'password' => 'a-new-strong-pass',
                 'password_confirmation' => 'a-new-strong-pass',
@@ -70,8 +70,8 @@ class PortalProfileTest extends TestCase
         $user = $this->user();
 
         $this->actingAs($user, 'portal')
-            ->from('/portal/profile')
-            ->post('/portal/profile/password', [
+            ->from('/user/settings')
+            ->post('/user/settings/password', [
                 'current_password' => 'WRONG',
                 'password' => 'a-new-strong-pass',
                 'password_confirmation' => 'a-new-strong-pass',

@@ -14,6 +14,8 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 use UnitEnum;
 
 /**
@@ -49,6 +51,17 @@ class CustomerUserResource extends Resource
     public static function canAccess(): bool
     {
         return (bool) auth()->user()?->isSystemSuperAdmin();
+    }
+
+    /**
+     * Drop the SoftDeletingScope so the TrashedFilter / RestoreAction can reach
+     * soft-deleted logins (default listing still hides them until the operator
+     * opts in via the filter). Without this a trashed row is invisible AND
+     * unrestorable, yet still blocks its email — a dead end.
+     */
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->withoutGlobalScopes([SoftDeletingScope::class]);
     }
 
     public static function form(Schema $schema): Schema

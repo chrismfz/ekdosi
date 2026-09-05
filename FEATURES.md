@@ -752,8 +752,8 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 ## 18. Πύλη πελατών (customer portal) — foundation
 - **Slice 0 (auth shell):** ξεχωριστός **`portal` auth guard** + πίνακας/model `customer_users`
   (global login identity, unique email σε όλες τις εταιρίες· λιτός — auth + account-safety, καμία
-  νομική ταυτότητα). `/login`·`/logout`·`/portal`·**προφίλ** (στοιχεία + αλλαγή κωδικού· email/ΑΦΜ
-  όχι επεξεργάσιμα). **UI με Flux UI (Free)** πάνω στο υπάρχον Tailwind v4/Vite. Πλήρης **διαχωρισμός
+  νομική ταυτότητα). `/user/login`·`/user/logout`·`/user`·**προφίλ** `/user/settings` (στοιχεία + αλλαγή
+  κωδικού· email/ΑΦΜ όχι επεξεργάσιμα). **UI με Flux UI (Free)** πάνω στο υπάρχον Tailwind v4/Vite. Πλήρης **διαχωρισμός
   guard** από τους operators (portal login ≠ operator· δεν φτάνει ποτέ στο `/admin`), throttled login,
   no-enumeration errors, status gating (invited/active/suspended — μόνο active+κωδικός συνδέεται).
   `php artisan portal:create-user` για χειροκίνητη δημιουργία (registration/invite/backfill = επόμενα).
@@ -764,9 +764,17 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   (`customer_user × company × customer × role`), με audit (granted_by/granted_at) + soft revoke. Λύνει το
   «ίδιο email σε πολλές εταιρίες». **Operator management** στο «Χρήστες πύλης» (RelationManager «Πρόσβαση σε
   πελάτες»: προσθήκη/ανάκληση/επαναφορά ανά πελάτη/ΑΦΜ). Δεν το διαβάζει ακόμα customer-facing οθόνη.
-- **Επόμενα slices:** λίστα παραστατικών/υπηρεσιών του πελάτη (θα χρησιμοποιεί τα grants ως leak-proof
-  boundary, μέσω κοινού `CustomerDocumentFeed` με το WHMCS) + reset-password/self-register με claim +
-  auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους».
+- **Routing:** καθαρός διαχωρισμός **`/admin` (operators) ⟂ `/user` (πελάτες)**· το `/` είναι σκόπιμα κενό
+  placeholder (δεν αποκαλύπτει καμία από τις δύο επιφάνειες).
+- **Λίστα παραστατικών (Slice 2):** στο `/user` ο πελάτης βλέπει τα εκδοθέντα παραστατικά του,
+  ομαδοποιημένα ανά (εταιρία, πελάτη/ΑΦΜ), με ημ/νία·κωδικό·τύπο·κατάσταση·ΜΑΡΚ + **PDF** (proxied/streamed)
+  και **Επαλήθευση** (provider/ΑΑΔΕ URL). Υπηρεσία **`CustomerDocumentFeed`** = η μοναδική πηγή «ποια live
+  παραστατικά ανήκουν σε (εταιρία, πελάτη)» + «μπορεί το login να δει αυτό» — αυστηρά μέσω **ενεργού grant**
+  (ποτέ ΑΦΜ/εταιρία σκέτα), μόνο **live** (ίδιο allow-list με `isPubliclyViewable()`). Route
+  `/user/document/{invoice}/pdf` **fail-closed** (404 χωρίς αποκάλυψη ύπαρξης, ξανα-ελέγχει το boundary ανά
+  request)· το middleware ξανα-ελέγχει `canLogin()` κάθε request (suspend μετά το login → logout αμέσως).
+- **Επόμενα slices:** reset-password/self-register με claim + auto-provision reseller-grants από τη
+  δρομολόγηση «Παραστατικά σε τρίτους» + κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».
 
 ---
 

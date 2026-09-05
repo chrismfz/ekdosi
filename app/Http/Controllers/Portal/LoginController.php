@@ -67,6 +67,13 @@ class LoginController extends Controller
     public function logout(Request $request): RedirectResponse
     {
         Auth::guard('portal')->logout();
+
+        // Full invalidate() — DESTROY the session server-side, so a stolen/hijacked
+        // pre-logout session cookie stops authenticating the moment the user logs
+        // out (regenerate() alone would leave the old id alive in the store). The
+        // session record is shared with the operator 'web' guard, so this also ends
+        // a co-logged-in operator's /admin session in the same browser — the correct
+        // trade-off (see config/auth.php: secure logout > a rare same-browser combo).
         $request->session()->invalidate();
         $request->session()->regenerateToken();
 

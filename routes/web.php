@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\CompanyBackupDownloadController;
 use App\Http\Controllers\ExpenseDocumentDownloadController;
+use App\Http\Controllers\Portal\DocumentPdfController as PortalDocumentPdfController;
 use App\Http\Controllers\Portal\HomeController as PortalHomeController;
 use App\Http\Controllers\Portal\LoginController as PortalLoginController;
 use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
@@ -9,30 +10,43 @@ use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Support\Facades\Route;
 
-// The app is the Filament admin panel; there is no public landing page.
-// Send the root straight to the panel (which then routes to login / tenant).
-Route::redirect('/', '/admin');
+// Two wholly separate surfaces: the operator/Filament panel at /admin and the
+// customer portal at /user. The root `/` is an INTENTIONAL blank placeholder —
+// it reveals neither surface (operators bookmark /admin, customers /user), so a
+// stranger landing on `/` learns nothing about the app's structure. (When the
+// app isn't installed yet, the EnsureInstalled middleware still redirects `/`
+// to /install before this view is reached.)
+Route::view('/', 'root-placeholder');
 
 /**
- * Customer portal (Slice 0) — a customer-facing login on the dedicated `portal`
- * guard, wholly separate from the operator/Filament panel (/admin). This slice
- * is the auth SHELL only: login/logout + an authenticated placeholder. No
- * customer data is exposed here yet. The login (throttled) is at /login; `/`
- * still goes to /admin for operators.
+ * Customer portal — a customer-facing surface on the dedicated `portal` guard,
+ * wholly separate from the operator/Filament panel (/admin). Everything lives
+ * under /user (login/logout/home/settings/document), so /admin ⟂ /user is a
+ * clean split. Route NAMES stay `portal.*` (the internal guard/namespace name);
+ * only the URL prefix is /user. Unauthenticated hits on a protected /user route
+ * are redirected to /user/login by EnsurePortalAuthenticated.
  */
-Route::get('/login', [PortalLoginController::class, 'show'])->name('portal.login');
-Route::post('/login', [PortalLoginController::class, 'login'])
+Route::get('/user/login', [PortalLoginController::class, 'show'])->name('portal.login');
+Route::post('/user/login', [PortalLoginController::class, 'login'])
     ->middleware('throttle:10,1')
     ->name('portal.login.attempt');
-Route::post('/logout', [PortalLoginController::class, 'logout'])->name('portal.logout');
+Route::post('/user/logout', [PortalLoginController::class, 'logout'])->name('portal.logout');
 Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
-    Route::get('/portal', [PortalHomeController::class, 'index'])->name('portal.home');
-    Route::get('/portal/profile', [PortalProfileController::class, 'show'])->name('portal.profile');
-    Route::post('/portal/profile', [PortalProfileController::class, 'update'])
+    Route::get('/user', [PortalHomeController::class, 'index'])->name('portal.home');
+    // Official PDF of one of the customer's own documents (grant-scoped, streamed).
+    // Throttled: each hit is a heavy DomPDF render (raises memory_limit/time_limit),
+    // so cap the rate to keep a tight loop (or a hijacked session) from exhausting
+    // FPM workers — the heaviest portal endpoint, so a tighter cap than the rest.
+    Route::get('/user/document/{invoice}/pdf', PortalDocumentPdfController::class)
+        ->where('invoice', '[0-9]+')
+        ->middleware('throttle:20,1')
+        ->name('portal.document.pdf');
+    Route::get('/user/settings', [PortalProfileController::class, 'show'])->name('portal.profile');
+    Route::post('/user/settings', [PortalProfileController::class, 'update'])
         ->middleware('throttle:12,1')->name('portal.profile.update');
     // Throttled: current_password is verified here, so cap guessing (a hijacked
     // session brute-forcing the current password to take over the account).
-    Route::post('/portal/profile/password', [PortalProfileController::class, 'updatePassword'])
+    Route::post('/user/settings/password', [PortalProfileController::class, 'updatePassword'])
         ->middleware('throttle:8,1')->name('portal.profile.password');
 });
 
