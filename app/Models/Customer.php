@@ -9,6 +9,7 @@ use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
 use App\Support\Afm;
 use App\Support\InvoiceScope;
+use App\Support\IsoCountry;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -71,6 +72,9 @@ class Customer extends Model
         // G6: per-customer auto-email opt-out (default true).
         'auto_email_invoices',
         'country',
+        // MYD-011: normalised ISO-3166-1 alpha-2 cache of `country` (the picker binds
+        // here). Fillable so the form can set it; re-normalised on save regardless.
+        'country_code',
         'vat_vies',
         'withhold_tax',
         'sort_order',
@@ -115,7 +119,20 @@ class Customer extends Model
         // typed. Query-builder writers (ETL, importer) set it themselves.
         static::saving(function (self $customer): void {
             $customer->afm_key = Afm::uniqueKey($customer->afm);
+
+            IsoCountry::syncCountryCode($customer);
         });
+    }
+
+    /**
+     * The customer's country as a normalised ISO-3166-1 alpha-2, or null when it
+     * cannot be resolved. Prefers the stored `country_code` cache and falls back to
+     * normalising the free-text `country` live — so a row whose cache is not yet
+     * backfilled resolves identically to the pre-MYD-011 behaviour (zero regression).
+     */
+    public function isoCountryCode(): ?string
+    {
+        return $this->country_code ?? IsoCountry::tryNormalise($this->country);
     }
 
     /**

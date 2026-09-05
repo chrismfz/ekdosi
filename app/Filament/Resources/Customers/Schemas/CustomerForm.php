@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\PaymentMethod;
 use App\Support\Afm;
+use App\Support\IsoCountry;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
@@ -132,7 +133,7 @@ class CustomerForm
                                             ->icon('heroicon-o-shield-check')
                                             ->action(fn (callable $get) => ViesFormFill::check(
                                                 $get('vat_vies') ?: $get('afm'),
-                                                $get('country'),
+                                                $get('country_code'),
                                             )),
                                         FormAction::make('fetch_vies')
                                             ->label('Άντληση από VIES')
@@ -170,7 +171,15 @@ class CustomerForm
 
                                 TextInput::make('city')->maxLength(60),
                                 TextInput::make('postcode')->maxLength(10),
-                                TextInput::make('country')->maxLength(60),
+                                // MYD-011: ISO picker bound to the clean `country_code`
+                                // cache (never the raw free-text `country`, so a legacy
+                                // «ΙΤΑΛΙΑ» can't fail the Select's implicit in: rule). The
+                                // model's saving() hook mirrors the code into `country`.
+                                Select::make('country_code')
+                                    ->label('Χώρα')
+                                    ->options(IsoCountry::options())
+                                    ->searchable()
+                                    ->native(false),
 
                                 TextInput::make('phone1')
                                     ->label('Phone')
@@ -318,7 +327,9 @@ class CustomerForm
         AadeFormFill::assign($get, $set, 'address1', $result->address, $overwrite);
         AadeFormFill::assign($get, $set, 'city', $result->city, $overwrite);
         AadeFormFill::assign($get, $set, 'postcode', $result->postcode, $overwrite);
-        AadeFormFill::assign($get, $set, 'country', 'GR', $overwrite);
+        // The form's country control is the ISO picker (country_code); the model's
+        // saving() hook mirrors it into the free-text `country`. GSIS is GR-only.
+        AadeFormFill::assign($get, $set, 'country_code', 'GR', $overwrite);
         $primary = $result->primaryActivity();
         if ($primary) {
             AadeFormFill::assign($get, $set, 'kad_primary', $primary['code'] ?? null, $overwrite);
@@ -351,14 +362,17 @@ class CustomerForm
      */
     private static function applyViesToCustomer(callable $get, callable $set): void
     {
-        $result = ViesFormFill::check($get('vat_vies') ?: $get('afm'), $get('country'));
+        $result = ViesFormFill::check($get('vat_vies') ?: $get('afm'), $get('country_code'));
         if (! $result || ! $result->valid) {
             return;
         }
 
         // Normalise the stored VIES value to the canonical prefixed id.
         ViesFormFill::assign($get, $set, 'vat_vies', $result->fullVatId(), overwrite: true);
-        ViesFormFill::assign($get, $set, 'country', $result->countryCode === 'EL' ? 'GR' : $result->countryCode, overwrite: false);
+        // The form's country control is the ISO picker (country_code); the saving()
+        // hook mirrors it into the free-text `country`.
+        $iso = $result->countryCode === 'EL' ? 'GR' : $result->countryCode;
+        ViesFormFill::assign($get, $set, 'country_code', $iso, overwrite: false);
         // Also seed afm (only-when-empty): for a FOREIGN B2B customer the afm
         // field carries the foreign VAT number — MyDataSubmitter::buildCounterpart
         // reads afm (not vat_vies) and throws if it's empty. Filling it here

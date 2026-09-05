@@ -34,20 +34,21 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
 > is the operators' routine, not a backlog task. Kept as a closed record under «Cutover gate».*
 
 > **Sequencing (owner, 2026-09-05):** the **delivery-note family is HELD until the myDATA
-> API v2.0.2** ships (DEP-001) — don't start it before then. The **actionable-now** items
-> are **MYD-011 (country→ISO)** and **PROV-005** (vendor-blocked but worth chasing the
-> endpoint). TIER 2 is **not urgent** («δεν καιγόμαστε»). In parallel, the **AI «Βοηθός»
-> Phase 2c** picks up: **(ε) usage/cost dashboard — 🚧 IN PROGRESS** (inside the «AI Βοηθός»
-> area, NOT the central dashboard), then **(ζ) `knowledge_search`**.
+> API v2.0.2** ships (DEP-001) — don't start it before then. **MYD-011 (country→ISO) ✅ DONE**;
+> the remaining **actionable-now** item is **PROV-005** (vendor-blocked but worth chasing the
+> endpoint). TIER 2 is **not urgent** («δεν καιγόμαστε»). The **AI «Βοηθός» Phase 2c** is
+> **✅ COMPLETE** (α read tools · ε ai_usage · β record_payment · ζ knowledge_search).
 
 **TIER 1 — Real in-scope code work, next deadline (delivery-note family + provider):**
 1. **Delivery-note family** — ⏳ **HELD until myDATA API v2.0.2** (DEP-001). Before the
    ψηφιακή-διακίνηση deadline, NOT 1 Oct: MYD-023 strict-refusal + already-cancelled
    adoption on ΔΑ/provider paths (**P1**, ties to PROV-015) · MYD-019 · MYD-026 · PROV-002 ·
    STOCK-001 follow-ups · unblock 9.1/9.2 + combined ΤΔΑ. One block with a 9.3 sandbox rehearsal.
-2. **MYD-011 country→ISO normalization** — foreign supplier/customer can freeze a
-   wrong `GR` on a ΔΑ. Needs normalise-on-load + column backfill + ETL alignment
-   (tried & reverted once — do it carefully).
+2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
+   `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
+   (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
+   nullable/no-default (τέλος το silent-GR freeze). Οι resolvers έκδοσης διαβάζουν
+   `isoCountryCode()` (zero-regression fallback). Βλ. «Done recently».
 3. **PROV-005** (**P1**, vendor-blocked) — authenticated provider credential/quota
    probe; `ping()` is an unauthenticated GET. Needs an InvoSign non-issuing endpoint.
 4. **WHMCS bridge Phase 2 — outbound payment sync** (money-write, opt-in, design-first).
@@ -318,15 +319,24 @@ surfaced in the open-items sections further down.
     πάντα ζωντανό. Σήμερα ο InvoSign παραδίδει με email (όχι SMS), οπότε δεν είναι footgun· **αν** ποτέ
     προστεθεί SMS-παράδοση, το τηλέφωνο γίνεται ανάλογη περίπτωση → είτε δεύτερος διακόπτης είτε
     επέκταση του ίδιου (rename σε `einvoice_include_customer_contact`).
-- **Χώρα πελάτη/προμηθευτή σε ISO picker (follow-up MYD-011)** — το `suppliers.country` έχει
-  **default 'GR'** (NOT NULL) και το `customers.country` είναι ελεύθερο κείμενο, οπότε ένας ξένος
-  προμηθευτής μπορεί να παγώσει `GR` σε ΔΑ. Δοκιμάστηκε μέσα στο MYD-011 και **αναιρέθηκε**: ένα
-  σκέτο `Select` βάζει implicit `in` rule και η αποθηκευμένη τιμή συγκρίνεται **ωμή**, οπότε
-  **μπλόκαρε το save** για κάθε υπάρχουσα εγγραφή με legacy τιμή (π.χ. «ΙΤΑΛΙΑ») — ακόμη και τώρα
-  που ο `IsoCountry` την αναγνωρίζει, γιατί τίποτα δεν την κανονικοποιεί κατά το **load**· και ο
-  re-runnable ETL την ξαναγράφει. Θέλει **normalise-on-load + backfill στήλης + ευθυγράμμιση ETL**
-  πριν αλλάξει το widget — όχι drive-by. Το ΔΑ στο μεταξύ **κανονικοποιεί** ό,τι λέει η εγγραφή και
-  **αρνείται** την έκδοση αν δεν βγαίνει ISO κωδικός (ποτέ σιωπηλό GR).
+- **Χώρα πελάτη/προμηθευτή σε ISO picker (MYD-011) — ✅ DONE (Option B).** Η λύση που δούλεψε:
+  αντί να μπει `Select` πάνω στην ωμή free-text στήλη (που έβαζε implicit `in` rule και **μπλόκαρε
+  το save** σε κάθε legacy «ΙΤΑΛΙΑ» — γι' αυτό είχε αναιρεθεί), προστέθηκε **νέα καθαρή στήλη
+  `country_code`** (πάντα null ή έγκυρο ISO) και ο picker δένεται εκεί. `IsoCountry::syncCountryCode`
+  (save-hook, μία λογική για τα δύο models· `isDirty` ξεχωρίζει «picker set code» από «label changed»
+  ώστε να μη μένει stale code), `ekdosi:backfill-country-codes` (idempotent), ETL γράφει την cache,
+  και `suppliers.country` έγινε nullable/no-default → τέλος το silent-GR freeze. Το `country` μένει ως
+  legacy/mirror label· οι resolvers έκδοσης διαβάζουν `isoCountryCode()` (zero-regression fallback).
+  **Conscious tradeoffs (review P2, αποδεκτά):** (α) ένα deliberate re-pick στον picker **αντικαθιστά**
+  το legacy free-text spelling («ΙΤΑΛΙΑ»→`IT`) ώστε να μη διίστανται οι δύο στήλες — το `country` δεν
+  εμφανίζεται ως label πουθενά στην εφαρμογή (grep: κανένα table/infolist) και το πρωτότυπο μένει στο
+  activity log/git· (β) αλλαγή του label σε μη-αναγνωρίσιμη τιμή **μηδενίζει** το derived code (→ ο
+  submitter αρνείται) αντί να κρατά stale code που το νέο label δεν δικαιολογεί — safe by design.
+  **Follow-up (P2, review):** τα money-adjacent predicates `ReverseCharge::isEuNonGreek`, το
+  `PeppolEndpoint` και το EU-hint στο `InvoiceForm` διαβάζουν ακόμη το ωμό `customer->country` (όχι
+  `isoCountryCode()`). Δεν είναι regression (έτσι ήταν πριν, και ο mirror κρατά το `country`
+  resolvable), αλλά το root-fix θα ήταν να περάσουν κι αυτά από `isoCountryCode()` — εκτός MYD-011
+  scope (αγγίζει VAT reverse-charge logic), οπότε ξεχωριστό βήμα με δικά του tests.
 - **ΔΑ σε εξωτερικό παραλήπτη χωρίς ΑΦΜ — ανοιχτό ερώτημα ΑΑΔΕ (MYD-011 residual)** — όταν
   υπάρχει επώνυμος εξωτερικός παραλήπτης **χωρίς ΑΦΜ**, το μόνο διαθέσιμο placeholder είναι η
   σεντινέλα `000000000`, που όμως η Α.1123/2024 την ορίζει για **ενδοδιακίνηση**. Σήμερα:

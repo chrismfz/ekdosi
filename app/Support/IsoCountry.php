@@ -3,6 +3,7 @@
 namespace App\Support;
 
 use Firebed\AadeMyData\Enums\CountryCode;
+use Illuminate\Database\Eloquent\Model;
 use RuntimeException;
 
 /**
@@ -194,6 +195,46 @@ final class IsoCountry
     public static function isKnownCode(string $alpha2): bool
     {
         return CountryCode::tryFrom($alpha2) !== null || isset(self::EXTRA_ISO[$alpha2]);
+    }
+
+    /**
+     * MYD-011: keep a model's normalised `country_code` cache in step with its
+     * free-text `country`, called from the model's `saving()` hook. One definition so
+     * Customer and Supplier can't drift. Two cases, and why each is needed:
+     *
+     *  - **The picker (country_code) changed** → it is authoritative: an explicit pick
+     *    sets BOTH columns to the normalised code, and an explicit CLEAR blanks both.
+     *    The free-text `country` field is hidden on the forms, so the picker is the
+     *    only control — deriving the code back from the (mirrored) label here would
+     *    make a clear a silent no-op, and a re-pick unable to overwrite a legacy label.
+     *    The label follows the code so the two never diverge; the original free-text
+     *    spelling is not shown anywhere in the app (it lives in the audit trail).
+     *  - **Only the free-text label changed** (legacy row, ETL-adjacent Eloquent write,
+     *    programmatic set) → the code FOLLOWS the label. The label is KEPT as-is so a
+     *    legacy «ΙΤΑΛΙΑ» stays resolvable; an unresolvable label yields a null code (→
+     *    the submitter refuses), never a stale code justified by a value since replaced.
+     *
+     * Readers of the free-text column (invoice snapshot, ReverseCharge, PEPPOL, PDF)
+     * keep resolving because a known code is always mirrored into a blank label.
+     *
+     * @param  Model  $model
+     */
+    public static function syncCountryCode($model, string $labelField = 'country', string $codeField = 'country_code'): void
+    {
+        if ($model->isDirty($codeField)) {
+            $code = $model->{$codeField} ? self::tryNormalise($model->{$codeField}) : null;
+            $model->{$codeField} = $code;
+            $model->{$labelField} = $code; // authoritative, incl. null on an explicit clear
+
+            return;
+        }
+
+        $code = self::tryNormalise($model->{$labelField});
+        $model->{$codeField} = $code;
+        // A known code with a blank label: mirror it so downstream readers resolve.
+        if ($code !== null && blank($model->{$labelField})) {
+            $model->{$labelField} = $code;
+        }
     }
 
     /**

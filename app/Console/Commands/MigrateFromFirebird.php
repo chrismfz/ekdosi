@@ -10,6 +10,7 @@ use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
 use App\Support\FiledSeriesBackfill;
+use App\Support\IsoCountry;
 use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
@@ -611,6 +612,9 @@ class MigrateFromFirebird extends Command
                     'email' => $this->fld($r, 'EMAIL'),
                     'secondary_email' => $this->fld($r, 'SECONDARY_EMAIL'),
                     'country' => $this->fld($r, 'COUNTRY'),
+                    // MYD-011: normalised ISO cache (query-builder write bypasses the
+                    // model's saving() hook, so set it here alongside the raw label).
+                    'country_code' => IsoCountry::tryNormalise($this->fld($r, 'COUNTRY')),
                     'vat_vies' => $this->fld($r, 'VAT_VIES'),
                     'withhold_tax' => $r['WITHHOLD_TAX'] ?? null,
                     'sort_order' => $r['ORDER'] ?? null,

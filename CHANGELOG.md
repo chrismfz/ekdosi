@@ -26,6 +26,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   καμία φορολογική οδηγία (το `tax-notes.md` μένει accountant-confirmed-only).
 
 ### Added
+- **MYD-011: κανονικοποιημένη χώρα ISO (`country_code`) σε πελάτες/προμηθευτές.** Νέα καθαρή στήλη
+  `country_code` (ISO-3166-1 alpha-2) δίπλα στο ελεύθερο `country`, με **ISO picker** στη φόρμα
+  (πελάτη & προμηθευτή) δεμένο σε αυτήν — ώστε μια legacy τιμή «ΙΤΑΛΙΑ» να μη σπάει πλέον το save
+  (το πρόβλημα που είχε αναιρέσει την πρώτη προσπάθεια). Παράγεται στο save (`IsoCountry::syncCountryCode`,
+  μία λογική για τα δύο models), backfill με `php artisan ekdosi:backfill-country-codes`, και ο ETL τη
+  γράφει στο import. Οι resolvers έκδοσης (τιμολόγιο/ΔΑ) διαβάζουν την cache (`isoCountryCode()`,
+  zero-regression fallback στο live normalise). **Fix:** το `suppliers.country` έπαψε να έχει default
+  `GR`/NOT NULL — ένας ξένος προμηθευτής χωρίς χώρα δεν «παγώνει» πλέον σιωπηλά ως ελληνικός σε ΔΑ
+  (ο submitter αρνείται, ποτέ σιωπηλό GR).
 - **AI «Βοηθός» Phase 2c-(ζ): `knowledge_search` — grounded «βοήθεια & συμβουλή» (chat + MCP).**
   Curated βάση γνώσης σε markdown (`docs/assistant-kb/`: app how-to + **επιβεβαιωμένες** φορολογικές
   σημειώσεις) + RAG-lite `knowledge_search` tool (`KnowledgeBase`: split ανά τίτλο, scoring με
