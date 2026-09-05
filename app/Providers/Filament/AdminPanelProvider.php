@@ -69,6 +69,7 @@ class AdminPanelProvider extends PanelProvider
                 'Λογιστικά',
                 'myDATA & Διασυνδέσεις',
                 'Ρυθμίσεις',
+                'Πύλη πελατών',
                 'Σύστημα',
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')

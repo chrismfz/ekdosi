@@ -19,6 +19,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Customer portal — Slice 0 (auth shell + UI).** Θεμέλια για portal πελατών: πίνακας/model `customer_users`
+  (global login identity, ξεχωριστός από τους operators `users`), νέος **`portal` auth guard**, `/login` +
+  `/logout` + `/portal` + **σελίδα προφίλ** (στοιχεία + αλλαγή κωδικού· email/ΑΦΜ όχι επεξεργάσιμα), και
+  `php artisan portal:create-user`. **UI με Flux UI (Free)** πάνω στο υπάρχον Tailwind v4/Vite pipeline. Κανένα
+  customer data ακόμα — μόνο το κέλυφος auth, με έμφαση στον **διαχωρισμό guard** (portal login ≠ operator, δεν
+  φτάνει ποτέ στο `/admin`). Ο πίνακας είναι λιτός (auth + account-safety)· forward-looking στήλες (2FA à la
+  Fortify, username/locale/phone) κάθονται dormant. **Operator-side «Χρήστες πύλης»** Filament resource (group
+  «Πύλη πελατών», super-admin only) για create/activate/suspend/reset-password των logins. Grants ανά
+  εταιρία/πελάτη + παραστατικά = επόμενα slices.
+- **Dependency:** `livewire/flux` (Flux UI Free) για το customer portal UI.
 - **AI «Βοηθός» Phase 2c-(ε): σελίδα «Χρήση & κόστος AI».** Read-only surface πάνω στο υπάρχον
   `ai_usage_log` (καμία νέα οντότητα δεδομένων), **μέσα στην περιοχή «AI Βοηθός»** (group «Σύστημα»,
   δίπλα στο «Βοηθός AI»), ΟΧΙ στο κεντρικό dashboard. Δείχνει ανά εταιρεία (αιτήματα, tokens in/out/
