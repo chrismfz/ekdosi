@@ -741,6 +741,10 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **EurobankReturnController parses the raw body twice (P2, micro).** `__invoke` parse_str's the body for the
+  orderid; `record()` parse_str's it again for the raw provider status. Tiny (small body), and keeping `record()`
+  self-contained is arguably cleaner than threading `$fields` through `reject()` → `record()`. Fold into a single
+  parse passed down if the return path ever grows hot.
 - **Invoice-targeted settle: no invoice row-lock → concurrent same-invoice settles can overpay (P2, edge).**
   `PaymentAllocator::allocateToInvoice` reads the target balance without `lockForUpdate` on the invoice, so two
   intents targeting the SAME invoice settling concurrently could each write the full balance (invoice → negative

@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentGatewayConnection;
+use App\Models\PaymentGatewayEvent;
 use App\Models\PaymentIntent;
 use App\Models\PaymentMethod;
 use App\Services\InvoiceBalance;
@@ -221,5 +222,73 @@ class EurobankReturnControllerTest extends TestCase
     {
         $this->postReturn(['orderid' => '999999', 'status' => 'CAPTURED', 'digest' => 'x'])
             ->assertRedirect(route('portal.home'));
+    }
+
+    public function test_a_captured_return_writes_a_settled_log_event(): void
+    {
+        $this->creditInvoice(100);
+        $intent = $this->pendingIntent(100);
+        $fields = $this->capturedReturn($intent);
+
+        $this->postReturn($fields);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertSame(PaymentGatewayEvent::OUTCOME_SETTLED, $event->outcome);
+        $this->assertTrue($event->verified);
+        $this->assertSame('CAPTURED', $event->provider_status);
+        $this->assertSame($fields['txId'], $event->transaction_id);
+        $this->assertSame($this->t->id, $event->company_id);
+    }
+
+    public function test_a_forged_digest_writes_a_rejected_log_event(): void
+    {
+        $this->creditInvoice(100);
+        $intent = $this->pendingIntent(100);
+
+        $this->postReturn($this->capturedReturn($intent, secret: 'attacker-secret'));
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertSame(PaymentGatewayEvent::OUTCOME_REJECTED, $event->outcome);
+        $this->assertSame('digest_verification_failed', $event->reason);
+        $this->assertFalse($event->verified);
+    }
+
+    public function test_an_unknown_orderid_writes_a_rejected_log_event(): void
+    {
+        $this->postReturn(['orderid' => '999999', 'status' => 'CAPTURED', 'digest' => 'x']);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', '999999')->firstOrFail();
+        $this->assertSame(PaymentGatewayEvent::OUTCOME_REJECTED, $event->outcome);
+        $this->assertSame('intent_not_found', $event->reason);
+    }
+
+    public function test_a_replayed_capture_logs_an_ignored_event_not_a_second_settled(): void
+    {
+        $this->creditInvoice(100);
+        $intent = $this->pendingIntent(100);
+        $fields = $this->capturedReturn($intent);
+
+        $this->postReturn($fields);   // 1st → settled
+        $this->postReturn($fields);   // replay → no money, must NOT log a 2nd «settled»
+
+        $events = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->get();
+        $this->assertSame(1, $events->where('outcome', PaymentGatewayEvent::OUTCOME_SETTLED)->count());
+        $ignored = $events->firstWhere('outcome', PaymentGatewayEvent::OUTCOME_IGNORED);
+        $this->assertNotNull($ignored, 'the replay is logged as ignored');
+        $this->assertSame('already_settled', $ignored->reason);
+    }
+
+    public function test_a_gateway_payment_inherits_the_connections_mydata_method(): void
+    {
+        // Operator maps this channel → «Ηλεκτρονικά μέσα Πληρωμών».
+        $electronic = PaymentMethod::create(['company_id' => $this->t->id, 'description' => 'Ηλεκτρονικά μέσα Πληρωμών', 'due_days' => 0]);
+        $this->conn->update(['payment_method_id' => $electronic->id]);
+
+        $this->creditInvoice(100);
+        $intent = $this->pendingIntent(100);
+        $this->postReturn($this->capturedReturn($intent));
+
+        $payment = Payment::where('customer_id', $this->customer->id)->firstOrFail();
+        $this->assertSame($electronic->id, $payment->payment_method_id, 'the Payment auto-gets the channel method');
     }
 }

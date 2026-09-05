@@ -19,6 +19,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **«Log πύλης» — audit κάθε εισερχόμενης ειδοποίησης gateway (vPOS return).** Νέος πίνακας `payment_gateway_events`
+  + read-only Filament page (super-admin): κάθε return καταγράφεται — δεκτό/αγνοήθηκε/απορρίφθηκε + λόγος
+  (digest fail / αναντιστοιχία ποσού-νομίσματος-εταιρίας / άγνωστο orderid / μη-CAPTURED), αν επαληθεύτηκε η
+  υπογραφή, το raw provider status (CAPTURED…), txn id, ποσό, IP, ID (= vPOS orderid). Το εργαλείο για
+  «πλήρωσα, δεν φαίνεται»: βλέπεις ότι ήρθε η επιστροφή και τι έγινε, χωρίς grep στο laravel.log. Best-effort
+  (logging failure δεν σπάει ποτέ το settlement). Runtime data → εκτός company export.
+- **Στήλη «Κανάλι» στις Πληρωμές + auto myDATA «Τρόπος» ανά gateway.** Η λίστα Πληρωμών δείχνει την προέλευση:
+  «Πύλη · Eurobank» (αυτόματο, από intent) vs «Χειροκίνητα» — ξεχωριστό από το «Τρόπος» (myDATA μέθοδος).
+  Και νέο per-connection «Τρόπος πληρωμής (myDATA)» (`payment_gateway_connections.payment_method_id`): το settle
+  το stamp-άρει αυτόματα στην πληρωμή, ώστε μια Eurobank είσπραξη να παίρνει π.χ. «Ηλεκτρονικά μέσα Πληρωμών»
+  αντί για κενό «Τρόπος».
 - **Πύλη: «πλήρωσε ΑΥΤΟ το τιμολόγιο» (invoice-targeted payment).** Στη σελίδα πληρωμής ο πελάτης επιλέγει
   «Όλο το υπόλοιπο» (FIFO, όπως πριν) Ή ένα ΣΥΓΚΕΚΡΙΜΕΝΟ παραστατικό· το `PaymentIntent` κρατά `invoice_id` και
   το settle εφαρμόζει το ποσό σε ΕΚΕΙΝΟ το τιμολόγιο (capped στο υπόλοιπό του, τυχόν υπερβάλλον → έναντι

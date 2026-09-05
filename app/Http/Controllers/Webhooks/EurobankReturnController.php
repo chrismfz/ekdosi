@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Webhooks;
 
 use App\Contracts\WebhookGateway;
 use App\Models\PaymentGatewayConnection;
+use App\Models\PaymentGatewayEvent;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Payments\PaymentGatewayRegistry;
@@ -12,6 +13,7 @@ use App\Support\Payments\PaymentOutcome;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 /**
  * Eurobank / Cardlink vPOS return (B1). The acquirer's hosted page redirect-POSTs
@@ -52,7 +54,7 @@ class EurobankReturnController
             : null;
 
         if ($intent === null) {
-            $this->reject($request, 'intent_not_found', ['orderid' => $orderId]);
+            $this->reject($request, 'intent_not_found', ['orderid' => $orderId], orderId: (string) $orderId);
 
             return redirect()->route('portal.home');
         }
@@ -61,7 +63,7 @@ class EurobankReturnController
         $gateway = $registry->for($intent->gateway);
 
         if ($connection === null || ! $gateway instanceof WebhookGateway) {
-            $this->reject($request, 'connection_or_gateway_missing', ['intent' => $intent->id]);
+            $this->reject($request, 'connection_or_gateway_missing', ['intent' => $intent->id], intent: $intent);
 
             return $this->back($intent);
         }
@@ -70,7 +72,7 @@ class EurobankReturnController
 
         if (! $outcome->verified) {
             // T1: forged / mis-signed return — never a side effect.
-            $this->reject($request, 'digest_verification_failed', ['intent' => $intent->id]);
+            $this->reject($request, 'digest_verification_failed', ['intent' => $intent->id], intent: $intent, outcome: $outcome);
 
             return $this->back($intent);
         }
@@ -83,17 +85,25 @@ class EurobankReturnController
             // Idempotent (T2): a replayed return is a no-op. Amount already verified
             // == the intent's, so settle() uses the intent amount (server-authoritative).
             // The acquirer's txn id is recorded on the Payment for the money trail.
+            // A return that arrives when the intent is NOT settleable (already settled
+            // = a replay, or human-cancelled) writes no money → log it as IGNORED, not
+            // a second «Καταχωρίστηκε» (keeps the audit truthful).
+            $settleable = in_array($intent->status, [PaymentIntent::STATUS_PENDING, PaymentIntent::STATUS_EXPIRED], true);
             $intents->settle(
                 $intent,
                 settledBy: 'webhook:eurobank',
                 transactionId: $outcome->providerTxnId,
             );
+            $settleable
+                ? $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_SETTLED, null, $outcome)
+                : $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'already_settled', $outcome);
         } else {
             Log::info('eurobank.return.not_captured', [
                 'intent' => $intent->id,
                 'status' => $outcome->status,
                 'txn' => $outcome->providerTxnId,
             ]);
+            $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'not_captured', $outcome);
         }
 
         return $this->back($intent);
@@ -114,7 +124,7 @@ class EurobankReturnController
         // to the same key). Not merely tautological — it rejects a malformed orderid
         // that collides on cast.
         if ((string) $outcome->reference !== (string) $intent->id) {
-            $this->reject($request, 'reference_mismatch', ['intent' => $intent->id, 'ref' => $outcome->reference]);
+            $this->reject($request, 'reference_mismatch', ['intent' => $intent->id, 'ref' => $outcome->reference], intent: $intent, outcome: $outcome);
 
             return false;
         }
@@ -122,20 +132,20 @@ class EurobankReturnController
         // intent's company (that's where T6 is actually enforced); this asserts the
         // invariant so a future change to that loader can't silently open a leak.
         if ((int) $connection->company_id !== (int) $intent->company_id) {
-            $this->reject($request, 'company_mismatch', ['intent' => $intent->id]);
+            $this->reject($request, 'company_mismatch', ['intent' => $intent->id], intent: $intent, outcome: $outcome);
 
             return false;
         }
         if ($outcome->amount === null || abs($outcome->amount - (float) $intent->amount) > 0.005) {
             $this->reject($request, 'amount_mismatch', [
                 'intent' => $intent->id, 'intent_amount' => (float) $intent->amount, 'outcome_amount' => $outcome->amount,
-            ]);
+            ], intent: $intent, outcome: $outcome);
 
             return false;
         }
         if ($outcome->currency !== null
             && $this->normaliseCurrency($outcome->currency) !== $this->normaliseCurrency((string) $intent->currency)) {
-            $this->reject($request, 'currency_mismatch', ['intent' => $intent->id, 'currency' => $outcome->currency]);
+            $this->reject($request, 'currency_mismatch', ['intent' => $intent->id, 'currency' => $outcome->currency], intent: $intent, outcome: $outcome);
 
             return false;
         }
@@ -184,13 +194,65 @@ class EurobankReturnController
         return redirect()->route('portal.payment.show', $intent->id);
     }
 
-    /** Structured warning for a rejected return — never logs the digest or secret. */
-    private function reject(Request $request, string $reason, array $context = []): void
-    {
+    /**
+     * Structured warning for a rejected return — never logs the digest or secret —
+     * AND a durable «Log πύλης» row so the operator sees the rejection (and why)
+     * without grepping laravel.log.
+     */
+    private function reject(
+        Request $request,
+        string $reason,
+        array $context = [],
+        ?PaymentIntent $intent = null,
+        ?PaymentOutcome $outcome = null,
+        ?string $orderId = null,
+    ): void {
         Log::warning('eurobank.return.rejected', array_merge([
             'reason' => $reason,
             'ip' => $request->ip(),
             'result' => (string) $request->query('result', ''),
         ], $context));
+
+        $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_REJECTED, $reason, $outcome, $orderId);
+    }
+
+    /**
+     * Write one «Log πύλης» audit row. Best-effort: a logging failure must NEVER
+     * break settlement or the customer's redirect, so it is fully swallowed.
+     */
+    private function record(
+        Request $request,
+        ?PaymentIntent $intent,
+        string $outcome,
+        ?string $reason,
+        ?PaymentOutcome $providerOutcome,
+        ?string $orderId = null,
+    ): void {
+        try {
+            // Log the RAW acquirer status («CAPTURED»/«REFUSED»… — what the bank's
+            // notification shows), not our normalised one; fall back to the normalised
+            // outcome when the return carried none.
+            $body = [];
+            parse_str($request->getContent(), $body);
+            $rawStatus = filled($body['status'] ?? null) ? (string) $body['status'] : $providerOutcome?->status;
+
+            PaymentGatewayEvent::create([
+                'company_id' => $intent?->company_id,
+                'payment_intent_id' => $intent?->id,
+                'gateway' => 'eurobank',
+                'order_id' => $orderId ?? ($intent?->id !== null ? (string) $intent->id : null),
+                'outcome' => $outcome,
+                'reason' => $reason,
+                'verified' => (bool) ($providerOutcome?->verified ?? false),
+                'provider_status' => $rawStatus,
+                'transaction_id' => $providerOutcome?->providerTxnId,
+                'amount' => $providerOutcome?->amount,
+                'currency' => $providerOutcome?->currency,
+                'ip' => $request->ip(),
+                'message' => $providerOutcome?->message,
+            ]);
+        } catch (Throwable $e) {
+            Log::warning('eurobank.return.event_log_failed', ['error' => $e->getMessage()]);
+        }
     }
 }
