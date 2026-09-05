@@ -2,6 +2,7 @@
 
 namespace App\Mcp\Servers;
 
+use App\Mcp\Tools\AiUsageMcpTool;
 use App\Mcp\Tools\AppHealthTool;
 use App\Mcp\Tools\AppVersionMcpTool;
 use App\Mcp\Tools\CountSalesMcpTool;
@@ -74,6 +75,9 @@ Business (tenant-scoped, offered only if your user holds the permission):
   operator did in the period (calls, emails, meetings, quotes, conversions), who
   opened the newest leads and when, and the latest timeline rows. For "did anyone
   work the leads?".
+- ai_usage — the AI «Βοηθός» token usage + estimated USD cost for a month, this company's
+  monthly cap and % of it, and a per-user breakdown. Gated on View:CompanySettings; with
+  company="all" a super-admin gets the per-company spend across every tenant.
 - app_version — deployed build + whether an update is available (read-only).
 - send_customer_statement / create_reminder — WRITE actions that are PROPOSE-ONLY here:
   they stage a pending action and return its id; nothing is sent/armed until an operator
@@ -132,6 +136,7 @@ class EkdosiMcpServer extends Server
         IncomeVsExpenseMcpTool::class,
         TopProductsMcpTool::class,
         WhmcsInboxMcpTool::class,
+        AiUsageMcpTool::class,
         AppVersionMcpTool::class,
         // Business — write (PROPOSE-ONLY; operator confirms in-app).
         SendCustomerStatementMcpTool::class,

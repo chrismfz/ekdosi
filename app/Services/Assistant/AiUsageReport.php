@@ -14,11 +14,15 @@ use Carbon\CarbonImmutable;
  * the source of truth for the monthly cap, see {@see AiUsageMeter}); it adds NO
  * new data, only a surface.
  *
- * CROSS-TENANT by design: this is a super_admin governance/billing view, so every
- * query DELIBERATELY drops the {@see CompanyScope} global scope (per the CLAUDE.md
- * rule: an all-tenant sweep declares itself with `withoutGlobalScope`). The page
- * that renders it (the `App\Filament\Pages\AiUsage` page) is hard-gated to a
- * system super_admin — a per-tenant view for company_admin is a tracked follow-up.
+ * TWO read paths, different scopes:
+ *   - {@see forMonth()} + perCompany()/perUser()/trend() — CROSS-TENANT: they
+ *     DELIBERATELY drop the {@see CompanyScope} global scope (an all-tenant sweep
+ *     declared with `withoutGlobalScope`, per the CLAUDE.md rule) for the super_admin
+ *     «Χρήση & κόστος AI» page (`App\Filament\Pages\AiUsage`, hard-gated to a system
+ *     super_admin).
+ *   - {@see forTenant()} — PER-TENANT: scoped explicitly by `company_id` (keeps the
+ *     scope), for the `ai_usage` chat/MCP tool (gated View:CompanySettings, reachable
+ *     by company_admin). No cross-tenant read.
  *
  * Costs are OUR estimate in USD (from `cost_estimate`, computed by {@see AiPricing}
  * against the per-model price map); token counts are authoritative.
@@ -73,6 +77,69 @@ class AiUsageReport
             'users' => $users,
             'trend' => $this->trend($start, $trendMonths),
             'totals' => $totals,
+        ];
+    }
+
+    /**
+     * ONE tenant's AI usage/cost for a month — the per-tenant twin of forMonth(),
+     * for the `ai_usage` chat/MCP tool (ambient tenant, no cross-tenant read). Scoped
+     * explicitly by company_id; the monthly cap + status mirror {@see AiUsageMeter}.
+     *
+     * @return array{
+     *   month:string, monthLabel:string, requests:int,
+     *   tokens:array{input:int,output:int,cache_read:int,cache_write:int,billable:int},
+     *   cost_usd:float, cap:?int, pct_of_cap:?float, status:string,
+     *   by_user:list<array{name:string,billable:int,cost:float}>
+     * }
+     */
+    public function forTenant(Company $tenant, string $month): array
+    {
+        [$start, $end] = $this->monthBounds($month);
+
+        $g = AiUsageLog::query()
+            ->where('company_id', $tenant->getKey())
+            ->where('created_at', '>=', $start)->where('created_at', '<', $end)
+            ->selectRaw('COALESCE(SUM(input_tokens),0) AS i, COALESCE(SUM(output_tokens),0) AS o,
+                COALESCE(SUM(cache_read_tokens),0) AS cr, COALESCE(SUM(cache_write_tokens),0) AS cw,
+                COALESCE(SUM(cost_estimate),0) AS cost, COUNT(*) AS reqs')
+            ->first();
+
+        $billable = (int) $g->i + (int) $g->o;
+        // The monthly cap only means something for the CURRENT month (it resets each
+        // month). Reporting it against a closed past month would falsely label an old
+        // month «warn»/«blocked» — mirror forMonth()'s $withCap = $isCurrent guard.
+        $cap = $start->isSameMonth(CarbonImmutable::now()) ? $this->meter->effectiveCap($tenant) : null;
+        $pct = ($cap !== null && $cap > 0) ? $billable / $cap : null;
+
+        $userRows = AiUsageLog::query()
+            ->where('company_id', $tenant->getKey())
+            ->where('created_at', '>=', $start)->where('created_at', '<', $end)
+            ->selectRaw('user_id, COALESCE(SUM(input_tokens + output_tokens),0) AS billable, COALESCE(SUM(cost_estimate),0) AS cost')
+            ->groupBy('user_id')
+            ->get();
+        $userNames = User::query()->whereIn('id', $userRows->pluck('user_id')->filter())->pluck('name', 'id');
+        $byUser = $userRows->map(fn ($r): array => [
+            'name' => $r->user_id ? (string) ($userNames[$r->user_id] ?? ('Χρήστης #'.$r->user_id)) : 'Σύστημα',
+            'billable' => (int) $r->billable,
+            'cost' => round((float) $r->cost, 4),
+        ])->sortByDesc('cost')->values()->all();
+
+        return [
+            'month' => $start->format('Y-m'),
+            'monthLabel' => (self::MONTHS_EL[(int) $start->format('n')] ?? '').' '.$start->format('Y'),
+            'requests' => (int) $g->reqs,
+            'tokens' => [
+                'input' => (int) $g->i,
+                'output' => (int) $g->o,
+                'cache_read' => (int) $g->cr,
+                'cache_write' => (int) $g->cw,
+                'billable' => $billable,
+            ],
+            'cost_usd' => round((float) $g->cost, 4),
+            'cap' => $cap,
+            'pct_of_cap' => $pct !== null ? round($pct, 4) : null,
+            'status' => $this->status($pct),
+            'by_user' => $byUser,
         ];
     }
 

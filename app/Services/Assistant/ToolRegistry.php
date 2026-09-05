@@ -4,6 +4,7 @@ namespace App\Services\Assistant;
 
 use App\Models\Company;
 use App\Models\User;
+use App\Services\Assistant\Tools\AiUsageTool;
 use App\Services\Assistant\Tools\AppVersionTool;
 use App\Services\Assistant\Tools\AssistantTool;
 use App\Services\Assistant\Tools\CountSalesTool;
@@ -51,6 +52,7 @@ class ToolRegistry
             new IncomeVsExpenseTool,
             new TopProductsTool,
             new WhmcsInboxTool,
+            new AiUsageTool,
             new AppVersionTool,
             // Write tools — PREPARE only; the operator confirms before execution.
             new SendCustomerStatementTool,
