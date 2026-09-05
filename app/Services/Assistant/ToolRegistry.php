@@ -53,6 +53,18 @@ class ToolRegistry
     }
 
     /**
+     * Every registered tool, permission-agnostic — the single catalogue both the
+     * in-app chat and the external MCP surface are built from. Used by the parity
+     * guard (McpAssistantParityTest) that keeps the two channels in lock-step.
+     *
+     * @return list<AssistantTool>
+     */
+    public function all(): array
+    {
+        return $this->tools;
+    }
+
+    /**
      * The Anthropic `tools` payload (name / description / input_schema), limited
      * to the tools THIS user may run — so the model is never offered a capability
      * the operator lacks.

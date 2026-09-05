@@ -29,6 +29,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   «Πύλη πελατών», super-admin only) για create/activate/suspend/reset-password των logins. Grants ανά
   εταιρία/πελάτη + παραστατικά = επόμενα slices.
 - **Dependency:** `livewire/flux` (Flux UI Free) για το customer portal UI.
+- **AI «Βοηθός» Phase 2c-(ε): σελίδα «Χρήση & κόστος AI».** Read-only surface πάνω στο υπάρχον
+  `ai_usage_log` (καμία νέα οντότητα δεδομένων), **μέσα στην περιοχή «AI Βοηθός»** (group «Σύστημα»,
+  δίπλα στο «Βοηθός AI»), ΟΧΙ στο κεντρικό dashboard. Δείχνει ανά εταιρεία (αιτήματα, tokens in/out/
+  cache, χρεώσιμα, μηνιαίο όριο, % ορίου με badge, εκτ. κόστος USD), ανά χρήστη («ποιος έκαψε το
+  budget») και μηνιαία τάση, με επιλογή μήνα (12 μήνες) + εξαγωγή CSV. Νέο `AiUsageReport` (aggregation)
+  + `AiUsage` Filament page. **Cross-tenant → hard-gated σε system super_admin** (ρητό
+  `withoutGlobalScope(CompanyScope)`· ΠΟΤΕ Shield-grantable, ώστε ένας company_admin να μη βλέπει
+  κόστος άλλου tenant). Το κόστος είναι εκτίμηση USD (ανά μοντέλο), για συμφωνία με τον λογαριασμό Anthropic.
 - **«Εκδοθέντα Παραστατικά» για τον πελάτη μέσα στο WHMCS.** Δύο νέα HMAC-signed webhook
   endpoints (`issued-for-client` POST + `issued-doc-pdf/{userid}/{invoice}` GET) τροφοδοτούν μια
   νέα σελίδα του WHMCS plugin, όπου ο reseller βλέπει τα παραστατικά που εκδόθηκαν γι' αυτόν
@@ -44,6 +52,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
   αίτημα PDF ξανα-ελέγχει membership + `isPubliclyViewable()` (drafts/ακυρωμένα → 404). Read-only.
 
 ### Changed
+- **AI «Βοηθός» ⇄ MCP parity guardrail.** Νέο `McpAssistantParityTest` επιβάλλει ότι **κάθε**
+  `AssistantTool` (in-app chat) εκτίθεται και μέσω του εξωτερικού MCP με έναν `AssistantMcpTool`
+  adapter — και αντίστροφα. Έτσι ένα νέο tool δεν «ξεχνιέται» στη μία επιφάνεια· η αρχή «write once,
+  δουλεύει και στα δύο» γίνεται αυτόματη. (Νέο `ToolRegistry::all()` enumerator.)
 - **Docs cleanup — ένα backlog αντί για 10 md files.** Το `known-issues.md` (283 KB, ~65%
   ήδη DONE/DISARMED) **διαγράφηκε**· το «Go-live triage» και τα ~16 πραγματικά ανοιχτά items
   διπλώθηκαν στο `docs/BACKLOG.md`, που απέκτησε **Master priority index** (TIER 0–7),
