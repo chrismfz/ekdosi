@@ -40,7 +40,9 @@ class PasswordResetController extends Controller
     {
         // Honeypot: a hidden field humans never see. A bot that fills it gets the
         // same generic response (no signal it was caught) and no mail is sent.
-        if (filled($request->input('company_website'))) {
+        // Named `fax` (not a website/email/name field) so browser & password-manager
+        // autofill heuristics don't populate it and silently block a real user.
+        if (filled($request->input('fax'))) {
             return back()->with('status', self::GENERIC);
         }
 
@@ -56,8 +58,10 @@ class PasswordResetController extends Controller
         }
         RateLimiter::hit($key, 3600);
 
-        // INVALID_USER (unknown email) returns fast with no token/mail; a real hit
-        // queues the mail (send time off the request path). Response is identical.
+        // Response body + redirect are identical for every outcome, and the mail is
+        // queued so send time is off the request path. (A real hit still does a
+        // token-table write, so timing isn't perfectly constant-time — an accepted
+        // residual, far below the signal the old distinct messages would give.)
         Password::broker('customer_users')->sendResetLink(['email' => $email]);
 
         return back()->with('status', self::GENERIC);
@@ -103,7 +107,12 @@ class PasswordResetController extends Controller
                 ->with('status', 'Ο κωδικός ορίστηκε. Μπορείς να συνδεθείς.');
         }
 
-        // Invalid/expired token or unknown email — generic validation error.
-        throw ValidationException::withMessages(['email' => [__($status)]]);
+        // ONE generic error for every failure (unknown email OR bad/expired token
+        // alike). The broker's own messages differ (INVALID_USER vs INVALID_TOKEN),
+        // which would let this endpoint enumerate logins — so we never surface them;
+        // it stays as tight-lipped as the request endpoint.
+        throw ValidationException::withMessages([
+            'email' => ['Ο σύνδεσμος επαναφοράς είναι άκυρος ή έληξε. Ζήτησε νέο σύνδεσμο.'],
+        ]);
     }
 }

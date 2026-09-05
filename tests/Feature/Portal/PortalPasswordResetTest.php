@@ -86,7 +86,7 @@ class PortalPasswordResetTest extends TestCase
 
         $this->post('/user/forgot-password', [
             'email' => $user->email,
-            'company_website' => 'http://spam.example',   // honeypot filled
+            'fax' => 'http://spam.example',   // honeypot filled
         ])->assertSessionHas('status');
 
         Notification::assertNothingSent();
@@ -158,6 +158,24 @@ class PortalPasswordResetTest extends TestCase
 
         // Password unchanged.
         $this->assertTrue(Hash::check('secret-pass-123', $user->fresh()->password));
+    }
+
+    public function test_reset_error_is_identical_for_unknown_email_and_bad_token(): void
+    {
+        // The reset endpoint must not enumerate: an unknown email and a wrong
+        // token for a KNOWN email produce the exact same generic error.
+        $known = $this->make(CustomerUser::STATUS_ACTIVE, email: 'known@example.com');
+        $generic = 'Ο σύνδεσμος επαναφοράς είναι άκυρος ή έληξε. Ζήτησε νέο σύνδεσμο.';
+
+        $this->post('/user/reset-password', [
+            'token' => 'bad-token', 'email' => 'unknown@example.com',
+            'password' => 'a-Brand-New-1', 'password_confirmation' => 'a-Brand-New-1',
+        ])->assertSessionHasErrors(['email' => $generic]);
+
+        $this->post('/user/reset-password', [
+            'token' => 'bad-token', 'email' => $known->email,
+            'password' => 'a-Brand-New-1', 'password_confirmation' => 'a-Brand-New-1',
+        ])->assertSessionHasErrors(['email' => $generic]);
     }
 
     public function test_reset_page_renders_with_the_token(): void

@@ -18,10 +18,11 @@
                 autofocus
             />
 
-            {{-- Honeypot: hidden from humans, tempting to bots. Server bails if filled. --}}
+            {{-- Honeypot: hidden from humans, tempting to bots. Server bails if filled.
+                 Named `fax` (not a website/email/name field) so autofill leaves it empty. --}}
             <div aria-hidden="true" style="position:absolute;left:-9999px;top:-9999px;" tabindex="-1">
                 <label>Μην το συμπληρώσεις
-                    <input type="text" name="company_website" tabindex="-1" autocomplete="off" value="">
+                    <input type="text" name="fax" tabindex="-1" autocomplete="off" value="">
                 </label>
             </div>
 
