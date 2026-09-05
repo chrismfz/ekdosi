@@ -5,6 +5,7 @@ namespace App\Filament\Resources\CustomerUsers;
 use App\Filament\Resources\CustomerUsers\Pages\CreateCustomerUser;
 use App\Filament\Resources\CustomerUsers\Pages\EditCustomerUser;
 use App\Filament\Resources\CustomerUsers\Pages\ListCustomerUsers;
+use App\Filament\Resources\CustomerUsers\RelationManagers\AccessRelationManager;
 use App\Filament\Resources\CustomerUsers\Schemas\CustomerUserForm;
 use App\Filament\Resources\CustomerUsers\Tables\CustomerUsersTable;
 use App\Models\CustomerUser;
@@ -58,6 +59,13 @@ class CustomerUserResource extends Resource
     public static function table(Table $table): Table
     {
         return CustomerUsersTable::configure($table);
+    }
+
+    public static function getRelations(): array
+    {
+        return [
+            AccessRelationManager::class,
+        ];
     }
 
     public static function getPages(): array

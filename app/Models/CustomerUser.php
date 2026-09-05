@@ -6,6 +6,7 @@ use Database\Factories\CustomerUserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Foundation\Auth\User as Authenticatable;
 use Illuminate\Notifications\Notifiable;
@@ -53,5 +54,28 @@ class CustomerUser extends Authenticatable
     public function canLogin(): bool
     {
         return $this->status === self::STATUS_ACTIVE && $this->password !== null;
+    }
+
+    /**
+     * The access grants for this login — which (company, customer) it may see.
+     * The portal's documents view (later slice) reads the ACTIVE ones as its
+     * leak-proof boundary.
+     */
+    public function accessGrants(): HasMany
+    {
+        return $this->hasMany(CustomerUserAccess::class);
+    }
+
+    /**
+     * Active (non-revoked) grants. NOTE for the future documents-view slice: this
+     * filters ONLY on the grant's revoked_at, NOT on the login's own status — a
+     * suspended/soft-deleted login keeps its grant rows. In practice such a login
+     * can't authenticate (see canLogin()), so the auth gate already blocks it; but
+     * the documents boundary must still combine THIS with canLogin() rather than
+     * reading grants in isolation.
+     */
+    public function activeAccessGrants(): HasMany
+    {
+        return $this->accessGrants()->whereNull('revoked_at');
     }
 }
