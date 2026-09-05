@@ -639,10 +639,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 
 ## 16β. AI «Βοηθός» (insights + links + write actions με confirm)
 In-app chat που απαντά για τα δεδομένα της **τρέχουσας** εταιρείας μέσω εργαλείων.
-**6 read-only tools** (επεκτάσιμο registry): `count_sales`, `outstanding_receivables`,
+**Read-only tools** (επεκτάσιμο registry): `count_sales`, `outstanding_receivables`,
 `list_top_debtors` (top οφειλέτες + link Καρτέλας), `find_customer` (αναζήτηση ονόματος/ΑΦΜ +
 links Καρτέλας/νέου παραστατικού), `recent_invoices` (πρόσφατα + view link), `vat_summary` (ΦΠΑ
-εκροών για περίοδο). **2 write tools με operator-confirm**: `send_customer_statement` («στείλε
+εκροών για περίοδο), `recent_activity`, `leads_pulse`, **`income_vs_expense`** (έσοδα vs έξοδα +
+υπόλοιπο ΦΠΑ, Βιβλίο Εσόδων-Εξόδων), **`top_products`** (κορυφαία είδη/υπηρεσίες ανά περίοδο),
+**`whmcs_inbox`** (εκκρεμή προτιμολόγια WHMCS). **2 write tools με operator-confirm**: `send_customer_statement` («στείλε
 ενημερωτικό/καρτέλα» — επαφή-aware) και `create_reminder` («θύμισέ μου / notification»). Ο βοηθός
 **ΠΟΤΕ δεν εκτελεί** write μόνος του: στήνει εγγραφή σε `ai_pending_actions`, ο χειριστής πατά
 **«Επιβεβαίωση»/«Άκυρο»** σε κάρτα κάτω από το chat, και η εκτέλεση γίνεται server-side

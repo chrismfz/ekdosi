@@ -9,13 +9,16 @@ use App\Services\Assistant\Tools\AssistantTool;
 use App\Services\Assistant\Tools\CountSalesTool;
 use App\Services\Assistant\Tools\CreateReminderTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
+use App\Services\Assistant\Tools\IncomeVsExpenseTool;
 use App\Services\Assistant\Tools\LeadsPulseTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
 use App\Services\Assistant\Tools\RecentActivityTool;
 use App\Services\Assistant\Tools\RecentInvoicesTool;
 use App\Services\Assistant\Tools\SendCustomerStatementTool;
+use App\Services\Assistant\Tools\TopProductsTool;
 use App\Services\Assistant\Tools\VatSummaryTool;
+use App\Services\Assistant\Tools\WhmcsInboxTool;
 use App\Support\Tenancy\CompanyContext;
 use Illuminate\Support\Facades\Gate;
 
@@ -45,6 +48,9 @@ class ToolRegistry
             new VatSummaryTool,
             new RecentActivityTool,
             new LeadsPulseTool,
+            new IncomeVsExpenseTool,
+            new TopProductsTool,
+            new WhmcsInboxTool,
             new AppVersionTool,
             // Write tools — PREPARE only; the operator confirms before execution.
             new SendCustomerStatementTool,

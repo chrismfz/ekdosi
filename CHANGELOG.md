@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» Phase 2c-(α): τρία νέα read tools — και στα ΔΥΟ κανάλια (chat + MCP).**
+  `income_vs_expense` (έσοδα vs έξοδα ανά διάστημα από το Βιβλίο Εσόδων-Εξόδων — net/ΦΠΑ/μικτά ανά
+  πλευρά + υπόλοιπο ΦΠΑ· η πλευρά εξόδων που δεν κάλυπτε το `vat_summary`), `top_products` (κορυφαία
+  προϊόντα/υπηρεσίες ανά περίοδο — reuse `CustomerTopProducts::forCompany`), `whmcs_inbox` (πόσα
+  προτιμολόγια WHMCS εκκρεμούν στα «Εισερχόμενα» ανά κατάσταση). Κάθε ένα = ένας `AssistantTool` +
+  3-γραμμος `AssistantMcpTool` adapter (το parity test το επιβάλλει), tenant-scoped, Shield-gated,
+  read-only, χωρίς κλήση ΑΑΔΕ/WHMCS.
 - **Customer portal — Slice 0 (auth shell + UI).** Θεμέλια για portal πελατών: πίνακας/model `customer_users`
   (global login identity, ξεχωριστός από τους operators `users`), νέος **`portal` auth guard**, `/login` +
   `/logout` + `/portal` + **σελίδα προφίλ** (στοιχεία + αλλαγή κωδικού· email/ΑΦΜ όχι επεξεργάσιμα), και
