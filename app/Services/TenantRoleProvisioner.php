@@ -95,7 +95,7 @@ class TenantRoleProvisioner
      *
      * @var list<string>
      */
-    public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role', 'UpdateRun', 'CustomerUser'];
+    public const ADMIN_FORBIDDEN_RESOURCES = ['User', 'Company', 'Role', 'UpdateRun', 'CustomerUser', 'PaymentGatewayConnection'];
 
     // ── super_admin ────────────────────────────────────────────────────────
 

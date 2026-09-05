@@ -6,6 +6,7 @@ use App\Services\Backup\Destinations\S3BackupDestination;
 use App\Services\Backup\Destinations\SftpBackupDestination;
 use App\Services\Billing\Sources\WhmcsBillingSource;
 use App\Services\EInvoice\Transports\InvoSignTransport;
+use App\Services\Payments\Gateways\ManualPaymentGateway;
 
 return [
 
@@ -270,6 +271,27 @@ return [
             'whmcs' => WhmcsBillingSource::class,
             // 'woocommerce' => App\Services\Billing\Sources\WooCommerceBillingSource::class,  // Phase 1+
             // 'blesta'      => App\Services\Billing\Sources\BlestaBillingSource::class,        // Phase 1+
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Payment gateways (Πυλώνας B) — docs/payment-gateways-design.md
+    |--------------------------------------------------------------------------
+    |
+    | The map of gateway key → PaymentGateway implementation, resolved by
+    | PaymentGatewayRegistry. A tenant enables/configures which ones it offers in
+    | the `payment_gateway_connections` table («Τρόποι πληρωμής» admin). Add a
+    | gateway = one line here + one class (mirrors the einvoice/billing registries);
+    | no core edit, no migration. B0 ships only the offline `manual` gateway.
+    |
+    */
+    'payments' => [
+        'gateways' => [
+            'manual' => ManualPaymentGateway::class,
+            // 'stripe'   => App\Services\Payments\Gateways\StripeGateway::class,    // B1
+            // 'paypal'   => App\Services\Payments\Gateways\PaypalGateway::class,    // B2
+            // 'eurobank' => App\Services\Payments\Gateways\EurobankGateway::class,  // B3
         ],
     ],
 

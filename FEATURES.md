@@ -788,6 +788,16 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   operator· ποτέ open signup) + auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους» +
   κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».
 
+## 19. Τρόποι online πληρωμής (Πυλώνας B) — foundation
+- **B0a — modular seam + admin (SHIPPED):** `PaymentGateway` contract + `PaymentGatewayRegistry`
+  (config-driven, Null fallback). Νέο gateway = μία class + μία γραμμή στο `config/ekdosi.php →
+  payments.gateways` — μηδέν core edit/migration (Eurobank φέτος, Viva του χρόνου). Per-tenant
+  `payment_gateway_connections` (gateway/label/is_active/sort/**encrypted** config) = WHMCS-style λίστα·
+  Filament «Τρόποι online πληρωμής» (Ρυθμίσεις, **super-admin**): add/enable(inline)/name/order/settings-ανά-
+  gateway + «Έλεγχος». Πρώτο: **manual** (κατάθεση, offline). Design+threat-model: `docs/payment-gateways-design.md`.
+- **Επόμενα:** B0b «Πλήρωσε» (intents + offline confirm) → B1 πρώτο hosted (Stripe/IRIS, webhook) → B2 PayPal
+  → B3 Eurobank → B4 reconcile/prepaid/refund.
+
 ---
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)

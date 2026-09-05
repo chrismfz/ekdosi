@@ -90,6 +90,11 @@ class CompanyExporter
         // are reconfigured on the target VM) — never travel inside a bundle.
         'company_backup_settings',
         'company_backup_runs',
+        // Payment-gateway creds (API/webhook secrets, encrypted) are per-ENVIRONMENT
+        // and reconfigured on the target VM — like backup destinations, they never
+        // travel inside a bundle (and the encrypted config wouldn't survive a new
+        // APP_KEY anyway). The operator re-adds payment methods on the target.
+        'payment_gateway_connections',
         // AI «Βοηθός» operational state — metering/billing log + the transient
         // confirm queue & reminders. Not part of the accounting dataset a tenant
         // carries across VMs (re-accrues per usage; pending actions are ephemeral).
