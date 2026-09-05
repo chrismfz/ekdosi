@@ -226,14 +226,24 @@ customer-initiated refunds, multi-currency FX. Collect-first.
   show bank details, operator confirms → existing manual `Payment`). Proves the
   seam + the whole admin/portal UX with zero money risk. The portal «Πλήρωσε»
   button ships here (manual only).
-- **B1 — first hosted gateway (Stripe OR IRIS).** One real `flow=redirect`
-  (or `request_to_pay`) adapter end-to-end: initiate → hosted page/QR →
-  **signed webhook** → `Payment` → balance. Locks the security spine (T1–T3,
-  T6) against ONE provider's real docs.
-- **B2 — PayPal** (second `redirect` adapter — proves «new gateway = adapter,
-  not rewrite»).
-- **B3 — Eurobank** (acquirer hosted page; + the ΑΑΔΕ POS↔ERP mandate only if a
-  physical terminal is in play — see `payment-connectors.md §4`).
+- **B1 — first hosted gateway = Eurobank / Cardlink vPOS.** ✅ DONE. Re-sequenced
+  to the tenant's PRIMARY provider (card + Apple/Google Pay + IRIS through one
+  hosted redirect). One real `flow=redirect` adapter end-to-end: initiate →
+  auto-submitted signed vPOS form → hosted page → **signed return** (vPOS digest
+  over the raw body) → the idempotent `settle()` → `Payment` → balance. Locks the
+  security spine (T1–T3, T6) against a real provider. Ported field-for-field from
+  the tenant's open-source WHMCS module. **Capability seams** added here:
+  `HostedRedirectGateway` (builds the signed form), `WebhookGateway`
+  (`handleWebhook` → normalised `PaymentOutcome`), `HasSecretConfig` (write-only
+  config keys) — opt-in interfaces, so the offline/manual gateway stubs none.
+  **Known limitation:** this module has NO separate server-to-server webhook —
+  settlement rides the browser-return POST; a customer who closes the tab leaves
+  the intent pending (safety net: operator manual-settle + reconciliation +
+  stale-intent expiry, BACKLOG).
+- **B2 — PayPal / Stripe** (second `redirect` adapter — proves «new gateway =
+  adapter, not rewrite»).
+- **B3 — office rails** (physical card-POS + the ΑΑΔΕ POS↔ERP mandate when a
+  terminal is in play — see `payment-connectors.md §4`).
 - **B4 — reconciliation** (T10) + **prepaid credit top-up** UX + **refund**
   (operator) + the **ΠΡΟΤ convert-on-pay** tie-in (needs the ΠΡΟΤ series).
 

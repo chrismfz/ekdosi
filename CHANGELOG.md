@@ -18,6 +18,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Πυλώνας B / B1 — Eurobank / Cardlink vPOS (κάρτα + Apple/Google Pay + IRIS).** Το πρώτο
+  online payment gateway (`flow=redirect`): ο πελάτης από «Πλήρωσε» ανακατευθύνεται με
+  υπογεγραμμένη φόρμα στη σελίδα της τράπεζας· η επιστροφή (vPOS digest πάνω στο raw body)
+  επαληθεύεται και **μία φορά** (idempotent) καταχωρεί την πληρωμή μέσω του υπάρχοντος
+  `PaymentAllocator`/`InvoiceBalance` — ΜΟΝΟ σε verified `CAPTURED` + ταίριασμα ποσού/νομίσματος/
+  εταιρίας (T1/T3/T6). Ρύθμιση per-tenant στο «Τρόποι online πληρωμής» (Merchant ID + **write-only**
+  Shared Secret κρυπτογραφημένο + γλώσσα + sandbox toggle). Νέες opt-in capability-διεπαφές
+  (`HostedRedirectGateway`/`WebhookGateway`/`HasSecretConfig`) — προσθήκη επόμενου gateway μένει
+  «ένας adapter». Port field-for-field από το open-source WHMCS module του πελάτη.
+
 ### Changed
 - **Πάροχος «Έλεγχος σύνδεσης» — ειλικρινές μήνυμα (PROV-005 closed as won't-do).** Το success
   notification λέει πλέον ρητά «έλεγχος **μόνο διαθεσιμότητας** — ΔΕΝ επαληθεύει διαπιστευτήρια ή

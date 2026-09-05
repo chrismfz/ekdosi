@@ -745,17 +745,37 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `actual_amount` is bounded only by `min 0.01`; a typo (10000 vs 100) settles FIFO + parks a large on-account
   credit. Pre-existing to ALL manual payment entry (the Payments resource too), operator-authoritative — add a
   soft «are you sure, this is far from the intended X?» confirm if it bites. (b) **Auto-expire stale pending
-  intents:** `expires_at`/`STATUS_EXPIRED` are wired into the model/filter but nothing sets/transitions them
-  (manual intents have no timeout by design). When B1 online gateways land, set `expires_at` on redirect
-  intents + a scheduled sweep to expire abandoned ones (keeps the «Εκκρεμείς» badge honest).
-- **Payment gateways — write-only secret fields (B1 prerequisite).** The `PaymentGateway::configFields()`
-  contract says secrets must be password-type + write-only, but nothing ENFORCES it: the «Τρόποι online
-  πληρωμής» form binds `statePath('config')`, so on edit Filament re-hydrates the decrypted `config` into the
-  fields. Benign in B0 (the manual gateway stores only `bank_details`/`instructions`, shown to the customer
-  anyway; super-admin only). BEFORE the first secret-bearing gateway (Stripe/PayPal/Eurobank, B1): give the
-  resource a shared «don't hydrate + only dehydrate-when-filled» treatment for password fields (à la the
-  ProfileController password field / CustomerUserForm), so a stored api/webhook secret is never rendered back
-  into the form. Add a test that an edited connection never exposes its secret in the form state.
+  intents (still open after B1):** `expires_at`/`STATUS_EXPIRED` are wired into the model/filter but nothing
+  sets/transitions them. B1 deliberately did NOT set `expires_at` on Eurobank redirect intents: a genuine but
+  LATE browser-return must still settle (money > tidiness), and `settle()` ignores `expires_at`, so expiry is
+  purely a housekeeping/badge concern, not a gate. Follow-up: a scheduled sweep that flips clearly-abandoned
+  pendings (older than N hours AND never returned) to `EXPIRED` for the «Εκκρεμείς» badge — never one that
+  could block a real settle. ✅ **(c) DONE (B1) — acquirer txId on the Payment.** `settle()` now takes an
+  optional `$transactionId`; the Eurobank return threads `PaymentOutcome::providerTxnId` → `payments.transaction_id`
+  (+ into the notes «κωδ. συναλλαγής»), while `reference` stays our ΠΛ- receipt key. The `Payment` table IS the
+  transactions ledger (WHMCS `tblaccounts` analog) — no new table needed; a fuller per-gateway event log
+  (auth/capture/refund) is only worth it at B4/refunds.
+- **B1 go-live — sandbox-validate the vPOS digest before production (MUST).** The request field set/order
+  (`version,mid,lang,deviceCategory,orderid,orderDesc,orderAmount,currency,payerEmail,bill*,confirmUrl,cancelUrl`)
+  and `currency='EUR'` are ported field-for-field from the tenant's acquirer-validated WHMCS module, but no test
+  hits the real bank (the unit test re-runs our own concatenation). Before flipping `testmode` off: run ONE
+  sandbox transaction end-to-end (redirect accepted + a CAPTURED return that settles) with the tenant's real
+  test creds. If Cardlink rejects the redirect, the likely culprits are the `lang`/`deviceCategory` positions or
+  a numeric currency (`978`) — adjust `redirectForm()` to match what their MAC spec/module actually signs.
+- **B1 review — consciously-declined P2s (kept as-is, reasons recorded).** (i) **No auto-cancel of an intent on a
+  verified FAILED/CANCELLED return** — same money>tidiness rule as expiry: a REFUSED interim status can be
+  followed by a retry-CAPTURE on the SAME orderid, and auto-cancelling would then strand real money via the
+  `isPending()` guard. Declines just log + leave pending; «Εκκρεμείς»-badge honesty is the money-safe expiry
+  sweep (item b above), not a cancel. (ii) **`is_scalar` guard drops array-shaped return fields from the digest
+  concat** — fails closed (never a false settle); real vPOS returns are flat scalars. (iii) **Two
+  `connectionFor()` loaders** (portal vs webhook) kept separate by DELIBERATE opposite semantics — the outbound
+  portal path refuses an inactive/trashed method (don't start a payment through it), the inbound return resolves
+  it `withTrashed` + regardless of `is_active` (settle money that already arrived). Merging risks collapsing that
+  distinction; revisit only if a third caller appears.
+- ✅ **DONE (B1) — Payment gateways write-only secret fields.** `HasSecretConfig` (opt-in interface) +
+  `EditPaymentGatewayConnection` mutate hooks: a stored secret is never hydrated back into the form, and a
+  blank submit preserves it. `EurobankGateway::secretConfigKeys() = ['shared_secret']`; covered by
+  `PaymentGatewaySecretConfigTest`.
 - **Customer portal — acting device's remember-me after own password change (P2, pre-existing UX).** When a
   customer changes their OWN password (profile), `remember_token` is rotated (kills «remember me» on every
   device, incl. this one) but the acting device's recaller cookie is NOT re-issued — so once its session

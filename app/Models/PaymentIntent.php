@@ -33,6 +33,7 @@ class PaymentIntent extends Model
         'customer_id',
         'customer_user_id',
         'gateway',
+        'payment_gateway_connection_id',
         'purpose',
         'amount',
         'currency',
@@ -66,5 +67,11 @@ class PaymentIntent extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /** The payment method that started this intent (null for a manual/operator one). */
+    public function connection(): BelongsTo
+    {
+        return $this->belongsTo(PaymentGatewayConnection::class, 'payment_gateway_connection_id');
     }
 }

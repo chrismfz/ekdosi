@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Webhooks\EurobankReturnController;
 use App\Http\Controllers\Webhooks\WhmcsClientInvoiceMapController;
 use App\Http\Controllers\Webhooks\WhmcsClientIssuedInvoicesController;
 use App\Http\Controllers\Webhooks\WhmcsClientIssuedPdfController;
@@ -135,3 +136,17 @@ Route::get(
     ->where('whmcs_userid', '[0-9]+')
     ->where('invoice', '[0-9]+')
     ->name('whmcs.issued-doc-pdf');
+
+/**
+ * Payment gateways (Πυλώνας B / B1) — Eurobank / Cardlink vPOS return. The
+ * acquirer's hosted page redirect-POSTs the transaction result here (the
+ * customer's browser carries it), so it's in this CSRF-exempt group: the vPOS
+ * DIGEST is the auth. The controller verifies the digest against the intent's
+ * connection secret, cross-checks amount/currency/company, and settles once
+ * (idempotent) only on a signed CAPTURED status — then redirects the browser to
+ * the portal status page. `?result=success|failure` is advisory; only the signed
+ * `status` field decides. Throttled against replay/probing floods.
+ */
+Route::post('payments/eurobank/return', EurobankReturnController::class)
+    ->middleware('throttle:120,1')
+    ->name('payments.eurobank.return');
