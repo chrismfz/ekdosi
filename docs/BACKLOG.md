@@ -65,7 +65,9 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
 
 **TIER 3 — Strategic epic «Αντικατάσταση WHMCS» (`PLAN.md`, largely greenfield):**
 9. **Πυλώνας A — Domains** (A0→A5; design-only today, first pillar).
-10. **Πυλώνας B — Payment gateways** (IRIS first → card-POS; `payment-connectors.md`).
+10. **Πυλώνας B — Payment gateways** (online Stripe/PayPal/Eurobank/manual, WHMCS-style admin, modular
+    contract/registry — **design+threat-model: `docs/payment-gateways-design.md`**; office rails card-POS/IRIS
+    → `payment-connectors.md`).
 11. **Πυλώνας C — Provisioning modules** (real cPanel/DA/… on the existing seam).
 12. **Πυλώνας D — Customer portal** (2nd panel; deliberately last, needs A+B).
 

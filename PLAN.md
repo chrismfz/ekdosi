@@ -245,7 +245,11 @@ registrar-API WHOIS + γενικό port-43/RDAP fallback.
 
 ## 4. Πυλώνας B — Payment gateways
 
-**Ήδη σχεδιασμένο:** `docs/payment-connectors.md`. Περίληψη:
+**Authoritative design + threat model:** `docs/payment-gateways-design.md`
+(online gateways Stripe/PayPal/Eurobank/manual + WHMCS-style admin [list/enable/
+settings/name/order] + `PaymentGateway` contract/registry για modular add/swap +
+phase gates B0–B4). Οι office rails (card-POS + IRIS) → `docs/payment-connectors.md`
+κάτω από το ίδιο contract. Περίληψη:
 - **IRIS πρώτα** (online, χωρίς hardware/PCI, εκτός POS-interconnect mandate) →
   μετά Viva/Cardlink card-POS → μετά Stripe/PayPal.
 - Όλα πίσω από `App\Contracts\PaymentTerminal` / `IrisRequest` +
