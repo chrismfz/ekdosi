@@ -473,7 +473,9 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
     per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).
   - **(δ) Persistence συνομιλιών** — `ai_conversations` table (ιστορικό + πολλές
     συνομιλίες ανά χρήστη, αντί session) — απαιτεί και UI επιλογής συνομιλίας.
-  - **(ε) Usage dashboard — tokens/κόστος ανά εταιρεία. 🚧 IN PROGRESS (2026-09-05).**
+  - **(ε) Usage dashboard + `ai_usage` tool — tokens/κόστος ανά εταιρεία. ✅ SHIPPED (2026-09-05).**
+    Super-admin σελίδα «Χρήση & κόστος AI» (cross-tenant) **+ `ai_usage` chat/MCP tool** (per-tenant·
+    MCP `company="all"` → ανά-εταιρεία fan-out). Follow-up: per-tenant self-view UI για company_admin. Ιστορικό:
     Χτίζεται ως **super_admin σελίδα «Χρήση & κόστος AI» ΜΕΣΑ στην περιοχή «AI Βοηθός»**
     (group «Σύστημα», δίπλα στο «Βοηθός AI») — **ΟΧΙ** στο κεντρικό dashboard (owner). Τα
     ΔΕΔΟΜΕΝΑ ΥΠΑΡΧΟΥΝ ΗΔΗ: το `ai_usage_log` κρατά input/output/cache tokens +

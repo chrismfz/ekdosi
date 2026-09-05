@@ -19,6 +19,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» Phase 2c-(ε): `ai_usage` tool — κόστος/όριο AI μέσα από τον Βοηθό (chat + MCP).**
+  Ο χειριστής ρωτά «πόσο κόστισε το AI τον μήνα;» / «πλησιάζουμε το όριο;» και ο Βοηθός απαντά:
+  αιτήματα, tokens (in/out/cache), εκτ. κόστος USD, μηνιαίο όριο + % ορίου, ανά χρήστη — **για την
+  τρέχουσα εταιρεία** (`AiUsageReport::forTenant`, gated `View:CompanySettings`). Μέσω MCP με
+  `company="all"` ένας super-admin παίρνει ανά-εταιρεία fan-out (το cross-tenant «ποιος πληρώνει»
+  της σελίδας «Χρήση & κόστος AI»). Read-only· ένας `AssistantTool` + 3-γραμμος MCP adapter.
 - **AI «Βοηθός» Phase 2c-(α): τρία νέα read tools — και στα ΔΥΟ κανάλια (chat + MCP).**
   `income_vs_expense` (έσοδα vs έξοδα ανά διάστημα από το Βιβλίο Εσόδων-Εξόδων — net/ΦΠΑ/μικτά ανά
   πλευρά + υπόλοιπο ΦΠΑ· η πλευρά εξόδων που δεν κάλυπτε το `vat_summary`), `top_products` (κορυφαία

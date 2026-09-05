@@ -7,6 +7,7 @@ use App\Models\AiUsageLog;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\Assistant\AiUsageReport;
+use App\Services\Assistant\Tools\AiUsageTool;
 use App\Services\TenantRoleProvisioner;
 use Carbon\CarbonImmutable;
 use Filament\Facades\Filament;
@@ -156,5 +157,53 @@ class AiUsageReportTest extends TestCase
         $this->actingAs($admin);
         Filament::setTenant($c);
         $this->assertTrue(AiUsage::canAccess(), 'a system super_admin reaches it');
+    }
+
+    public function test_for_tenant_scopes_to_one_company_with_cap_and_per_user(): void
+    {
+        config(['ekdosi.ai.global_monthly_token_cap' => 0]);
+        $a = $this->company('alpha', cap: 1000);
+        $b = $this->company('beta');
+        $ua = User::create(['name' => 'Alice', 'email' => 'a-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+
+        $this->logRow($a, $ua, 500, 300, 0.10);   // alpha billable 800 → 80% of 1000
+        $this->logRow($b, null, 9_000, 9_000, 5.00); // beta — must NOT appear in alpha's report
+
+        $res = app(AiUsageReport::class)->forTenant($a, CarbonImmutable::now()->format('Y-m'));
+
+        $this->assertSame(800, $res['tokens']['billable']);
+        $this->assertSame(1000, $res['cap']);
+        $this->assertEqualsWithDelta(0.80, $res['pct_of_cap'], 0.0001);
+        $this->assertSame('warn', $res['status']);
+        $this->assertEqualsWithDelta(0.10, $res['cost_usd'], 0.0001);
+        $this->assertSame('Alice', $res['by_user'][0]['name']);
+        $this->assertSame(800, $res['by_user'][0]['billable']);
+    }
+
+    public function test_for_tenant_does_not_apply_the_cap_to_a_past_month(): void
+    {
+        config(['ekdosi.ai.global_monthly_token_cap' => 0]);
+        $a = $this->company('alpha', cap: 1000);
+        $last = CarbonImmutable::now()->subMonthNoOverflow()->startOfMonth()->addDays(3);
+        $this->logRow($a, null, 2_000, 1_000, 1.00, $last); // 3000 > cap 1000, but a CLOSED month
+
+        $res = app(AiUsageReport::class)->forTenant($a, $last->format('Y-m'));
+
+        $this->assertSame(3_000, $res['tokens']['billable']);
+        $this->assertNull($res['cap'], 'a closed month must not carry the current cap');
+        $this->assertNull($res['pct_of_cap']);
+        $this->assertSame('ok', $res['status']); // never a false «blocked» for an old month
+    }
+
+    public function test_ai_usage_tool_defaults_to_current_month_for_the_ambient_tenant(): void
+    {
+        $a = $this->company('alpha');
+        $this->logRow($a, null, 100, 50, 0.02);
+
+        $res = (new AiUsageTool)->run($a, []);
+
+        $this->assertSame(CarbonImmutable::now()->format('Y-m'), $res['month']);
+        $this->assertSame(150, $res['tokens']['billable']);
+        $this->assertSame(1, $res['requests']);
     }
 }
