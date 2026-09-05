@@ -95,6 +95,10 @@ class CompanyExporter
         // travel inside a bundle (and the encrypted config wouldn't survive a new
         // APP_KEY anyway). The operator re-adds payment methods on the target.
         'payment_gateway_connections',
+        // Payment intents are operational/transient — a «customer started to pay»
+        // record. The actual money lives in `payments` (exported); a settled intent
+        // is re-derivable from it, a pending one is ephemeral. Not source-of-truth.
+        'payment_intents',
         // AI «Βοηθός» operational state — metering/billing log + the transient
         // confirm queue & reminders. Not part of the accounting dataset a tenant
         // carries across VMs (re-accrues per usage; pending actions are ephemeral).

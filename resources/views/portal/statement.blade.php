@@ -34,6 +34,11 @@
                     <flux:text class="text-sm text-zinc-500">Υπόλοιπο</flux:text>
                     <div class="mt-1 text-2xl font-semibold text-zinc-700 dark:text-zinc-200">Εξοφλημένο</div>
                 @endif
+
+                <div class="mt-3">
+                    <flux:button size="sm" variant="primary" icon="credit-card"
+                        href="{{ route('portal.payment.create', $st['customer_id']) }}">Πλήρωσε</flux:button>
+                </div>
             </div>
 
             @if (count($st['rows']) === 0)

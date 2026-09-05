@@ -31,6 +31,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
   καμία φορολογική οδηγία (το `tax-notes.md` μένει accountant-confirmed-only).
 
 ### Added
+- **Payment gateways — B0b: η ροή «Πλήρωσε» + «Τραπεζική κατάθεση» (manual).** Στο `/user/statement` κουμπί
+  **«Πλήρωσε»** → επιλογή ποσού + ενεργού τρόπου → **`payment_intents`** (pending, unique reference) →
+  σελίδα οδηγιών. Το manual gateway **αναδεικνύει τους υπάρχοντες τραπεζικούς λογαριασμούς του ekdosi**
+  (`bank_accounts`, με per-account toggle — κενό = όλοι οι ενεργοί), αντί να ξαναγράφεις IBAN. Operator:
+  resource **«Εκκρεμείς πληρωμές πύλης»** (nav badge με το πλήθος) → **«Καταχώριση πληρωμής»** (πραγματικό
+  ποσό + προαιρετικός τρόπος myDATA) που γράφει το `Payment` μέσω του υπάρχοντος `PaymentAllocator`
+  (FIFO + on-account credit) → το `InvoiceBalance` ενημερώνεται. **Idempotent settle** (locked
+  pending→settled — διπλό confirm/replay ΔΕΝ δημιουργεί 2η πληρωμή). Ο browser return ΠΟΤΕ δεν εξοφλεί.
+  Grant-scoped όλη η portal ροή. Contract επεκτάθηκε με `initiate()` (τώρα που υπάρχει consumer)· webhook/
+  refund στο B1. `payment_intents` → `INTENTIONALLY_EXCLUDED` από το export (operational· το χρήμα ζει στο
+  `payments`). **Post-deploy:** `shield:generate` + re-provision.
 - **Payment gateways — B0a: modular seam + «Τρόποι online πληρωμής» admin.** Το θεμέλιο του Πυλώνα B
   (`docs/payment-gateways-design.md`): `PaymentGateway` contract + `PaymentGatewayRegistry` (config-driven,
   Null fallback — mirror του e-invoice/billing registry· νέο gateway = μία class + μία γραμμή στο

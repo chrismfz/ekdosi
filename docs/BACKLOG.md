@@ -741,6 +741,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Payment intents — housekeeping (B0b survivors, low priority).** (a) **Amount sanity cap on manual settle:**
+  `actual_amount` is bounded only by `min 0.01`; a typo (10000 vs 100) settles FIFO + parks a large on-account
+  credit. Pre-existing to ALL manual payment entry (the Payments resource too), operator-authoritative — add a
+  soft «are you sure, this is far from the intended X?» confirm if it bites. (b) **Auto-expire stale pending
+  intents:** `expires_at`/`STATUS_EXPIRED` are wired into the model/filter but nothing sets/transitions them
+  (manual intents have no timeout by design). When B1 online gateways land, set `expires_at` on redirect
+  intents + a scheduled sweep to expire abandoned ones (keeps the «Εκκρεμείς» badge honest).
 - **Payment gateways — write-only secret fields (B1 prerequisite).** The `PaymentGateway::configFields()`
   contract says secrets must be password-type + write-only, but nothing ENFORCES it: the «Τρόποι online
   πληρωμής» form binds `statePath('config')`, so on edit Filament re-hydrates the decrypted `config` into the
