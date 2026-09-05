@@ -11,6 +11,7 @@ use App\Services\Assistant\Tools\CountSalesTool;
 use App\Services\Assistant\Tools\CreateReminderTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
 use App\Services\Assistant\Tools\IncomeVsExpenseTool;
+use App\Services\Assistant\Tools\KnowledgeSearchTool;
 use App\Services\Assistant\Tools\LeadsPulseTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
@@ -54,6 +55,7 @@ class ToolRegistry
             new TopProductsTool,
             new WhmcsInboxTool,
             new AiUsageTool,
+            new KnowledgeSearchTool,
             new AppVersionTool,
             // Write tools — PREPARE only; the operator confirms before execution.
             new SendCustomerStatementTool,

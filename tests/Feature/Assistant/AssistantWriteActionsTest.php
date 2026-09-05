@@ -195,7 +195,7 @@ class AssistantWriteActionsTest extends TestCase
         $this->assertContains('send_customer_statement', $names);
         $this->assertContains('create_reminder', $names);
         $this->assertContains('record_payment', $names);
-        $this->assertCount(16, $names);
+        $this->assertCount(17, $names);
     }
 
     public function test_widget_confirm_flow_executes_the_action(): void

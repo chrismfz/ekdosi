@@ -12,6 +12,7 @@ use App\Mcp\Tools\FailedJobsTool;
 use App\Mcp\Tools\FindCustomerMcpTool;
 use App\Mcp\Tools\IncomeVsExpenseMcpTool;
 use App\Mcp\Tools\InvoiceFilingMcpTool;
+use App\Mcp\Tools\KnowledgeSearchMcpTool;
 use App\Mcp\Tools\LeadsPulseMcpTool;
 use App\Mcp\Tools\ListCompaniesTool;
 use App\Mcp\Tools\ListTopDebtorsMcpTool;
@@ -79,6 +80,9 @@ Business (tenant-scoped, offered only if your user holds the permission):
 - ai_usage — the AI «Βοηθός» token usage + estimated USD cost for a month, this company's
   monthly cap and % of it, and a per-user breakdown. Gated on View:CompanySettings; with
   company="all" a super-admin gets the per-company spend across every tenant.
+- knowledge_search — search the curated app KB (docs/assistant-kb): app how-to + accountant-
+  confirmed tax notes. Answer STRICTLY from the returned excerpts; anything not covered →
+  «ρώτα λογιστή», never an invented rule. Not tenant data.
 - app_version — deployed build + whether an update is available (read-only).
 - send_customer_statement / create_reminder / record_payment — WRITE actions that are
   PROPOSE-ONLY here: they stage a pending action and return its id; nothing is sent/armed/
@@ -140,6 +144,7 @@ class EkdosiMcpServer extends Server
         TopProductsMcpTool::class,
         WhmcsInboxMcpTool::class,
         AiUsageMcpTool::class,
+        KnowledgeSearchMcpTool::class,
         AppVersionMcpTool::class,
         // Business — write (PROPOSE-ONLY; operator confirms in-app).
         SendCustomerStatementMcpTool::class,

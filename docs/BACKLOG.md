@@ -490,7 +490,14 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
     _Follow-up: per-tenant self-view για company_admin (η δική του κατανάλωση vs cap)._
   - **(στ) Streaming απαντήσεων** — τώρα είναι «σκέφτομαι…» μέχρι να ολοκληρωθεί το
     tool-loop· streaming θα ήθελε SSE/Livewire polling (μεγαλύτερη αλλαγή στο surface).
-  - **(ζ) Helper / «βοήθεια & συμβουλή» με curated knowledge base.** Δύο ΞΕΧΩΡΙΣΤΑ
+  - **(ζ) Helper / «βοήθεια & συμβουλή» με curated knowledge base. ✅ SHIPPED (2026-09-05).**
+    `knowledge_search` tool + `KnowledgeBase` (RAG-lite) πάνω στο `docs/assistant-kb/` (chat + MCP),
+    ΑΥΣΤΗΡΟ grounding («ρώτα λογιστή» όταν δεν καλύπτεται). **Follow-up:** πλούτισε το KB (ο λογιστής
+    προσθέτει επιβεβαιωμένες φορολογικές ενότητες με ημερομηνία ισχύος). _P2 follow-up:_ το
+    `knowledge_search` είναι **global** (δεν αγγίζει tenant data) αλλά μέσω MCP περνά από τον
+    `McpTenantResolver` — άρα multi-company χρήστης πρέπει να δώσει ένα (αδιάφορο) `company`. Θέλει
+    ένα «no-tenant» μονοπάτι στο `AssistantMcpTool` (framework· το in-app chat δεν επηρεάζεται).
+    _Το αρχικό σχέδιο:_ Δύο ΞΕΧΩΡΙΣΤΑ
     πράγματα: **(i) app how-to** («πού βλέπω τι μου χρωστάνε;», «πώς κόβω πιστωτικό;») —
     ασφαλές, γνώση της εφαρμογής· **(ii) domain advisory** («τι ΦΠΑ για Σκόπελο;», «τι
     παραστατικό για αποστολή δικού μου εξοπλισμού στο datacenter;», «ποιον τύπο να
