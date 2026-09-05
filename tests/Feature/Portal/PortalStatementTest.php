@@ -137,6 +137,39 @@ class PortalStatementTest extends TestCase
         $this->assertSame(0.0, $st['owed']);
     }
 
+    public function test_row_labels_do_not_leak_internal_ids(): void
+    {
+        $t = $this->company();
+        $c = Customer::create(['company_id' => $t->id, 'name' => 'C', 'afm' => '1']);
+        Payment::create([
+            'company_id' => $t->id, 'customer_id' => $c->id, 'invoice_id' => null,
+            'kind' => 'payment', 'amount' => 50, 'pay_date' => now(),
+        ]);
+        $login = $this->login();
+        $this->grant($login, $c);
+
+        $rows = app(CustomerLedgerFeed::class)->forLogin($login)[0]['rows'];
+        $this->assertSame('Πληρωμή', $rows[0]['label']);   // «Πληρωμή #<id>» → «Πληρωμή»
+        $this->assertStringNotContainsString('#', $rows[0]['label']);
+    }
+
+    public function test_a_grant_whose_company_mismatches_its_customer_is_skipped(): void
+    {
+        $companyA = $this->company();
+        $companyB = $this->company();
+        $customerB = Customer::create(['company_id' => $companyB->id, 'name' => 'B', 'afm' => '1']);
+        $this->creditTermInvoice($companyB, $customerB, 100);
+
+        $login = $this->login();
+        // A malformed grant: company_id = A, but the customer belongs to B.
+        CustomerUserAccess::create([
+            'customer_user_id' => $login->id, 'company_id' => $companyA->id,
+            'customer_id' => $customerB->id, 'role' => CustomerUserAccess::ROLE_OWNER, 'granted_at' => now(),
+        ]);
+
+        $this->assertCount(0, app(CustomerLedgerFeed::class)->forLogin($login));
+    }
+
     public function test_statement_page_renders(): void
     {
         $t = $this->company();

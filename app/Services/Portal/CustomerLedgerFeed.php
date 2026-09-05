@@ -33,7 +33,7 @@ class CustomerLedgerFeed
      * @return list<array{
      *     company:string, customer:string, afm:?string, role:string,
      *     balance:float, credit:float, owed:float, oldest_unpaid_days:?int,
-     *     has_activity:bool, rows:list<array<string,mixed>>
+     *     rows:list<array<string,mixed>>
      * }>
      */
     public function forLogin(CustomerUser $login): array
@@ -41,7 +41,9 @@ class CustomerLedgerFeed
         $out = [];
         foreach ($this->boundary->grantedTargets($login) as $grant) {
             $result = $this->builder->build($grant->customer);
-            $balance = round((float) $result->stats['balance'], 2);
+            // Read the engine's already-2dp balance straight — the feed never
+            // massages money, it only SPLITS the balance into owed vs credit.
+            $balance = (float) $result->stats['balance'];
 
             $out[] = [
                 'company' => (string) $grant->company->name,
@@ -49,12 +51,11 @@ class CustomerLedgerFeed
                 'afm' => $grant->customer->afm,
                 'role' => (string) $grant->role,
                 'balance' => $balance,
-                // Split for the header: a positive balance is owed; a negative one
-                // is the customer's credit (overpaid / prepaid on account).
+                // A positive balance is owed; a negative one is the customer's
+                // credit (overpaid / prepaid on account).
                 'owed' => max($balance, 0.0),
                 'credit' => max(-$balance, 0.0),
                 'oldest_unpaid_days' => $result->stats['oldest_unpaid_days'],
-                'has_activity' => $result->hasAnyActivity(),
                 'rows' => $this->projectRows($result->ledger),
             ];
         }
@@ -74,12 +75,34 @@ class CustomerLedgerFeed
     {
         return array_map(fn (array $e): array => [
             'date' => $e['date'],
-            'label' => (string) $e['reference'],
+            'label' => $this->label($e),
             'kind' => $this->kind($e),
             'debit' => round((float) $e['debit'], 2),
             'credit' => round((float) $e['credit'], 2),
             'running_balance' => round((float) $e['running_balance'], 2),
         ], $ledger);
+    }
+
+    /**
+     * Customer-facing label. Strips internal «#<id>» suffixes (raw sequential
+     * payment/invoice ids the operator reference carries — «Πληρωμή #123»,
+     * «#456» for a null-invcode invoice) so the statement never discloses global
+     * ids; keeps human references (invcodes, grouped-receipt refs). Falls back to
+     * a type word when nothing meaningful remains.
+     */
+    private function label(array $e): string
+    {
+        $clean = trim((string) preg_replace('/\s*#\d+$/', '', (string) $e['reference']));
+        if ($clean !== '') {
+            return $clean;
+        }
+
+        return match ($this->kind($e)) {
+            'payment' => 'Πληρωμή',
+            'refund' => 'Επιστροφή χρημάτων',
+            'credit' => 'Πιστωτικό',
+            default => 'Παραστατικό',
+        };
     }
 
     /**

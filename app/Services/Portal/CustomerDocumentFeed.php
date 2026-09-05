@@ -70,7 +70,14 @@ class CustomerDocumentFeed
         return $login->activeAccessGrants()
             ->with(['company:id,name', 'customer:id,company_id,name,afm'])
             ->get()
-            ->filter(fn (CustomerUserAccess $g): bool => $g->company !== null && $g->customer !== null)
+            ->filter(fn (CustomerUserAccess $g): bool => $g->company !== null
+                && $g->customer !== null
+                // Fail-closed on a mismatched grant: documents scope by the grant's
+                // company_id, the ledger by the customer's own company_id. They are
+                // the same value unless a grant row points company A at a customer of
+                // company B (a data slip — no DB constraint ties them). Skipping such
+                // a grant keeps every surface on one consistent (company, customer).
+                && (int) $g->customer->company_id === (int) $g->company_id)
             ->values()
             ->all();
     }

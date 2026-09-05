@@ -27,6 +27,9 @@
                 @elseif ($st['credit'] > 0)
                     <flux:text class="text-sm text-zinc-500">Πιστωτικό υπόλοιπο (υπέρ σου)</flux:text>
                     <div class="mt-1 text-2xl font-semibold text-green-600 dark:text-green-400">{{ Money::eur($st['credit']) }}</div>
+                @elseif (count($st['rows']) === 0)
+                    <flux:text class="text-sm text-zinc-500">Υπόλοιπο</flux:text>
+                    <div class="mt-1 text-2xl font-semibold text-zinc-500 dark:text-zinc-400">Χωρίς κίνηση</div>
                 @else
                     <flux:text class="text-sm text-zinc-500">Υπόλοιπο</flux:text>
                     <div class="mt-1 text-2xl font-semibold text-zinc-700 dark:text-zinc-200">Εξοφλημένο</div>
