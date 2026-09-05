@@ -186,7 +186,7 @@ class AssistantInsightToolsTest extends TestCase
     {
         $names = array_column((new ToolRegistry)->definitionsFor(auth()->user()), 'name');
         $this->assertEqualsCanonicalizing(
-            ['count_sales', 'outstanding_receivables', 'list_top_debtors', 'find_customer', 'recent_invoices', 'vat_summary', 'recent_activity', 'leads_pulse', 'income_vs_expense', 'top_products', 'whmcs_inbox', 'ai_usage', 'app_version', 'send_customer_statement', 'create_reminder', 'record_payment'],
+            ['count_sales', 'outstanding_receivables', 'list_top_debtors', 'find_customer', 'recent_invoices', 'vat_summary', 'recent_activity', 'leads_pulse', 'income_vs_expense', 'top_products', 'whmcs_inbox', 'ai_usage', 'knowledge_search', 'app_version', 'send_customer_statement', 'create_reminder', 'record_payment'],
             $names,
         );
     }

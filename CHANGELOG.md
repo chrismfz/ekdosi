@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **AI «Βοηθός» Phase 2c-(ζ): `knowledge_search` — grounded «βοήθεια & συμβουλή» (chat + MCP).**
+  Curated βάση γνώσης σε markdown (`docs/assistant-kb/`: app how-to + **επιβεβαιωμένες** φορολογικές
+  σημειώσεις) + RAG-lite `knowledge_search` tool (`KnowledgeBase`: split ανά τίτλο, scoring με
+  keyword-overlap, accent-insensitive, χωρίς εξωτερική κλήση). **Grounding discipline:** ο Βοηθός
+  απαντά ΑΥΣΤΗΡΑ από τα αποσπάσματα· ό,τι δεν καλύπτεται → «ρώτα λογιστή», ΠΟΤΕ εφευρεμένος
+  φορολογικός κανόνας, πάντα disclaimer στα φορολογικά. Global (όχι tenant data), read-only, χωρίς gate.
+  **Ολοκληρώνει το dual-surface Phase 2c** (α read tools · ε ai_usage · β record_payment · ζ knowledge_search).
 - **AI «Βοηθός» Phase 2c-(β): `record_payment` write tool — «καταχώρισε είσπραξη» με confirm (chat + MCP).**
   Ο χειριστής λέει «πήρα 100 από τον Χ» και ο Βοηθός **ΠΡΟΕΤΟΙΜΑΖΕΙ** μια είσπραξη — καμία κίνηση
   χρημάτων μέχρι να πατηθεί «Επιβεβαίωση». Στο confirm, ο `AiActionExecutor` re-validate + τρέχει
