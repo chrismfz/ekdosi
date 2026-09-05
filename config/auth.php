@@ -1,5 +1,6 @@
 <?php
 
+use App\Models\CustomerUser;
 use App\Models\User;
 
 return [
@@ -54,6 +55,16 @@ return [
             'driver' => 'passport',
             'provider' => 'users',
         ],
+
+        // Customer portal (Slice 0) — session guard for CustomerUser, wholly
+        // separate from the operator 'web' guard/Filament panel. A portal login
+        // never reaches /admin; an operator never authenticates here. Multi-guard
+        // sessions coexist (distinct session keys), so both can even be logged in
+        // in one browser without collision.
+        'portal' => [
+            'driver' => 'session',
+            'provider' => 'customer_users',
+        ],
     ],
 
     /*
@@ -77,6 +88,11 @@ return [
         'users' => [
             'driver' => 'eloquent',
             'model' => env('AUTH_MODEL', User::class),
+        ],
+
+        'customer_users' => [
+            'driver' => 'eloquent',
+            'model' => CustomerUser::class,
         ],
 
         // 'users' => [
@@ -107,6 +123,15 @@ return [
     'passwords' => [
         'users' => [
             'provider' => 'users',
+            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+
+        // Portal password-reset broker (wired when the reset flow ships; the
+        // token table is shared — rows are namespaced by email + guard usage).
+        'customer_users' => [
+            'provider' => 'customer_users',
             'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
             'expire' => 60,
             'throttle' => 60,
