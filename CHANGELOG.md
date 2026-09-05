@@ -42,6 +42,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
   αίτημα PDF ξανα-ελέγχει membership + `isPubliclyViewable()` (drafts/ακυρωμένα → 404). Read-only.
 
 ### Changed
+- **AI «Βοηθός» ⇄ MCP parity guardrail.** Νέο `McpAssistantParityTest` επιβάλλει ότι **κάθε**
+  `AssistantTool` (in-app chat) εκτίθεται και μέσω του εξωτερικού MCP με έναν `AssistantMcpTool`
+  adapter — και αντίστροφα. Έτσι ένα νέο tool δεν «ξεχνιέται» στη μία επιφάνεια· η αρχή «write once,
+  δουλεύει και στα δύο» γίνεται αυτόματη. (Νέο `ToolRegistry::all()` enumerator.)
 - **Docs cleanup — ένα backlog αντί για 10 md files.** Το `known-issues.md` (283 KB, ~65%
   ήδη DONE/DISARMED) **διαγράφηκε**· το «Go-live triage» και τα ~16 πραγματικά ανοιχτά items
   διπλώθηκαν στο `docs/BACKLOG.md`, που απέκτησε **Master priority index** (TIER 0–7),
