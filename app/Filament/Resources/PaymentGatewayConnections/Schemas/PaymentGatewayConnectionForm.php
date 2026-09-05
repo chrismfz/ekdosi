@@ -2,10 +2,12 @@
 
 namespace App\Filament\Resources\PaymentGatewayConnections\Schemas;
 
+use App\Contracts\PaymentGateway;
 use App\Services\Payments\PaymentGatewayRegistry;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Schemas\Components\Group;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
@@ -51,10 +53,37 @@ class PaymentGatewayConnectionForm
             // Per-gateway settings, declared BY the gateway (configFields) and
             // nested under `config` (encrypted at rest). A new gateway brings its
             // own fields with no edit here.
+            //
+            // STATIC schema (not a `->schema(fn (Get))` closure): every gateway's
+            // fields are built ONCE at mount, one Group each, and only the selected
+            // gateway's Group is shown. A reactively-BUILT schema (closure) adds its
+            // fields AFTER mount, so they never go through `fill()` — their state
+            // isn't hydrated/committed and `->default()` is skipped, which silently
+            // dropped merchant_id/shared_secret and fired a false «required» on save
+            // (reproduced in-browser; the earlier `->live(onBlur)` couldn't fix it
+            // because the schema shape, not blur timing, was the cause). Hidden
+            // Groups are excluded from validation AND dehydrated out, so a non-selected
+            // gateway's required fields never block and its keys never persist (verified:
+            // a manual create saves only manual keys, no eurobank bleed).
+            //
+            // CONTRACT: because all gateways share the one `config` statePath, their
+            // configFields() keys must be UNIQUE across gateways (today: manual =
+            // bank_account_ids/instructions, eurobank = merchant_id/shared_secret/lang/
+            // testmode — disjoint). A second gateway reusing a key (e.g. a future PayPal
+            // `testmode`) would collide on defaults → namespace under the gateway key
+            // then. See docs/BACKLOG.md.
             Section::make('Ρυθμίσεις τρόπου')
                 ->statePath('config')
                 ->visible(fn (Get $get): bool => filled($get('gateway')) && $get('gateway') !== 'none')
-                ->schema(fn (Get $get): array => $registry->for((string) $get('gateway'))->configFields()),
+                ->schema(array_map(
+                    // `../gateway`: the Group sits under the `config`-statePath Section,
+                    // so a bare `$get('gateway')` would read `config.gateway` (null) and
+                    // `isAbsolute` drops the form's own `data` prefix — `../` climbs one
+                    // level to the sibling top-level select.
+                    fn (PaymentGateway $g): Group => Group::make($g->configFields())
+                        ->visible(fn (Get $get): bool => (string) $get('../gateway') === $g->key()),
+                    $registry->all(),
+                )),
         ]);
     }
 }

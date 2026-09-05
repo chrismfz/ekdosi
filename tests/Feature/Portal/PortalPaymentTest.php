@@ -54,6 +54,35 @@ class PortalPaymentTest extends TestCase
         ]);
     }
 
+    public function test_chosen_method_is_preserved_when_validation_bounces_back(): void
+    {
+        // A bad amount bounces back with old input — the picked method must stay
+        // selected (native radios must honour old('connection_id'), not reset to
+        // the first). Two methods so «first» ≠ «chosen».
+        $t = $this->company();
+        $c = $this->customer($t);
+        $this->method($t);                 // id 1 (first)
+        $second = $this->method($t);       // id 2 (the one we pick)
+        $login = $this->login();
+        $this->grant($login, $c);
+
+        $this->actingAs($login, 'portal')
+            ->from("/user/pay/{$c->id}")
+            ->post("/user/pay/{$c->id}", ['connection_id' => $second->id, 'amount' => '0'])
+            ->assertRedirect("/user/pay/{$c->id}");   // amount<0.01 → bounce
+
+        $html = $this->actingAs($login, 'portal')->get("/user/pay/{$c->id}")->getContent();
+        // The radio for the CHOSEN method carries `checked`; the first does not.
+        $this->assertMatchesRegularExpression(
+            '/value="'.$second->id.'"[^>]*\bchecked\b/s', $html,
+            'chosen method radio should stay checked after a validation bounce',
+        );
+        $this->assertDoesNotMatchRegularExpression(
+            '/value="1"[^>]*\bchecked\b/s', $html,
+            'first method should not be checked when another was chosen',
+        );
+    }
+
     public function test_create_page_renders_for_a_granted_company(): void
     {
         $t = $this->company();
@@ -63,7 +92,13 @@ class PortalPaymentTest extends TestCase
         $this->grant($login, $c);
 
         $this->actingAs($login, 'portal')->get("/user/pay/{$c->id}")
-            ->assertOk()->assertSee('Πληρωμή')->assertSee('Κατάθεση');
+            ->assertOk()->assertSee('Πληρωμή')->assertSee('Κατάθεση')
+            // A NATIVE radio must render — not the flux:radio.group «cards» variant,
+            // whose <ui-radio> web-component shows nothing until the Vite/Flux build
+            // is served, so on a box without `npm run build` the method list was
+            // blank and the customer could not pay.
+            ->assertSee('type="radio"', false)
+            ->assertSee('name="connection_id"', false);
     }
 
     public function test_create_page_404_for_a_non_granted_customer(): void

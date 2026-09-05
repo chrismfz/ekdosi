@@ -741,6 +741,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Payment-gateway config fields share one `config` statePath — keys must be unique across gateways (P2, future).**
+  The «Τρόποι online πληρωμής» form now builds a STATIC per-gateway `config` schema (one Group per gateway under a
+  single `->statePath('config')`, only the selected one visible) — the fix for the false-«required» bug. All Groups
+  mount together, so if two gateways declare the SAME `configFields()` key (e.g. a future PayPal `testmode` colliding
+  with Eurobank's), their defaults collide and the last-mounted wins. Disjoint today (manual = bank_account_ids/
+  instructions; eurobank = merchant_id/shared_secret/lang/testmode → verified no bleed on create). When a 2nd gateway
+  reuses a key: namespace config under the gateway key (`config.eurobank.testmode`) — but that changes the persisted
+  shape + every reader (gateway `initiate`/`redirectForm`, exporter), so do it deliberately, not reflexively.
 - **Export/import — manual gateway bank_account_ids all-unresolved → «all active» (P2, edge).** On import, a
   `manual` connection's `bank_account_ids` are rewired through the imported bank_accounts map; ids that don't
   resolve are dropped. If a connection restricted to specific accounts references ONLY banks that didn't export
