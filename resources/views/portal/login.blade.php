@@ -21,7 +21,10 @@
                 autocomplete="current-password"
                 required
             />
-            <flux:checkbox name="remember" value="1" label="Να με θυμάσαι" />
+            <div class="flex items-center justify-between">
+                <flux:checkbox name="remember" value="1" label="Να με θυμάσαι" />
+                <flux:link href="{{ route('portal.password.request') }}" class="text-sm">Ξέχασα τον κωδικό</flux:link>
+            </div>
             <flux:button type="submit" variant="primary" class="w-full">Είσοδος</flux:button>
         </form>
     </div>

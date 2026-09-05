@@ -725,6 +725,31 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Customer portal — password-change session invalidation (P2, pre-existing).** A password reset (and the
+  existing profile password change) rotates `remember_token` (kills «remember me» cookies) but does NOT
+  terminate other ACTIVE server-side sessions — a hijacked live session survives the reset the owner did «to
+  assume compromise». Proper fix is portal-wide: add `Illuminate\Session\Middleware\AuthenticateSession` to the
+  portal route group so a password-hash change logs out every other session on its next request (covers reset
+  AND profile change). Deferred because it touches the whole portal middleware stack and needs its own tests;
+  `remember_token` rotation is the partial mitigation today. NOT introduced by the reset slice — the profile
+  change already had it.
+- **Customer portal — invited-claim vs revoked grant (reviewed, BY DESIGN — not a bug).** If an operator
+  invites a login (invited + grant) then revokes the grant before the invitee claims, the claim still flips
+  invited→active and the login can authenticate (seeing NOTHING, since grants gate the documents view). This is
+  the deliberate orthogonality: login STATUS (can authenticate) ⟂ GRANTS (what it sees). To neutralize a login
+  the operator **suspends** it (then the claim no-ops); revoking a grant only removes data access. An ungranted
+  active login is harmless (empty portal). Revisit only if a product decision wants «no grant ⇒ can't activate».
+- **Customer portal — self-register concept (design locked, NOT built).** Reset-password + the invited-login
+  «claim» shipped (operator opens an invited login → customer self-sets password via `/user/forgot-password`),
+  which IS the safe near-term onboarding — no open form, operator decides who gets a login. If open-ish
+  self-registration is ever wanted, go **tier-2 CLAIM only, never open signup (tier-3)**: a form where the
+  visitor proves they are an EXISTING customer (ΑΦΜ + email that matches a `customers` row, or an invoice
+  number) → **email verification** → the row is created, but **the data grant is still operator-approved**
+  (or deterministically WHMCS-derived), never auto. Key safety fact: because of the grants boundary a login
+  with **no grant sees nothing**, so even a successful spam/bot registration is inert — the real vectors are
+  email-bombing (mitigate with the same throttle+honeypot pattern as reset), DB junk (email-verify before the
+  row is «real»), and impersonation (mitigated by the ΑΦΜ-match + operator grant approval). Do not build until
+  a tenant actually asks; reset-password covers onboarding for now.
 - **Customer portal — Slice 2 documents view: P2/P3 survivors (from the adversarial gate).**
   _(consciously deferred)._ The security boundary (grant-scoped reads, fail-closed PDF authz, per-request
   status re-check) passed with no P0/P1. Fixed in the same PR: PDF-route throttle, `target=_blank`

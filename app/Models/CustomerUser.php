@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Notifications\Portal\PortalResetPasswordNotification;
 use Database\Factories\CustomerUserFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\Hidden;
@@ -54,6 +55,22 @@ class CustomerUser extends Authenticatable
     public function canLogin(): bool
     {
         return $this->status === self::STATUS_ACTIVE && $this->password !== null;
+    }
+
+    /**
+     * Send the portal-scoped reset link (not the operator one). A SUSPENDED login
+     * never receives one — defense in depth (even though a reset password couldn't
+     * let it log in). Invited + active logins do: the same link sets an invited
+     * login's FIRST password (the «claim»). The broker may still write a token row
+     * for a suspended email; it's unusable because no mail carries it.
+     */
+    public function sendPasswordResetNotification($token): void
+    {
+        if ($this->status === self::STATUS_SUSPENDED) {
+            return;
+        }
+
+        $this->notify(new PortalResetPasswordNotification($token));
     }
 
     /**

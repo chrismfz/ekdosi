@@ -773,8 +773,13 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   (ποτέ ΑΦΜ/εταιρία σκέτα), μόνο **live** (ίδιο allow-list με `isPubliclyViewable()`). Route
   `/user/document/{invoice}/pdf` **fail-closed** (404 χωρίς αποκάλυψη ύπαρξης, ξανα-ελέγχει το boundary ανά
   request)· το middleware ξανα-ελέγχει `canLogin()` κάθε request (suspend μετά το login → logout αμέσως).
-- **Επόμενα slices:** reset-password/self-register με claim + auto-provision reseller-grants από τη
-  δρομολόγηση «Παραστατικά σε τρίτους» + κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».
+- **Reset password + invited «claim»:** `/user/forgot-password` + `/user/reset-password/{token}` (απομονωμένος
+  `customer_users` broker). Η ίδια ροή ορίζει τον πρώτο κωδικό ενός operator-invited login (invited→active) —
+  **operator-gated onboarding, χωρίς open registration**. Anti-abuse: generic response (no enumeration),
+  honeypot, throttle ανά email + IP, queued mail, κανένα email σε suspended.
+- **Επόμενα slices:** self-register (**tier-2 claim** — ΑΦΜ+email match → email verify → grant πάντα από
+  operator· ποτέ open signup) + auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους» +
+  κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».
 
 ---
 
