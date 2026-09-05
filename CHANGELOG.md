@@ -31,6 +31,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
   καμία φορολογική οδηγία (το `tax-notes.md` μένει accountant-confirmed-only).
 
 ### Added
+- **Payment gateways — B0a: modular seam + «Τρόποι online πληρωμής» admin.** Το θεμέλιο του Πυλώνα B
+  (`docs/payment-gateways-design.md`): `PaymentGateway` contract + `PaymentGatewayRegistry` (config-driven,
+  Null fallback — mirror του e-invoice/billing registry· νέο gateway = μία class + μία γραμμή στο
+  `config/ekdosi.php → payments.gateways`, χωρίς core edit/migration). Νέος πίνακας/model
+  `payment_gateway_connections` (per εταιρία × gateway: `gateway`/`label`/`is_active`/`sort`/**encrypted**
+  `config`) = η WHMCS-style λίστα. Filament resource **«Τρόποι online πληρωμής»** (group «Ρυθμίσεις»,
+  **super-admin only**): προσθήκη/ενεργοποίηση(inline toggle)/όνομα/σειρά/settings-ανά-gateway (τα fields τα
+  δηλώνει το ίδιο το gateway) + «Έλεγχος». Πρώτο gateway: **manual** (κατάθεση, `flow=offline`, χωρίς external
+  API — ο operator επιβεβαιώνει). Καμία χρέωση/webhook ακόμη (έρχονται στο B0b/B1 με τη ροή «Πλήρωσε»). Το
+  `payment_gateway_connections` → `ADMIN_FORBIDDEN_RESOURCES` (creds → super-admin) + `INTENTIONALLY_EXCLUDED`
+  από το company export (per-environment creds, όπως τα backup settings). **Post-deploy:** `shield:generate` +
+  re-provision roles.
 - **Customer portal — «Η καρτέλα μου» (Slice 3, read-only).** Ο πελάτης βλέπει στο `/user/statement` το
   **υπόλοιπό** του ανά (εταιρία, πελάτη) + τη **χρονολογική καρτέλα** (χρέωση/πίστωση/τρέχον υπόλοιπο:
   παραστατικά, πληρωμές, πιστωτικά, επιστροφές, on-account προκαταβολές). Νέα υπηρεσία `CustomerLedgerFeed`

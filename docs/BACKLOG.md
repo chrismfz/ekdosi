@@ -741,6 +741,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Payment gateways — write-only secret fields (B1 prerequisite).** The `PaymentGateway::configFields()`
+  contract says secrets must be password-type + write-only, but nothing ENFORCES it: the «Τρόποι online
+  πληρωμής» form binds `statePath('config')`, so on edit Filament re-hydrates the decrypted `config` into the
+  fields. Benign in B0 (the manual gateway stores only `bank_details`/`instructions`, shown to the customer
+  anyway; super-admin only). BEFORE the first secret-bearing gateway (Stripe/PayPal/Eurobank, B1): give the
+  resource a shared «don't hydrate + only dehydrate-when-filled» treatment for password fields (à la the
+  ProfileController password field / CustomerUserForm), so a stored api/webhook secret is never rendered back
+  into the form. Add a test that an edited connection never exposes its secret in the form state.
 - **Customer portal — acting device's remember-me after own password change (P2, pre-existing UX).** When a
   customer changes their OWN password (profile), `remember_token` is rotated (kills «remember me» on every
   device, incl. this one) but the acting device's recaller cookie is NOT re-issued — so once its session
