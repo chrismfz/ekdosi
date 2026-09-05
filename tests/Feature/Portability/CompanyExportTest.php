@@ -2,8 +2,12 @@
 
 namespace Tests\Feature\Portability;
 
+use App\Casts\MaybeEncrypted;
 use App\Models\Company;
 use App\Models\InvoiceType;
+use App\Models\PaymentGatewayConnection;
+use App\Models\Server;
+use App\Models\ServerGroup;
 use App\Models\VatCategory;
 use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyExporter;
@@ -113,7 +117,7 @@ class CompanyExportTest extends TestCase
         // matches the exporter (MaybeEncrypted OR the legacy encrypted casts).
         $secret = 0;
         foreach ($company->getCasts() as $col => $cast) {
-            if (\App\Casts\MaybeEncrypted::isSecretCast((string) $cast)) {
+            if (MaybeEncrypted::isSecretCast((string) $cast)) {
                 $secret++;
                 $this->assertArrayNotHasKey($col, $bundle['company'], "secret {$col} leaked into company.json");
             }
@@ -127,11 +131,11 @@ class CompanyExportTest extends TestCase
             'name' => 'Srv OE', 'slug' => 'srv-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata', 'afm' => '800561849',
         ]);
-        $group = \App\Models\ServerGroup::create([
+        $group = ServerGroup::create([
             'company_id' => $company->id, 'name' => 'cPanel', 'module' => 'cpanel',
             'username' => 'reseller', 'secret_encrypted' => 'super-secret-token',
         ]);
-        \App\Models\Server::create([
+        Server::create([
             'company_id' => $company->id, 'server_group_id' => $group->id, 'name' => 'Virgo',
             'hostname' => 'virgo.example.gr', 'secret_encrypted' => 'per-server-pw',
         ]);
@@ -188,6 +192,11 @@ class CompanyExportTest extends TestCase
             'mydata_subscription_key_production' => 'PRODKEY',
         ]);
         InvoiceType::create(['company_id' => $company->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 3, 'mydata_type' => '2.1']);
+        PaymentGatewayConnection::create([
+            'company_id' => $company->id, 'gateway' => 'eurobank', 'label' => 'Κάρτα',
+            'is_active' => true, 'sort' => 0,
+            'config' => ['merchant_id' => 'MID', 'shared_secret' => 'ZIP-SECRET'],
+        ]);
 
         $bundle = app(CompanyExporter::class)->build($company, 'passphrase', 'p@ss');
         $archive = app(BundleArchive::class);
@@ -200,6 +209,10 @@ class CompanyExportTest extends TestCase
         $this->assertSame($bundle['company']['afm'], $read['company']['afm']);
         $this->assertSame('TPY', $read['setup']['invoice_types'][0]['code']);
         $this->assertSame($bundle['secrets']['mode'], $read['secrets']['mode']);
+        // Connections (payment methods) survive the zip, sealed — no plaintext secret.
+        $this->assertSame('eurobank', $read['connections']['rows'][0]['gateway']);
+        $this->assertSame('passphrase', $read['connections']['secrets']['mode']);
+        $this->assertStringNotContainsString('ZIP-SECRET', file_get_contents($path));
 
         @unlink($path);
     }

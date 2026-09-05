@@ -10,7 +10,8 @@ use ZipArchive;
  * Filament UI share one reader/writer instead of duplicating ZipArchive glue.
  *
  * Layout: manifest.json + company.json + secrets.json + users.json +
- * setup/<table>.json + data/<table>.json (full bundle only) + files/<name>.
+ * connections.json + setup/<table>.json + data/<table>.json (full bundle only) +
+ * files/<name>.
  */
 class BundleArchive
 {
@@ -38,6 +39,9 @@ class BundleArchive
         // Assigned operators (email/name/role, no passwords). Optional key so an
         // older bundle without it still round-trips.
         $zip->addFromString('users.json', $json($bundle['users'] ?? []));
+        // Sealed payment-method connections (rows + passphrase-sealed config).
+        // Optional key so an older bundle without it still round-trips.
+        $zip->addFromString('connections.json', $json($bundle['connections'] ?? []));
         foreach ($bundle['setup'] as $table => $rows) {
             $zip->addFromString("setup/{$table}.json", $json($rows));
         }
@@ -97,6 +101,9 @@ class BundleArchive
         }
         // Optional (absent in older bundles) → default to no assigned operators.
         $users = $this->readJsonEntry($zip, 'users.json') ?? [];
+        // Optional (absent in older bundles) → default to no connections. The
+        // importer no-ops on empty rows, so a pre-connections bundle round-trips.
+        $connections = $this->readJsonEntry($zip, 'connections.json') ?? [];
 
         $setup = [];
         $data = [];
@@ -115,7 +122,7 @@ class BundleArchive
         }
         $zip->close();
 
-        return compact('manifest', 'company', 'secrets', 'users', 'setup', 'data', 'files');
+        return compact('manifest', 'company', 'secrets', 'users', 'connections', 'setup', 'data', 'files');
     }
 
     private function openOrFail(string $path): ZipArchive

@@ -26,6 +26,7 @@ class CompanyExportCoverageTest extends TestCase
         $known = array_merge(
             CompanyExporter::SETUP_TABLES,
             CompanyExporter::TRANSACTIONAL_TABLES,
+            CompanyExporter::SEALED_TABLES,
             CompanyExporter::INTENTIONALLY_EXCLUDED,
         );
 
@@ -80,11 +81,13 @@ class CompanyExportCoverageTest extends TestCase
     {
         $setup = CompanyExporter::SETUP_TABLES;
         $tx = CompanyExporter::TRANSACTIONAL_TABLES;
+        $sealed = CompanyExporter::SEALED_TABLES;
         $excluded = CompanyExporter::INTENTIONALLY_EXCLUDED;
 
         $this->assertSame([], array_intersect($setup, $tx), 'A table is in BOTH setup and transactional buckets.');
         $this->assertSame([], array_intersect($setup, $excluded), 'A table is both setup and excluded.');
         $this->assertSame([], array_intersect($tx, $excluded), 'A table is both transactional and excluded.');
+        $this->assertSame([], array_intersect($sealed, array_merge($setup, $tx, $excluded)), 'A sealed table is also in another bucket.');
     }
 
     /**
