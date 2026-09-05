@@ -460,9 +460,10 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   confirm/cancel κάρτες, `AiActionExecutor` (re-validate, scoped tenant+user), reminders → Filament DB
   notifications μέσω `ai:dispatch-reminders`._
   **Phase 2c (open) — ιδέες/σημειώσεις (καμία δέσμευση, χαμηλή προτεραιότητα):**
-  - **(α) Περισσότερα read tools** — σύγκριση εσόδων/εξόδων (income vs expense),
-    κατάσταση backups (`OperatorHealth`), WHMCS inbox (εκκρεμή `pending_whmcs_invoices`),
-    top προϊόντα/υπηρεσίες ανά περίοδο (`CustomerTopProducts`-style αλλά εταιρείας).
+  - **(α) Περισσότερα read tools** — **✅ SHIPPED (3/4): `income_vs_expense`, `top_products`,
+    `whmcs_inbox`** (dual-surface, chat + MCP). **Remaining: `backups_status`** — αφέθηκε γιατί
+    τα backups είναι super-admin/global (αδέξιο σε tenant-scoped operator chat)· καλύπτεται ήδη
+    μερικώς από το super-admin `app_health` MCP tool. Χτίσε το μόνο αν χρειαστεί operator-facing.
   - **(β) Περισσότερα write tools με confirm** — π.χ. «καταχώρισε είσπραξη/έμβασμα»
     (reuse `PaymentAllocator`), «κόψε πρόχειρο παραστατικό» (το `find_customer` ήδη δίνει
     link· εδώ θα στηνόταν draft μέσω `CreateInvoice`). Πάντα operator-confirm στο

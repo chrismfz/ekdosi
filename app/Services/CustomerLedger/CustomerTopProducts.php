@@ -2,22 +2,29 @@
 
 namespace App\Services\CustomerLedger;
 
+use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceLine;
 use App\Support\InvoiceScope;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 
 /**
- * «Συχνά προϊόντα/υπηρεσίες» for a customer's Καρτέλα.
+ * «Συχνά προϊόντα/υπηρεσίες» — top-N of what was sold, most-frequent first.
  *
- * Aggregates the invoice lines of a customer's LIVE sales invoices (not
- * cancelled, not AADE-cancelled, excluding credit notes) into a top-N list:
- * what they buy, how often, total quantity + net spend, and when they last
- * bought it. Lines without a linked product fall back to their free-text
- * description so manually-typed items still surface.
+ * Aggregates the invoice lines of LIVE sales invoices (not cancelled, not
+ * AADE-cancelled, excluding credit notes and unissued drafts) into a top-N list:
+ * what was bought, how often, total quantity + net spend, and when it last sold.
+ * Lines without a linked product fall back to their free-text description so
+ * manually-typed items still surface.
  *
- * Read-only and tenant-safe: every line is reached through the customer's own
- * invoices, so it never leaks across tenants. Cheap and bounded per customer.
+ * Two entry points, same aggregation:
+ *   - {@see for()} — one customer's Καρτέλα (all-time).
+ *   - {@see forCompany()} — the whole tenant over a period (the AI «top_products»
+ *     tool / company-wide view).
+ * Read-only and tenant-safe: `for()` reaches lines through the customer's own
+ * invoices; `forCompany()` scopes explicitly by `company_id`. Neither leaks across
+ * tenants.
  */
 class CustomerTopProducts
 {
@@ -49,6 +56,44 @@ class CustomerTopProducts
             ->with(['product:id,sku,description_short,description', 'invoice:id,issued_at'])
             ->get();
 
+        return $this->aggregate($rows, $limit);
+    }
+
+    /**
+     * Company-wide top products/services over a period (optional bounds). Same
+     * live-sales filter as {@see for()}, scoped explicitly by tenant.
+     *
+     * @return array<int, array{key: string, label: string, product_id: ?int, sku: ?string, times: int, qty: float, net: float, unit: ?string, last_at: ?string}>
+     */
+    public function forCompany(Company $tenant, ?Carbon $from = null, ?Carbon $to = null, int $limit = 10): array
+    {
+        $rows = InvoiceLine::query()
+            ->whereHas('invoice', function ($q) use ($tenant, $from, $to): void {
+                $q->where('company_id', $tenant->getKey());
+                if ($from !== null) {
+                    $q->where('issued_at', '>=', $from);
+                }
+                if ($to !== null) {
+                    $q->where('issued_at', '<=', $to);
+                }
+                InvoiceScope::excludeCreditNotes($q);
+                InvoiceScope::excludeUnissuedDrafts($q);
+                InvoiceScope::live($q);
+            })
+            ->with(['product:id,sku,description_short,description', 'invoice:id,issued_at'])
+            ->get();
+
+        return $this->aggregate($rows, $limit);
+    }
+
+    /**
+     * Bucket a set of invoice lines into the top-N most-frequent products/services.
+     *
+     * @param  Collection<int, InvoiceLine>  $rows
+     * @return array<int, array{key: string, label: string, product_id: ?int, sku: ?string, times: int, qty: float, net: float, unit: ?string, last_at: ?string}>
+     */
+    private function aggregate(Collection $rows, int $limit): array
+    {
         $buckets = [];
 
         foreach ($rows as $line) {
