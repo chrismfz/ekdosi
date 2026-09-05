@@ -138,6 +138,11 @@ class PaymentIntentService
 
             $amount = round($actualAmount ?? (float) $locked->amount, 2);
 
+            // Auto-stamp the myDATA «Τρόπος πληρωμής»: an explicit one (operator form)
+            // wins; otherwise inherit the channel's configured default (e.g. Eurobank
+            // → «Ηλεκτρονικά μέσα Πληρωμών») so a gateway payment isn't left method-less.
+            $methodId = $paymentMethodId ?? $this->connectionMethodId($locked);
+
             // Provenance («πώς ήρθε η συναλλαγή»): the Payment IS the transactions
             // ledger. `reference` stays our ΠΛ- receipt key (groups the είσπραξη in
             // the Καρτέλα); `transaction_id` carries the ACQUIRER's txn id when the
@@ -160,7 +165,7 @@ class PaymentIntentService
                     invoice: $target,
                     amount: $amount,
                     date: Carbon::now(),
-                    paymentMethodId: $paymentMethodId,
+                    paymentMethodId: $methodId,
                     reference: $locked->reference,
                     notes: $notes,
                     transactionId: $transactionId ?: $locked->reference,
@@ -171,7 +176,7 @@ class PaymentIntentService
                     customer: $customer,
                     amount: $amount,
                     date: Carbon::now(),
-                    paymentMethodId: $paymentMethodId,
+                    paymentMethodId: $methodId,
                     reference: $locked->reference,
                     notes: $notes,
                     transactionId: $transactionId ?: $locked->reference,
@@ -185,6 +190,23 @@ class PaymentIntentService
                 'settled_by' => $settledBy,
             ])->save();
         });
+    }
+
+    /** The myDATA payment-method the intent's channel is configured to stamp, or null. */
+    private function connectionMethodId(PaymentIntent $intent): ?int
+    {
+        if ($intent->payment_gateway_connection_id === null) {
+            return null;
+        }
+
+        $methodId = PaymentGatewayConnection::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->withTrashed()
+            ->where('company_id', $intent->company_id)
+            ->whereKey($intent->payment_gateway_connection_id)
+            ->value('payment_method_id');
+
+        return $methodId !== null ? (int) $methodId : null;
     }
 
     /**

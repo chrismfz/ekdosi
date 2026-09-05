@@ -98,6 +98,10 @@ class CompanyExporter
         // record. The actual money lives in `payments` (exported); a settled intent
         // is re-derivable from it, a pending one is ephemeral. Not source-of-truth.
         'payment_intents',
+        // «Log πύλης» — a diagnostic/audit trail of inbound gateway returns. Runtime
+        // history bound to THIS deployment's traffic, not config or accounting data;
+        // it re-accrues on the target as returns arrive. Never travels in the bundle.
+        'payment_gateway_events',
         // AI «Βοηθός» operational state — metering/billing log + the transient
         // confirm queue & reminders. Not part of the accounting dataset a tenant
         // carries across VMs (re-accrues per usage; pending actions are ephemeral).
@@ -259,6 +263,9 @@ class CompanyExporter
                     'label' => $conn->label,
                     'is_active' => (bool) $conn->is_active,
                     'sort' => (int) $conn->sort,
+                    // The channel's default myDATA method (a payment_methods FK) —
+                    // rewired to the target's imported payment_methods on import.
+                    'payment_method_id' => $conn->payment_method_id,
                 ];
                 // `config` is the decrypted array (encrypted:array cast); seal it.
                 $configs[$ref] = $conn->config ?? [];

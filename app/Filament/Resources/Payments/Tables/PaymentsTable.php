@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Payments\Tables;
 
 use App\Enums\PaymentStatus;
 use App\Models\Payment;
+use App\Services\Payments\PaymentGatewayRegistry;
 use App\Support\Money;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -21,6 +22,8 @@ class PaymentsTable
     public static function configure(Table $table): Table
     {
         return $table
+            // Eager-load the intent (id+gateway only) so the «Κανάλι» column doesn't N+1.
+            ->modifyQueryUsing(fn ($query) => $query->with('paymentIntent:id,gateway'))
             ->columns([
                 TextColumn::make('pay_date')
                     ->label('Ημ/νία')
@@ -39,6 +42,24 @@ class PaymentsTable
                 TextColumn::make('paymentMethod.description')
                     ->label('Τρόπος')
                     ->placeholder('—'),
+
+                // Κανάλι/προέλευση: came AUTOMATICALLY via a portal gateway (linked to
+                // an intent → «Πύλη · Eurobank») vs entered by the operator/import
+                // («Χειροκίνητα»). Distinct from «Τρόπος» (the myDATA method).
+                TextColumn::make('payment_channel')
+                    ->label('Κανάλι')
+                    ->badge()
+                    ->state(function (Payment $record): string {
+                        if ($record->payment_intent_id === null) {
+                            return 'Χειροκίνητα';
+                        }
+                        $gateway = (string) $record->paymentIntent?->gateway;
+
+                        return $gateway !== ''
+                            ? 'Πύλη · '.app(PaymentGatewayRegistry::class)->label($gateway)
+                            : 'Πύλη';   // intent purged/soft-deleted — still «Πύλη», no stray «· —»
+                    })
+                    ->color(fn (Payment $record): string => $record->payment_intent_id !== null ? 'info' : 'gray'),
 
                 // A refund IS a Payment row (kind='refund'); mark it so it doesn't
                 // read as an incoming payment.

@@ -635,6 +635,7 @@ class CompanyImporter
             ? $this->codec->open($connections['secrets'], $passphrase)
             : [];
         $bankMap = $maps['bank_accounts'] ?? [];
+        $methodMap = $maps['payment_methods'] ?? [];
 
         // Track the target rows already matched THIS pass, so two bundle rows that
         // share (gateway, label) — allowed, and common with a null label — match TWO
@@ -656,9 +657,18 @@ class CompanyImporter
                 )));
             }
 
+            // Rewire the channel's default myDATA method to the target's imported
+            // payment_methods (drop if it didn't import) — else the auto-«Τρόπος» on
+            // gateway settlements is silently lost on cutover.
+            $oldMethod = $row['payment_method_id'] ?? null;
+            $newMethod = $oldMethod !== null
+                ? ($methodMap[$oldMethod] ?? ($methodMap[(int) $oldMethod] ?? null))
+                : null;
+
             $attrs = [
                 'is_active' => (bool) ($row['is_active'] ?? false),
                 'sort' => (int) ($row['sort'] ?? 0),
+                'payment_method_id' => $newMethod,
                 'config' => $config,
             ];
 

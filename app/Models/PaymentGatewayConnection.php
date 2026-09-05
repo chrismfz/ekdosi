@@ -24,6 +24,7 @@ class PaymentGatewayConnection extends Model
     protected $fillable = [
         'company_id',
         'gateway',
+        'payment_method_id',
         'label',
         'is_active',
         'sort',
@@ -44,5 +45,11 @@ class PaymentGatewayConnection extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /** The myDATA «Τρόπος πληρωμής» stamped on payments settled through this channel. */
+    public function paymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class);
     }
 }

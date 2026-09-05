@@ -3,7 +3,9 @@
 namespace App\Filament\Resources\PaymentGatewayConnections\Schemas;
 
 use App\Contracts\PaymentGateway;
+use App\Models\PaymentMethod;
 use App\Services\Payments\PaymentGatewayRegistry;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
@@ -49,6 +51,22 @@ class PaymentGatewayConnectionForm
                 ->numeric()
                 ->default(0)
                 ->minValue(0),
+
+            // The myDATA «Τρόπος πληρωμής» stamped on payments settled through this
+            // channel (e.g. Eurobank/κάρτα → «Ηλεκτρονικά μέσα Πληρωμών»), so a gateway
+            // payment isn't left method-less. Kept SEPARATE from the customer-facing
+            // label: this is the accounting/myDATA type, not what the customer reads.
+            Select::make('payment_method_id')
+                ->label('Τρόπος πληρωμής (myDATA)')
+                ->options(fn (): array => PaymentMethod::query()
+                    ->where('company_id', Filament::getTenant()?->getKey())
+                    ->orderBy('description')
+                    ->pluck('description', 'id')
+                    ->all())
+                ->searchable()
+                ->native(false)
+                ->placeholder('— κανένας (κενό «Τρόπος» στην πληρωμή) —')
+                ->helperText('Αυτόματα στην είσπραξη μέσω αυτού του καναλιού. Π.χ. «Ηλεκτρονικά μέσα Πληρωμών».'),
 
             // Per-gateway settings, declared BY the gateway (configFields) and
             // nested under `config` (encrypted at rest). A new gateway brings its

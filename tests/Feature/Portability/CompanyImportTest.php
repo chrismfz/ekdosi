@@ -101,9 +101,14 @@ class CompanyImportTest extends TestCase
             'company_id' => $company->id, 'bank_name' => 'Eurobank', 'iban' => 'GR-IBAN-1',
             'account_name' => 'Δικαιούχος', 'is_active' => true,
         ]);
+        // The channel's auto-«Τρόπος» (myDATA method) must also survive — rewired to
+        // the target's imported payment_methods, not the stale source id.
+        $method = PaymentMethod::create([
+            'company_id' => $company->id, 'description' => 'Ηλεκτρονικά μέσα Πληρωμών', 'due_days' => 0,
+        ]);
         PaymentGatewayConnection::create([
             'company_id' => $company->id, 'gateway' => 'eurobank', 'label' => 'Κάρτα',
-            'is_active' => true, 'sort' => 0,
+            'is_active' => true, 'sort' => 0, 'payment_method_id' => $method->id,
             'config' => ['merchant_id' => 'MID999', 'shared_secret' => 'TOP-SECRET-XYZ', 'lang' => 'el', 'testmode' => false],
         ]);
         PaymentGatewayConnection::create([
@@ -129,6 +134,10 @@ class CompanyImportTest extends TestCase
         $this->assertSame('MID999', $eb->config['merchant_id']);
         $this->assertSame('TOP-SECRET-XYZ', $eb->config['shared_secret']);
         $this->assertTrue((bool) $eb->is_active);
+        // The myDATA-method FK rewired to the target's own imported payment_method.
+        $targetMethod = PaymentMethod::where('company_id', $target->id)
+            ->where('description', 'Ηλεκτρονικά μέσα Πληρωμών')->firstOrFail();
+        $this->assertSame($targetMethod->id, $eb->payment_method_id);
 
         $newBank = BankAccount::where('company_id', $target->id)->firstOrFail();
         $manual = PaymentGatewayConnection::where('company_id', $target->id)->where('gateway', 'manual')->firstOrFail();
