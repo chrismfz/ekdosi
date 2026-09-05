@@ -5,6 +5,7 @@ namespace App\Services\Portal;
 use App\Models\CustomerUser;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * The single source of «which live documents belong to a (company, customer)»
@@ -51,7 +52,11 @@ class CustomerDocumentFeed
                 'documents' => $documents,
                 // The MAX_ROWS cap is surfaced so the view can say so — a customer
                 // with more live documents than the cap sees the newest, not silence.
-                'truncated' => count($documents) >= self::MAX_ROWS,
+                // Only a FULL page can hide older rows, and only then do we pay the
+                // extra existence check (is there a MAX_ROWS+1'th live doc?).
+                'truncated' => count($documents) === self::MAX_ROWS
+                    && $this->liveQuery($grant->company_id, $grant->customer_id)
+                        ->offset(self::MAX_ROWS)->exists(),
             ];
         }
 
@@ -65,13 +70,7 @@ class CustomerDocumentFeed
      */
     public function documentsFor(int $companyId, int $customerId): array
     {
-        return Invoice::query()
-            ->withoutGlobalScope(CompanyScope::class)
-            ->where('company_id', $companyId)
-            ->where('customer_id', $customerId)
-            // isPubliclyViewable() in SQL: issued + not AADE-cancelled.
-            ->where('local_status', 'active')
-            ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'))
+        return $this->liveQuery($companyId, $customerId)
             ->with('invoiceType:id,name')
             ->orderByDesc('issued_at')
             ->orderByDesc('id')
@@ -87,6 +86,23 @@ class CustomerDocumentFeed
                 'verify_url' => ($inv->mydata_url !== null && $inv->mydata_url !== '') ? $inv->mydata_url : null,
             ])
             ->all();
+    }
+
+    /**
+     * The one live-document predicate for a (company, customer): issued
+     * (`local_status=active`) and not AADE-cancelled — the same allow-list as
+     * Invoice::isPubliclyViewable(), in SQL. CompanyScope is dropped (grants are
+     * cross-company). Shared by documentsFor() and the truncation check so the
+     * filter is defined exactly once.
+     */
+    private function liveQuery(int $companyId, int $customerId): Builder
+    {
+        return Invoice::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $companyId)
+            ->where('customer_id', $customerId)
+            ->where('local_status', 'active')
+            ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'));
     }
 
     /**

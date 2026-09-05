@@ -29,7 +29,10 @@ class EnsurePortalAuthenticated
         if (! $user instanceof CustomerUser || ! $user->canLogin()) {
             Auth::guard('portal')->logout();
 
-            return redirect()->route('portal.login');
+            // guest() stashes the intended URL (GET only), so after login the
+            // customer lands back on the document/page they deep-linked to — the
+            // new /user/document/{id}/pdf route makes this user-visible.
+            return redirect()->guest(route('portal.login'));
         }
 
         Auth::shouldUse('portal');

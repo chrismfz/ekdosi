@@ -167,7 +167,10 @@ class PortalDocumentsTest extends TestCase
     public function test_pdf_requires_portal_auth(): void
     {
         $this->mock(InvoicePdfRenderer::class)->shouldNotReceive('render');
-        $this->get('/user/document/1/pdf')->assertRedirect(route('portal.login'));
+        $this->get('/user/document/1/pdf')
+            ->assertRedirect(route('portal.login'))
+            // The deep link is remembered so login sends the customer back to it.
+            ->assertSessionHas('url.intended', url('/user/document/1/pdf'));
     }
 
     public function test_a_suspended_login_is_logged_out_mid_session(): void

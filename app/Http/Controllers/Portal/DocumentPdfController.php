@@ -37,12 +37,11 @@ class DocumentPdfController extends Controller
 
         $pdf = $renderer->render($model);
 
-        $ascii = ($model->invcode !== null && $model->invcode !== '')
-            ? preg_replace('/[^A-Za-z0-9._-]/', '_', (string) $model->invcode)
-            : 'invoice-'.$model->getKey();
-        $utf8 = ($model->invcode !== null && $model->invcode !== '')
+        $base = ($model->invcode !== null && $model->invcode !== '')
             ? (string) $model->invcode
             : 'invoice-'.$model->getKey();
+        $ascii = preg_replace('/[^A-Za-z0-9._-]/', '_', $base);
+        $utf8 = $base;
 
         return response($pdf, Response::HTTP_OK, [
             'Content-Type' => 'application/pdf',
