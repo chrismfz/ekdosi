@@ -49,13 +49,12 @@ class CustomerLedgerStats extends StatsOverviewWidget
 
         $balance = (float) ($s['balance'] ?? 0);
         $balanceStat = Stat::make('Υπόλοιπο', $fmt($balance))
-            ->color($balance > 0 ? 'danger' : 'success')
-            ->descriptionIcon($balance > 0 ? 'heroicon-m-exclamation-triangle' : 'heroicon-m-check-circle')
-            ->description(
-                ! empty($s['oldest_unpaid_days'])
-                    ? 'Παλαιότερο ανεξόφλητο: '.$s['oldest_unpaid_days'].' ημ.'
-                    : 'Χωρίς ανεξόφλητο υπόλοιπο',
-            );
+            ->color($balance > 0.005 ? 'danger' : ($balance < -0.005 ? 'success' : 'gray'))
+            ->descriptionIcon($balance > 0.005 ? 'heroicon-m-exclamation-triangle' : 'heroicon-m-check-circle')
+            // EXPLAIN the number: χρεώσεις − πιστωτικά − πληρωμές = υπόλοιπο, so a
+            // credit note (or a payment) that flipped the balance is visible instead
+            // of a mystery (the whole reason someone couldn't tell «από πού ήρθε»).
+            ->description($this->balanceBreakdown($s, $fmt));
 
         if (count($spark) > 1) {
             $balanceStat->chart($spark);
@@ -104,5 +103,47 @@ class CustomerLedgerStats extends StatsOverviewWidget
                 ->color('gray'),
             $balanceStat,
         ];
+    }
+
+    /**
+     * A one-line explanation of the balance: «Χρεώσεις 186,00 € · Πιστωτικά
+     * −18,60 € · Πληρωμές −185,00 €» (only the non-zero terms). Falls back to the
+     * ανεξόφλητο-age hint when there's nothing to break down. `charges` are the
+     * collectible debits that count toward the balance (credit-term + paid
+     * cash-term); cash sales settled at issue don't appear.
+     *
+     * @param  array<string, mixed>  $s
+     */
+    private function balanceBreakdown(array $s, callable $fmt): string
+    {
+        $charges = (float) ($s['charges'] ?? 0);
+        $creditNotes = (float) ($s['credit_notes'] ?? 0);
+        $payments = (float) ($s['payments'] ?? 0);
+
+        // Show each term as its SIGNED effect on the balance (charges add; credit
+        // notes and payments subtract) so charges + (−credit_notes) + (−payments)
+        // reconciles to the «Υπόλοιπο» — and a net-refund lifetime (payments < 0)
+        // prints «Πληρωμές 30,00 €» rather than a garbled double-negative.
+        $parts = [];
+        if (abs($charges) >= 0.005) {
+            $parts[] = 'Χρεώσεις '.$fmt($charges);
+        }
+        if (abs($creditNotes) >= 0.005) {
+            $parts[] = 'Πιστωτικά '.$fmt(-$creditNotes);
+        }
+        if (abs($payments) >= 0.005) {
+            $parts[] = 'Πληρωμές '.$fmt(-$payments);
+        }
+
+        if ($parts === []) {
+            return 'Χωρίς κινήσεις υπολοίπου';
+        }
+
+        $line = implode(' · ', $parts);
+        if (! empty($s['oldest_unpaid_days'])) {
+            $line .= ' · Παλαιότερο ανεξόφλητο '.$s['oldest_unpaid_days'].' ημ.';
+        }
+
+        return $line;
     }
 }

@@ -101,14 +101,18 @@ class DashboardMetrics
 
     /**
      * Outstanding receivables across ALL customers:
-     *   Σ(credit-term, non-cancelled invoice gross − credited_total)
+     *   Σ(credit-term/paid, non-cancelled invoice payable)
+     *   − Σ(credited_total over ALL live issued originals, any term)
+     *   − Σ(standalone legacy credit notes' payable)
      *   − Σ(all non-trashed payments)
      * Credit notes (credited_invoice_id set) are excluded from the base
      * — they're reductions, applied via the original's credited_total
-     * cache, not receivables of their own. Payments are subtracted
-     * tenant-wide (allocated + on-account both reduce what's owed),
-     * matching the CustomerLedgerBuilder balance summed across customers.
-     * Can be negative if customers carry credit balances; real figure.
+     * cache. MON-13: that cache is summed over ALL live originals (not just
+     * those in the receivable base), so crediting a CASH-TERM invoice still
+     * lands its reduction (a credit note is account credit, not a refund).
+     * Payments are subtracted tenant-wide (allocated + on-account both reduce
+     * what's owed), matching the CustomerLedgerBuilder balance summed across
+     * customers. Can be negative if customers carry credit balances; real figure.
      */
     public function outstandingReceivables(): float
     {
@@ -142,11 +146,32 @@ class DashboardMetrics
 
         // Receivable base = payable_total (collectible) per row, gross_total fallback
         // for not-yet-backfilled rows. Revenue/turnover sums elsewhere stay on gross_total.
-        $row = InvoiceScope::live($base, 'invoices.')
-            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) - COALESCE(SUM(invoices.credited_total), 0) AS net_owed')
-            ->first();
+        $netOwed = (float) InvoiceScope::live($base, 'invoices.')
+            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) AS owed')
+            ->value('owed');
 
-        $netOwed = (float) ($row->net_owed ?? 0);
+        // MON-13: a correlated credit note reduces via its ORIGINAL's credited_total —
+        // but the original must be COUNTED for the reduction to land. Summing it
+        // inside the receivable base above dropped it whenever the original is
+        // cash-term-unpaid (not in the base): crediting a cash-term invoice silently
+        // lost its account credit, so the customer list / dashboard read a DIFFERENT
+        // balance than the Καρτέλα (the confusing «τρία διαφορετικά υπόλοιπα»). A
+        // credit note is NOT a refund → the customer IS owed the money back, so the
+        // reduction MUST land regardless of term. Sum credited_total over ALL live,
+        // issued originals — matching CustomerLedgerBuilder.
+        // NOT filtered by customer_id: the headline is TENANT-WIDE, so it nets a
+        // retail (null-customer) credit note too — mirroring the owed base above,
+        // which also counts null-customer receivables. (The per-customer scope can't
+        // represent retail, so headline vs Σ-per-customer legitimately differs when
+        // retail receivables exist — a pre-existing, accepted property.)
+        $creditedBase = DB::table('invoices')
+            ->where('invoices.company_id', $this->tenant->id)
+            ->whereNull('invoices.deleted_at');
+        InvoiceScope::excludeCreditNotes($creditedBase);
+        InvoiceScope::excludeUnissuedDrafts($creditedBase);
+        $creditedTotal = (float) InvoiceScope::live($creditedBase, 'invoices.')
+            ->selectRaw('COALESCE(SUM(invoices.credited_total), 0) AS credited_total')
+            ->value('credited_total');
 
         // MON-9: standalone legacy credit notes (is_credit type, no
         // credited_invoice_id) have no original to carry a credited_total, so the
@@ -172,7 +197,7 @@ class DashboardMetrics
             ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS net_paid')
             ->value('net_paid');
 
-        return round($netOwed - $standaloneCredits - $totalPaid, 2);
+        return round($netOwed - $creditedTotal - $standaloneCredits - $totalPaid, 2);
     }
 
     /**
@@ -548,7 +573,10 @@ class DashboardMetrics
         $receivables = $this->outstandingReceivables();
         $trailing = $this->income($now->copy()->subYearNoOverflow(), $now);
         $perDay = $trailing->gross / 365.0;
-        $dso = $perDay > 0.005 ? (int) round($receivables / $perDay) : null;
+        // DSO measures how long receivables take to collect — a settled OR CREDIT
+        // (negative) balance has zero days outstanding, never a negative DSO. Clamp
+        // at 0 (MON-13: crediting a cash-term invoice can push receivables negative).
+        $dso = $perDay > 0.005 ? (int) round(max(0.0, $receivables) / $perDay) : null;
 
         return [
             'year' => $year,

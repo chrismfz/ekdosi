@@ -741,6 +741,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **MON-13 leftover (P3, ledger display edge).** The Καρτέλα ledger sorts same-day rows by a business-date
+  primary + creation-order tiebreak, but a row's DISPLAYED time is issue-time for invoices vs entry-time
+  (created_at) for payments. A back-dated invoice (issued 09:00, entered 15:00) on the same day as a payment
+  (entered 10:00) can render its 09:00 above the payment's 10:00 while sorting after it — a cosmetic «ανάποδα»
+  in that narrow case. The common case (two same-day payments/refunds) is fixed + tested. A full fix synthesizes
+  a single sort/display datetime per row (pay_date + entry time-of-day), but that shifts the running-balance walk
+  order, so it needs its own regression pass — deferred.
 - **Payment intents — housekeeping (B0b survivors, low priority).** (a) **Amount sanity cap on manual settle:**
   `actual_amount` is bounded only by `min 0.01`; a typo (10000 vs 100) settles FIFO + parks a large on-account
   credit. Pre-existing to ALL manual payment entry (the Payments resource too), operator-authoritative — add a

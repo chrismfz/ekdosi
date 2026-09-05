@@ -7,6 +7,7 @@ use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Filament\Resources\Payments\PaymentResource;
 use App\Filament\Support\BankAccountField;
 use App\Mail\CustomerStatementMail;
 use App\Models\Customer;
@@ -335,6 +336,9 @@ class CustomerLedger extends Page implements HasTable
                 TextColumn::make('date')
                     ->label('Ημερομηνία')
                     ->formatStateUsing(fn ($state): string => Carbon::parse($state)->format('d/m/Y'))
+                    // Show the entry time under the date so same-day rows (a payment +
+                    // a same-day refund) read in the right order at a glance.
+                    ->description(fn (array $record): ?string => $record['time'] ?? null)
                     ->sortable()
                     ->extraAttributes(['class' => 'font-mono whitespace-nowrap']),
                 TextColumn::make('type')
@@ -349,7 +353,10 @@ class CustomerLedger extends Page implements HasTable
                 TextColumn::make('reference')
                     ->label('Αναφορά')
                     ->searchable()
-                    ->color(fn (array $record): ?string => ($record['type'] === 'invoice' && $record['invoice_id']) ? 'primary' : null)
+                    // Blue (clickable) for anything the row links to: an invoice, or a
+                    // payment/refund (→ its editable record). Grouped receipts have the
+                    // «Κατανομή» drill-down instead, so they stay plain.
+                    ->color(fn (array $record): ?string => $this->ledgerRowUrl($record) !== null ? 'primary' : null)
                     // «Αναλυτική παρακράτηση»: when the collectible differs from the
                     // document value (withholding/τέλη), show both under the reference.
                     // Display-only — the Χρέωση/Υπόλοιπο stay = payable.
@@ -424,9 +431,7 @@ class CustomerLedger extends Page implements HasTable
                         'fmtMoney' => fn ($v): string => $this->fmtMoney($v),
                     ])),
             ])
-            ->recordUrl(fn (array $record): ?string => ($record['type'] === 'invoice' && $record['invoice_id'])
-                ? InvoiceResource::getUrl('view', ['record' => $record['invoice_id']])
-                : null)
+            ->recordUrl(fn (array $record): ?string => $this->ledgerRowUrl($record))
             ->defaultSort('date', 'desc')
             ->paginated([25, 50, 100, 'all'])
             ->defaultPaginationPageOption(25)
@@ -484,10 +489,12 @@ class CustomerLedger extends Page implements HasTable
             }));
         }
 
-        // buildLedgerOnly already returns newest-first (date desc). Only
-        // re-sort when the operator explicitly flips the date column.
+        // buildLedgerOnly already returns newest-first (date + creation-order
+        // tiebreak). Flipping to ascending just reverses it — array_reverse keeps
+        // the same-day creation-order tiebreak intact (strcmp on the date string
+        // would collapse same-day rows into an arbitrary order again).
         if ($sortColumn === 'date' && $sortDirection === 'asc') {
-            usort($rows, fn (array $a, array $b): int => strcmp($a['date'], $b['date']));
+            $rows = array_reverse($rows);
         }
 
         $total = count($rows);
@@ -508,6 +515,26 @@ class CustomerLedger extends Page implements HasTable
                 'pageName' => 'page',
             ],
         );
+    }
+
+    /**
+     * Where a ledger row links: an invoice → its view; a payment/refund → its
+     * (editable) Payment record, so the operator can inspect/correct it (e.g. a
+     * wrong refund amount). A grouped receipt (no single payment_id) uses the
+     * «Κατανομή» drill-down modal instead → no direct url.
+     *
+     * @param  array<string, mixed>  $record
+     */
+    private function ledgerRowUrl(array $record): ?string
+    {
+        if (($record['type'] ?? null) === 'invoice' && ! empty($record['invoice_id'])) {
+            return InvoiceResource::getUrl('view', ['record' => $record['invoice_id']]);
+        }
+        if (in_array($record['type'] ?? null, ['payment', 'refund'], true) && ! empty($record['payment_id'])) {
+            return PaymentResource::getUrl('edit', ['record' => $record['payment_id']]);
+        }
+
+        return null;
     }
 
     private function fmtMoney(mixed $value): string
