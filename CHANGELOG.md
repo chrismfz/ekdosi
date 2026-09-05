@@ -46,8 +46,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
   3-γραμμος `AssistantMcpTool` adapter (το parity test το επιβάλλει), tenant-scoped, Shield-gated,
   read-only, χωρίς κλήση ΑΑΔΕ/WHMCS.
 - **Customer portal — Slice 0 (auth shell + UI).** Θεμέλια για portal πελατών: πίνακας/model `customer_users`
-  (global login identity, ξεχωριστός από τους operators `users`), νέος **`portal` auth guard**, `/login` +
-  `/logout` + `/portal` + **σελίδα προφίλ** (στοιχεία + αλλαγή κωδικού· email/ΑΦΜ όχι επεξεργάσιμα), και
+  (global login identity, ξεχωριστός από τους operators `users`), νέος **`portal` auth guard**, `/user/login` +
+  `/user/logout` + `/user` + **σελίδα προφίλ** (στοιχεία + αλλαγή κωδικού· email/ΑΦΜ όχι επεξεργάσιμα), και
   `php artisan portal:create-user`. **UI με Flux UI (Free)** πάνω στο υπάρχον Tailwind v4/Vite pipeline. Κανένα
   customer data ακόμα — μόνο το κέλυφος auth, με έμφαση στον **διαχωρισμό guard** (portal login ≠ operator, δεν
   φτάνει ποτέ στο `/admin`). Ο πίνακας είναι λιτός (auth + account-safety)· forward-looking στήλες (2FA à la
@@ -61,6 +61,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
   «Πρόσβαση σε πελάτες»: προσθήκη/ανάκληση/επαναφορά ανά πελάτη/ΑΦΜ). **Δεν** το διαβάζει ακόμα καμία
   customer-facing οθόνη — είναι το data model + διαχείριση· η λίστα παραστατικών του πελάτη (που θα το
   χρησιμοποιεί ως leak-proof boundary) είναι επόμενο slice.
+- **Customer portal — Slice 2 (λίστα παραστατικών του πελάτη).** Το πρώτο πραγματικό customer-facing data:
+  στο `/user` ο πελάτης βλέπει τα εκδοθέντα παραστατικά του, ομαδοποιημένα ανά (εταιρία, πελάτη/ΑΦΜ),
+  με ημερομηνία/κωδικό/τύπο/κατάσταση/ΜΑΡΚ + κουμπιά **PDF** (proxied, streamed) και **Επαλήθευση** (provider/ΑΑΔΕ
+  URL). Νέα υπηρεσία **`CustomerDocumentFeed`** = η μοναδική πηγή «ποια live παραστατικά ανήκουν σε (εταιρία,
+  πελάτη)» + «μπορεί αυτό το login να δει αυτό το παραστατικό» — **αυστηρά μέσω ενεργού grant** (ποτέ με ΑΦΜ/εταιρία
+  σκέτα), μόνο **live** (`local_status=active` + όχι AADE-cancelled, ίδιο allow-list με `isPubliclyViewable()`).
+  Νέο route **`/user/document/{invoice}/pdf`** (throttled): fail-closed (404 όταν δεν είναι live ή δεν φτάνεται
+  μέσω grant, χωρίς αποκάλυψη ύπαρξης), ξανα-ελέγχει το boundary ανά request. Το middleware ξανα-ελέγχει
+  `canLogin()` κάθε request (suspend μετά το login → logout στο επόμενο request).
+- **Routing: καθαρός διαχωρισμός `/admin` ⟂ `/user` + κενό `/`.** Όλες οι customer-facing διαδρομές κάτω από
+  **`/user`** (`/user/login`·`/user/logout`·`/user`·`/user/settings`·`/user/document/{id}/pdf`)· το `/` έγινε
+  **σκόπιμα κενό placeholder** (δεν αποκαλύπτει ούτε `/admin` ούτε `/user` — πρώην redirect → `/admin`). Οι
+  operators μπαίνουν στο `/admin`, οι πελάτες στο `/user`. (Τα route names μένουν `portal.*` εσωτερικά· μόνο το
+  URL prefix άλλαξε.)
 - **Dependency:** `livewire/flux` (Flux UI Free) για το customer portal UI.
 - **AI «Βοηθός» Phase 2c-(ε): σελίδα «Χρήση & κόστος AI».** Read-only surface πάνω στο υπάρχον
   `ai_usage_log` (καμία νέα οντότητα δεδομένων), **μέσα στην περιοχή «AI Βοηθός»** (group «Σύστημα»,

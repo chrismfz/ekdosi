@@ -10,9 +10,10 @@ class ExampleTest extends TestCase
     /**
      * A basic test example.
      */
-    public function test_the_root_redirects_to_the_admin_panel(): void
+    public function test_the_root_is_an_intentional_blank_placeholder(): void
     {
-        // There is no public landing page; root redirects into the panel.
-        $this->get('/')->assertRedirect('/admin');
+        // Root reveals neither surface: operators use /admin, customers /user.
+        // It renders a neutral placeholder (200), never a redirect to either.
+        $this->get('/')->assertOk()->assertDontSee('/admin')->assertDontSee('/user');
     }
 }

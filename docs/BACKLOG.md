@@ -715,6 +715,19 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Customer portal — Slice 2 documents view: P2/P3 survivors (from the adversarial gate).**
+  _(consciously deferred)._ The security boundary (grant-scoped reads, fail-closed PDF authz, per-request
+  status re-check) passed with no P0/P1. Fixed in the same PR: PDF-route throttle, `target=_blank`
+  `rel=noopener`, a «newest 500» notice when the per-group cap is hit, and a strengthened suspended-mid-session
+  test (real login + `forgetGuards()` → genuine DB-reload path). **Parked:** (a) **`CustomerDocumentFeed::forLogin()`
+  runs one query per active grant with no aggregate per-response cap** — fine at today's 1–3 grants/login, but a
+  login with many grants would hydrate up to 500 rows × N groups into one non-paginated page; add pagination /
+  a response ceiling if a reseller login ever holds many grants. (b) **`documentsFor()` hard-caps at 500 newest
+  docs per (company,customer)** with only a notice, no pagination — a customer with >500 live invoices can't
+  reach the oldest; add pagination when a real tenant approaches the cap. **Deliberate (not a bug):** a
+  `reseller`-role grant exposes the granted customer's FULL live-document history, not only reseller-brokered
+  docs — the operator explicitly links a login to a customer/ΑΦΜ, so the grant IS the configured relationship;
+  narrow it only if a product decision says a reseller should see a subset.
 - **Gapless-at-send (ΑΑ Phase 1 invoices + Phase 2 δελτία) — P2 survivors of the review loop**
   _(consciously deferred)._ The gapless-at-send numbering change (real ΑΑ allocated at transmission,
   provisional «ΠΡΟΣ-…» until then) passed the adversarial gate with two P1s fixed (finalize gate → mode-aware

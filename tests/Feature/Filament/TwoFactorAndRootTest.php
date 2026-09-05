@@ -6,6 +6,7 @@ use App\Models\User;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class TwoFactorAndRootTest extends TestCase
@@ -37,13 +38,14 @@ class TwoFactorAndRootTest extends TestCase
         $this->assertSame($user->email, $fresh->getAppAuthenticationHolderName());
 
         // Stored encrypted at rest — the raw column is not the plaintext secret.
-        $raw = \Illuminate\Support\Facades\DB::table('users')->where('id', $user->id)->value('app_authentication_secret');
+        $raw = DB::table('users')->where('id', $user->id)->value('app_authentication_secret');
         $this->assertNotSame('S3CR3TBASE32', $raw);
     }
 
-    public function test_root_redirects_to_the_admin_panel(): void
+    public function test_root_is_an_intentional_blank_placeholder(): void
     {
-        $this->get('/')->assertRedirect('/admin');
+        // /admin ⟂ /user split: the root leaks neither surface, just a placeholder.
+        $this->get('/')->assertOk()->assertDontSee('/admin')->assertDontSee('/user');
     }
 
     public function test_mfa_secrets_are_hidden_from_serialization(): void

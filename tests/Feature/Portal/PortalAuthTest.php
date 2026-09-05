@@ -37,14 +37,14 @@ class PortalAuthTest extends TestCase
 
     public function test_login_page_renders(): void
     {
-        $this->get('/login')->assertOk()->assertSee('Είσοδος πελατών');
+        $this->get('/user/login')->assertOk()->assertSee('Είσοδος πελατών');
     }
 
     public function test_valid_credentials_log_in_and_record_last_login(): void
     {
         $user = $this->active();
 
-        $res = $this->post('/login', ['email' => $user->email, 'password' => 'secret-pass-123']);
+        $res = $this->post('/user/login', ['email' => $user->email, 'password' => 'secret-pass-123']);
 
         $res->assertRedirect(route('portal.home'));
         $this->assertAuthenticatedAs($user, 'portal');
@@ -58,16 +58,16 @@ class PortalAuthTest extends TestCase
     {
         $user = $this->active();
 
-        $this->from('/login')
-            ->post('/login', ['email' => $user->email, 'password' => 'wrong'])
-            ->assertRedirect('/login')
+        $this->from('/user/login')
+            ->post('/user/login', ['email' => $user->email, 'password' => 'wrong'])
+            ->assertRedirect('/user/login')
             ->assertSessionHasErrors('email');
         $this->assertGuest('portal');
     }
 
     public function test_unknown_email_is_rejected(): void
     {
-        $this->post('/login', ['email' => 'nobody@example.com', 'password' => 'whatever'])
+        $this->post('/user/login', ['email' => 'nobody@example.com', 'password' => 'whatever'])
             ->assertSessionHasErrors('email');
         $this->assertGuest('portal');
     }
@@ -76,7 +76,7 @@ class PortalAuthTest extends TestCase
     {
         $user = CustomerUser::factory()->invited()->create(['email' => 'invited@example.com']);
 
-        $this->post('/login', ['email' => $user->email, 'password' => 'anything'])
+        $this->post('/user/login', ['email' => $user->email, 'password' => 'anything'])
             ->assertSessionHasErrors('email');
         $this->assertGuest('portal');
     }
@@ -88,21 +88,21 @@ class PortalAuthTest extends TestCase
             'password' => Hash::make('secret-pass-123'),
         ]);
 
-        $this->post('/login', ['email' => $user->email, 'password' => 'secret-pass-123'])
+        $this->post('/user/login', ['email' => $user->email, 'password' => 'secret-pass-123'])
             ->assertSessionHasErrors('email');
         $this->assertGuest('portal');
     }
 
     public function test_portal_home_requires_authentication(): void
     {
-        $this->get('/portal')->assertRedirect(route('portal.login'));
+        $this->get('/user')->assertRedirect(route('portal.login'));
     }
 
     public function test_authenticated_user_reaching_login_is_sent_home(): void
     {
         $user = $this->active();
 
-        $this->actingAs($user, 'portal')->get('/login')->assertRedirect(route('portal.home'));
+        $this->actingAs($user, 'portal')->get('/user/login')->assertRedirect(route('portal.home'));
     }
 
     public function test_logout_ends_the_session(): void
@@ -110,7 +110,7 @@ class PortalAuthTest extends TestCase
         $user = $this->active();
         $this->actingAs($user, 'portal');
 
-        $this->post('/logout')->assertRedirect(route('portal.login'));
+        $this->post('/user/logout')->assertRedirect(route('portal.login'));
         $this->assertGuest('portal');
     }
 
@@ -147,6 +147,6 @@ class PortalAuthTest extends TestCase
 
         $this->assertGuest('portal');
         // And an operator session does not open the portal.
-        $this->get('/portal')->assertRedirect(route('portal.login'));
+        $this->get('/user')->assertRedirect(route('portal.login'));
     }
 }
