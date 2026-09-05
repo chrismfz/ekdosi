@@ -556,9 +556,9 @@ class DeliveryNoteForm
                 'customer_id' => $c->id,
                 'afm' => $c->afm,
                 'name' => $c->name,
-                // customers.country is free text ("Greece"/"EL"/…) — normalise to
-                // the ISO-2 the payload needs, null if unrecognised (MYD-011).
-                'country' => IsoCountry::tryNormalise($c->country),
+                // Prefer the normalised ISO cache; falls back to normalising the
+                // free-text country live for un-backfilled rows (MYD-011).
+                'country' => $c->isoCountryCode(),
                 'street' => $c->address1,
                 'postcode' => $c->postcode,
                 'city' => $c->city,
@@ -575,9 +575,9 @@ class DeliveryNoteForm
                 'customer_id' => null,
                 'afm' => $s->afm,
                 'name' => $s->name,
-                // suppliers.country is already ISO-2; normalise anyway so an
-                // 'EL'/'UK' row can't reach the payload as a non-ISO code.
-                'country' => IsoCountry::tryNormalise($s->country),
+                // Prefer the normalised ISO cache; falls back to normalising the
+                // stored country live (an 'EL'/'UK' row can't reach the payload).
+                'country' => $s->isoCountryCode(),
                 'street' => $s->address1,
                 'postcode' => $s->postcode,
                 'city' => $s->city,

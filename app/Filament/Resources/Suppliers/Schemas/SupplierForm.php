@@ -6,6 +6,7 @@ use App\Enums\SupplierSource;
 use App\Filament\Support\AadeFormFill;
 use App\Filament\Support\Tags\TagControls;
 use App\Filament\Support\ViesFormFill;
+use App\Support\IsoCountry;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -62,7 +63,7 @@ class SupplierForm
                                 FormAction::make('verify_supplier_vies')
                                     ->label('Επαλήθευση VIES')
                                     ->icon('heroicon-o-shield-check')
-                                    ->visible(fn (callable $get) => ($get('country') ?: 'GR') !== 'GR')
+                                    ->visible(fn (callable $get) => ($get('country_code') ?: 'GR') !== 'GR')
                                     ->action(fn (callable $get, callable $set) => self::applyViesToSupplier($get, $set)),
                             ]),
 
@@ -79,10 +80,18 @@ class SupplierForm
                             ->label('Δραστηριότητα')
                             ->maxLength(191),
 
-                        TextInput::make('country')
-                            ->label('Χώρα (ISO-2)')
-                            ->default('GR')
-                            ->maxLength(2),
+                        // MYD-011: ISO picker bound to the clean `country_code` cache.
+                        // No default GR here — a foreign supplier left blank must NOT
+                        // be frozen as Greek; the model's saving() hook mirrors the code
+                        // into `country`.
+                        Select::make('country_code')
+                            ->label('Χώρα')
+                            ->options(IsoCountry::options())
+                            ->searchable()
+                            ->native(false)
+                            // ->live so the VIES button's country-dependent visibility
+                            // updates as soon as a non-GR country is picked.
+                            ->live(),
                     ]),
 
                 Section::make('Επικοινωνία')
@@ -136,7 +145,9 @@ class SupplierForm
         AadeFormFill::assign($get, $set, 'address1', $result->address, $overwrite);
         AadeFormFill::assign($get, $set, 'city', $result->city, $overwrite);
         AadeFormFill::assign($get, $set, 'postcode', $result->postcode, $overwrite);
-        AadeFormFill::assign($get, $set, 'country', 'GR', $overwrite);
+        // The form's country control is the ISO picker (country_code); the model's
+        // saving() hook mirrors it into the free-text `country`. GSIS is GR-only.
+        AadeFormFill::assign($get, $set, 'country_code', 'GR', $overwrite);
         $primary = $result->primaryActivity();
         if ($primary) {
             AadeFormFill::assign($get, $set, 'occupation', $primary['description'] ?? null, $overwrite);
@@ -154,12 +165,15 @@ class SupplierForm
      */
     private static function applyViesToSupplier(callable $get, callable $set): void
     {
-        $result = ViesFormFill::check($get('afm'), $get('country'));
+        $result = ViesFormFill::check($get('afm'), $get('country_code'));
         if (! $result || ! $result->valid) {
             return;
         }
 
-        ViesFormFill::assign($get, $set, 'country', $result->countryCode === 'EL' ? 'GR' : $result->countryCode, overwrite: false);
+        // The form's country control is the ISO picker (country_code); the saving()
+        // hook mirrors it into the free-text `country`.
+        $iso = $result->countryCode === 'EL' ? 'GR' : $result->countryCode;
+        ViesFormFill::assign($get, $set, 'country_code', $iso, overwrite: false);
         if ($result->hasIdentity()) {
             ViesFormFill::assign($get, $set, 'name', $result->name, overwrite: false);
             ViesFormFill::assign($get, $set, 'address1', str_replace("\n", ', ', $result->address), overwrite: false);

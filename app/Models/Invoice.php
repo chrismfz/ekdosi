@@ -435,7 +435,7 @@ class Invoice extends Model
         }
 
         return $this->mayFallBackToLiveCustomer()
-            ? IsoCountry::tryNormalise($this->customer?->country)
+            ? $this->customer?->isoCountryCode()
             : null;
     }
 

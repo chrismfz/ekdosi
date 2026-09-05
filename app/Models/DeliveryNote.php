@@ -258,7 +258,7 @@ class DeliveryNote extends Model
             return null;
         }
 
-        return IsoCountry::tryNormalise($this->customer?->country);
+        return $this->customer?->isoCountryCode();
     }
 
     protected function casts(): array

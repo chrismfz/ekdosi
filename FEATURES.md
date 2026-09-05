@@ -253,6 +253,10 @@
   (καθρέφτης του `suppliers:sync`).
 - **VIES (EU)** — επαλήθευση/άντληση μη-GR ενδοκοινοτικών ΑΦΜ (`ViesLookup`) +
   **reverse-charge hint** (0% + §8.3 «16 — άρθρο 45»).
+- **Χώρα ISO (MYD-011)** — καθαρή στήλη `country_code` (ISO-3166-1 alpha-2) σε πελάτες/προμηθευτές
+  με **ISO picker** στη φόρμα· κανονικοποίηση στο save (`IsoCountry::syncCountryCode`), backfill
+  (`ekdosi:backfill-country-codes`), ETL alignment. Ένας ξένος προμηθευτής δεν «παγώνει» πλέον ως
+  ελληνικός σε ΔΑ (τέλος το `suppliers.country` default-GR).
 - **Καρτέλα**: ledger κινήσεων, aging, **YoY**, charts, εξαγωγή **PDF/CSV** + email·
   «αναλυτική παρακράτηση» (αξία εγγράφου + παρακράτηση/τέλη κάτω από την αναφορά, χωρίς
   να αλλάζει το υπόλοιπο). **Όψη περιόδου**: φίλτρα (έτος/τύπος/κατάσταση) πάνω από τον

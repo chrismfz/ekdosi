@@ -2,10 +2,10 @@
 
 namespace App\Models;
 
+use App\Enums\SupplierSource;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
-
-use App\Enums\SupplierSource;
+use App\Support\IsoCountry;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,7 +23,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Supplier extends Model
 {
     use BelongsToCompany;
-
     use HasFactory;
     use HasTags;
     use SoftDeletes;
@@ -38,6 +37,8 @@ class Supplier extends Model
         'city',
         'postcode',
         'country',
+        // MYD-011: normalised ISO-3166-1 alpha-2 cache of `country` (the picker binds here).
+        'country_code',
         'email',
         'phone1',
         'source',
@@ -51,6 +52,27 @@ class Supplier extends Model
             'is_active' => 'boolean',
             'source' => SupplierSource::class,
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // MYD-011: keep the normalised ISO code in sync with the free-text country.
+        // Prefer an explicit code the picker set, else derive from the stored value.
+        // Mirror a known code into a blank `country` so downstream readers of the
+        // free-text column keep resolving (and a foreign supplier is never GR).
+        static::saving(function (self $supplier): void {
+            IsoCountry::syncCountryCode($supplier);
+        });
+    }
+
+    /**
+     * The supplier's country as a normalised ISO-3166-1 alpha-2, or null when it
+     * cannot be resolved. Prefers the `country_code` cache, falling back to
+     * normalising the free-text `country` live (zero regression for un-backfilled rows).
+     */
+    public function isoCountryCode(): ?string
+    {
+        return $this->country_code ?? IsoCountry::tryNormalise($this->country);
     }
 
     public function company(): BelongsTo
