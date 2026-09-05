@@ -31,7 +31,7 @@ class CustomerLedgerFeed
      * independent statements).
      *
      * @return list<array{
-     *     company_id:int, company:string, customer:string, afm:?string, role:string,
+     *     company_id:int, customer_id:int, company:string, customer:string, afm:?string, role:string,
      *     balance:float, credit:float, owed:float, oldest_unpaid_days:?int,
      *     rows:list<array<string,mixed>>
      * }>
@@ -47,6 +47,7 @@ class CustomerLedgerFeed
 
             $out[] = [
                 'company_id' => (int) $grant->company_id,
+                'customer_id' => (int) $grant->customer_id,
                 'company' => (string) $grant->company->name,
                 'customer' => (string) $grant->customer->name,
                 'afm' => $grant->customer->afm,

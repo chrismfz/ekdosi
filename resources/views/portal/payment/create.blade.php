@@ -9,7 +9,7 @@
                 <flux:text>Δεν υπάρχει διαθέσιμος τρόπος πληρωμής αυτή τη στιγμή. Επικοινώνησε μαζί μας.</flux:text>
             </div>
         @else
-            <form method="POST" action="{{ route('portal.payment.store', $company) }}" class="flex flex-col gap-5">
+            <form method="POST" action="{{ route('portal.payment.store', $customer->id) }}" class="flex flex-col gap-5">
                 @csrf
                 <flux:input
                     name="amount"

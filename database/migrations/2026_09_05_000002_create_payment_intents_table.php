@@ -10,9 +10,11 @@ use Illuminate\Support\Facades\Schema;
  * One row per «the customer set out to pay X through gateway G». It is created
  * when the customer starts a payment in the portal and is the anchor the outcome
  * settles against — the browser return NEVER settles money; only an operator
- * confirmation (manual) or, later, a signed webhook does. `status` walks
- * pending → settled | expired | cancelled; settlement is idempotent on the row
- * (a locked pending→settled transition writes the Payment(s) exactly once).
+ * confirmation (manual) or, later, a signed webhook does. `status`: pending →
+ * settled (operator confirm) | cancelled (operator). Settlement is idempotent on
+ * the row (a locked pending→settled transition writes the Payment(s) exactly once).
+ * `expired` + `expires_at` are reserved for the B1 online flow (an abandoned
+ * redirect times out); a manual intent has no timeout — operators cancel stale ones.
  *
  * `reference` (unique per company) is the human/allocation key: it is written on
  * the resulting Payment rows so the Καρτέλα groups them as one «είσπραξη».

@@ -62,16 +62,17 @@ class PortalPaymentTest extends TestCase
         $login = $this->login();
         $this->grant($login, $c);
 
-        $this->actingAs($login, 'portal')->get("/user/pay/{$t->id}")
+        $this->actingAs($login, 'portal')->get("/user/pay/{$c->id}")
             ->assertOk()->assertSee('Πληρωμή')->assertSee('Κατάθεση');
     }
 
-    public function test_create_page_404_for_a_non_granted_company(): void
+    public function test_create_page_404_for_a_non_granted_customer(): void
     {
         $t = $this->company();
-        $login = $this->login();   // no grant
+        $c = $this->customer($t);      // exists but NOT granted to this login
+        $login = $this->login();
 
-        $this->actingAs($login, 'portal')->get("/user/pay/{$t->id}")->assertStatus(404);
+        $this->actingAs($login, 'portal')->get("/user/pay/{$c->id}")->assertStatus(404);
     }
 
     public function test_store_creates_a_pending_intent_and_redirects(): void
@@ -82,7 +83,7 @@ class PortalPaymentTest extends TestCase
         $login = $this->login();
         $this->grant($login, $c);
 
-        $res = $this->actingAs($login, 'portal')->post("/user/pay/{$t->id}", [
+        $res = $this->actingAs($login, 'portal')->post("/user/pay/{$c->id}", [
             'connection_id' => $method->id, 'amount' => '50.00',
         ]);
 
@@ -91,6 +92,26 @@ class PortalPaymentTest extends TestCase
         $this->assertSame(PaymentIntent::STATUS_PENDING, $intent->status);
         $this->assertSame('50.00', (string) $intent->amount);
         $res->assertRedirect(route('portal.payment.show', $intent->id));
+    }
+
+    public function test_paying_for_one_of_several_granted_customers_targets_the_right_one(): void
+    {
+        // A login granted to TWO customers in the SAME company must pay for the
+        // customer whose button was clicked, not «the first grant».
+        $t = $this->company();
+        $a = Customer::create(['company_id' => $t->id, 'name' => 'A', 'afm' => '1']);
+        $b = Customer::create(['company_id' => $t->id, 'name' => 'B', 'afm' => '2']);
+        $method = $this->method($t);
+        $login = $this->login();
+        $this->grant($login, $a);
+        $this->grant($login, $b);
+
+        $this->actingAs($login, 'portal')->post("/user/pay/{$b->id}", [
+            'connection_id' => $method->id, 'amount' => '10.00',
+        ])->assertRedirect();
+
+        $this->assertSame(0, PaymentIntent::where('customer_id', $a->id)->count());
+        $this->assertSame(1, PaymentIntent::where('customer_id', $b->id)->count());
     }
 
     public function test_show_404_for_another_customers_intent(): void
@@ -112,6 +133,7 @@ class PortalPaymentTest extends TestCase
     public function test_pay_requires_portal_auth(): void
     {
         $t = $this->company();
-        $this->get("/user/pay/{$t->id}")->assertRedirect(route('portal.login'));
+        $c = $this->customer($t);
+        $this->get("/user/pay/{$c->id}")->assertRedirect(route('portal.login'));
     }
 }

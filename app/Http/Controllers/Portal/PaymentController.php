@@ -32,36 +32,35 @@ class PaymentController extends Controller
         private PaymentIntentService $intents,
     ) {}
 
-    public function create(Request $request, int $company): View
+    public function create(Request $request, int $customer): View
     {
-        $customer = $this->resolveCustomer($company);
-        $methods = $this->activeMethods($company);
-        $owed = max((float) $this->ledger->build($customer)->stats['balance'], 0.0);
+        $model = $this->resolveCustomer($customer);
+        $methods = $this->activeMethods((int) $model->company_id);
+        $owed = max((float) $this->ledger->build($model)->stats['balance'], 0.0);
 
         return view('portal.payment.create', [
-            'company' => $company,
-            'customer' => $customer,
+            'customer' => $model,
             'methods' => $methods,
             'owed' => $owed,
         ]);
     }
 
-    public function store(Request $request, int $company): RedirectResponse
+    public function store(Request $request, int $customer): RedirectResponse
     {
-        $customer = $this->resolveCustomer($company);
+        $model = $this->resolveCustomer($customer);
 
         $data = $request->validate([
             'connection_id' => ['required', 'integer'],
             'amount' => ['required', 'numeric', 'min:0.01', 'max:9999999'],
         ]);
 
-        $connection = $this->activeMethods($company)->firstWhere('id', (int) $data['connection_id']);
+        $connection = $this->activeMethods((int) $model->company_id)->firstWhere('id', (int) $data['connection_id']);
         if ($connection === null) {
             abort(Response::HTTP_NOT_FOUND);
         }
 
         $result = $this->intents->start(
-            customer: $customer,
+            customer: $model,
             connection: $connection,
             amount: (float) $data['amount'],
             login: Auth::guard('portal')->user(),
@@ -84,11 +83,15 @@ class PaymentController extends Controller
         return view('portal.payment.show', ['intent' => $model]);
     }
 
-    /** The granted customer for this company, or a flat 404 (no grant → no page). */
-    private function resolveCustomer(int $company)
+    /**
+     * The granted customer BY ID (a login may hold grants to several customers in
+     * one company, so the pay flow is keyed by customer, never by company), or a
+     * flat 404 when no active grant matches.
+     */
+    private function resolveCustomer(int $customerId)
     {
         foreach ($this->boundary->grantedTargets(Auth::guard('portal')->user()) as $grant) {
-            if ((int) $grant->company_id === $company) {
+            if ((int) $grant->customer_id === $customerId) {
                 return $grant->customer;
             }
         }

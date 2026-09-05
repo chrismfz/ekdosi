@@ -100,7 +100,11 @@ class PaymentIntentService
     ): void {
         DB::transaction(function () use ($intent, $settledBy, $actualAmount, $paymentMethodId): void {
             /** @var PaymentIntent $locked */
-            $locked = PaymentIntent::query()->whereKey($intent->getKey())->lockForUpdate()->firstOrFail();
+            $locked = PaymentIntent::query()
+                ->withoutGlobalScope(CompanyScope::class)   // context-independent (operator now, webhook in B1)
+                ->whereKey($intent->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
             if (! $locked->isPending()) {
                 return;   // already settled/expired/cancelled — no-op (idempotent)
             }
@@ -128,6 +132,27 @@ class PaymentIntentService
                 'settled_at' => Carbon::now(),
                 'settled_by' => $settledBy,
             ])->save();
+        });
+    }
+
+    /**
+     * Cancel a PENDING intent (a locked pending→cancelled transition), so it can
+     * never race a concurrent settle(): if the intent was already settled (a
+     * Payment written), cancel is a no-op and the settled state stands.
+     */
+    public function cancel(PaymentIntent $intent): void
+    {
+        DB::transaction(function () use ($intent): void {
+            /** @var PaymentIntent $locked */
+            $locked = PaymentIntent::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->whereKey($intent->getKey())
+                ->lockForUpdate()
+                ->firstOrFail();
+            if (! $locked->isPending()) {
+                return;   // already settled/cancelled/expired — leave it
+            }
+            $locked->forceFill(['status' => PaymentIntent::STATUS_CANCELLED])->save();
         });
     }
 

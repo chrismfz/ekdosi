@@ -121,6 +121,25 @@ class PaymentIntentServiceTest extends TestCase
         $this->assertSame($countAfterFirst, Payment::where('customer_id', $this->customer->id)->count());
     }
 
+    public function test_cancel_after_settle_is_a_no_op_and_a_cancelled_intent_never_settles(): void
+    {
+        $this->creditInvoice(100);
+        $intent = $this->service()->start($this->customer, $this->connection(), 100.0)['intent'];
+
+        $this->service()->settle($intent, 'op@example.com');
+        // A late cancel must NOT undo a settled intent (a Payment exists).
+        $this->service()->cancel($intent);
+        $this->assertSame(PaymentIntent::STATUS_SETTLED, $intent->fresh()->status);
+
+        // And a cancelled intent must never settle (no payment written).
+        $intent2 = $this->service()->start($this->customer, $this->connection(), 50.0)['intent'];
+        $this->service()->cancel($intent2);
+        $before = Payment::where('customer_id', $this->customer->id)->count();
+        $this->service()->settle($intent2, 'op@example.com');
+        $this->assertSame($before, Payment::where('customer_id', $this->customer->id)->count());
+        $this->assertSame(PaymentIntent::STATUS_CANCELLED, $intent2->fresh()->status);
+    }
+
     public function test_settle_uses_the_actual_amount_received(): void
     {
         $inv = $this->creditInvoice(100);

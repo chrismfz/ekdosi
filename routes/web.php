@@ -54,10 +54,10 @@ Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
     // «Πλήρωσε» (B0b) — start a payment against a granted company/customer, then
     // see where to pay. The browser never settles money (manual = operator
     // confirms; online webhook later). Store is throttled.
-    Route::get('/user/pay/{company}', [PortalPaymentController::class, 'create'])
-        ->where('company', '[0-9]+')->name('portal.payment.create');
-    Route::post('/user/pay/{company}', [PortalPaymentController::class, 'store'])
-        ->where('company', '[0-9]+')->middleware('throttle:20,1')->name('portal.payment.store');
+    Route::get('/user/pay/{customer}', [PortalPaymentController::class, 'create'])
+        ->where('customer', '[0-9]+')->name('portal.payment.create');
+    Route::post('/user/pay/{customer}', [PortalPaymentController::class, 'store'])
+        ->where('customer', '[0-9]+')->middleware('throttle:20,1')->name('portal.payment.store');
     Route::get('/user/payment/{intent}', [PortalPaymentController::class, 'show'])
         ->where('intent', '[0-9]+')->name('portal.payment.show');
     // Official PDF of one of the customer's own documents (grant-scoped, streamed).

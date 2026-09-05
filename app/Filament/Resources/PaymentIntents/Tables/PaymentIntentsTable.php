@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PaymentIntents\Tables;
 
+use App\Models\Payment;
 use App\Models\PaymentIntent;
 use App\Models\PaymentMethod;
 use App\Services\Payments\PaymentGatewayRegistry;
@@ -14,6 +15,7 @@ use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Support\Facades\Gate;
 
 class PaymentIntentsTable
 {
@@ -50,6 +52,7 @@ class PaymentIntentsTable
                     PaymentIntent::STATUS_PENDING => 'Εκκρεμεί',
                     PaymentIntent::STATUS_SETTLED => 'Καταχωρίστηκε',
                     PaymentIntent::STATUS_CANCELLED => 'Ακυρώθηκε',
+                    PaymentIntent::STATUS_EXPIRED => 'Έληξε',
                 ])->default(PaymentIntent::STATUS_PENDING),
             ])
             ->recordActions([
@@ -57,7 +60,10 @@ class PaymentIntentsTable
                     ->label('Καταχώριση πληρωμής')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(fn (PaymentIntent $record): bool => $record->isPending())
+                    // Writing money requires the payment-create right — not just
+                    // read access to this list. Hard-guarded in the body too
+                    // (mountAction does NOT re-check visible()).
+                    ->visible(fn (PaymentIntent $record): bool => $record->isPending() && Gate::allows('create', Payment::class))
                     ->schema([
                         TextInput::make('actual_amount')
                             ->label('Ποσό που εισπράχθηκε (€)')
@@ -73,6 +79,7 @@ class PaymentIntentsTable
                             ->placeholder('— προαιρετικό —'),
                     ])
                     ->action(function (array $data, PaymentIntent $record): void {
+                        abort_unless(Gate::allows('create', Payment::class), 403);
                         app(PaymentIntentService::class)->settle(
                             $record,
                             settledBy: (string) (auth()->user()?->email ?? 'operator'),
@@ -85,10 +92,12 @@ class PaymentIntentsTable
                     ->label('Ακύρωση')
                     ->icon('heroicon-o-x-circle')
                     ->color('danger')
-                    ->visible(fn (PaymentIntent $record): bool => $record->isPending())
+                    ->visible(fn (PaymentIntent $record): bool => $record->isPending() && Gate::allows('create', Payment::class))
                     ->requiresConfirmation()
                     ->action(function (PaymentIntent $record): void {
-                        $record->forceFill(['status' => PaymentIntent::STATUS_CANCELLED])->save();
+                        abort_unless(Gate::allows('create', Payment::class), 403);
+                        // Guarded pending→cancelled (locked) so it can't race/overwrite a settle.
+                        app(PaymentIntentService::class)->cancel($record);
                         Notification::make()->title("Ακυρώθηκε η εκκρεμότητα {$record->reference}")->success()->send();
                     }),
             ]);

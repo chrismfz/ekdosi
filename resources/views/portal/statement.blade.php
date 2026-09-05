@@ -37,7 +37,7 @@
 
                 <div class="mt-3">
                     <flux:button size="sm" variant="primary" icon="credit-card"
-                        href="{{ route('portal.payment.create', $st['company_id']) }}">Πλήρωσε</flux:button>
+                        href="{{ route('portal.payment.create', $st['customer_id']) }}">Πλήρωσε</flux:button>
                 </div>
             </div>
 
