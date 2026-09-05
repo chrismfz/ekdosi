@@ -777,6 +777,9 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   `customer_users` broker). Η ίδια ροή ορίζει τον πρώτο κωδικό ενός operator-invited login (invited→active) —
   **operator-gated onboarding, χωρίς open registration**. Anti-abuse: generic response (no enumeration),
   honeypot, throttle ανά email + IP, queued mail, κανένα email σε suspended.
+- **Session invalidation σε αλλαγή κωδικού:** κάθε session δένεται με το password hash του login· μια αλλαγή
+  κωδικού οπουδήποτε (reset/operator/profile) αποσυνδέει κάθε άλλη session στο επόμενο request, ενώ η session
+  που έκανε την αλλαγή επιβιώνει (`EnsurePortalAuthenticated`, explicit για τον `portal` guard).
 - **Επόμενα slices:** self-register (**tier-2 claim** — ΑΦΜ+email match → email verify → grant πάντα από
   operator· ποτέ open signup) + auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους» +
   κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».

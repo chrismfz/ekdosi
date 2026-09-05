@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
+use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -64,6 +65,10 @@ class ProfileController extends Controller
 
         // Keep THIS session valid but with a fresh id (defense against fixation).
         $request->session()->regenerate();
+        // Re-bind THIS session to the new hash, so the session-invalidation check
+        // (EnsurePortalAuthenticated) logs out the customer's OTHER sessions on
+        // their next request while this one survives.
+        $request->session()->put(EnsurePortalAuthenticated::PW_HASH_KEY, (string) $user->getAuthPassword());
 
         return back()->with('status', 'Ο κωδικός σου άλλαξε.');
     }
