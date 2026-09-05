@@ -571,11 +571,22 @@ data model + phase gates: **`PLAN.md`**.
     reconciliation** (mirror myDATA reconcile).
 - **Πυλώνας B — Payment gateways** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά)· πριν το portal.
 - **Πυλώνας C — Provisioning modules** → seam `app/Contracts/ProvisioningModule.php` ήδη (βλ. «Services / Provisioning» κάτω).
-- **Πυλώνας D — Customer portal** — custom blades / 2ο panel· **τελευταίο** (θέλει A+B έτοιμα).
+- **Πυλώνας D — Customer portal** — **foundation ✅ SHIPPED** (identity/grants/reset/session-security +
+  προβολή παραστατικών + «Η καρτέλα μου», όλα read-only, στο `/user`). ΔΕΝ ήταν τελικά μονολιθικά «τελευταίο»:
+  η foundation δεν χρειαζόταν A/B/C. Μένουν τα **transactional** surfaces (πλήρωσε → B· domains → A·
+  services → C), που προσκολλώνται ανά πυλώνα. Βλ. `PLAN.md §6`.
 
 ## 🟢 Services / Provisioning
 - **Real provisioning modules** (cPanel/Mailcow/license server) — σήμερα μόνο `NullProvisioningModule`. _(= Πυλώνας C του `PLAN.md`.)_
 - **Multi-line service contracts** — v1 = single-line.
+- **Non-fiscal «προτιμολόγιο» series (ΠΡΟΤ) — WHMCS-style freedom (2η φάση, δένει με portal + gateway + recurring).**
+  Μια σειρά/invoice-type με **filing OFF** (`submitsElectronically()` → false) που ΠΟΤΕ δεν φεύγει σε ΑΑΔΕ/πάροχο:
+  ο operator μπορεί να τη μαρκάρει «πληρωμένη» ή να την αφήσει ανοιχτή ελεύθερα, χωρίς νόμιμο έγγραφο — το μοντέλο
+  «φίλοι/reference υπηρεσίες που δεν πληρώνουν ποτέ, αλλά θέλω να ξέρω τι έχασα» (what-if, χωρίς να το κάνω «0/free»).
+  Στο portal γίνεται ο «λογαριασμός σου»: recurring auto-issue ΠΡΟΤ → ο πελάτης βλέπει/επιλέγει ανανέωση/upgrade/
+  downgrade/ακύρωση → πληρωμή (gateway) → **convert σε νόμιμο τιμολόγιο** με τον τρόπο πληρωμής → mark paid → money
+  trail. Η αρχιτεκτονική το σηκώνει (`local_status` ⟂ `mydata_state`)· η «Καρτέλα μου» το εμφανίζει αυτόματα (ίδιο
+  `CustomerLedgerBuilder`). Θέλει και τη numbering απόφαση κάτω ↓.
 - **Pro-forma numbering (draft = προτιμολόγιο)** — σήμερα ο ΑΑ εκχωρείται στη ΔΗΜΙΟΥΡΓΙΑ (`InvoiceNumberer`, `CreateInvoice`), οπότε κάθε draft «καίει» έναν αριθμό της νόμιμης σειράς τιμολογίων → gap αν διαγραφεί/δεν πληρωθεί. Για service-manager pro-forma ροή (στέλνεις πολλά προτιμολόγια, πληρώνονται κάποια) χρειάζεται **δικό τους reference**: είτε ξεχωριστός μετρητής «ΠΡΟΤ-N» (ο πραγματικός ΑΑ μπαίνει στην έκδοση/πληρωμή), είτε το σταθερό `id`. Σημαίνει μετακίνηση εκχώρησης ΑΑ create→issue (ο `InvoiceNumberer` συνειδητά το απέφυγε — τεκμηρίωση εκεί). Το immediate «ο πελάτης χρειάζεται αριθμό-αναφορά» ΗΔΗ καλύπτεται (το draft έχει `invcode` + banner «ΠΡΟΧΕΙΡΟ» στο PDF). Surfaced από το MON-5.
 
 ## 🟣 WHMCS loose ends (βλ. `whmcs-legacy-plugin-map.md`)

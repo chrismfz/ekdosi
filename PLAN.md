@@ -276,15 +276,31 @@ gateways — τα services έχουν ήδη το billing+dunning loop.
 
 ## 6. Πυλώνας D — Customer portal
 
-Το **τελευταίο** κομμάτι — χρειάζεται domains + services + payments να είναι
-πραγματικά πρώτα. Custom Blades σε **ξεχωριστή public-facing περιοχή / 2ο
-Filament panel** (το operator panel μένει internal, κατά CLAUDE.md
-«operators-only»). Ο πελάτης βλέπει τα domains του (WHOIS/NS/ανανέωση), τις
-υπηρεσίες, τα παραστατικά + myDATA QR, το υπόλοιπο Καρτέλας, και **πληρώνει μέσω
-Πυλώνα B**. Auth = customer guard διακριτό από τους operator users.
+**ΑΝΑΘΕΩΡΗΣΗ (2026-09): ΔΕΝ είναι πια μονολιθικά «τελευταίο».** Ο πυλώνας
+χωρίζεται σε δύο στρώματα, και το κάτω στρώμα ΔΕΝ εξαρτάται από A/B/C:
 
-Εδώ «δένουν όλα σε custom blades σε ένα interface για τον πελάτη» — μεγάλη νέα
-επιφάνεια, γι' αυτό τελευταία.
+- **D-foundation — ✅ SHIPPED** (custom Blades σε `/user`, ξεχωριστός `portal`
+  guard): ταυτότητα (`customer_users`) + **grants** (email↔εταιρία↔πελάτης, το
+  leak-proof boundary) + reset/claim + session-invalidation + **προβολή
+  παραστατικών** (PDF/επαλήθευση) + **«Η καρτέλα μου»** (υπόλοιπο + κινήσεις,
+  read-only, πάνω στο `CustomerLedgerBuilder`). Χτίστηκε πρώτο γιατί είναι η
+  security-δύσκολη σπονδυλική στήλη και δεν χρειάζεται κανέναν άλλο πυλώνα (τα
+  παραστατικά + το money-trail υπάρχουν ήδη).
+- **D-transactional — OPEN, προσκολλάται ανά πυλώνα**: «πλήρωσε το
+  παραστατικό/υπόλοιπο» + prepaid credit → **Πυλώνας B** (gateway)· «τα domains
+  μου» → **Πυλώνας A**· «οι υπηρεσίες/provisioning μου» → **Πυλώνας C**. Κάθε
+  ένα είναι μικρή προσθήκη πάνω στην έτοιμη foundation (το «ποιος είσαι / τι
+  επιτρέπεσαι με ασφάλεια» λύθηκε).
+
+**Proforma freedom (2η φάση, σχετικό με B + recurring):** για WHMCS-style
+ευελιξία (φίλοι/reference υπηρεσίες, «πληρωμένο» χωρίς νόμιμο έγγραφο, what-if
+«τι έχασα»), μια **μη-φορολογική σειρά «προτιμολόγιο» (ΠΡΟΤ)** που ΠΟΤΕ δεν
+φεύγει σε ΑΑΔΕ/πάροχο — invoice-type με filing OFF (`submitsElectronically()`
+→ false). Στο portal γίνεται ο «λογαριασμός σου» (recurring auto-issue → πλήρωσε
+→ convert σε νόμιμο τιμολόγιο με τον τρόπο πληρωμής → mark paid → money trail).
+Η αρχιτεκτονική το σηκώνει ήδη (`local_status` ⟂ `mydata_state`)· η «Καρτέλα μου»
+το εμφανίζει αυτόματα (ίδιο `CustomerLedgerBuilder`). Λεπτομέρεια numbering:
+`docs/BACKLOG.md` → «Pro-forma numbering».
 
 ---
 
@@ -296,7 +312,9 @@ Filament panel** (το operator panel μένει internal, κατά CLAUDE.md
   Openprovider· υπάρχει open-source WHMCS/Blesta module για δομή.
 - **Gateways πριν το portal** — το portal πρέπει να εισπράττει.
 - **Provisioning** — reuse του υπάρχοντος dunning seam· χαμηλότερη επείγουσα αξία.
-- **Portal τελευταίο** — εξαρτάται από τους άλλους τρεις.
+- **Portal — ΑΝΑΘΕΩΡΗΘΗΚΕ:** η **foundation** (ταυτότητα/grants/παραστατικά/καρτέλα)
+  χτίστηκε ΠΡΩΤΗ (δεν εξαρτάται από A/B/C)· μόνο τα **transactional** surfaces
+  (πλήρωσε/domains/services) προσκολλώνται καθώς landάρουν A/B/C. Βλ. §6.
 
 **Strangler-fig:** το WHMCS μένει authoritative ανά περιοχή μέχρι κάθε πυλώνας να
 αποδειχθεί· το `billing_connections` μοντελοποιεί ήδη τη συνύπαρξη.

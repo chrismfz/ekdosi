@@ -3,6 +3,7 @@
 namespace App\Services\Portal;
 
 use App\Models\CustomerUser;
+use App\Models\CustomerUserAccess;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
 use Illuminate\Database\Eloquent\Builder;
@@ -32,17 +33,8 @@ class CustomerDocumentFeed
      */
     public function forLogin(CustomerUser $login): array
     {
-        $grants = $login->activeAccessGrants()
-            ->with(['company:id,name', 'customer:id,name,afm'])
-            ->get();
-
         $groups = [];
-        foreach ($grants as $grant) {
-            // A grant whose company/customer was hard-deleted is skipped (the FK
-            // is cascade, so normally impossible; defensive).
-            if ($grant->company === null || $grant->customer === null) {
-                continue;
-            }
+        foreach ($this->grantedTargets($login) as $grant) {
             $documents = $this->documentsFor($grant->company_id, $grant->customer_id);
             $groups[] = [
                 'company' => (string) $grant->company->name,
@@ -61,6 +53,26 @@ class CustomerDocumentFeed
         }
 
         return $groups;
+    }
+
+    /**
+     * THE grant boundary, resolved once: the active grants a login may act
+     * through, each with its `company` and `customer` eager-loaded and the
+     * impossible null-FK rows skipped. Every portal surface (documents, ledger,
+     * …) reads its scope from here so they can never diverge — a login only ever
+     * sees a (company, customer) it holds an active grant to. The customer carries
+     * `company_id` so it's usable directly as a tenant-scoped model off-panel.
+     *
+     * @return list<CustomerUserAccess> each with ->company and ->customer loaded
+     */
+    public function grantedTargets(CustomerUser $login): array
+    {
+        return $login->activeAccessGrants()
+            ->with(['company:id,name', 'customer:id,company_id,name,afm'])
+            ->get()
+            ->filter(fn (CustomerUserAccess $g): bool => $g->company !== null && $g->customer !== null)
+            ->values()
+            ->all();
     }
 
     /**

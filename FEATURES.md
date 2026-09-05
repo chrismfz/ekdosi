@@ -780,6 +780,10 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Session invalidation σε αλλαγή κωδικού:** κάθε session δένεται με το password hash του login· μια αλλαγή
   κωδικού οπουδήποτε (reset/operator/profile) αποσυνδέει κάθε άλλη session στο επόμενο request, ενώ η session
   που έκανε την αλλαγή επιβιώνει (`EnsurePortalAuthenticated`, explicit για τον `portal` guard).
+- **«Η καρτέλα μου» (Slice 3):** read-only υπόλοιπο + χρονολογική καρτέλα (χρέωση/πίστωση/τρέχον υπόλοιπο)
+  ανά (εταιρία, πελάτη) στο `/user/statement`. `CustomerLedgerFeed` πάνω στο **ίδιο** `CustomerLedgerBuilder`
+  με τον operator (ποτέ ξαναϋπολογισμός → ίδιοι αριθμοί) + ίδιο grant boundary. Αρνητικό υπόλοιπο = «πιστωτικό
+  υπόλοιπο» (seat για prepaid credit). Το «πλήρωσε» έρχεται με τον gateway πυλώνα.
 - **Επόμενα slices:** self-register (**tier-2 claim** — ΑΦΜ+email match → email verify → grant πάντα από
   operator· ποτέ open signup) + auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους» +
   κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».
