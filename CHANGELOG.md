@@ -18,6 +18,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- **AI «Βοηθός» KB: εμπλουτισμός `docs/assistant-kb/app-howto.md`** — νέες ενότητες app how-to
+  (κύκλος ζωής παραστατικού πρόχειρο/ενεργό/ακυρωμένο, επεξεργασία μόνο σε πρόχειρο, WHMCS
+  «Εισερχόμενα» → «Δημιουργία Παραστατικού», έκδοση ΔΑ, καρτέλα «Ιστορικό», «Ρυθμίσεις εταιρείας»)
+  ώστε το `knowledge_search` να καλύπτει περισσότερες «πώς-κάνω» ερωτήσεις. Μόνο app how-to —
+  καμία φορολογική οδηγία (το `tax-notes.md` μένει accountant-confirmed-only).
+
 ### Added
 - **AI «Βοηθός» Phase 2c-(ζ): `knowledge_search` — grounded «βοήθεια & συμβουλή» (chat + MCP).**
   Curated βάση γνώσης σε markdown (`docs/assistant-kb/`: app how-to + **επιβεβαιωμένες** φορολογικές
