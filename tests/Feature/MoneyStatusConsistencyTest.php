@@ -10,11 +10,13 @@ use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
+use App\Models\ReturnInvoiceExtra;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
 use App\Services\Dashboard\DashboardMetrics;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Collection;
 use Tests\TestCase;
 
 /**
@@ -36,17 +38,23 @@ use Tests\TestCase;
  *                credit notes (the cache equals the live truth).
  *
  * Amounts are kept exact-2dp (unit gross 124.00) so equality is exact.
- * Credit notes target ONLY credit-term originals — crediting a cash-term
- * original is a separately-documented FIFO fuzziness, deliberately
- * excluded so this invariant stays clean.
+ * MON-13: crediting a CASH-TERM original used to be a documented divergence
+ * (the aggregate AR surfaces dropped its reduction) — now fixed (a credit note is
+ * account credit, not a refund → all surfaces show the credit) and guarded by
+ * test_credit_note_against_a_cash_term_original_reduces_all_three_surfaces.
  */
 class MoneyStatusConsistencyTest extends TestCase
 {
     use RefreshDatabase;
 
     private Company $tenant;
+
     private PaymentMethod $credit;
+
+    private PaymentMethod $cash;
+
     private InvoiceType $saleType;
+
     private InvoiceType $creditType;
 
     protected function setUp(): void
@@ -58,6 +66,9 @@ class MoneyStatusConsistencyTest extends TestCase
         ]);
         $this->credit = PaymentMethod::create([
             'company_id' => $this->tenant->id, 'description' => 'Πίστωση', 'due_days' => 30,
+        ]);
+        $this->cash = PaymentMethod::create([
+            'company_id' => $this->tenant->id, 'description' => 'Μετρητά', 'due_days' => 0,
         ]);
         $this->saleType = InvoiceType::create([
             'company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1,
@@ -170,6 +181,57 @@ class MoneyStatusConsistencyTest extends TestCase
         $this->assertInvariants(collect([$c]));
     }
 
+    /** A CASH-term sale (due_days=0, settled at issue → not a receivable). */
+    private function makeCashSale(Customer $c, int $qty): Invoice
+    {
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->saleType->id, 'customer_id' => $c->id,
+            'payment_method_id' => $this->cash->id, 'issued_at' => '2026-05-10 10:00:00',
+            'local_status' => 'active',
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => $qty, 'price_per_item' => 100, 'vat_percent' => 24, 'product_descr' => 'W',
+        ]);
+
+        return app(RecomputeInvoiceTotals::class)($inv);
+    }
+
+    public function test_credit_note_against_a_cash_term_original_reduces_all_three_surfaces(): void
+    {
+        // MON-13 (the NEXON bug): a correlated credit note against a CASH-TERM
+        // original. The cash-term sale is settled at issue (NOT a receivable), so
+        // the aggregate AR surfaces used to DROP its credited_total reduction —
+        // making the customer list / dashboard disagree with the Καρτέλα. A credit
+        // note is account credit, not a refund: we owe the customer back, so all
+        // three surfaces must show the credit balance (−124).
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'CASH', 'afm' => '177777777']);
+
+        $sale = $this->makeCashSale($c, 1)->refresh();       // cash-term: gross/payable 124, NOT a receivable
+        $line = $sale->lines()->first();
+        // Full correlated credit note against the cash-term original (→ owe 124 back).
+        app(IssueCreditNote::class)($sale, $this->creditType, [['line_id' => $line->id, 'qty' => 1]]);
+
+        // Ledger: 0 owed (cash-term, unpaid) − 124 credit note = −124 (creditor).
+        $ledger = app(CustomerLedgerBuilder::class)->build($c)->stats['balance'];
+        $this->assertEqualsWithDelta(-124.0, $ledger, 0.001);
+
+        // Dashboard headline must agree (before MON-13 it read 0 — the dropped credit).
+        $dashboard = (new DashboardMetrics($this->tenant))->outstandingReceivables();
+        $this->assertEqualsWithDelta(-124.0, $dashboard, 0.001);
+
+        // Per-customer scope (debtor table / CustomersTable «Υπόλοιπο») must agree.
+        $scoped = Customer::query()
+            ->where('customers.company_id', $this->tenant->id)
+            ->withOutstandingBalance($this->tenant->id)
+            ->where('customers.id', $c->id)
+            ->first();
+        $this->assertEqualsWithDelta(-124.0, (float) $scoped->outstanding_balance, 0.001);
+
+        $this->assertInvariants(collect([$c]));
+    }
+
     public function test_surfaces_stay_consistent_across_randomized_scenarios(): void
     {
         $customers = collect();
@@ -194,7 +256,7 @@ class MoneyStatusConsistencyTest extends TestCase
         $this->assertInvariants($customers);
     }
 
-    /** @param \Illuminate\Support\Collection<int, Customer> $customers */
+    /** @param Collection<int, Customer> $customers */
     private function generateScenario($customers): void
     {
         foreach ($customers as $c) {
@@ -225,7 +287,7 @@ class MoneyStatusConsistencyTest extends TestCase
                 $sale = $sales[array_rand($sales)];
                 $line = $sale->lines()->first();
                 $remaining = (int) $line->qty
-                    - (int) (\App\Models\ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned') ?? 0);
+                    - (int) (ReturnInvoiceExtra::where('invoice_line_id', $line->id)->value('qty_returned') ?? 0);
                 if ($remaining < 1) {
                     continue;
                 }
@@ -255,14 +317,14 @@ class MoneyStatusConsistencyTest extends TestCase
                 $sale = $sales[array_rand($sales)];
                 $hasCredit = Invoice::where('credited_invoice_id', $sale->id)->exists();
                 if (! $hasCredit && $sale->local_status !== 'cancelled') {
-                    \App\Models\Payment::where('invoice_id', $sale->id)->get()->each->update(['invoice_id' => null]);
+                    Payment::where('invoice_id', $sale->id)->get()->each->update(['invoice_id' => null]);
                     $sale->update(['local_status' => 'cancelled']);
                 }
             }
         }
     }
 
-    /** @param \Illuminate\Support\Collection<int, Customer> $customers */
+    /** @param Collection<int, Customer> $customers */
     private function assertInvariants($customers): void
     {
         // The backfill must be a no-op — caches were kept fresh by the

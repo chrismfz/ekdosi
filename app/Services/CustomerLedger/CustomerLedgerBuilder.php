@@ -182,6 +182,7 @@ class CustomerLedgerBuilder
                 'invoices.mydata_state',
                 'invoices.mydata_mark',
                 'invoices.credited_invoice_id',
+                'invoices.created_at',
                 'payment_methods.due_days',
                 'invoice_types.code as invoice_type_code',
                 'invoice_types.is_credit',
@@ -260,7 +261,7 @@ class CustomerLedgerBuilder
             // reference/invoice_id/notes are needed by the Φ3 grouping in
             // computeLedger() (collapse one «έμβασμα/είσπραξη» into one row).
             // The money math (stats/aging/yearly) ignores them.
-            ->select('id', 'pay_date', 'amount', 'kind', 'reference', 'invoice_id', 'notes')
+            ->select('id', 'pay_date', 'amount', 'kind', 'reference', 'invoice_id', 'notes', 'created_at')
             ->get();
     }
 
@@ -411,6 +412,12 @@ class CustomerLedgerBuilder
             'ytd_gross' => round($ytdGross, 2),
             'ytd_paid' => round($ytdPaid, 2),
             'balance' => $balance,
+            // Balance breakdown (so the Καρτέλα can EXPLAIN the number): the
+            // collectible charges that count toward the balance, minus the credit
+            // notes, minus the payments. charges − credit_notes − payments = balance.
+            'charges' => round($creditTermGross, 2),
+            'credit_notes' => round($creditReductions, 2),
+            'payments' => round($totalPaidLifetime, 2),
             'oldest_unpaid_days' => $oldestUnpaidDays,
             'last_activity_at' => $lastActivity?->toIso8601String(),
             'total_invoices_lifetime' => $invoices->count(),
@@ -531,6 +538,29 @@ class CustomerLedgerBuilder
      * filter window (operator wouldn't expect a year filter to reset
      * the balance to zero).
      */
+    /**
+     * A stable within-day ordering key: the record's creation timestamp, so two
+     * rows on the SAME business date (a payment + a same-day refund; two payments)
+     * order by when they were entered instead of arbitrarily (payments carry no
+     * time-of-day — pay_date is a DATE). Falls back to the business date when
+     * created_at is absent (legacy rows).
+     */
+    private function createdSort(?string $createdAt, int $fallback): int
+    {
+        return $createdAt ? Carbon::parse($createdAt)->timestamp : $fallback;
+    }
+
+    /** Display time «HH:MM» for the ledger row, or null when it's a bare date (00:00). */
+    private function displayTime(?string $dt): ?string
+    {
+        if (! $dt) {
+            return null;
+        }
+        $c = Carbon::parse($dt);
+
+        return $c->format('H:i:s') === '00:00:00' ? null : $c->format('H:i');
+    }
+
     private function computeLedger(
         Collection $invoices,
         Collection $payments,
@@ -558,6 +588,8 @@ class CustomerLedgerBuilder
             $taxAdjustment = round($gross - $documentGross, 2);
             $events[] = [
                 'date_sort' => Carbon::parse($inv->issued_at)->timestamp,
+                'created_sort' => $this->createdSort($inv->created_at ?? null, Carbon::parse($inv->issued_at)->timestamp),
+                'time' => $this->displayTime($inv->issued_at),
                 'date' => Carbon::parse($inv->issued_at)->toDateString(),
                 'type' => 'invoice',
                 'invoice_id' => (int) $inv->id,
@@ -603,6 +635,8 @@ class CustomerLedgerBuilder
             if (($p->kind ?? 'payment') === 'refund') {
                 $events[] = [
                     'date_sort' => Carbon::parse($p->pay_date)->timestamp,
+                    'created_sort' => $this->createdSort($p->created_at ?? null, Carbon::parse($p->pay_date)->timestamp),
+                    'time' => $this->displayTime($p->created_at ?? null),
                     'date' => Carbon::parse($p->pay_date)->toDateString(),
                     'type' => 'refund',
                     'invoice_id' => $p->invoice_id !== null ? (int) $p->invoice_id : null,
@@ -626,6 +660,8 @@ class CustomerLedgerBuilder
             if ($p->reference === null || $p->reference === '') {
                 $events[] = [
                     'date_sort' => Carbon::parse($p->pay_date)->timestamp,
+                    'created_sort' => $this->createdSort($p->created_at ?? null, Carbon::parse($p->pay_date)->timestamp),
+                    'time' => $this->displayTime($p->created_at ?? null),
                     'date' => Carbon::parse($p->pay_date)->toDateString(),
                     'type' => 'payment',
                     'invoice_id' => null,
@@ -652,6 +688,7 @@ class CustomerLedgerBuilder
 
         foreach ($referenced as $reference => $group) {
             $earliest = null;
+            $earliestCreated = null;
             $sum = 0.0;
             $allocations = [];
             $isReceipt = false; // any allocation against an invoice → «Έμβασμα»
@@ -660,6 +697,10 @@ class CustomerLedgerBuilder
                 $ts = Carbon::parse($p->pay_date)->timestamp;
                 if ($earliest === null || $ts < $earliest) {
                     $earliest = $ts;
+                }
+                $cts = $this->createdSort($p->created_at ?? null, $ts);
+                if ($earliestCreated === null || $cts < $earliestCreated) {
+                    $earliestCreated = $cts;
                 }
                 $amount = (float) $p->amount;
                 $sum += $amount;
@@ -690,6 +731,8 @@ class CustomerLedgerBuilder
 
             $events[] = [
                 'date_sort' => $earliest,
+                'created_sort' => $earliestCreated ?? $earliest,
+                'time' => $this->displayTime(Carbon::createFromTimestamp($earliestCreated ?? $earliest)->toDateTimeString()),
                 'date' => Carbon::createFromTimestamp($earliest)->toDateString(),
                 'type' => 'payment',
                 'invoice_id' => null,
@@ -708,8 +751,9 @@ class CustomerLedgerBuilder
             ];
         }
 
-        // Walk oldest-first to compute running balance.
-        usort($events, fn ($a, $b) => $a['date_sort'] <=> $b['date_sort']);
+        // Walk oldest-first to compute running balance. Tiebreak same-date rows by
+        // creation order (created_sort) so a payment + a same-day refund never flip.
+        usort($events, fn ($a, $b) => [$a['date_sort'], $a['created_sort']] <=> [$b['date_sort'], $b['created_sort']]);
         $running = 0.0;
         foreach ($events as $i => $e) {
             // Only credit-term invoices change the receivables balance;
@@ -753,13 +797,13 @@ class CustomerLedgerBuilder
             ));
         }
 
-        // Newest first for display.
-        usort($events, fn ($a, $b) => $b['date_sort'] <=> $a['date_sort']);
+        // Newest first for display — same tiebreak, reversed, so the LATER of two
+        // same-date rows sits on top (its running balance is the current one).
+        usort($events, fn ($a, $b) => [$b['date_sort'], $b['created_sort']] <=> [$a['date_sort'], $a['created_sort']]);
 
-        // Strip the internal date_sort + is_credit_term cols from the
-        // returned shape - view doesn't need them.
+        // Strip the internal sort cols from the returned shape - view doesn't need them.
         foreach ($events as &$e) {
-            unset($e['date_sort'], $e['is_credit_term']);
+            unset($e['date_sort'], $e['created_sort'], $e['is_credit_term']);
             $e['net'] = $e['debit'];   // for backward-compat / view convenience
             // Uniform shape: payment/refund rows carry no document breakdown.
             $e['document_gross'] ??= null;

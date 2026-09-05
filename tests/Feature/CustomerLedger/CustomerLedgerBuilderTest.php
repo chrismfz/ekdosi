@@ -10,7 +10,6 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
@@ -24,8 +23,11 @@ class CustomerLedgerBuilderTest extends TestCase
     use RefreshDatabase;
 
     private Company $tenant;
+
     private PaymentMethod $cash;
+
     private PaymentMethod $credit;
+
     private InvoiceType $invType;
 
     protected function setUp(): void
@@ -77,6 +79,7 @@ class CustomerLedgerBuilderTest extends TestCase
         // InvoiceNumberer at issue time. Tests bypass the numberer
         // so seed a unique value here.
         self::$invSeq++;
+
         return Invoice::create([
             'company_id' => $this->tenant->id,
             'customer_id' => $c->id,
@@ -112,6 +115,49 @@ class CustomerLedgerBuilderTest extends TestCase
         $p->delete();   // soft delete — must stop reducing the balance
 
         $this->assertSame(124.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
+    }
+
+    public function test_same_day_payment_and_refund_order_by_creation_and_carry_link_ids(): void
+    {
+        // Two money rows on the SAME date (a payment, then a refund entered later).
+        // Without the creation-order tiebreak they could flip, and the running
+        // balance would read out of order (the operator's «ανάποδα» complaint).
+        $c = $this->makeCustomer();
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'TST1', 'code' => 1,
+            'invoice_type_id' => $this->invType->id, 'customer_id' => $c->id,
+            'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-01 10:00:00',
+            'local_status' => 'active',
+        ]);
+        $inv->forceFill(['net_total' => 200, 'gross_total' => 200, 'payable_total' => 200])->save();
+
+        $pay = Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $c->id,
+            'amount' => 100, 'pay_date' => '2026-05-10', 'kind' => 'payment',
+        ]);
+        $pay->forceFill(['created_at' => '2026-05-10 10:00:00'])->save();
+        $refund = Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $c->id,
+            'amount' => 30, 'pay_date' => '2026-05-10', 'kind' => 'refund',
+        ]);
+        $refund->forceFill(['created_at' => '2026-05-10 11:00:00'])->save();
+
+        $rows = app(CustomerLedgerBuilder::class)->build($c)->ledger;
+        $money = array_values(array_filter($rows, fn ($r) => in_array($r['type'], ['payment', 'refund'], true)));
+
+        // Newest-first: the LATER-created refund sits on top of the same-day payment.
+        $this->assertSame('refund', $money[0]['type']);
+        $this->assertSame($refund->id, $money[0]['payment_id']);   // links to its editable record
+        $this->assertSame('payment', $money[1]['type']);
+        $this->assertSame($pay->id, $money[1]['payment_id']);
+
+        // Running balance is correct in that order: 200 − 100 = 100, then + 30 refund = 130.
+        $this->assertEqualsWithDelta(130.0, $money[0]['running_balance'], 0.001);
+        $this->assertEqualsWithDelta(100.0, $money[1]['running_balance'], 0.001);
+
+        // Entry time surfaced for the ledger's date column.
+        $this->assertSame('11:00', $money[0]['time']);
+        $this->assertSame('10:00', $money[1]['time']);
     }
 
     public function test_cancelled_credit_note_does_not_reduce_ledger_balance(): void
@@ -327,7 +373,7 @@ class CustomerLedgerBuilderTest extends TestCase
         $this->assertLessThanOrEqual(6, $r->stats['oldest_unpaid_days']);
     }
 
-    public function test_buildStatsBlock_returns_only_filter_independent_sections(): void
+    public function test_build_stats_block_returns_only_filter_independent_sections(): void
     {
         // Locked-in contract: the optimization path (cache stats/aging/
         // yearly across filter changes in the Filament page) depends
@@ -343,7 +389,7 @@ class CustomerLedgerBuilderTest extends TestCase
         $this->assertArrayNotHasKey('ledger', $block);
     }
 
-    public function test_buildLedgerOnly_respects_filters(): void
+    public function test_build_ledger_only_respects_filters(): void
     {
         $c = $this->makeCustomer();
         $this->makeInvoice($c, '2025-06-01', 100.0, $this->credit);

@@ -6,6 +6,7 @@ use App\Actions\IssueCreditNote;
 use App\Actions\ReissueInvoiceAsDraft;
 use App\Actions\StornoAndReissue;
 use App\Filament\Resources\Cmr\CmrResource;
+use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\BankAccountField;
 use App\Jobs\SendInvoiceEmail;
@@ -63,6 +64,17 @@ class ViewInvoice extends ViewRecord
         $channelLabel = $tenant?->einvoiceChannelLabel() ?? 'myDATA';
 
         return [
+            // «Καρτέλα πελάτη» — an invoice is often reached FROM a customer's ledger
+            // (its rows link here); offer a one-click way back instead of navigating
+            // the menu. Only when the invoice has a customer (retail has none).
+            Action::make('customer_ledger')
+                ->label('Καρτέλα πελάτη')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('gray')
+                ->visible(fn (Invoice $record): bool => $record->customer_id !== null)
+                ->url(fn (Invoice $record): ?string => $record->customer_id
+                    ? CustomerResource::getUrl('ledger', ['record' => $record->customer_id])
+                    : null),
             // «Δημιουργία CMR» — international consignment note for this invoice's
             // goods (e.g. cross-border shipment). Pre-fills a DRAFT CMR (Greek→Latin
             // transliteration) the operator corrects to English, then prints. NOT a

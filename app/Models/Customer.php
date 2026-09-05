@@ -28,12 +28,14 @@ class Customer extends Model
 
     /**
      * The AR outstanding-balance expression over the join aliases created by
-     * scopeWithOutstandingBalance() (owed − standalone-credit-notes − paid).
-     * Defined once so the SELECT alias, scopeOnlyDebtors(), and the Filament
-     * CustomersTable filter can't drift apart (MON-9 added the cust_credit term).
+     * scopeWithOutstandingBalance() (owed − correlated-credit-notes − standalone-
+     * credit-notes − paid). Defined once so the SELECT alias, scopeOnlyDebtors(),
+     * and the Filament CustomersTable filter can't drift apart (MON-9 added the
+     * cust_credit term; MON-13 split out cust_credited_total so a credit note
+     * against a cash-term original still nets, matching the Καρτέλα).
      * Not usable on a select alias in WHERE, so the sites repeat this expression.
      */
-    public const OUTSTANDING_BALANCE_SQL = '(COALESCE(cust_owed.owed, 0) - COALESCE(cust_credit.credited, 0) - COALESCE(cust_paid.paid, 0))';
+    public const OUTSTANDING_BALANCE_SQL = '(COALESCE(cust_owed.owed, 0) - COALESCE(cust_credited_total.credited_total, 0) - COALESCE(cust_credit.credited, 0) - COALESCE(cust_paid.paid, 0))';
 
     /**
      * Audited identity/contact/terms columns. See TracksActivity.
@@ -309,9 +311,8 @@ class Customer extends Model
             ->select('invoices.customer_id')
             // Receivable base = payable_total (collectible: net+VAT + fees −
             // withholding) per row, falling back to gross_total for rows not yet
-            // backfilled. COALESCE each SUM separately (credited_total is NULL on
-            // never-credited invoices). Mirrors DashboardMetrics::outstandingReceivables().
-            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) - COALESCE(SUM(invoices.credited_total), 0) as owed');
+            // backfilled. Mirrors DashboardMetrics::outstandingReceivables().
+            ->selectRaw('COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) as owed');
         // MON-9: exclude credit notes from the receivable base — correlated
         // (credited_invoice_id) AND standalone legacy (invoice_types.is_credit).
         // Must match DashboardMetrics::outstandingReceivables() exactly, or the
@@ -322,6 +323,23 @@ class Customer extends Model
         // DashboardMetrics::outstandingReceivables() so the two stay reconciled.
         InvoiceScope::excludeUnissuedDrafts($owed);
         $owed = InvoiceScope::live($owed, 'invoices.');
+
+        // MON-13: correlated credit notes reduce via their ORIGINAL's credited_total,
+        // summed over ALL live issued originals (ANY term) — NOT just those in the
+        // owed base above. Else a credit note against a CASH-TERM original (its
+        // original isn't a receivable) silently loses its reduction, and this
+        // per-customer balance diverges from the Καρτέλα (CustomerLedgerBuilder). A
+        // credit note is account credit, not a refund — the reduction must land.
+        $creditedTotal = DB::table('invoices')
+            ->where('invoices.company_id', $companyId)
+            ->whereNull('invoices.deleted_at')
+            ->whereNotNull('invoices.customer_id')
+            ->groupBy('invoices.customer_id')
+            ->select('invoices.customer_id')
+            ->selectRaw('COALESCE(SUM(invoices.credited_total), 0) as credited_total');
+        InvoiceScope::excludeCreditNotes($creditedTotal);
+        InvoiceScope::excludeUnissuedDrafts($creditedTotal);
+        $creditedTotal = InvoiceScope::live($creditedTotal, 'invoices.');
 
         // MON-9: standalone legacy credit notes (is_credit type, no
         // credited_invoice_id) have no original carrying a credited_total, so the
@@ -349,6 +367,7 @@ class Customer extends Model
 
         return $query
             ->leftJoinSub($owed, 'cust_owed', 'cust_owed.customer_id', '=', 'customers.id')
+            ->leftJoinSub($creditedTotal, 'cust_credited_total', 'cust_credited_total.customer_id', '=', 'customers.id')
             ->leftJoinSub($standaloneCredits, 'cust_credit', 'cust_credit.customer_id', '=', 'customers.id')
             ->leftJoinSub($paid, 'cust_paid', 'cust_paid.customer_id', '=', 'customers.id')
             ->select('customers.*')

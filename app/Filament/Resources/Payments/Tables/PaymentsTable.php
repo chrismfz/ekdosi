@@ -3,6 +3,8 @@
 namespace App\Filament\Resources\Payments\Tables;
 
 use App\Enums\PaymentStatus;
+use App\Models\Payment;
+use App\Support\Money;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
@@ -38,11 +40,24 @@ class PaymentsTable
                     ->label('Τρόπος')
                     ->placeholder('—'),
 
+                // A refund IS a Payment row (kind='refund'); mark it so it doesn't
+                // read as an incoming payment.
+                TextColumn::make('kind')
+                    ->label('Τύπος')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state): string => Payment::kindLabel($state))
+                    ->color(fn (?string $state): string => $state === 'refund' ? 'warning' : 'success'),
+
                 TextColumn::make('amount')
                     ->label('Ποσό')
-                    ->money('EUR')
                     ->alignEnd()
-                    ->sortable(),
+                    ->sortable()
+                    // Show a refund as NEGATIVE (money OUT) so the sign matches the
+                    // Καρτέλα and it can't be mistaken for an incoming payment.
+                    ->color(fn (Payment $record): ?string => $record->isRefund() ? 'danger' : null)
+                    ->formatStateUsing(fn ($state, Payment $record): string => Money::eur(
+                        ($record->isRefund() ? -1 : 1) * (float) $state,
+                    )),
 
                 TextColumn::make('invoice.payment_status')
                     ->label('Κατάσταση παρ/κού')
