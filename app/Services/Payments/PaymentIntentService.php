@@ -4,9 +4,11 @@ namespace App\Services\Payments;
 
 use App\Models\Customer;
 use App\Models\CustomerUser;
+use App\Models\Invoice;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
+use App\Support\InvoiceScope;
 use App\Support\Payments\PaymentInitiation;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -39,6 +41,7 @@ class PaymentIntentService
         float $amount,
         ?CustomerUser $login = null,
         string $purpose = 'balance',
+        ?Invoice $invoice = null,
     ): array {
         $amount = round($amount, 2);
         if ($amount <= 0) {
@@ -52,6 +55,15 @@ class PaymentIntentService
         if ((int) $connection->company_id !== (int) $customer->company_id) {
             throw new RuntimeException('Ο τρόπος πληρωμής δεν ανήκει στην εταιρία του πελάτη.');
         }
+        // A targeted invoice must be THIS customer's AND this company's (never trust
+        // a caller-supplied invoice id across the tenant/customer boundary — checking
+        // both, not just customer_id, keeps the guard honest even if id spaces ever
+        // overlap). Payability is (re)checked at settle, which safely falls back to
+        // FIFO — so a stale target never strands money.
+        if ($invoice !== null && ((int) $invoice->customer_id !== (int) $customer->id
+            || (int) $invoice->company_id !== (int) $customer->company_id)) {
+            throw new RuntimeException('Το παραστατικό δεν ανήκει στον πελάτη.');
+        }
 
         $gateway = $this->registry->for($connection->gateway);
         if (! $gateway->capabilities()->chargeable()) {
@@ -61,12 +73,13 @@ class PaymentIntentService
         $intent = new PaymentIntent([
             'company_id' => $customer->company_id,
             'customer_id' => $customer->id,
+            'invoice_id' => $invoice?->id,
             'customer_user_id' => $login?->id,
             'gateway' => $connection->gateway,
             // Remember the method → its config (shared secret) so the online return
             // webhook can verify the provider digest against the right connection.
             'payment_gateway_connection_id' => $connection->id,
-            'purpose' => $purpose,
+            'purpose' => $invoice !== null ? 'invoice' : $purpose,
             'amount' => $amount,
             'currency' => 'EUR',
             'status' => PaymentIntent::STATUS_PENDING,
@@ -109,8 +122,12 @@ class PaymentIntentService
                 ->whereKey($intent->getKey())
                 ->lockForUpdate()
                 ->firstOrFail();
-            if (! $locked->isPending()) {
-                return;   // already settled/expired/cancelled — no-op (idempotent)
+            // Settle a PENDING intent, OR one auto-EXPIRED by the stale-intent sweep:
+            // a genuine (verified) capture that arrives after our own expiry guess
+            // must still be recorded — money truth overrides the sweep. A human
+            // CANCELLED or an already-SETTLED intent stays a no-op (idempotent).
+            if (! in_array($locked->status, [PaymentIntent::STATUS_PENDING, PaymentIntent::STATUS_EXPIRED], true)) {
+                return;
             }
 
             $customer = Customer::query()
@@ -131,15 +148,36 @@ class PaymentIntentService
                 $notes .= ' (κωδ. συναλλαγής: '.$transactionId.')';
             }
 
-            $this->allocator->allocate(
-                customer: $customer,
-                amount: $amount,
-                date: Carbon::now(),
-                paymentMethodId: $paymentMethodId,
-                reference: $locked->reference,
-                notes: $notes,
-                transactionId: $transactionId ?: $locked->reference,
-            );
+            // Invoice-targeted intent → pay THAT invoice (capped, remainder on-account).
+            // If the chosen invoice is no longer a payable target at settle time
+            // (cancelled/credited/deleted between start and settle), we must NEVER
+            // strand the captured money — fall back to the balance FIFO allocation.
+            $target = $locked->invoice_id !== null ? $this->payableTarget($locked) : null;
+
+            if ($target !== null) {
+                $this->allocator->allocateToInvoice(
+                    customer: $customer,
+                    invoice: $target,
+                    amount: $amount,
+                    date: Carbon::now(),
+                    paymentMethodId: $paymentMethodId,
+                    reference: $locked->reference,
+                    notes: $notes,
+                    transactionId: $transactionId ?: $locked->reference,
+                    paymentIntentId: $locked->id,
+                );
+            } else {
+                $this->allocator->allocate(
+                    customer: $customer,
+                    amount: $amount,
+                    date: Carbon::now(),
+                    paymentMethodId: $paymentMethodId,
+                    reference: $locked->reference,
+                    notes: $notes,
+                    transactionId: $transactionId ?: $locked->reference,
+                    paymentIntentId: $locked->id,
+                );
+            }
 
             $locked->forceFill([
                 'status' => PaymentIntent::STATUS_SETTLED,
@@ -147,6 +185,24 @@ class PaymentIntentService
                 'settled_by' => $settledBy,
             ])->save();
         });
+    }
+
+    /**
+     * The intent's targeted invoice IF it is still a payable target at settle time
+     * (this customer's, live, issued/active, not a credit note), else null so the
+     * caller falls back to FIFO — the captured money is recorded either way.
+     */
+    private function payableTarget(PaymentIntent $intent): ?Invoice
+    {
+        $q = InvoiceScope::live(Invoice::query())
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $intent->company_id)
+            ->where('customer_id', $intent->customer_id)
+            ->where('local_status', 'active')
+            ->whereKey($intent->invoice_id);
+        InvoiceScope::excludeCreditNotes($q);
+
+        return $q->first();
     }
 
     /**

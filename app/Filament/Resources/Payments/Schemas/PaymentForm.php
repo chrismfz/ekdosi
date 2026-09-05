@@ -2,16 +2,20 @@
 
 namespace App\Filament\Resources\Payments\Schemas;
 
+use App\Filament\Resources\PaymentIntents\PaymentIntentResource;
 use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\Payment;
 use App\Models\PaymentMethod;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 class PaymentForm
 {
@@ -19,6 +23,28 @@ class PaymentForm
     {
         return $schema
             ->components([
+                // Trail («πλήρωσα, δεν φαίνεται;»): when this Payment was settled from
+                // a portal/gateway intent, show WHERE it came from — reference, gateway,
+                // acquirer txn — linked to that intent. Hidden for operator/FIFO/import
+                // payments (no intent).
+                Placeholder::make('origin')
+                    ->label('Προέλευση')
+                    ->visible(fn (?Payment $record): bool => $record?->payment_intent_id !== null)
+                    ->content(function (?Payment $record): HtmlString {
+                        $intent = $record?->paymentIntent;
+                        if ($intent === null) {
+                            return new HtmlString('—');
+                        }
+                        $url = PaymentIntentResource::getUrl('index', ['tableSearch' => $intent->reference]);
+                        $txn = filled($record->transaction_id) ? ' · κωδ. συναλλαγής '.e($record->transaction_id) : '';
+
+                        return new HtmlString(
+                            'Πληρωμή πύλης <a href="'.e($url).'" class="fi-link" style="text-decoration:underline">'
+                            .e($intent->reference).'</a> · '.e($intent->gateway).$txn
+                        );
+                    })
+                    ->columnSpanFull(),
+
                 Select::make('customer_id')
                     ->label('Πελάτης')
                     ->options(fn () => Customer::query()

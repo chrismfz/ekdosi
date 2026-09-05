@@ -5,6 +5,7 @@ namespace App\Services\Payments;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Support\InvoiceScope;
 use Carbon\Carbon;
@@ -34,6 +35,7 @@ class PaymentAllocator
         ?string $notes = null,
         ?string $transactionId = null,
         ?int $bankAccountId = null,
+        ?int $paymentIntentId = null,
     ): PaymentAllocationResult {
         $amount = round($amount, 2);
         if ($amount <= 0) {
@@ -42,7 +44,7 @@ class PaymentAllocator
 
         $ref = $reference ?: 'ΕΙΣ-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
 
-        return DB::transaction(function () use ($customer, $amount, $date, $paymentMethodId, $ref, $notes, $transactionId, $bankAccountId) {
+        return DB::transaction(function () use ($customer, $amount, $date, $paymentMethodId, $ref, $notes, $transactionId, $bankAccountId, $paymentIntentId) {
             $remaining = $amount;
             $allocations = [];
 
@@ -76,6 +78,7 @@ class PaymentAllocator
                     'company_id' => $customer->company_id,
                     'customer_id' => $customer->id,
                     'invoice_id' => $invoice->id,
+                    'payment_intent_id' => $paymentIntentId,
                     'kind' => 'payment',
                     'payment_method_id' => $paymentMethodId,
                     'bank_account_id' => $bankAccountId,
@@ -96,6 +99,101 @@ class PaymentAllocator
                     'company_id' => $customer->company_id,
                     'customer_id' => $customer->id,
                     'invoice_id' => null, // on-account credit / προκαταβολή
+                    'payment_intent_id' => $paymentIntentId,
+                    'kind' => 'payment',
+                    'payment_method_id' => $paymentMethodId,
+                    'bank_account_id' => $bankAccountId,
+                    'pay_date' => $date->toDateString(),
+                    'amount' => $remaining,
+                    'reference' => $ref,
+                    'transaction_id' => $transactionId,
+                    'notes' => trim(($notes ? $notes.' · ' : '').'Πίστωση / προκαταβολή (on-account)'),
+                ]);
+                $onAccount = $remaining;
+            }
+
+            return new PaymentAllocationResult($ref, $amount, $allocations, $onAccount);
+        });
+    }
+
+    /**
+     * #1b — INVOICE-TARGETED allocation (portal «πλήρωσε ΑΥΤΟ το τιμολόγιο»): apply
+     * the amount to ONE chosen invoice, capped at its own balance, and park any
+     * remainder as on-account credit — so an over-payment funds the customer's
+     * account instead of driving the invoice negative. The target must be THIS
+     * customer's, live and issued (active), and not a credit note (MON-9). Mirrors
+     * {@see allocate} but skips the FIFO sweep.
+     */
+    public function allocateToInvoice(
+        Customer $customer,
+        Invoice $invoice,
+        float $amount,
+        Carbon $date,
+        ?int $paymentMethodId = null,
+        ?string $reference = null,
+        ?string $notes = null,
+        ?string $transactionId = null,
+        ?int $bankAccountId = null,
+        ?int $paymentIntentId = null,
+    ): PaymentAllocationResult {
+        $amount = round($amount, 2);
+        if ($amount <= 0) {
+            throw new InvalidArgumentException('Το ποσό της είσπραξης πρέπει να είναι θετικό.');
+        }
+
+        $ref = $reference ?: 'ΕΙΣ-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
+
+        return DB::transaction(function () use ($customer, $invoice, $amount, $date, $paymentMethodId, $ref, $notes, $transactionId, $bankAccountId, $paymentIntentId) {
+            // Re-resolve the target under the customer/scope guard (never trust the
+            // passed model's ownership): this customer's, live, issued, non-credit.
+            // Drop the ambient CompanyScope (like PaymentIntentService::payableTarget,
+            // which pre-checked the same row) and rely on the EXPLICIT company_id —
+            // so settle() from a mismatched context (a future job) can't filter the
+            // row out and roll back, stranding a captured payment.
+            $target = InvoiceScope::live(Invoice::query())
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $customer->company_id)
+                ->where('customer_id', $customer->id)
+                ->where('local_status', 'active')
+                ->whereKey($invoice->id);
+            InvoiceScope::excludeCreditNotes($target);
+            $target = $target->first();
+
+            if ($target === null) {
+                throw new InvalidArgumentException('Μη έγκυρο τιμολόγιο για πληρωμή (#'.$invoice->id.').');
+            }
+
+            $allocations = [];
+            $remaining = $amount;
+
+            $balance = round((float) $target->balanceData()->balance, 2);
+            $toInvoice = round(min($balance, $remaining), 2);
+            if ($toInvoice > 0.005) {
+                Payment::create([
+                    'company_id' => $customer->company_id,
+                    'customer_id' => $customer->id,
+                    'invoice_id' => $target->id,
+                    'payment_intent_id' => $paymentIntentId,
+                    'kind' => 'payment',
+                    'payment_method_id' => $paymentMethodId,
+                    'bank_account_id' => $bankAccountId,
+                    'pay_date' => $date->toDateString(),
+                    'amount' => $toInvoice,
+                    'reference' => $ref,
+                    'transaction_id' => $transactionId,
+                    'notes' => $notes,
+                ]);
+                $allocations[] = ['invcode' => (string) $target->invcode, 'amount' => $toInvoice];
+                $remaining = round($remaining - $toInvoice, 2);
+            }
+
+            $onAccount = 0.0;
+            if ($remaining > 0.005) {
+                Payment::create([
+                    'company_id' => $customer->company_id,
+                    'customer_id' => $customer->id,
+                    'invoice_id' => null,
+                    'payment_intent_id' => $paymentIntentId,
                     'kind' => 'payment',
                     'payment_method_id' => $paymentMethodId,
                     'bank_account_id' => $bankAccountId,
@@ -257,6 +355,9 @@ class PaymentAllocator
                         'company_id' => $customer->company_id,
                         'customer_id' => $customer->id,
                         'invoice_id' => $target->id,
+                        // Preserve the intent trail: the split-off portion is the
+                        // SAME money as the on-account row it came from.
+                        'payment_intent_id' => $payment->payment_intent_id,
                         'kind' => 'payment',
                         'payment_method_id' => $payment->payment_method_id,
                         'bank_account_id' => $payment->bank_account_id,

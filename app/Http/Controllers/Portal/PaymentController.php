@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Portal;
 
 use App\Contracts\HostedRedirectGateway;
 use App\Http\Controllers\Controller;
+use App\Models\Invoice;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
@@ -11,6 +12,7 @@ use App\Services\CustomerLedger\CustomerLedgerBuilder;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Services\Payments\PaymentIntentService;
 use App\Services\Portal\CustomerDocumentFeed;
+use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,11 +40,19 @@ class PaymentController extends Controller
         $model = $this->resolveCustomer($customer);
         $methods = $this->activeMethods((int) $model->company_id);
         $owed = max((float) $this->ledger->build($model)->stats['balance'], 0.0);
+        $openInvoices = $this->payableInvoices($model);
+
+        // Optional deep-link «pay THIS invoice» (?invoice=…) — honoured only if it
+        // is one of the customer's own payable documents.
+        $preselect = (int) $request->query('invoice', 0);
+        $preselected = $preselect > 0 ? $openInvoices->firstWhere('id', $preselect) : null;
 
         return view('portal.payment.create', [
             'customer' => $model,
             'methods' => $methods,
             'owed' => $owed,
+            'openInvoices' => $openInvoices,
+            'preselectedInvoiceId' => $preselected?->id,
         ]);
     }
 
@@ -53,6 +63,7 @@ class PaymentController extends Controller
         $data = $request->validate([
             'connection_id' => ['required', 'integer'],
             'amount' => ['required', 'numeric', 'min:0.01', 'max:9999999'],
+            'invoice_id' => ['nullable', 'integer'],
         ]);
 
         $connection = $this->activeMethods((int) $model->company_id)->firstWhere('id', (int) $data['connection_id']);
@@ -60,11 +71,22 @@ class PaymentController extends Controller
             abort(Response::HTTP_NOT_FOUND);
         }
 
+        // Invoice target is OPTIONAL — «Όλο το υπόλοιπο» leaves it null (FIFO). When
+        // set it must be one of THIS customer's payable invoices (never trust the id).
+        $invoice = null;
+        if (filled($data['invoice_id'] ?? null)) {
+            $invoice = $this->payableInvoices($model)->firstWhere('id', (int) $data['invoice_id']);
+            if ($invoice === null) {
+                abort(Response::HTTP_NOT_FOUND);
+            }
+        }
+
         $result = $this->intents->start(
             customer: $model,
             connection: $connection,
             amount: (float) $data['amount'],
             login: Auth::guard('portal')->user(),
+            invoice: $invoice,
         );
 
         // A hosted gateway (flow=redirect) bounces the customer to its own page
@@ -172,6 +194,31 @@ class PaymentController extends Controller
         }
 
         return false;
+    }
+
+    /**
+     * The customer's PAYABLE invoices (live, issued/active, non-credit, with an
+     * open balance), oldest-first — the choices for «πλήρωσε ΑΥΤΟ το τιμολόγιο».
+     * Each carries an `open_balance` attribute for display/pre-fill. Grant-scoped
+     * (the customer is already resolved from an active grant).
+     *
+     * @return \Illuminate\Support\Collection<int, Invoice>
+     */
+    private function payableInvoices(object $customer): \Illuminate\Support\Collection
+    {
+        $q = InvoiceScope::live(Invoice::query())
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $customer->company_id)
+            ->where('customer_id', $customer->id)
+            ->where('local_status', 'active')
+            ->orderBy('issued_at')
+            ->orderBy('id');
+        InvoiceScope::excludeCreditNotes($q);
+
+        return $q->get()
+            ->each(fn (Invoice $inv) => $inv->setAttribute('open_balance', round((float) $inv->balanceData()->balance, 2)))
+            ->filter(fn (Invoice $inv): bool => (float) $inv->open_balance > 0.005)
+            ->values();
     }
 
     /**

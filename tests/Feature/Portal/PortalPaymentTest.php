@@ -6,8 +6,11 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerUser;
 use App\Models\CustomerUserAccess;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
+use App\Models\PaymentMethod;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
@@ -108,6 +111,50 @@ class PortalPaymentTest extends TestCase
         $login = $this->login();
 
         $this->actingAs($login, 'portal')->get("/user/pay/{$c->id}")->assertStatus(404);
+    }
+
+    public function test_store_with_an_invoice_target_records_it_on_the_intent(): void
+    {
+        $t = $this->company();
+        $c = $this->customer($t);
+        $method = $this->method($t);
+        $login = $this->login();
+        $this->grant($login, $c);
+
+        // A payable (credit-term, issued, open) invoice the customer can target.
+        $type = InvoiceType::create(['company_id' => $t->id, 'code' => 'ΤΙΜ', 'name' => 'Τ', 'invcount' => 1, 'mydata_type' => '1.1']);
+        $credit = PaymentMethod::create(['company_id' => $t->id, 'description' => 'Επί Πιστώσει', 'due_days' => 30]);
+        $inv = Invoice::create([
+            'company_id' => $t->id, 'invcode' => 'ΤΙΜ7', 'code' => 7, 'invoice_type_id' => $type->id,
+            'customer_id' => $c->id, 'issued_at' => now()->subDay(), 'local_status' => 'active', 'payment_method_id' => $credit->id,
+        ]);
+        $inv->forceFill(['net_total' => 40, 'gross_total' => 40])->save();
+
+        // The pay page renders the invoice selector with this document as a choice.
+        $this->actingAs($login, 'portal')->get("/user/pay/{$c->id}")
+            ->assertOk()->assertSee('Τι πληρώνεις;')->assertSee('ΤΙΜ7');
+
+        $this->actingAs($login, 'portal')->post("/user/pay/{$c->id}", [
+            'connection_id' => $method->id, 'amount' => '40.00', 'invoice_id' => $inv->id,
+        ])->assertRedirect();
+
+        $intent = PaymentIntent::query()->where('customer_id', $c->id)->firstOrFail();
+        $this->assertSame($inv->id, $intent->invoice_id);
+        $this->assertSame('invoice', $intent->purpose);
+    }
+
+    public function test_store_rejects_an_invoice_that_is_not_the_customers(): void
+    {
+        $t = $this->company();
+        $c = $this->customer($t);
+        $method = $this->method($t);
+        $login = $this->login();
+        $this->grant($login, $c);
+
+        // An invoice id that is not one of this customer's payable documents → 404.
+        $this->actingAs($login, 'portal')->post("/user/pay/{$c->id}", [
+            'connection_id' => $method->id, 'amount' => '10.00', 'invoice_id' => 999999,
+        ])->assertStatus(404);
     }
 
     public function test_store_creates_a_pending_intent_and_redirects(): void

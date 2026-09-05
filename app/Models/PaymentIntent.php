@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -31,6 +32,7 @@ class PaymentIntent extends Model
     protected $fillable = [
         'company_id',
         'customer_id',
+        'invoice_id',
         'customer_user_id',
         'gateway',
         'payment_gateway_connection_id',
@@ -67,6 +69,18 @@ class PaymentIntent extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /** The specific invoice this intent targets (null = pay the whole balance, FIFO). */
+    public function invoice(): BelongsTo
+    {
+        return $this->belongsTo(Invoice::class);
+    }
+
+    /** The Payment row(s) settle() wrote from this intent (the money trail). */
+    public function payments(): HasMany
+    {
+        return $this->hasMany(Payment::class);
     }
 
     /** The payment method that started this intent (null for a manual/operator one). */

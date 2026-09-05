@@ -6,6 +6,7 @@ use App\Services\Backup\Destinations\S3BackupDestination;
 use App\Services\Backup\Destinations\SftpBackupDestination;
 use App\Services\Billing\Sources\WhmcsBillingSource;
 use App\Services\EInvoice\Transports\InvoSignTransport;
+use App\Services\Payments\Gateways\EurobankGateway;
 use App\Services\Payments\Gateways\ManualPaymentGateway;
 
 return [
@@ -245,6 +246,12 @@ return [
         'leads_notify_due_enabled' => env('EKDOSI_SCHEDULE_LEADS_NOTIFY_DUE', false),
         'leads_notify_due_time' => env('EKDOSI_LEADS_NOTIFY_DUE_TIME', '08:00'),
 
+        // payments:expire-stale-intents — mark abandoned ONLINE portal intents
+        // «Έληξε» past the age threshold (see payments.intent_expiry_minutes), so
+        // «Εκκρεμείς Πληρωμές Πύλης» stays real. Default ON (a status flip only;
+        // a late verified capture still settles). Cross-tenant, cheap.
+        'intent_expiry_enabled' => env('EKDOSI_SCHEDULE_INTENT_EXPIRY', true),
+
         // ai:dispatch-reminders — deliver due AI «Βοηθός» reminders (the bell).
         // Default ON: a confirmed reminder is expected to fire (still inert until
         // the OS cron + a queue worker run the scheduler). Cheap every-minute
@@ -289,9 +296,15 @@ return [
     'payments' => [
         'gateways' => [
             'manual' => ManualPaymentGateway::class,
-            'eurobank' => App\Services\Payments\Gateways\EurobankGateway::class,   // B1 (vPOS: card + Apple/Google Pay + IRIS)
+            'eurobank' => EurobankGateway::class,   // B1 (vPOS: card + Apple/Google Pay + IRIS)
             // 'paypal'   => App\Services\Payments\Gateways\PaypalGateway::class,    // B2
         ],
+
+        // Abandoned-intent hygiene: an ONLINE pending intent older than this many
+        // minutes is marked «Έληξε» by `payments:expire-stale-intents`. Well beyond
+        // any hosted-gateway session (which dies in ~30′), so it never races a real
+        // return; a late verified capture still settles (settle() accepts expired).
+        'intent_expiry_minutes' => (int) env('EKDOSI_PAYMENT_INTENT_EXPIRY_MINUTES', 120),
     ],
 
     /*

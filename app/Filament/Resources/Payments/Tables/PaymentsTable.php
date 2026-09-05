@@ -66,6 +66,22 @@ class PaymentsTable
                     ->formatStateUsing(fn (?string $state) => $state ? PaymentStatus::from($state)->label() : '—')
                     ->color(fn (?string $state) => $state ? PaymentStatus::from($state)->color() : 'gray'),
 
+                // Acquirer transaction id («ID Συναλλαγής» in the bank's mail) —
+                // searchable + copyable so «βρες την πληρωμή με ID 320…» is one search.
+                TextColumn::make('transaction_id')
+                    ->label('Κωδ. συναλλαγής')
+                    ->placeholder('—')
+                    ->copyable()
+                    ->searchable()
+                    ->toggleable(),
+
+                // Our ΠΛ- receipt key that groups an είσπραξη's rows (and matches the
+                // portal intent) — searchable, hidden by default to avoid clutter.
+                TextColumn::make('reference')
+                    ->label('Αναφορά')
+                    ->searchable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('deleted_at')
                     ->dateTime()
                     ->toggleable(isToggledHiddenByDefault: true),
