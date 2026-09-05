@@ -4,6 +4,8 @@ namespace App\Services\Portability;
 
 use App\Casts\MaybeEncrypted;
 use App\Models\Company;
+use App\Models\PaymentGatewayConnection;
+use App\Models\Scopes\CompanyScope;
 use App\Services\TenantRoleProvisioner;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -12,10 +14,12 @@ use Illuminate\Support\Facades\Storage;
 /**
  * the per-company portability feature (FEATURES.md) — builds a per-company
  * SETTINGS + SETUP bundle (buckets A + B): the `companies` row (secrets sealed
- * via SecretsCodec, logo bundled) plus the operator-curated lookup tables.
+ * via SecretsCodec, logo bundled) plus the operator-curated lookup tables, and
+ * the sealed payment-method connections (SEALED_TABLES — their encrypted config
+ * re-sealed under the passphrase so it survives a new APP_KEY).
  *
- * Transactional data (bucket C) is Phase 2 and not touched here. The bundle is
- * an in-memory structure; the command serialises it to a .zip.
+ * Transactional data (bucket C) rides only in a `--full` bundle. The bundle is
+ * an in-memory structure; the command serialises it to a .zip (BundleArchive).
  */
 class CompanyExporter
 {
@@ -90,11 +94,6 @@ class CompanyExporter
         // are reconfigured on the target VM) — never travel inside a bundle.
         'company_backup_settings',
         'company_backup_runs',
-        // Payment-gateway creds (API/webhook secrets, encrypted) are per-ENVIRONMENT
-        // and reconfigured on the target VM — like backup destinations, they never
-        // travel inside a bundle (and the encrypted config wouldn't survive a new
-        // APP_KEY anyway). The operator re-adds payment methods on the target.
-        'payment_gateway_connections',
         // Payment intents are operational/transient — a «customer started to pay»
         // record. The actual money lives in `payments` (exported); a settled intent
         // is re-derivable from it, a pending one is ephemeral. Not source-of-truth.
@@ -121,6 +120,24 @@ class CompanyExporter
         'server_groups' => ['secret_encrypted'],
     ];
 
+    /**
+     * Tenant tables carried via the SEALED, model-based path (not the raw
+     * setup/transactional dump): their `config` is encrypted-at-rest, so a raw dump
+     * would ship APP_KEY ciphertext that can't be opened on the target VM. Instead
+     * we load them through Eloquent (config decrypted), seal the config under the
+     * passphrase (like the company's own secrets), and the importer re-encrypts it
+     * under the target's APP_KEY. `CompanyExportCoverageTest` counts these as
+     * classified. Always carried (SETTINGS, not gated on --full).
+     *
+     * @var list<string>
+     */
+    public const SEALED_TABLES = [
+        // Payment methods incl. the Eurobank mid + Shared Secret (config encrypted).
+        // Devbox → production: the operator re-adds NOTHING — the methods land
+        // configured, secrets and all (portal logins stay OUT, by design).
+        'payment_gateway_connections',
+    ];
+
     public function __construct(
         private readonly SecretsCodec $codec,
         private readonly TenantRoleProvisioner $roles,
@@ -134,6 +151,7 @@ class CompanyExporter
      *     setup: array<string, list<array<string,mixed>>>,
      *     data: array<string, list<array<string,mixed>>>,
      *     users: list<array{email:string, name:string, role:?string}>,
+     *     connections: array{rows: list<array<string,mixed>>, secrets: array<string,mixed>},
      *     files: array<string,string>
      * }
      */
@@ -172,6 +190,11 @@ class CompanyExporter
         $users = $this->exportUsers($company);
         $counts['users'] = count($users);
 
+        // Sealed connections (payment methods incl. their encrypted config) — the
+        // config secret rides passphrase-sealed, NOT as raw APP_KEY ciphertext.
+        $connections = $this->buildConnections($company, $secretsMode, $passphrase);
+        $counts['payment_gateway_connections'] = count($connections['rows']);
+
         $files = [];
         if (($logo = $this->logo($company)) !== null) {
             $files['files/'.$logo['name']] = $logo['bytes'];
@@ -199,7 +222,52 @@ class CompanyExporter
             'setup' => $setup,
             'data' => $data,
             'users' => $users,
+            'connections' => $connections,
             'files' => $files,
+        ];
+    }
+
+    /**
+     * Payment-method connections (SEALED_TABLES), loaded through Eloquent so the
+     * encrypted `config` decrypts, then re-sealed under the passphrase. Clear
+     * metadata (gateway/label/is_active/sort) rides in `rows`; the per-connection
+     * `config` (mid + Shared Secret + settings) rides in `secrets`, index-aligned,
+     * sealed exactly like the company's own secrets — never raw APP_KEY ciphertext.
+     *
+     * @return array{rows: list<array<string,mixed>>, secrets: array{mode:string, salt?:string, values:array<string,?string>}}
+     */
+    private function buildConnections(Company $company, string $secretsMode, ?string $passphrase): array
+    {
+        $rows = [];
+        $configs = [];
+        if (Schema::hasTable('payment_gateway_connections')) {
+            $connections = PaymentGatewayConnection::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $company->id)
+                ->orderBy('sort')
+                ->orderBy('id')
+                ->get();
+
+            foreach ($connections as $i => $conn) {
+                // A stable per-connection ref ties a row to its sealed config, so the
+                // two never depend on positional array index (a diverged/edited
+                // bundle can't attach one connection's secret to another's row).
+                $ref = 'c'.$i;
+                $rows[] = [
+                    'ref' => $ref,
+                    'gateway' => (string) $conn->gateway,
+                    'label' => $conn->label,
+                    'is_active' => (bool) $conn->is_active,
+                    'sort' => (int) $conn->sort,
+                ];
+                // `config` is the decrypted array (encrypted:array cast); seal it.
+                $configs[$ref] = $conn->config ?? [];
+            }
+        }
+
+        return [
+            'rows' => $rows,
+            'secrets' => $this->codec->seal($configs, $secretsMode, $passphrase),
         ];
     }
 

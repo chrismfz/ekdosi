@@ -741,6 +741,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Export/import — manual gateway bank_account_ids all-unresolved → «all active» (P2, edge).** On import, a
+  `manual` connection's `bank_account_ids` are rewired through the imported bank_accounts map; ids that don't
+  resolve are dropped. If a connection restricted to specific accounts references ONLY banks that didn't export
+  (e.g. a soft-deleted bank whose id lingered in config), the list rewrites to `[]`, which the gateway treats as
+  «show ALL active accounts» — a silent widening from the configured subset. Rare (needs a config pointing at a
+  non-exported bank). Mitigation idea: when a non-empty selection rewrites to empty, deactivate the connection so
+  the operator re-checks it, rather than defaulting to all. Deferred — the common case (all banks export) is fine.
 - **MON-13 leftover (P3, ledger display edge).** The Καρτέλα ledger sorts same-day rows by a business-date
   primary + creation-order tiebreak, but a row's DISPLAYED time is issue-time for invoices vs entry-time
   (created_at) for payments. A back-dated invoice (issued 09:00, entered 15:00) on the same day as a payment

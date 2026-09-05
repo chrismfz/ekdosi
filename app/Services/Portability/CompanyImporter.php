@@ -3,6 +3,8 @@
 namespace App\Services\Portability;
 
 use App\Models\Company;
+use App\Models\PaymentGatewayConnection;
+use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
@@ -222,7 +224,8 @@ class CompanyImporter
             return $summary;
         }
 
-        $company = DB::transaction(function () use ($bundle, $secrets, $new, $existing): Company {
+        $passphrase = $opts['passphrase'] ?? null;
+        $company = DB::transaction(function () use ($bundle, $secrets, $passphrase, $new, $existing): Company {
             $attrs = $this->companyAttributes($bundle['company'], $secrets);
             // Null every invoice_types FK the bundle CARRIES before the save; each
             // is rewired below through the imported invoice_types map (see
@@ -263,6 +266,12 @@ class CompanyImporter
             if ($typeFkPatch !== []) {
                 Company::withoutEvents(fn () => $company->forceFill($typeFkPatch)->save());
             }
+
+            // Sealed connections (payment methods): open the passphrase-sealed
+            // configs, rewire the manual gateway's bank_account_ids via the freshly
+            // imported bank_accounts map, and upsert via Eloquent so the secret is
+            // re-encrypted under the TARGET VM's APP_KEY. After bank_accounts (above).
+            $this->importConnections($bundle['connections'] ?? [], $company->id, $maps, $passphrase);
 
             // Bucket C (full bundle): transactional, parents before children.
             foreach (self::ORDER_TRANSACTIONAL as $table) {
@@ -604,6 +613,77 @@ class CompanyImporter
     /**
      * @return array<int|string, int> old exported id → resulting id
      */
+    /**
+     * Restore the sealed payment-method connections (CompanyExporter::buildConnections):
+     * open the passphrase-sealed configs, rewire the manual gateway's
+     * `bank_account_ids` (config-nested FKs) through the imported bank_accounts
+     * old→new map, and upsert via Eloquent so the secret re-encrypts under the
+     * TARGET VM's APP_KEY. Idempotent per (company, gateway, label) — a re-import
+     * updates in place. Portal logins deliberately do NOT ride the bundle.
+     *
+     * @param  array{rows?: list<array<string,mixed>>, secrets?: array<string,mixed>}  $connections
+     * @param  array<string, array<int|string, int>>  $maps
+     */
+    private function importConnections(array $connections, int $companyId, array $maps, ?string $passphrase): void
+    {
+        $rows = $connections['rows'] ?? [];
+        if ($rows === [] || ! Schema::hasTable('payment_gateway_connections')) {
+            return;
+        }
+
+        $configs = isset($connections['secrets'])
+            ? $this->codec->open($connections['secrets'], $passphrase)
+            : [];
+        $bankMap = $maps['bank_accounts'] ?? [];
+
+        // Track the target rows already matched THIS pass, so two bundle rows that
+        // share (gateway, label) — allowed, and common with a null label — match TWO
+        // different target rows (or create two) instead of the second overwriting
+        // the first and losing its secret. Idempotent: a re-import matches the same
+        // rows in the same order.
+        $consumed = [];
+        foreach ($rows as $row) {
+            $ref = (string) ($row['ref'] ?? '');
+            $config = (array) ($configs[$ref] ?? []);
+
+            // The manual gateway stores bank_account_ids INSIDE its config JSON —
+            // rewire those legacy ids to the target's freshly imported bank_accounts
+            // (drop any that didn't import). Empty stays empty (= «all active»).
+            if (($row['gateway'] ?? null) === 'manual' && ! empty($config['bank_account_ids'])) {
+                $config['bank_account_ids'] = array_values(array_filter(array_map(
+                    fn ($old) => $bankMap[$old] ?? ($bankMap[(int) $old] ?? null),
+                    (array) $config['bank_account_ids'],
+                )));
+            }
+
+            $attrs = [
+                'is_active' => (bool) ($row['is_active'] ?? false),
+                'sort' => (int) ($row['sort'] ?? 0),
+                'config' => $config,
+            ];
+
+            $match = PaymentGatewayConnection::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $companyId)
+                ->where('gateway', (string) $row['gateway'])
+                ->when($consumed !== [], fn ($q) => $q->whereNotIn('id', $consumed));
+            ($row['label'] ?? null) === null
+                ? $match->whereNull('label')
+                : $match->where('label', $row['label']);
+
+            if ($existing = $match->orderBy('id')->first()) {
+                $existing->forceFill($attrs)->save();
+                $consumed[] = $existing->id;
+            } else {
+                $created = PaymentGatewayConnection::query()->withoutGlobalScope(CompanyScope::class)->create(array_merge(
+                    ['company_id' => $companyId, 'gateway' => (string) $row['gateway'], 'label' => $row['label'] ?? null],
+                    $attrs,
+                ));
+                $consumed[] = $created->id;
+            }
+        }
+    }
+
     private function importTable(string $table, array $rows, int $companyId, array $maps): array
     {
         $map = [];

@@ -2,9 +2,11 @@
 
 namespace Tests\Feature\Portability;
 
+use App\Models\BankAccount;
 use App\Models\Company;
 use App\Models\DistributionAim;
 use App\Models\InvoiceType;
+use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentMethod;
 use App\Models\VatCategory;
 use App\Models\WhmcsPaymentMap;
@@ -85,6 +87,81 @@ class CompanyImportTest extends TestCase
         $map = DB::table('whmcs_payment_maps')->where('company_id', $company->id)->where('whmcs_gateway', 'stripe')->first();
         $this->assertNotNull($map);
         $this->assertSame($pm->id, (int) $map->payment_method_id);
+    }
+
+    public function test_payment_gateway_connections_travel_with_sealed_secrets_and_rewired_bank_ids(): void
+    {
+        // Devbox → production: the operator wants the payment methods (Eurobank mid
+        // + Shared Secret, and the manual bank-deposit) to LAND configured, secrets
+        // and all — nothing re-typed. The secret must ride passphrase-sealed (not
+        // raw APP_KEY ciphertext), and the manual gateway's bank_account_ids must
+        // rewire to the target's freshly imported bank accounts.
+        $company = $this->sourceCompany();
+        $bank = BankAccount::create([
+            'company_id' => $company->id, 'bank_name' => 'Eurobank', 'iban' => 'GR-IBAN-1',
+            'account_name' => 'Δικαιούχος', 'is_active' => true,
+        ]);
+        PaymentGatewayConnection::create([
+            'company_id' => $company->id, 'gateway' => 'eurobank', 'label' => 'Κάρτα',
+            'is_active' => true, 'sort' => 0,
+            'config' => ['merchant_id' => 'MID999', 'shared_secret' => 'TOP-SECRET-XYZ', 'lang' => 'el', 'testmode' => false],
+        ]);
+        PaymentGatewayConnection::create([
+            'company_id' => $company->id, 'gateway' => 'manual', 'label' => 'Κατάθεση',
+            'is_active' => true, 'sort' => 1,
+            'config' => ['bank_account_ids' => [$bank->id], 'instructions' => 'ref = αριθμός'],
+        ]);
+
+        $bundle = $this->bundle($company);
+
+        // The secret is SEALED — not in the clear anywhere in the connections blob.
+        $this->assertCount(2, $bundle['connections']['rows']);
+        $this->assertSame('passphrase', $bundle['connections']['secrets']['mode']);
+        $this->assertStringNotContainsString('TOP-SECRET-XYZ', json_encode($bundle['connections']['secrets']));
+
+        // Simulate the target VM (fresh slug + fresh bank-account id).
+        Company::where('slug', 'src')->forceDelete();
+        app(CompanyImporter::class)->run($bundle, ['new' => true, 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $target = Company::where('slug', 'src')->firstOrFail();
+        $eb = PaymentGatewayConnection::where('company_id', $target->id)->where('gateway', 'eurobank')->firstOrFail();
+        // The secret survived + decrypts under the TARGET's APP_KEY.
+        $this->assertSame('MID999', $eb->config['merchant_id']);
+        $this->assertSame('TOP-SECRET-XYZ', $eb->config['shared_secret']);
+        $this->assertTrue((bool) $eb->is_active);
+
+        $newBank = BankAccount::where('company_id', $target->id)->firstOrFail();
+        $manual = PaymentGatewayConnection::where('company_id', $target->id)->where('gateway', 'manual')->firstOrFail();
+        // bank_account_ids rewired old→new (not the stale source id).
+        $this->assertSame([$newBank->id], $manual->config['bank_account_ids']);
+    }
+
+    public function test_two_connections_sharing_gateway_and_label_both_survive(): void
+    {
+        // A tenant with TWO eurobank methods labelled the same (or two manual with a
+        // null label) must NOT collapse to one on import — each secret is distinct.
+        $company = $this->sourceCompany();
+        PaymentGatewayConnection::create([
+            'company_id' => $company->id, 'gateway' => 'eurobank', 'label' => 'Κάρτα',
+            'is_active' => true, 'sort' => 0, 'config' => ['merchant_id' => 'MID-A', 'shared_secret' => 'SEC-A'],
+        ]);
+        PaymentGatewayConnection::create([
+            'company_id' => $company->id, 'gateway' => 'eurobank', 'label' => 'Κάρτα',
+            'is_active' => true, 'sort' => 1, 'config' => ['merchant_id' => 'MID-B', 'shared_secret' => 'SEC-B'],
+        ]);
+
+        $bundle = $this->bundle($company);
+        Company::where('slug', 'src')->forceDelete();
+        $importer = app(CompanyImporter::class);
+        $importer->run($bundle, ['new' => true, 'execute' => true, 'passphrase' => 'p@ss']);
+        // Re-import into the same company → still exactly two (idempotent, no dupes).
+        $importer->run($bundle, ['into' => 'src', 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $target = Company::where('slug', 'src')->firstOrFail();
+        $conns = PaymentGatewayConnection::where('company_id', $target->id)->where('gateway', 'eurobank')->orderBy('sort')->get();
+        $this->assertCount(2, $conns);
+        $this->assertSame(['MID-A', 'MID-B'], $conns->pluck('config.merchant_id')->all());
+        $this->assertSame(['SEC-A', 'SEC-B'], $conns->pluck('config.shared_secret')->all());
     }
 
     public function test_reimport_into_is_idempotent_and_updates_in_place(): void

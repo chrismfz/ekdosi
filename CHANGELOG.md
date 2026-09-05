@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Export εταιρίας: ταξιδεύουν πλέον οι τρόποι online πληρωμής (με secrets).** Τα `payment_gateway_connections`
+  (Eurobank mid + Shared Secret, και μελλοντικά gateways — endpoints/IDs/usernames/passwords, ό,τι κρατά το
+  encrypted `config`) μπαίνουν στο bundle με το config **σφραγισμένο στο passphrase** (όχι raw APP_KEY ciphertext),
+  και ξανα-κρυπτογραφούνται κάτω από το APP_KEY του target VM στο import. Ο manual τρόπος κάνει FK-rewire των
+  `bank_account_ids` στους νέους λογαριασμούς. Devbox → production: οι τρόποι πληρωμής «προσγειώνονται» ρυθμισμένοι,
+  χωρίς να ξαναγράψεις τίποτα. Οι portal συνδέσεις πελατών **μένουν έξω** σκόπιμα. (Company creds — myDATA/GSIS/
+  InvoSign/WHMCS/SMTP — ταξίδευαν ήδη σφραγισμένα· τα seeded lookups ταξιδεύουν idempotently.)
 - **Πυλώνας B / B1 — Eurobank / Cardlink vPOS (κάρτα + Apple/Google Pay + IRIS).** Το πρώτο
   online payment gateway (`flow=redirect`): ο πελάτης από «Πλήρωσε» ανακατευθύνεται με
   υπογεγραμμένη φόρμα στη σελίδα της τράπεζας· η επιστροφή (vPOS digest πάνω στο raw body)
