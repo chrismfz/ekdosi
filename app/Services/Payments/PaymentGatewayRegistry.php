@@ -45,6 +45,23 @@ class PaymentGatewayRegistry
     }
 
     /**
+     * Display name for a possibly-STALE stored key, for read-only rendering (the
+     * admin list) — WITHOUT logging or falling back to Null. A known key → its
+     * gateway's displayName; an unknown/removed key → the raw key itself (so the
+     * operator still sees what was configured), never a warning per row.
+     */
+    public function label(string $key): string
+    {
+        $key = trim($key);
+        $class = $this->map()[$key] ?? null;
+        if ($class !== null && class_exists($class) && is_subclass_of($class, PaymentGateway::class)) {
+            return (new $class)->displayName();
+        }
+
+        return $key !== '' ? $key : '—';
+    }
+
+    /**
      * Every configured gateway instance — for the admin «Add method» picker
      * (key → displayName).
      *

@@ -46,6 +46,16 @@ class PaymentGatewayRegistryTest extends TestCase
         $this->assertContains('manual', $this->registry()->keys());
     }
 
+    public function test_label_renders_a_stale_key_without_resolving_or_logging(): void
+    {
+        $registry = $this->registry();
+        // Known key → the gateway's display name.
+        $this->assertSame((new ManualPaymentGateway)->displayName(), $registry->label('manual'));
+        // Unknown/removed key → the raw key itself (no Null fallback, no per-row warning).
+        $this->assertSame('stripe', $registry->label('stripe'));
+        $this->assertSame('—', $registry->label(''));
+    }
+
     public function test_manual_gateway_advertises_offline_capabilities(): void
     {
         $caps = $this->registry()->for('manual')->capabilities();

@@ -27,7 +27,9 @@ class PaymentGatewayConnectionsTable
                 TextColumn::make('gateway')
                     ->label('Τύπος')
                     ->badge()
-                    ->formatStateUsing(fn (string $state): string => $registry->for($state)->displayName()),
+                    // label() (not for()) so a stale/removed key renders as its raw
+                    // key, never a Null fallback + a per-row log warning.
+                    ->formatStateUsing(fn (string $state): string => $registry->label($state)),
 
                 TextColumn::make('label')
                     ->label('Όνομα (προς πελάτη)')
