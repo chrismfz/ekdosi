@@ -824,6 +824,22 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   `docs/payment-gateways-b2-paypal-stripe.md`) → B3 office rails (card-POS + ΑΑΔΕ) → B4 reconcile/
   prepaid/refund.
 
+## 20. Σύστημα υποστήριξης / Tickets (Πυλώνας E) — foundation
+- **Per-tenant kill-switch (SHIPPED):** όλος ο πυλώνας πίσω από `companies.support_enabled`
+  (**default OFF, τελείως κρυμμένο** — μενού/ρυθμίσεις/portal), toggle στη φόρμα Εταιρείας (super-admin).
+  Design: `docs/ticket-system-design.md`· build-our-own thin domain (multi-tenant native), δανεικό μόνο
+  το mail layer (Phase 3).
+- **Domain (Phase 1a, SHIPPED):** `tickets` / `ticket_messages` (public reply **ή** εσωτερική σημείωση) /
+  `ticket_departments` (+ IMAP config encrypted, Phase 3) / `canned_replies`. State machine «ποιος έγραψε →
+  κατάσταση» σε ΕΝΑ choke-point (`PostTicketMessage`/`OpenTicket`, enum `TicketStatus`). Reference
+  `TK-YYYY-MM-DD-xxxxxx` (ημ/νία + αμάντευτη ουρά = email token). Reuse `HasAttachments`/`HasTags`/`TracksActivity`.
+- **Χειριστικό UI (Phase 1b, SHIPPED):** cluster **«Υποστήριξη»** (στα «Καθημερινά», gated) — λίστα με tabs
+  («Στην ουρά»/«Χωρίς ανάθεση»/«Ανοιχτά»/«Όλα») + badges, «Νέο αίτημα», σελίδα προβολής με **thread**
+  (εσωτερικές σημειώσεις ξεχωριστά, «δεν το βλέπει ο πελάτης») + ενέργειες Απάντηση/Σημείωση/Ανάθεση/
+  Αναμονή/Κλείσιμο. Ρυθμίσεις **Τμημάτων** στο Settings Cluster → «Υποστήριξη».
+- **Επόμενα:** canned-reply picker + context panel (τιμολόγια/καρτέλα πελάτη inline) → Phase 2 πύλη πελάτη
+  → Phase 3 IMAP ingestion (`webklex/php-imap` + reply-parser) → Phase 4 parity (watchers/SLA/merge, KB).
+
 ---
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
