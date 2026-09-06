@@ -149,8 +149,9 @@ class EurobankGatewayTest extends TestCase
         // currency, paymentTotal, message, riskScore, payMethod, txId, paymentRef)
         // — cross-checked against the maintained Papaki WooCommerce module's
         // response-digest field list — plus the browser `_charset_` artifact that
-        // the digest must EXCLUDE. Our received-order reconstruction includes the
-        // extra fields for free; this fixture proves it.
+        // the digest must EXCLUDE. That the extra fields are folded into the SIGNED
+        // concatenation for free is proven by `verified` below: had any been dropped
+        // from the concat, the computed digest would not equal the sent one.
         $fields = [
             'version' => '2', 'mid' => 'MID123', 'orderid' => (string) $intent->id,
             'status' => 'CAPTURED', 'orderAmount' => '100.00', 'currency' => 'EUR',
@@ -167,6 +168,7 @@ class EurobankGatewayTest extends TestCase
         $this->assertSame((string) $intent->id, $outcome->reference);
         $this->assertSame(100.0, $outcome->amount);
         $this->assertSame('TX-1', $outcome->providerTxnId);   // txId wins over paymentRef
+        $this->assertSame('OK', $outcome->message);           // message survives the round-trip
     }
 
     /**
