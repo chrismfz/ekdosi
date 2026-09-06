@@ -123,6 +123,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συγχρονίζονται + επαναελέγχονται on-blur. Επίσης το `company_id` γράφεται ρητά στη δημιουργία (explicit tenancy).
 
 ### Changed
+- **Μενού: υπο-ομαδοποίηση του `SettingsCluster` σε 4 ενότητες (polish).** Τα config items του cluster
+  χωρίστηκαν σε 4 collapsible sub-sections μέσα στο settings area — **«Τιμολόγηση & πληρωμές»**, **«Είδη &
+  αποστολή»**, **«Εταιρεία»**, **«Λειτουργία»** — αντί για μία μακριά λίστα, μέσω `navigationGroup` στα
+  cluster members (renders ως sub-navigation, ΟΧΙ top-level group — κλειδωμένο από το `MenuStructureTest`).
+  «Σκοποί διακίνησης» μετακινήθηκε στα «Είδη & αποστολή» (δίπλα στους «Τρόπους αποστολής»)· η ενότητα των
+  operational config οθονών ονομάστηκε **«Λειτουργία»** (όχι «Σύστημα») για να μη συγχέεται με το top-level
+  group «Σύστημα». Μόνο navigation — καμία αλλαγή σε permissions/URLs. `docs/menu-ia.md`.
 - **Μενού Βήμα 1.5 — μία καθαρή Settings zone + «Διαχείριση» + κοντύτερα λεκτικά.** Τα config-ish
   «Σύστημα» (Ρυθμίσεις συστήματος / Έλεγχος ετοιμότητας / Χρονοπρογραμματιστής / Ενημερώσεις) μπήκαν
   ΜΕΣΑ στο `SettingsCluster` (πλέον 17 items), οπότε το «Σύστημα» έμεινε μόνο operational (Δραστηριότητα/

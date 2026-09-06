@@ -56,6 +56,8 @@ class CompanySettings extends Page implements HasForms
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Εταιρεία';
+
     protected static ?int $navigationSort = 96;
 
     protected string $view = 'filament.pages.company-settings';

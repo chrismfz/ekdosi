@@ -29,6 +29,8 @@ class BankAccountResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 21;
 
     protected static ?string $recordTitleAttribute = 'bank_name';

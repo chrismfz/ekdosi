@@ -28,6 +28,8 @@ class TagResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Είδη & αποστολή';
+
     protected static ?int $navigationSort = 75;
 
     protected static ?string $modelLabel = 'ετικέτα';

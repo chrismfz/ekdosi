@@ -102,8 +102,12 @@ scannable Clusters, not 60 flat rows.
    AiUsage/SystemHealth + the cluster). Super-admin Users/Companies/Roles moved to a NEW **«Διαχείριση»**
    group (kept separate from config, per option B). Labels shortened for a future one-line top-nav:
    «Ψηφιακή Διακίνηση»→«Διακίνηση», «myDATA & Διασυνδέσεις»→«Διασυνδέσεις». `MenuStructureTest` extended.
-   **Optional polish:** sub-group the 17-item cluster (Τιμολόγηση / Κατάλογος / Σύστημα) + a «Ρυθμίσεις»
-   landing page instead of jumping to the first member.
+   **Optional polish:** ✅ **DONE (2026-09-06)** — sub-grouped the cluster into 4 collapsible sub-sections
+   via `navigationGroup` on the members: «Τιμολόγηση & πληρωμές», «Είδη & αποστολή», «Εταιρεία»,
+   «Λειτουργία» (renders as cluster sub-navigation, NOT a top-level group — `MenuStructureTest` guards it;
+   «Σκοποί διακίνησης» moved to «Είδη & αποστολή» next to «Τρόποι αποστολής»; the operational sub-section is
+   named «Λειτουργία», not «Σύστημα», so it can't collide with the top-level «Σύστημα» group). _Still
+   deferred:_ a «Ρυθμίσεις» landing page instead of jumping to the first member.
    _(P2, deferred — review #492): `SettingsCluster` + `MyDataCluster` share identical
    `canAccess = canAccessClusteredComponents` boilerplate; when a 3rd cluster lands, extract an
    `abstract BaseNavCluster` to hold it once.)_

@@ -26,6 +26,8 @@ class MyDataCodeGuide extends Page
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Εταιρεία';
+
     protected static ?int $navigationSort = 98;
 
     protected string $view = 'filament.pages.my-data-code-guide';

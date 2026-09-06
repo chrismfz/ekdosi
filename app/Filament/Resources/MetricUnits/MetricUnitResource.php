@@ -28,6 +28,8 @@ class MetricUnitResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 70;
 
     protected static ?string $modelLabel = 'Μονάδα μέτρησης';

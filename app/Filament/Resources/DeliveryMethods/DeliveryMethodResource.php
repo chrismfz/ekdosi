@@ -30,6 +30,8 @@ class DeliveryMethodResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Είδη & αποστολή';
+
     protected static ?int $navigationSort = 30;
 
     protected static ?string $modelLabel = 'Τρόπος αποστολής';

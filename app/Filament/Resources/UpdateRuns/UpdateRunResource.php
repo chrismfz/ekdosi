@@ -46,13 +46,15 @@ class UpdateRunResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Λειτουργία';
+
     protected static ?string $navigationLabel = 'Ενημερώσεις';
 
     protected static ?string $modelLabel = 'ενημέρωση';
 
     protected static ?string $pluralModelLabel = 'Ενημερώσεις';
 
-    protected static ?int $navigationSort = 98;
+    protected static ?int $navigationSort = 100;
 
     protected static ?string $recordTitleAttribute = 'to_ref';
 

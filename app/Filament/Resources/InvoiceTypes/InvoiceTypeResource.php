@@ -31,6 +31,8 @@ class InvoiceTypeResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 10;
 
     protected static ?string $modelLabel = 'Τύπος παραστατικού';
