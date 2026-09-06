@@ -9,6 +9,7 @@ use App\Http\Controllers\Portal\PasswordResetController as PortalPasswordResetCo
 use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
 use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
+use App\Http\Controllers\Portal\TicketController as PortalTicketController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Support\Facades\Route;
@@ -51,6 +52,18 @@ Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
     // «Η καρτέλα μου» — read-only balance + ledger (same figures as the operator
     // Καρτέλα, grant-scoped). No «pay» yet — that lands with the gateway pillar.
     Route::get('/user/statement', [PortalStatementController::class, 'index'])->name('portal.statement');
+    // «Τα αιτήματά μου» (Πυλώνας E, Phase 2) — the customer opens/reads/replies to
+    // their support tickets, grant-scoped and fail-closed; only public messages are
+    // ever shown. Writes are throttled and go through the OpenTicket/PostTicketMessage
+    // choke-point (same state machine as the operator side).
+    Route::get('/user/tickets', [PortalTicketController::class, 'index'])->name('portal.tickets');
+    Route::get('/user/tickets/create', [PortalTicketController::class, 'create'])->name('portal.tickets.create');
+    Route::post('/user/tickets', [PortalTicketController::class, 'store'])
+        ->middleware('throttle:12,1')->name('portal.tickets.store');
+    Route::get('/user/tickets/{ticket}', [PortalTicketController::class, 'show'])
+        ->where('ticket', '[0-9]+')->name('portal.tickets.show');
+    Route::post('/user/tickets/{ticket}/reply', [PortalTicketController::class, 'reply'])
+        ->where('ticket', '[0-9]+')->middleware('throttle:20,1')->name('portal.tickets.reply');
     // «Πλήρωσε» (B0b) — start a payment against a granted company/customer, then
     // see where to pay. The browser never settles money (manual = operator
     // confirms; online webhook later). Store is throttled.
