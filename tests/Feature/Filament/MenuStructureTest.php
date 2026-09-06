@@ -3,10 +3,25 @@
 namespace Tests\Feature\Filament;
 
 use App\Filament\Clusters\SettingsCluster;
+use App\Filament\Pages\CompanySettings;
 use App\Filament\Pages\GeneralSettings;
+use App\Filament\Pages\MyDataCodeGuide;
 use App\Filament\Pages\Preflight;
 use App\Filament\Pages\ScheduleSettings;
+use App\Filament\Pages\WhmcsIncomeMapping;
+use App\Filament\Pages\WhmcsPaymentMapping;
+use App\Filament\Resources\BankAccounts\BankAccountResource;
+use App\Filament\Resources\DeliveryMethods\DeliveryMethodResource;
+use App\Filament\Resources\DistributionAims\DistributionAimResource;
+use App\Filament\Resources\ExpenseClassificationRules\ExpenseClassificationRuleResource;
+use App\Filament\Resources\InvoiceTypes\InvoiceTypeResource;
+use App\Filament\Resources\MetricUnits\MetricUnitResource;
+use App\Filament\Resources\PaymentGatewayConnections\PaymentGatewayConnectionResource;
+use App\Filament\Resources\PaymentMethods\PaymentMethodResource;
+use App\Filament\Resources\ProductCategories\ProductCategoryResource;
+use App\Filament\Resources\Tags\TagResource;
 use App\Filament\Resources\UpdateRuns\UpdateRunResource;
+use App\Filament\Resources\VatCategories\VatCategoryResource;
 use App\Models\Company;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -105,6 +120,55 @@ class MenuStructureTest extends TestCase
         // satisfied by «dropped from nav entirely» — the actual reorg intent is guarded).
         foreach ([GeneralSettings::class, Preflight::class, ScheduleSettings::class, UpdateRunResource::class] as $screen) {
             $this->assertSame(SettingsCluster::class, $screen::getCluster(), $screen.' πρέπει να ανήκει στο SettingsCluster');
+        }
+    }
+
+    public function test_settings_cluster_members_are_split_into_four_sub_sections(): void
+    {
+        // The «optional polish»: the cluster's config screens are grouped into 4
+        // collapsible sub-sections via navigationGroup on each member. Lock the FULL
+        // mapping — a dropped/mistyped navigationGroup silently splits a sub-section
+        // (the nav fragility AdminPanelProvider warns about), and the top-level tests
+        // above can't catch it (they filter to canonical top-level groups). This is the
+        // only guard that a member's sub-section is what we intend.
+        $subGroup = [
+            InvoiceTypeResource::class => 'Τιμολόγηση & πληρωμές',
+            PaymentMethodResource::class => 'Τιμολόγηση & πληρωμές',
+            PaymentGatewayConnectionResource::class => 'Τιμολόγηση & πληρωμές',
+            BankAccountResource::class => 'Τιμολόγηση & πληρωμές',
+            VatCategoryResource::class => 'Τιμολόγηση & πληρωμές',
+            ExpenseClassificationRuleResource::class => 'Τιμολόγηση & πληρωμές',
+            MetricUnitResource::class => 'Τιμολόγηση & πληρωμές',
+            WhmcsIncomeMapping::class => 'Τιμολόγηση & πληρωμές',
+            WhmcsPaymentMapping::class => 'Τιμολόγηση & πληρωμές',
+            DeliveryMethodResource::class => 'Είδη & αποστολή',
+            DistributionAimResource::class => 'Είδη & αποστολή',
+            ProductCategoryResource::class => 'Είδη & αποστολή',
+            TagResource::class => 'Είδη & αποστολή',
+            CompanySettings::class => 'Εταιρεία',
+            MyDataCodeGuide::class => 'Εταιρεία',
+            GeneralSettings::class => 'Λειτουργία',
+            ScheduleSettings::class => 'Λειτουργία',
+            Preflight::class => 'Λειτουργία',
+            UpdateRunResource::class => 'Λειτουργία',
+        ];
+
+        foreach ($subGroup as $class => $group) {
+            $this->assertSame(SettingsCluster::class, $class::getCluster(), "{$class}: πρέπει να είναι στο SettingsCluster");
+            $this->assertSame($group, $class::getNavigationGroup(), "{$class}: πρέπει να είναι στην ενότητα «{$group}»");
+        }
+
+        // Exactly the 4 intended sub-sections…
+        $sections = array_values(array_unique(array_values($subGroup)));
+        sort($sections);
+        $this->assertSame(['Είδη & αποστολή', 'Εταιρεία', 'Λειτουργία', 'Τιμολόγηση & πληρωμές'], $sections);
+
+        // …and none reuses a top-level group label. «Λειτουργία» is deliberately NOT
+        // «Σύστημα» (a real top-level group): a sub-section sharing a group's name would
+        // read as that group nested inside «Ρυθμίσεις» inside «Σύστημα».
+        $topLevel = array_keys($this->navTree());
+        foreach ($sections as $section) {
+            $this->assertNotContains($section, $topLevel, "Η ενότητα «{$section}» δεν πρέπει να συμπίπτει με top-level group");
         }
     }
 

@@ -54,7 +54,7 @@ class UpdateRunResource extends Resource
 
     protected static ?string $pluralModelLabel = 'Ενημερώσεις';
 
-    protected static ?int $navigationSort = 98;
+    protected static ?int $navigationSort = 100;
 
     protected static ?string $recordTitleAttribute = 'to_ref';
 
