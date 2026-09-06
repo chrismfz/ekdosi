@@ -53,15 +53,12 @@ class EurobankGatewayTest extends TestCase
     }
 
     /**
-     * The two legs sign DIFFERENTLY and each helper mirrors its production
-     * counterpart byte-for-byte (a single shared helper hid this): the OUTBOUND
-     * request digest ({@see EurobankGateway::requestDigest}) transliterates the
-     * concatenation with iconv//IGNORE BEFORE hashing; the INBOUND return digest
-     * ({@see EurobankGateway::returnDigest}) hashes the RAW bytes with NO iconv
-     * (faithful to the tenant's validated eurobankreturn.php). For pure-ASCII
-     * fixtures the two are identical — the split is what makes each test actually
-     * guard its real path, so a stray iconv added to (or dropped from) either
-     * production leg would now fail here instead of silently passing.
+     * The shared POSITIONAL concatenation both digests hash over: every returned
+     * value in received order, MINUS the browser artifacts + the digest field
+     * itself. Mirrors handleWebhook()'s `is_scalar($value) ? (string) $value : ''`
+     * exactly — a non-scalar field (an array-shaped `field[]=…` in a return)
+     * contributes '' in production, so it must here too. The secret and any iconv
+     * are NOT applied here: they differ per leg and live in the two sign* methods.
      */
     private function concat(array $orderedFields): string
     {
@@ -70,21 +67,36 @@ class EurobankGatewayTest extends TestCase
             if (in_array($k, ['_charset_', 'digest', 'submitButton'], true)) {
                 continue;
             }
-            $s .= (string) $v;
+            $s .= is_scalar($v) ? (string) $v : '';
         }
 
         return $s;
     }
 
-    /** OUTBOUND (request) digest — mirrors requestDigest(): iconv//IGNORE, then hash. */
+    /**
+     * OUTBOUND (request) digest — byte-for-byte mirror of requestDigest(): iconv//IGNORE
+     * over the CONCATENATION ONLY, THEN append the secret OUTSIDE the transliteration,
+     * then hash. Secret placement is load-bearing: hashing iconv(input.secret) instead
+     * would diverge from production for any non-ASCII byte — the exact silent drift this
+     * split exists to catch.
+     */
     private function signRequest(array $orderedFields, string $secret): string
     {
-        $norm = iconv('utf-8', 'utf-8//IGNORE', $this->concat($orderedFields).$secret);
+        $norm = iconv('utf-8', 'utf-8//IGNORE', $this->concat($orderedFields));
+        if ($norm === false) {
+            $norm = $this->concat($orderedFields);
+        }
 
-        return base64_encode(hash('sha256', $norm === false ? $this->concat($orderedFields).$secret : $norm, true));
+        return base64_encode(hash('sha256', $norm.$secret, true));
     }
 
-    /** INBOUND (return) digest — mirrors returnDigest(): raw bytes, NO iconv. */
+    /**
+     * INBOUND (return) digest — byte-for-byte mirror of returnDigest(): hash the RAW
+     * bytes (concat . secret) with NO iconv, faithful to the tenant's validated
+     * eurobankreturn.php. For pure-ASCII fixtures this equals the request leg; the
+     * invalid-UTF-8 fixture below is what makes the raw-vs-iconv distinction bite, so a
+     * stray iconv added to the production return leg fails here instead of passing.
+     */
     private function signReturn(array $orderedFields, string $secret): string
     {
         return base64_encode(hash('sha256', $this->concat($orderedFields).$secret, true));

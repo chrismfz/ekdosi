@@ -85,7 +85,7 @@ class EurobankReturnControllerTest extends TestCase
             if (in_array($k, ['_charset_', 'digest', 'submitButton'], true)) {
                 continue;
             }
-            $s .= (string) $v;
+            $s .= is_scalar($v) ? (string) $v : '';   // mirror handleWebhook()'s scalar guard
         }
 
         return base64_encode(hash('sha256', $s.$secret, true));
