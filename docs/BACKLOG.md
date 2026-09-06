@@ -635,8 +635,14 @@ data model + phase gates: **`PLAN.md`**.
     ακριβό κομμάτι είναι το email ingestion/threading, που δανειζόμαστε (`webklex/php-imap` +
     `willdurand/email-reply-parser`). Πιθανώς το καθαρότερο long-term δεδομένου πόσο δένουν τα tickets
     με customer/service/company.
-  - **Επόμενο βήμα:** time-boxed **spike (1-2 μέρες) του `laravel-service-desk`** — πόσο εύκολο το
-    tenancy retrofit + το wiring σε Filament (operators) & Flux (portal). Αποτέλεσμα → buy-or-build.
+  - **Πλήρης ανάλυση + απόφαση → `docs/ticket-system-eval.md`** (2 στρώματα: ticket domain + mail
+    ingestion). **Σύσταση:** **build-our-own thin model** (native multi-tenancy/Filament/Flux) +
+    δανεικό mail layer — **`webklex/php-imap`** (poll το δικό μας `mail.myip.gr`, όχι provider webhook
+    αφού έχουμε δικό μας mail) + **`willdurand/email-reply-parser`** (καθάρισμα quoted/signature) —
+    με το `laravel-service-desk` ως **MIT design reference** (schema + state machine), όχι dependency.
+  - **Επόμενο βήμα:** time-boxed **spike (1-2 μέρες)** — (α) διάβασε migrations/state-machine/IMAP poller
+    του `laravel-service-desk` + μέτρησε το tenancy-retrofit κόστος, (β) απόδειξε IMAP poll στο
+    `mail.myip.gr` + reply-parse. Αποτέλεσμα → adopt (αν φθηνό retrofit) ή build (πιθανό).
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._ Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
   «Ρυθμίσεις» στα **11**. Με Support (Tickets/Departments/Settings) + μελλοντικά Services/Domains/Servers/
