@@ -27,6 +27,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — polish: έτοιμες απαντήσεις + context panel (Πυλώνας E).** (α) **Έτοιμες
+  απαντήσεις** (`CannedReplyResource` σε κατηγορίες, Settings Cluster → «Υποστήριξη») με `{{tokens}}`
+  ({{customer.name}}, {{ticket.reference}}, {{company.ibans}}, {{operator.name}}…) — picker στη φόρμα
+  «Απάντηση» που συμπληρώνει το κείμενο με τα tokens λυμένα (`CannedReplyExpander`, unknown token μένει
+  αυτούσιο). (β) **Context panel «Πελάτης»** μέσα στο ticket: επωνυμία/ΑΦΜ/email + **υπόλοιπο** (canonical
+  `Customer::withOutstandingBalance`) + πρόσφατα ζωντανά παραστατικά (`InvoiceScope::live`, cached
+  `payment_status`) + «Άνοιγμα Καρτέλας» — το native πλεονέκτημα έναντι WHMCS. Read-only, μηδέν
+  recompute χρήματος.
 - **Σύστημα υποστήριξης (tickets) — χειριστικό UI (Πυλώνας E, Phase 1b).** Νέο cluster **«Υποστήριξη»**
   (στα «Καθημερινά», κρυφό όσο το pillar είναι OFF) με `TicketResource`: λίστα με tabs («Στην ουρά»/
   «Χωρίς ανάθεση»/«Ανοιχτά»/«Όλα») + badges, «Νέο αίτημα» (μέσω `OpenTicket`), και σελίδα προβολής με

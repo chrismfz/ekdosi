@@ -5,8 +5,10 @@ namespace App\Filament\Resources\Tickets\Pages;
 use App\Actions\Support\PostTicketMessage;
 use App\Enums\TicketStatus;
 use App\Filament\Resources\Tickets\TicketResource;
+use App\Models\CannedReply;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
+use App\Support\CannedReplyExpander;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
@@ -31,7 +33,27 @@ class ViewTicket extends ViewRecord
                 ->color('primary')
                 ->authorize($canUpdate)
                 ->schema([
-                    Textarea::make('body')->label('Απάντηση προς τον πελάτη')->required()->rows(5),
+                    Select::make('canned')
+                        ->label('Έτοιμη απάντηση')
+                        ->placeholder('— προαιρετικά: συμπλήρωσε από έτοιμη —')
+                        ->options(fn (): array => self::cannedOptions())
+                        ->searchable()
+                        ->live()
+                        ->dehydrated(false)
+                        ->afterStateUpdated(function ($state, callable $set, callable $get, $livewire): void {
+                            if (blank($state)) {
+                                return;
+                            }
+                            $reply = CannedReply::find($state);
+                            $ticket = $livewire->getRecord();
+                            if ($reply && $ticket instanceof Ticket) {
+                                $expanded = CannedReplyExpander::expand($reply->body, $ticket, auth()->user());
+                                // Append (don't clobber) anything the operator already typed.
+                                $existing = trim((string) $get('body'));
+                                $set('body', $existing === '' ? $expanded : $existing."\n\n".$expanded);
+                            }
+                        }),
+                    Textarea::make('body')->label('Απάντηση προς τον πελάτη')->required()->rows(6),
                 ])
                 ->action(function (array $data, Ticket $record): void {
                     app(PostTicketMessage::class)->handle($record, [
@@ -114,5 +136,27 @@ class ViewTicket extends ViewRecord
                     Notification::make()->title('Το αίτημα άνοιξε ξανά')->success()->send();
                 }),
         ];
+    }
+
+    /**
+     * The tenant's active canned replies as grouped Select options (category =>
+     * [id => title]). Auto tenant-scoped by CompanyScope in the panel.
+     *
+     * @return array<string, array<int, string>>
+     */
+    private static function cannedOptions(): array
+    {
+        $out = [];
+        CannedReply::query()
+            ->where('is_active', true)
+            ->with('category')
+            ->orderBy('sort')
+            ->orderBy('title')
+            ->get(['id', 'title', 'canned_reply_category_id'])
+            ->each(function (CannedReply $reply) use (&$out): void {
+                $out[$reply->category?->name ?? 'Γενικά'][$reply->id] = $reply->title;
+            });
+
+        return $out;
     }
 }

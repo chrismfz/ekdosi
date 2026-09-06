@@ -837,8 +837,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   («Στην ουρά»/«Χωρίς ανάθεση»/«Ανοιχτά»/«Όλα») + badges, «Νέο αίτημα», σελίδα προβολής με **thread**
   (εσωτερικές σημειώσεις ξεχωριστά, «δεν το βλέπει ο πελάτης») + ενέργειες Απάντηση/Σημείωση/Ανάθεση/
   Αναμονή/Κλείσιμο. Ρυθμίσεις **Τμημάτων** στο Settings Cluster → «Υποστήριξη».
-- **Επόμενα:** canned-reply picker + context panel (τιμολόγια/καρτέλα πελάτη inline) → Phase 2 πύλη πελάτη
-  → Phase 3 IMAP ingestion (`webklex/php-imap` + reply-parser) → Phase 4 parity (watchers/SLA/merge, KB).
+- **Polish (SHIPPED):** **έτοιμες απαντήσεις** (`CannedReplyResource` σε κατηγορίες + `{{token}}` expander)
+  με picker στη «Απάντηση»· **context panel «Πελάτης»** μέσα στο ticket — ΑΦΜ/email + **υπόλοιπο**
+  (canonical `withOutstandingBalance`) + πρόσφατα ζωντανά παραστατικά + «Άνοιγμα Καρτέλας» (native
+  πλεονέκτημα έναντι WHMCS, read-only).
+- **Επόμενα:** Phase 2 πύλη πελάτη («Τα αιτήματά μου» στο `/user`) → Phase 3 IMAP ingestion
+  (`webklex/php-imap` + reply-parser) → Phase 4 parity (watchers/SLA/merge, KB).
 
 ---
 
