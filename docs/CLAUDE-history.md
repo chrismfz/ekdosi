@@ -2284,3 +2284,42 @@ myip):** the VAT row `rate=10.00` mislabelled "ΜΕΙΩΜΕΝΟ ΦΠΑ 9%" is a 
 and 12 legacy delivery/cancellation/aggregation types have no `mydata_type`
 (never filed — fine unless myip will ever file them). Every type myip
 *actually* files is preflight-clean.
+
+---
+
+## Review-discipline war-stories (moved out of CLAUDE.md, 2026-09-06)
+
+The crisp *rule* lives in `CLAUDE.md` («Review discipline»). These are the concrete cases
+that taught it — kept here for the «why», not auto-loaded.
+
+- **The fix itself introduces the next bug (MYD-017 / MYD-011).** A re-run after fixing is a
+  new diff that has never been reviewed: a date guard that traded a false conflict for a false
+  green; a `payableTotal()` basis wrong twice; an internal-movement rule that broke the
+  `000000000` sentinel. Hence: re-run the gate after fixing, until a round comes back with no
+  P0/P1 — but the loop ends at «no P0/P1», NOT «zero findings» (an adversarial reviewer always
+  finds *something*).
+- **Sanity-check a fix against real values.** The Greek-ΑΦΜ inference "worked" until a 10-second
+  `php -r` showed `DE811234567` validating as Greek (the digit-strip ate the prefix). A cheap
+  probe beats a plausible-looking diff.
+- **Run the full suite before every commit, not just the review.** On MYD-009 it caught three
+  regressions the reviewer had not seen — including a silent «present-but-unresolvable country
+  → GR», the exact class of bug that change existed to remove.
+- **Don't let a fix widen into a new regression — check BOTH directions.** A refusal that stops
+  bad data can strand legitimate data (a blanket no-country refusal would make every domestic
+  note with a blank `customers.country` unissuable; a customer *rename* made every legacy
+  invoice with a blank country unissuable), and a heuristic that spots foreign parties can
+  misfire on domestic ones (`AE997073525` read as the UAE). Find the positive-evidence path.
+- **Fix at the ROOT, not the call site.** Both MYD-009 P0s were the SAME defect reached from two
+  entry points, because the first was patched locally instead of collapsing a duplicated policy
+  into one definition. If a second round finds the same bug by another route, stop patching and
+  go find the duplicate.
+- **Declining a finding is a legitimate disposition** (with the reason at the call site).
+  Routing `SalesReconciler` through the invoice identity helper was proposed, tried, and
+  reverted: reconciliation solves the opposite problem (every row is already filed), and the
+  change failed all eight legacy-row tests.
+- **The nine-round example (MYD-009).** Ran nine rounds for one of ~50 open issues: rounds 1–4
+  found 2 P0 (both in FIX code, not the original change), and every round after that found only
+  what the previous round's fix had introduced — round 5's main action was *removing* a check
+  added in round 4. Under the current rule it would have shipped at round 5 with the same
+  substantive outcome. The over-correction was the ΑΦΜ unique-constraint PR (#394: ~10 rounds
+  for what was 1–2 real fixes, «χανόμαστε») — hence the per-priority round caps.
