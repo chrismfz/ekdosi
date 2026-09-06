@@ -143,6 +143,22 @@ class PortalTicketTest extends TestCase
         $this->assertSame(TicketStatus::CustomerReply, $ticket->fresh()->status);
     }
 
+    public function test_support_disabled_company_is_invisible_in_the_portal(): void
+    {
+        $company = Company::create([
+            'name' => 'Off', 'slug' => 'off-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off', 'support_enabled' => false,
+        ]);
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
+        $login = $this->login();
+        $this->grant($login, $customer);
+        $ticket = $this->openFor($company, $customer);
+
+        $this->actingAs($login, 'portal')->get('/user/tickets')->assertOk()->assertDontSee($ticket->reference);
+        $this->actingAs($login, 'portal')->get("/user/tickets/{$ticket->id}")->assertStatus(404);
+        $this->actingAs($login, 'portal')->post("/user/tickets/{$ticket->id}/reply", ['body' => 'x'])->assertStatus(404);
+    }
+
     private function openFor(Company $company, Customer $customer): Ticket
     {
         return app(OpenTicket::class)->handle([

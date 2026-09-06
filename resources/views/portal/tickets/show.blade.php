@@ -1,4 +1,5 @@
 @php
+    use App\Enums\TicketStatus;
     $fluxColor = ['warning' => 'amber', 'danger' => 'red', 'success' => 'green', 'info' => 'blue', 'gray' => 'zinc'];
 @endphp
 <x-portal-layout title="Αίτημα {{ $ticket->reference }}">
@@ -31,7 +32,7 @@
     </div>
 
     {{-- Reply --}}
-    @if ($ticket->status->value === 'closed')
+    @if ($ticket->status === TicketStatus::Closed)
         <flux:text class="mb-2 text-sm text-zinc-500">Το αίτημα είναι κλειστό — μια νέα απάντηση θα το ανοίξει ξανά.</flux:text>
     @endif
     <form method="POST" action="{{ route('portal.tickets.reply', $ticket->id) }}" class="flex max-w-xl flex-col gap-3">

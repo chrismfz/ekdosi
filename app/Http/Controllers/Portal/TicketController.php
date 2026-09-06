@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Portal;
 use App\Actions\Support\OpenTicket;
 use App\Actions\Support\PostTicketMessage;
 use App\Http\Controllers\Controller;
+use App\Models\Company;
 use App\Models\CustomerUser;
 use App\Models\CustomerUserAccess;
 use App\Models\Scopes\CompanyScope;
@@ -12,6 +13,7 @@ use App\Models\Ticket;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
 use App\Services\Portal\CustomerDocumentFeed;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -21,18 +23,21 @@ use Illuminate\View\View;
 /**
  * «Τα αιτήματά μου» — the customer-facing ticket surface (Πυλώνας E, Phase 2).
  *
- * Scoping is the whole ballgame: a portal login (CustomerUser) may hold grants to
- * several (company, customer) tuples, and it must ONLY ever see/act on tickets of
- * a tuple it actively holds. Every method resolves through
- * {@see CustomerDocumentFeed::grantedTargets()} (the one canonical portal scope)
- * and fails closed (404) on anything unmatched — so a guessed ticket id, a crafted
- * department, or another customer's ticket is unreachable. Off-panel we drop the
- * CompanyScope global scope and filter by the grant's company_id/customer_id
+ * Scoping is the whole ballgame. A portal login (CustomerUser) may hold grants to
+ * several (company, customer) tuples; it must ONLY ever see/act on tickets of a
+ * tuple it actively holds AND whose company has the Support pillar enabled. All
+ * five actions route through {@see supportedGrants()} (grantedTargets ∩
+ * hasSupport) and {@see scopedTicketQuery()} — the ONE place the leak-proof
+ * (company_id, customer_id) scope is defined — and fail closed (404) on anything
+ * unmatched. Off-panel we drop the CompanyScope global scope and filter
  * explicitly. The portal only ever renders {@see Ticket::publicMessages()} — an
  * internal note never leaves the operator side.
  */
 class TicketController extends Controller
 {
+    /** Cap the customer's own ticket list (matches the documents feed's bounded reads). */
+    private const MAX_ROWS = 200;
+
     public function __construct(
         private readonly CustomerDocumentFeed $feed,
         private readonly OpenTicket $openTicket,
@@ -43,15 +48,12 @@ class TicketController extends Controller
     {
         $login = $this->login();
 
-        $tickets = collect($this->feed->grantedTargets($login))
-            ->flatMap(fn (CustomerUserAccess $grant): iterable => Ticket::query()
-                ->withoutGlobalScope(CompanyScope::class)
-                ->where('company_id', $grant->company_id)
-                ->where('customer_id', $grant->customer_id)
-                ->with('department')
-                ->get())
-            ->sortByDesc(fn (Ticket $t): string => (string) ($t->last_reply_at ?? $t->created_at))
-            ->values();
+        $tickets = $this->scopedTicketQuery($this->supportedGrants($login))
+            ->with('department')
+            ->orderByDesc('last_reply_at')
+            ->orderByDesc('id')
+            ->limit(self::MAX_ROWS)
+            ->get();
 
         return view('portal.tickets.index', ['user' => $login, 'tickets' => $tickets]);
     }
@@ -60,10 +62,10 @@ class TicketController extends Controller
     {
         $login = $this->login();
 
-        // Offerable departments PER granted (company, customer). Each option carries
+        // Offerable departments PER supported (company, customer). Each option carries
         // both ids so store() can re-verify the pairing — never trust a bare id.
         $options = [];
-        foreach ($this->feed->grantedTargets($login) as $grant) {
+        foreach ($this->supportedGrants($login) as $grant) {
             $departments = TicketDepartment::query()
                 ->withoutGlobalScope(CompanyScope::class)
                 ->where('company_id', $grant->company_id)
@@ -164,10 +166,61 @@ class TicketController extends Controller
         return $login;
     }
 
-    /** The active grant for a customer id, or 404 (fail-closed). */
+    /**
+     * The login's active grants, narrowed to companies that have the Support pillar
+     * enabled — the same gate the operator SupportCluster uses. A customer of a
+     * support-disabled tenant sees/opens NO tickets (they'd be an invisible sink,
+     * since the operator area is hidden).
+     *
+     * @return list<CustomerUserAccess>
+     */
+    private function supportedGrants(CustomerUser $login): array
+    {
+        $grants = $this->feed->grantedTargets($login);
+        if ($grants === []) {
+            return [];
+        }
+
+        $enabled = Company::query()
+            ->whereIn('id', array_map(static fn (CustomerUserAccess $g): int => (int) $g->company_id, $grants))
+            ->where('support_enabled', true)
+            ->pluck('id')
+            ->flip();
+
+        return array_values(array_filter(
+            $grants,
+            static fn (CustomerUserAccess $g): bool => $enabled->has((int) $g->company_id),
+        ));
+    }
+
+    /**
+     * A Ticket query scoped to the given grants' (company_id, customer_id) tuples —
+     * the ONE definition of the portal's ticket boundary. Empty grants ⇒ matches
+     * nothing (fail-closed), never an unconstrained query.
+     *
+     * @param  list<CustomerUserAccess>  $grants
+     */
+    private function scopedTicketQuery(array $grants): Builder
+    {
+        $query = Ticket::query()->withoutGlobalScope(CompanyScope::class);
+
+        if ($grants === []) {
+            return $query->whereRaw('1 = 0');
+        }
+
+        return $query->where(function (Builder $outer) use ($grants): void {
+            foreach ($grants as $grant) {
+                $outer->orWhere(fn (Builder $inner): Builder => $inner
+                    ->where('company_id', $grant->company_id)
+                    ->where('customer_id', $grant->customer_id));
+            }
+        });
+    }
+
+    /** The active, support-enabled grant for a customer id, or 404 (fail-closed). */
     private function resolveGrant(CustomerUser $login, int $customerId): CustomerUserAccess
     {
-        foreach ($this->feed->grantedTargets($login) as $grant) {
+        foreach ($this->supportedGrants($login) as $grant) {
             if ((int) $grant->customer_id === $customerId) {
                 return $grant;
             }
@@ -176,21 +229,12 @@ class TicketController extends Controller
         abort(404);
     }
 
-    /** A ticket the login actually holds a grant to, or 404 (fail-closed). */
+    /** A ticket the login holds a support-enabled grant to, or 404 (fail-closed). */
     private function resolveTicket(CustomerUser $login, int $ticketId): Ticket
     {
-        foreach ($this->feed->grantedTargets($login) as $grant) {
-            $ticket = Ticket::query()
-                ->withoutGlobalScope(CompanyScope::class)
-                ->where('company_id', $grant->company_id)
-                ->where('customer_id', $grant->customer_id)
-                ->find($ticketId);
+        $ticket = $this->scopedTicketQuery($this->supportedGrants($login))->find($ticketId);
+        abort_if($ticket === null, 404);
 
-            if ($ticket !== null) {
-                return $ticket;
-            }
-        }
-
-        abort(404);
+        return $ticket;
     }
 }
