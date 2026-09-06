@@ -820,7 +820,8 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Απόδειξη είσπραξης PDF + στοιχεία στο παραστατικό + ειδοποίηση settle (SHIPPED):** row action «Απόδειξη» (άτυπο
   αποδεικτικό είσπραξης, ανά reference-group)· στήλη «Κανάλι» στο tab «Πληρωμές» του τιμολογίου· καμπανάκι χειριστή
   σε αυτόματη είσπραξη πύλης.
-- **Επόμενα:** B2 PayPal/Stripe (2ος redirect adapter) → B3 office rails (card-POS + ΑΑΔΕ) → B4 reconcile/
+- **Επόμενα:** B2 PayPal/Stripe (2ος redirect adapter — research notes:
+  `docs/payment-gateways-b2-paypal-stripe.md`) → B3 office rails (card-POS + ΑΑΔΕ) → B4 reconcile/
   prepaid/refund.
 
 ---
