@@ -32,6 +32,8 @@ class PaymentMethodResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 20;
 
     protected static ?string $modelLabel = 'Τρόπος πληρωμής';

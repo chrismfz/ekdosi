@@ -27,6 +27,8 @@ class Preflight extends Page
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Λειτουργία';
+
     protected static ?int $navigationSort = 98;
 
     protected string $view = 'filament.pages.preflight';

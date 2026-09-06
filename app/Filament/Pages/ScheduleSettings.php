@@ -41,6 +41,8 @@ class ScheduleSettings extends Page implements HasForms
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Λειτουργία';
+
     protected static ?int $navigationSort = 98;
 
     protected string $view = 'filament.pages.schedule-settings';

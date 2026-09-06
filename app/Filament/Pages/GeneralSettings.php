@@ -44,6 +44,8 @@ class GeneralSettings extends Page implements HasForms
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Λειτουργία';
+
     protected static ?int $navigationSort = 97;
 
     protected string $view = 'filament.pages.general-settings';

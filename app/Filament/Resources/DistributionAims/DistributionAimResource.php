@@ -30,6 +30,8 @@ class DistributionAimResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Είδη & αποστολή';
+
     protected static ?int $navigationSort = 40;
 
     protected static ?string $modelLabel = 'Σκοπός διακίνησης';

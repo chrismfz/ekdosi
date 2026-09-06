@@ -36,6 +36,8 @@ class WhmcsPaymentMapping extends Page
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 83;
 
     protected string $view = 'filament.pages.whmcs-payment-mapping';

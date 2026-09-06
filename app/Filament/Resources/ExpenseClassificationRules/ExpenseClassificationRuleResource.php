@@ -31,6 +31,8 @@ class ExpenseClassificationRuleResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 65;
 
     protected static ?string $recordTitleAttribute = 'supplier_afm';

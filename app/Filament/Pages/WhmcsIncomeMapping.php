@@ -34,6 +34,8 @@ class WhmcsIncomeMapping extends Page
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 82;
 
     protected string $view = 'filament.pages.whmcs-income-mapping';

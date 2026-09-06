@@ -28,6 +28,8 @@ class VatCategoryResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 60;
 
     protected static ?string $modelLabel = 'Κατηγορία ΦΠΑ';

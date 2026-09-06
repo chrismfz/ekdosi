@@ -28,6 +28,8 @@ class ProductCategoryResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Είδη & αποστολή';
+
     protected static ?int $navigationSort = 50;
 
     protected static ?string $modelLabel = 'Κατηγορία προϊόντος';

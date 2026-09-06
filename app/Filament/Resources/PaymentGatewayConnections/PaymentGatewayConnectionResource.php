@@ -31,6 +31,8 @@ class PaymentGatewayConnectionResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
+    protected static string|\UnitEnum|null $navigationGroup = 'Τιμολόγηση & πληρωμές';
+
     protected static ?int $navigationSort = 25;
 
     protected static ?string $modelLabel = 'Τρόπος online πληρωμής';
