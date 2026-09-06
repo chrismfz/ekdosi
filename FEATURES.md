@@ -844,8 +844,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Πύλη πελάτη «Τα αιτήματά μου» (Phase 2, SHIPPED):** ο πελάτης στο `/user` ανοίγει/βλέπει/απαντά τα
   αιτήματά του. **Grant-scoped & fail-closed** (`grantedTargets`, ρητό company/customer, 404 σε άγνωστο id)·
   **μόνο δημόσια μηνύματα** (εσωτερική σημείωση δεν διαρρέει)· γράψιμο μέσω `OpenTicket`/`PostTicketMessage`.
-- **Επόμενα:** Phase 3 IMAP ingestion (`webklex/php-imap` + reply-parser) → Phase 4 parity (watchers/SLA/
-  merge, KB)· και μικρά follow-ups: operator bell σε νέο portal αίτημα, attachments στην πύλη.
+- **Inbound email → ticket (Phase 3a, SHIPPED — core):** `InboundTicketRouter` δρομολογεί parsed email σε
+  ticket (αντιστοίχιση πελάτη + `clients_only`, threading με References/`[TK-…]` token, καθάρισμα σώματος με
+  `email-reply-parser`). Transport-agnostic (`ParsedInboundEmail`) — ο IMAP poller + outbound threading =
+  Phase 3b.
+- **Επόμενα:** Phase 3b IMAP poller (`webklex/php-imap`) + outbound threading + scheduler → Phase 4 parity
+  (watchers/SLA/merge, KB)· follow-ups: operator bell σε νέο αίτημα, attachments (πύλη + email).
 
 ---
 
