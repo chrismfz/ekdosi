@@ -78,11 +78,6 @@ class Preflight extends Page
         return 'Έλεγχος ετοιμότητας';
     }
 
-    public static function getNavigationGroup(): ?string
-    {
-        return null; // lives in SettingsCluster now
-    }
-
     public static function shouldRegisterNavigation(): bool
     {
         return static::canAccess();
