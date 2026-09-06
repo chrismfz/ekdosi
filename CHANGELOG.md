@@ -27,7 +27,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
-- **Απόδειξη είσπραξης (PDF).** Νέο `PaymentReceiptRenderer` + row action «Απόδειξη» στη λίστα Πληρωμές και στο
+- **Σύστημα υποστήριξης (tickets) — θεμέλιο domain (Πυλώνας E, Phase 1a).** Νέο tenant-scoped domain:
+  `tickets` / `ticket_messages` (public reply ή **εσωτερική σημείωση**) / `ticket_departments`
+  (+ IMAP config πεδία, encrypted — για Phase 3) / `canned_replies` (κατηγορίες). State machine
+  «ποιος έγραψε → κατάσταση» σε ΕΝΑ σημείο (`App\Actions\Support\PostTicketMessage`/`OpenTicket`,
+  enum `TicketStatus`: Ανοιχτό/Απαντήθηκε/Απάντηση πελάτη/Σε αναμονή/Κλειστό). Reference
+  `TK-YYYY-MM-DD-xxxxxx` (ημ/νία ανοίγματος + αμάντευτη ουρά = email token). Reuse των έτοιμων
+  `HasAttachments`/`HasTags`/`TracksActivity`. Όλο το pillar πίσω από `companies.support_enabled`
+  (**default off, τελείως κρυμμένο**) + `Company::hasSupport()`. Χωρίς UI/mail ακόμα — σχέδιο:
+  `docs/ticket-system-design.md`.
   παραστατικό: άτυπο αποδεικτικό είσπραξης για όλο το reference-group (κανάλι «Πύλη · Eurobank», κωδ. συναλλαγής,
   ποια τιμολόγια εξόφλησε, σύνολο). Δεν είναι φορολογικό παραστατικό — αποδεικτικό «λάβαμε €X».
 - **Στοιχεία πληρωμής πάνω στο παραστατικό.** Το tab «Πληρωμές» του τιμολογίου δείχνει στήλη «Κανάλι» («Πύλη ·
