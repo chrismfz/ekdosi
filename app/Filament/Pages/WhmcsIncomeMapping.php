@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
+use App\Filament\Clusters\SettingsCluster;
 use App\Models\Company;
 use App\Models\WhmcsIncomeMap;
 use App\Services\Whmcs\WhmcsClientFactory;
@@ -30,6 +31,8 @@ use Filament\Pages\Page;
 class WhmcsIncomeMapping extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-square-3-stack-3d';
+
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 82;
 
@@ -169,7 +172,7 @@ class WhmcsIncomeMapping extends Page
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Ρυθμίσεις';
+        return null; // lives in SettingsCluster now
     }
 
     public static function shouldRegisterNavigation(): bool

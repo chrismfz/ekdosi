@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
+use App\Filament\Clusters\SettingsCluster;
 use App\Models\Company;
 use App\Models\PaymentMethod;
 use App\Models\WhmcsPaymentMap;
@@ -32,6 +33,8 @@ use Illuminate\Support\Collection;
 class WhmcsPaymentMapping extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-credit-card';
+
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 83;
 
@@ -233,7 +236,7 @@ class WhmcsPaymentMapping extends Page
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Ρυθμίσεις';
+        return null; // lives in SettingsCluster now
     }
 
     public static function shouldRegisterNavigation(): bool

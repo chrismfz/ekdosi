@@ -31,7 +31,7 @@ class ExpenseClassificationRuleResource extends Resource
 
     protected static ?string $cluster = SettingsCluster::class;
 
-    protected static ?int $navigationSort = 60;
+    protected static ?int $navigationSort = 65;
 
     protected static ?string $recordTitleAttribute = 'supplier_afm';
 

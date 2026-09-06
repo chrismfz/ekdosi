@@ -29,6 +29,12 @@ class MenuStructureTest extends TestCase
             'name' => 'Nav OE', 'slug' => 'nav-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
             'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
+            // WHMCS-integrated on purpose: it registers WhmcsIncomeMapping +
+            // WhmcsPaymentMapping (getNavigationGroup 'Ρυθμίσεις' before Step 1), so the
+            // «no flat Ρυθμίσεις group» assertion actually exercises the WHMCS case (2 of
+            // the 3 real tenants) instead of silently passing on a non-WHMCS tenant.
+            'whmcs_api_url' => 'https://whmcs.example/includes/api.php',
+            'whmcs_api_identifier' => 'id', 'whmcs_api_secret' => 'secret',
         ]);
         $user = User::create(['name' => 'A', 'email' => 'a-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
         $user->companies()->attach($company->id);

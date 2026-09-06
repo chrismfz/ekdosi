@@ -93,7 +93,9 @@ scannable Clusters, not 60 flat rows.
    `App\Filament\Clusters\SettingsCluster` — one nav entry (bottom, in the «Σύστημα» admin zone,
    since Filament renders ungrouped items at the TOP so a standalone-bottom entry needs a group)
    that opens a dedicated settings area with sub-navigation. Members: the 11 lookup Resources +
-   `CompanySettings` + `MyDataCodeGuide`; URLs moved under `/settings/…`; `MenuStructureTest` updated.
+   `CompanySettings` + `MyDataCodeGuide` + `WhmcsIncomeMapping` + `WhmcsPaymentMapping` (the last two
+   register only for WHMCS-integrated tenants — easy to miss); URLs moved under `/settings/…`;
+   `MenuStructureTest` uses a WHMCS-integrated tenant so a stray `getNavigationGroup('Ρυθμίσεις')` fails it.
    **Still to fold in (a follow-up):** the config-ish «Σύστημα» items (GeneralSettings/Preflight/
    ScheduleSettings/UpdateRuns/Companies/Users) → one clean Settings zone.
 2. **Fold** the current 9 flat groups into the ~6 domain Clusters above (mechanical: set
