@@ -21,6 +21,16 @@ class TicketReference
 
     private const TAIL_LENGTH = 6;
 
+    /**
+     * The reference regex fragment (no delimiters), DERIVED from the alphabet +
+     * tail length so inbound email parsing shares one source of truth: change
+     * ALPHABET/TAIL_LENGTH and the inbound matcher follows automatically.
+     */
+    public static function pattern(string $delimiter = '/'): string
+    {
+        return 'TK-\d{4}-\d{2}-\d{2}-['.preg_quote(self::ALPHABET, $delimiter).']{'.self::TAIL_LENGTH.'}';
+    }
+
     public static function generate(int $companyId, ?Carbon $on = null): string
     {
         $date = ($on ?? Carbon::now())->format('Y-m-d');

@@ -9,6 +9,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
+use App\Support\TicketReference;
 use EmailReplyParser\EmailReplyParser;
 use Illuminate\Database\Eloquent\Builder;
 
@@ -18,15 +19,21 @@ use Illuminate\Database\Eloquent\Builder;
  * choke-point the operator and portal use, so the state machine stays in one place.
  *
  * The order that matters:
+ *   0. IDEMPOTENCY — if we already stored a message with this Message-ID, this is a
+ *      redelivery (poller retry / overlapping poll): return that ticket, do nothing.
  *   1. Match the sender → a Customer of the department's company (email /
  *      secondary_email). A `clients_only` department REJECTS an unknown sender.
  *   2. Match an existing ticket: (a) References/In-Reply-To → a Message-ID we
- *      stored on a prior message; (b) a `[TK-YYYY-MM-DD-xxxxxx]` token in the
- *      subject. Neither ⇒ a NEW ticket (GUEST if the sender is unknown).
- *   3. Clean the body (strip quoted history/signature) for a reply.
+ *      stored; (b) a `[TK-…]` token in the subject. A candidate is threaded ONLY if
+ *      the SENDER OWNS it (its customer, or its guest requester_email) — a CC'd
+ *      stranger with the token/References must NOT inject into someone's thread.
+ *      Otherwise a NEW ticket (GUEST if the sender is unknown).
+ *   3. Clean the body (strip quoted history/signature) — the raw stays in body_original.
  *
- * Everything is off-panel, so it drops CompanyScope and filters by the
- * department's company_id explicitly. Returns the ticket, or null if rejected.
+ * All matching is company-scoped (explicit company_id off-panel), so no
+ * cross-company threading. Message-IDs are normalised (angle brackets stripped) on
+ * both store and compare, so threading is bracket-agnostic. Returns the ticket, or
+ * null if rejected.
  */
 class InboundTicketRouter
 {
@@ -38,6 +45,20 @@ class InboundTicketRouter
     public function route(TicketDepartment $department, ParsedInboundEmail $email): ?Ticket
     {
         $companyId = (int) $department->company_id;
+        $messageId = $this->normaliseId($email->messageId);
+
+        // (0) Already processed this exact message? Return its ticket, don't duplicate.
+        if ($messageId !== null) {
+            $seen = TicketMessage::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $companyId)
+                ->where('email_message_id', $messageId)
+                ->first();
+            if ($seen !== null) {
+                return $seen->ticket;
+            }
+        }
+
         $customer = $this->matchCustomer($companyId, $email->fromEmail);
 
         // «Clients Only»: an unknown sender is rejected outright (no ticket, no leak).
@@ -45,7 +66,13 @@ class InboundTicketRouter
             return null;
         }
 
+        // Thread onto a matched ticket ONLY if this sender owns it — else a stranger
+        // holding the (non-secret) Message-ID or the token would inject into a thread.
         $existing = $this->matchTicket($companyId, $email);
+        if ($existing !== null && ! $this->senderOwnsTicket($existing, $customer, $email->fromEmail)) {
+            $existing = null;
+        }
+
         $cleanBody = $this->cleanBody($email->body);
 
         if ($existing !== null) {
@@ -56,7 +83,7 @@ class InboundTicketRouter
                 'via' => TicketMessage::VIA_EMAIL,
                 'body' => $cleanBody,
                 'body_original' => $email->body,
-                'email_message_id' => $email->messageId,
+                'email_message_id' => $messageId,
             ]);
 
             return $existing;
@@ -76,8 +103,20 @@ class InboundTicketRouter
             'via' => TicketMessage::VIA_EMAIL,
             'body' => $cleanBody,
             'body_original' => $email->body,
-            'email_message_id' => $email->messageId,
+            'email_message_id' => $messageId,
         ]);
+    }
+
+    /** The sender is the ticket's customer, or (for a guest ticket) its requester_email. */
+    private function senderOwnsTicket(Ticket $ticket, ?Customer $customer, string $fromEmail): bool
+    {
+        if ($customer !== null && (int) $ticket->customer_id === (int) $customer->id) {
+            return true;
+        }
+
+        $from = mb_strtolower(trim($fromEmail));
+
+        return $from !== '' && mb_strtolower(trim((string) $ticket->requester_email)) === $from;
     }
 
     private function matchCustomer(int $companyId, string $fromEmail): ?Customer
@@ -99,11 +138,15 @@ class InboundTicketRouter
     private function matchTicket(int $companyId, ParsedInboundEmail $email): ?Ticket
     {
         // (a) In-Reply-To / References → a Message-ID we stored on a prior message.
-        if ($email->references !== []) {
+        $refs = array_values(array_filter(array_map(
+            fn (string $r): ?string => $this->normaliseId($r),
+            $email->references,
+        )));
+        if ($refs !== []) {
             $byReference = Ticket::query()
                 ->withoutGlobalScope(CompanyScope::class)
                 ->where('company_id', $companyId)
-                ->whereHas('messages', fn (Builder $q) => $q->whereIn('email_message_id', $email->references))
+                ->whereHas('messages', fn (Builder $q) => $q->whereIn('email_message_id', $refs))
                 ->first();
             if ($byReference !== null) {
                 return $byReference;
@@ -125,18 +168,23 @@ class InboundTicketRouter
 
     private function extractReference(string $subject): ?string
     {
-        if (preg_match('/(TK-\d{4}-\d{2}-\d{2}-[2-9A-HJKMNP-Z]{6})/', $subject, $m) === 1) {
+        if (preg_match('/('.TicketReference::pattern().')/', $subject, $m) === 1) {
             return $m[1];
         }
 
         return null;
     }
 
-    /** A new-ticket subject with the [TK-…] token and Re:/Fwd: noise stripped. */
+    /** A new-ticket subject with the [TK-…] token and STACKED Re:/Fwd: noise stripped. */
     private function cleanSubject(string $subject): string
     {
-        $subject = (string) preg_replace('/\[?TK-\d{4}-\d{2}-\d{2}-[2-9A-HJKMNP-Z]{6}\]?/', '', $subject);
-        $subject = (string) preg_replace('/^\s*(re|fwd|fw|απ|σχετ)\s*:\s*/iu', '', trim($subject));
+        $subject = (string) preg_replace('/\[?'.TicketReference::pattern().'\]?/', '', $subject);
+        $subject = trim($subject);
+
+        $prefix = '/^\s*(re|fwd|fw|απ|σχετ)\s*:\s*/iu';
+        while (preg_match($prefix, $subject) === 1) {
+            $subject = (string) preg_replace($prefix, '', $subject);
+        }
         $subject = trim($subject);
 
         return $subject !== '' ? mb_substr($subject, 0, 191) : '(χωρίς θέμα)';
@@ -148,5 +196,17 @@ class InboundTicketRouter
         $clean = trim(EmailReplyParser::parseReply($body));
 
         return $clean !== '' ? $clean : trim($body);
+    }
+
+    /** Normalise a Message-ID for storage/comparison: trim + strip angle brackets. */
+    private function normaliseId(?string $id): ?string
+    {
+        if ($id === null) {
+            return null;
+        }
+
+        $id = trim(trim($id), '<>');
+
+        return $id === '' ? null : $id;
     }
 }

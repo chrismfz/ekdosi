@@ -69,7 +69,7 @@ class InboundTicketRouterTest extends TestCase
         $this->assertSame('Δεν το έλαβα ακόμη.', $msg->body, 'quoted history stripped');
         $this->assertStringContainsString('προηγούμενο μήνυμα', (string) $msg->body_original, 'raw kept');
         $this->assertSame(TicketMessage::VIA_EMAIL, $msg->via);
-        $this->assertSame('<abc@mail>', $msg->email_message_id);
+        $this->assertSame('abc@mail', $msg->email_message_id, 'stored normalised (brackets stripped)');
     }
 
     public function test_unknown_sender_opens_a_guest_ticket_when_not_clients_only(): void
@@ -105,20 +105,77 @@ class InboundTicketRouterTest extends TestCase
         $dept = $this->department($company);
         $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
         $ticket = $this->open($company, $customer);
-        // simulate our OUTBOUND operator message carrying a Message-ID
+        // Our OUTBOUND operator message carries a normalised (bracket-free) Message-ID.
         $ticket->messages()->create([
             'company_id' => $company->id, 'author_role' => TicketMessage::ROLE_OPERATOR,
-            'body' => 'απάντηση', 'via' => TicketMessage::VIA_EMAIL, 'email_message_id' => '<sent-1@ekdosi>',
+            'body' => 'απάντηση', 'via' => TicketMessage::VIA_EMAIL, 'email_message_id' => 'sent-1@ekdosi',
         ]);
 
+        // The reply's References arrive WITH angle brackets — threading must still match.
         $result = $this->router()->route($dept, new ParsedInboundEmail(
             fromEmail: 'p@e.gr', fromName: 'Πελ', subject: 'Απάντηση χωρίς token',
             body: 'δεν δούλεψε', messageId: '<reply-1@mail>', references: ['<sent-1@ekdosi>'],
         ));
 
         $this->assertNotNull($result);
-        $this->assertSame($ticket->id, $result->id, 'threaded onto the existing ticket');
+        $this->assertSame($ticket->id, $result->id, 'threaded (bracket-agnostic) onto the existing ticket');
         $this->assertSame(TicketStatus::CustomerReply, $ticket->fresh()->status);
+        $this->assertSame('reply-1@mail', $ticket->messages()->get()->last()->email_message_id, 'stored normalised');
+    }
+
+    public function test_a_cc_stranger_does_not_inject_into_someone_elses_thread(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company);
+        $owner = Customer::create(['company_id' => $company->id, 'name' => 'Ιδιοκτήτης', 'email' => 'owner@e.gr']);
+        $ticket = $this->open($company, $owner);
+        $ticket->messages()->create([
+            'company_id' => $company->id, 'author_role' => TicketMessage::ROLE_OPERATOR,
+            'body' => 'απάντηση', 'via' => TicketMessage::VIA_EMAIL, 'email_message_id' => 'sent-9@ekdosi',
+        ]);
+        $before = $ticket->messages()->count();
+
+        // A stranger who was CC'd replies, References carrying our Message-ID + the token in the subject.
+        $result = $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: 'stranger@evil.com', fromName: 'Ξένος',
+            subject: "Re: [{$ticket->reference}]", body: 'κρυφάκουσμα',
+            messageId: '<x@mail>', references: ['<sent-9@ekdosi>'],
+        ));
+
+        $this->assertNotNull($result);
+        $this->assertNotSame($ticket->id, $result->id, 'a NEW ticket, not an injection into the owner\'s thread');
+        $this->assertSame($before, $ticket->fresh()->messages()->count(), 'owner thread untouched');
+        $this->assertNull($result->customer_id, 'stranger is a GUEST');
+    }
+
+    public function test_redelivery_of_the_same_message_is_idempotent(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company);
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
+
+        $email = new ParsedInboundEmail(
+            fromEmail: 'p@e.gr', fromName: 'Πελ', subject: 'Θέμα', body: 'σώμα', messageId: '<dup-1@mail>',
+        );
+
+        $first = $this->router()->route($dept, $email);
+        $second = $this->router()->route($dept, $email); // redelivery
+
+        $this->assertSame($first->id, $second->id, 'same ticket, not a duplicate');
+        $this->assertSame(1, Ticket::withoutGlobalScope(CompanyScope::class)->count());
+        $this->assertSame(1, $first->fresh()->messages()->count(), 'no duplicate message');
+    }
+
+    public function test_stacked_reply_prefixes_are_stripped(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company);
+
+        $ticket = $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: 'x@e.gr', fromName: 'X', subject: 'Re: Fwd: Σχετ: Πρόβλημα', body: 'σώμα',
+        ));
+
+        $this->assertSame('Πρόβλημα', $ticket?->subject);
     }
 
     public function test_reply_threads_by_subject_token(): void
