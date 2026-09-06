@@ -3,13 +3,16 @@
 namespace App\Http\Controllers\Webhooks;
 
 use App\Contracts\WebhookGateway;
+use App\Models\Customer;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentGatewayEvent;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Services\Payments\PaymentIntentService;
+use App\Support\Money;
 use App\Support\Payments\PaymentOutcome;
+use Filament\Notifications\Notification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
@@ -94,9 +97,15 @@ class EurobankReturnController
                 settledBy: 'webhook:eurobank',
                 transactionId: $outcome->providerTxnId,
             );
-            $settleable
-                ? $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_SETTLED, null, $outcome)
-                : $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'already_settled', $outcome);
+            if ($settleable) {
+                $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_SETTLED, null, $outcome);
+                // The webhook settles UNATTENDED — ring the operators' bell so they
+                // know money landed (an operator-driven settle is already visible to
+                // the operator doing it, so only this automatic path notifies).
+                $this->notifyOperators($intent, $outcome);
+            } else {
+                $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'already_settled', $outcome);
+            }
         } else {
             Log::info('eurobank.return.not_captured', [
                 'intent' => $intent->id,
@@ -214,6 +223,42 @@ class EurobankReturnController
         ], $context));
 
         $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_REJECTED, $reason, $outcome, $orderId);
+    }
+
+    /**
+     * Ring the tenant's operators' bell on an unattended gateway settlement, so a
+     * payment that arrived while nobody was watching is noticed. Best-effort: a
+     * notification hiccup must never break the settlement or the customer redirect.
+     */
+    private function notifyOperators(PaymentIntent $intent, PaymentOutcome $outcome): void
+    {
+        try {
+            $company = $intent->company;
+            $recipients = $company?->users;
+            if ($recipients === null || $recipients->isEmpty()) {
+                return;
+            }
+
+            $customer = Customer::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $intent->company_id)
+                ->whereKey($intent->customer_id)
+                ->first();
+
+            $amount = Money::eur((float) $intent->amount);
+            $who = $customer?->name ?? 'Πελάτης';
+            $gateway = app(PaymentGatewayRegistry::class)->label((string) $intent->gateway);
+            $txn = filled($outcome->providerTxnId) ? ' (κωδ. '.$outcome->providerTxnId.')' : '';
+
+            Notification::make()
+                ->title('Νέα πληρωμή μέσω πύλης')
+                ->body("{$who} πλήρωσε {$amount} μέσω {$gateway}{$txn}.")
+                ->icon('heroicon-o-banknotes')
+                ->success()
+                ->sendToDatabase($recipients);
+        } catch (Throwable $e) {
+            Log::warning('eurobank.return.notify_failed', ['intent' => $intent->id, 'error' => $e->getMessage()]);
+        }
     }
 
     /**

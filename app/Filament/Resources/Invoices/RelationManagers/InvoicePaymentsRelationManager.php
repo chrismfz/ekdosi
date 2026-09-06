@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\RelationManagers;
 
 use App\Filament\Support\BankAccountField;
+use App\Filament\Support\PaymentReceiptAction;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
@@ -184,6 +185,7 @@ class InvoicePaymentsRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
+            ->modifyQueryUsing(fn ($query) => $query->with('paymentIntent:id,gateway'))
             ->columns([
                 TextColumn::make('pay_date')->label('Ημερομηνία')->date('d/m/Y')->sortable(),
                 TextColumn::make('kind')->label('Τύπος')->badge()
@@ -191,6 +193,11 @@ class InvoicePaymentsRelationManager extends RelationManager
                     ->color(fn (?string $state) => $state === 'refund' ? 'warning' : 'success'),
                 TextColumn::make('amount')->label('Ποσό')->money('EUR')->alignRight()->sortable(),
                 TextColumn::make('paymentMethod.description')->label('Τρόπος')->placeholder('—'),
+                // «Εξοφλήθηκε μέσω πύλης Eurobank» right on the invoice: automatic
+                // (gateway) vs manual, next to the txn id column below.
+                TextColumn::make('payment_channel')->label('Κανάλι')->badge()
+                    ->state(fn (Payment $record): string => $record->channelLabel())
+                    ->color(fn (Payment $record): string => $record->payment_intent_id !== null ? 'info' : 'gray'),
                 TextColumn::make('bankAccount.bank_name')->label('Τράπεζα')->placeholder('—')->toggleable(),
                 TextColumn::make('transaction_id')->label('Κωδ. συναλλαγής')->placeholder('—')->copyable()->toggleable(),
                 TextColumn::make('notes')->label('Σημείωση')->limit(40)->placeholder('—')->toggleable(),
@@ -273,6 +280,8 @@ class InvoicePaymentsRelationManager extends RelationManager
                     }),
             ])
             ->recordActions([
+                // «Απόδειξη είσπραξης» PDF for an incoming payment (shared factory).
+                PaymentReceiptAction::make(),
                 EditAction::make()
                     ->schema(fn () => $this->paymentFields()),
                 DeleteAction::make(),
