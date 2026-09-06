@@ -52,19 +52,54 @@ class EurobankGatewayTest extends TestCase
         ]);
     }
 
-    /** Compute the vPOS digest exactly like the gateway (values in order + secret). */
-    private function sign(array $orderedFields, string $secret): string
+    /**
+     * The shared POSITIONAL concatenation both digests hash over: every returned
+     * value in received order, MINUS the browser artifacts + the digest field
+     * itself. Mirrors handleWebhook()'s `is_scalar($value) ? (string) $value : ''`
+     * exactly — a non-scalar field (an array-shaped `field[]=…` in a return)
+     * contributes '' in production, so it must here too. The secret and any iconv
+     * are NOT applied here: they differ per leg and live in the two sign* methods.
+     */
+    private function concat(array $orderedFields): string
     {
         $s = '';
         foreach ($orderedFields as $k => $v) {
             if (in_array($k, ['_charset_', 'digest', 'submitButton'], true)) {
                 continue;
             }
-            $s .= (string) $v;
+            $s .= is_scalar($v) ? (string) $v : '';
         }
-        $norm = iconv('utf-8', 'utf-8//IGNORE', $s.$secret);
 
-        return base64_encode(hash('sha256', $norm === false ? $s.$secret : $norm, true));
+        return $s;
+    }
+
+    /**
+     * OUTBOUND (request) digest — byte-for-byte mirror of requestDigest(): iconv//IGNORE
+     * over the CONCATENATION ONLY, THEN append the secret OUTSIDE the transliteration,
+     * then hash. Secret placement is load-bearing: hashing iconv(input.secret) instead
+     * would diverge from production for any non-ASCII byte — the exact silent drift this
+     * split exists to catch.
+     */
+    private function signRequest(array $orderedFields, string $secret): string
+    {
+        $norm = iconv('utf-8', 'utf-8//IGNORE', $this->concat($orderedFields));
+        if ($norm === false) {
+            $norm = $this->concat($orderedFields);
+        }
+
+        return base64_encode(hash('sha256', $norm.$secret, true));
+    }
+
+    /**
+     * INBOUND (return) digest — byte-for-byte mirror of returnDigest(): hash the RAW
+     * bytes (concat . secret) with NO iconv, faithful to the tenant's validated
+     * eurobankreturn.php. For pure-ASCII fixtures this equals the request leg; the
+     * invalid-UTF-8 fixture below is what makes the raw-vs-iconv distinction bite, so a
+     * stray iconv added to the production return leg fails here instead of passing.
+     */
+    private function signReturn(array $orderedFields, string $secret): string
+    {
+        return base64_encode(hash('sha256', $this->concat($orderedFields).$secret, true));
     }
 
     private function returnRequest(array $orderedFields): Request
@@ -88,8 +123,9 @@ class EurobankGatewayTest extends TestCase
         $this->assertSame('MID123', $form->fields['mid']);
         $this->assertArrayHasKey('digest', $form->fields);
 
-        // The digest must equal a recomputation over the same ordered values.
-        $expected = $this->sign(
+        // The digest must equal a recomputation over the same ordered values
+        // (request leg → iconv path).
+        $expected = $this->signRequest(
             collect($form->fields)->except('digest')->all(),
             self::SECRET,
         );
@@ -108,12 +144,22 @@ class EurobankGatewayTest extends TestCase
         $conn = $this->connection();
         $intent = $this->intent($conn);
 
+        // A REALISTIC return: every field the vPOS actually posts back, in the
+        // acquirer's real send-order (version, mid, orderid, status, orderAmount,
+        // currency, paymentTotal, message, riskScore, payMethod, txId, paymentRef)
+        // — cross-checked against the maintained Papaki WooCommerce module's
+        // response-digest field list — plus the browser `_charset_` artifact that
+        // the digest must EXCLUDE. That the extra fields are folded into the SIGNED
+        // concatenation for free is proven by `verified` below: had any been dropped
+        // from the concat, the computed digest would not equal the sent one.
         $fields = [
             'version' => '2', 'mid' => 'MID123', 'orderid' => (string) $intent->id,
             'status' => 'CAPTURED', 'orderAmount' => '100.00', 'currency' => 'EUR',
-            'txId' => 'TX-1', 'message' => 'OK', '_charset_' => 'UTF-8',
+            'paymentTotal' => '100.00', 'message' => 'OK', 'riskScore' => '0',
+            'payMethod' => 'visa', 'txId' => 'TX-1', 'paymentRef' => 'PAYREF-1',
+            '_charset_' => 'UTF-8',
         ];
-        $fields['digest'] = $this->sign($fields, self::SECRET);
+        $fields['digest'] = $this->signReturn($fields, self::SECRET);
 
         $outcome = $this->gateway()->handleWebhook($this->returnRequest($fields), $conn);
 
@@ -121,7 +167,42 @@ class EurobankGatewayTest extends TestCase
         $this->assertTrue($outcome->isSettled());
         $this->assertSame((string) $intent->id, $outcome->reference);
         $this->assertSame(100.0, $outcome->amount);
-        $this->assertSame('TX-1', $outcome->providerTxnId);
+        $this->assertSame('TX-1', $outcome->providerTxnId);   // txId wins over paymentRef
+        $this->assertSame('OK', $outcome->message);           // message survives the round-trip
+    }
+
+    /**
+     * The return leg hashes the RAW bytes (returnDigest → NO iconv), so a genuine
+     * return whose `message` carries an invalid-UTF-8 byte still verifies and the
+     * money is not stranded. This is the ONE fixture where raw-bytes and iconv//IGNORE
+     * diverge (iconv would STRIP the \x80), so it actively guards against a stray
+     * iconv sneaking onto the production return leg — with the guard asserted below:
+     * the iconv-path digest must NOT verify.
+     */
+    public function test_return_with_invalid_utf8_in_message_verifies_via_raw_bytes(): void
+    {
+        $conn = $this->connection();
+        $intent = $this->intent($conn);
+
+        // A lone \x80 continuation byte — invalid UTF-8 that iconv//IGNORE drops.
+        $fields = [
+            'version' => '2', 'mid' => 'MID123', 'orderid' => (string) $intent->id,
+            'status' => 'CAPTURED', 'orderAmount' => '100.00', 'currency' => 'EUR',
+            'message' => "OK\x80", 'txId' => 'TX-9',
+        ];
+        $fields['digest'] = $this->signReturn($fields, self::SECRET);
+
+        $outcome = $this->gateway()->handleWebhook($this->returnRequest($fields), $conn);
+        $this->assertTrue($outcome->verified, 'raw-byte return must verify');
+        $this->assertTrue($outcome->isSettled());
+
+        // Prove the divergence is real: an iconv-normalised digest over the SAME
+        // fields differs, so a return leg that (wrongly) used iconv would fail here.
+        $this->assertNotSame(
+            $this->signRequest($fields, self::SECRET),
+            $fields['digest'],
+            'raw and iconv digests must differ for an invalid-UTF-8 message',
+        );
     }
 
     public function test_handle_webhook_rejects_a_wrong_secret(): void
@@ -131,7 +212,7 @@ class EurobankGatewayTest extends TestCase
 
         $fields = ['orderid' => (string) $intent->id, 'status' => 'CAPTURED', 'orderAmount' => '100.00', 'currency' => 'EUR'];
         // Signed with a DIFFERENT secret → digest won't match the connection's.
-        $fields['digest'] = $this->sign($fields, 'attacker-secret');
+        $fields['digest'] = $this->signReturn($fields, 'attacker-secret');
 
         $outcome = $this->gateway()->handleWebhook($this->returnRequest($fields), $conn);
 
@@ -145,7 +226,7 @@ class EurobankGatewayTest extends TestCase
         $intent = $this->intent($conn);
 
         $fields = ['orderid' => (string) $intent->id, 'status' => 'CAPTURED', 'orderAmount' => '100.00', 'currency' => 'EUR'];
-        $fields['digest'] = $this->sign($fields, self::SECRET);
+        $fields['digest'] = $this->signReturn($fields, self::SECRET);
         // Attacker bumps the amount AFTER signing → digest no longer matches.
         $fields['orderAmount'] = '1.00';
 
@@ -160,7 +241,7 @@ class EurobankGatewayTest extends TestCase
 
         foreach (['REFUSED' => PaymentOutcome::STATUS_FAILED, 'CANCELED' => PaymentOutcome::STATUS_CANCELLED, 'AUTHORIZED' => PaymentOutcome::STATUS_PENDING] as $vpos => $expected) {
             $fields = ['orderid' => (string) $intent->id, 'status' => $vpos, 'orderAmount' => '100.00', 'currency' => 'EUR'];
-            $fields['digest'] = $this->sign($fields, self::SECRET);
+            $fields['digest'] = $this->signReturn($fields, self::SECRET);
 
             $outcome = $this->gateway()->handleWebhook($this->returnRequest($fields), $conn);
             $this->assertTrue($outcome->verified);

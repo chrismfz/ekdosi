@@ -809,6 +809,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   portal path refuses an inactive/trashed method (don't start a payment through it), the inbound return resolves
   it `withTrashed` + regardless of `is_active` (settle money that already arrived). Merging risks collapsing that
   distinction; revisit only if a third caller appears.
+- **B1 vPOS digest-test fidelity — surviving P2s (PR #485 round-2, test-only, kept as-is).** The `EurobankGatewayTest`/
+  `EurobankReturnControllerTest` helpers now mirror production byte-for-byte (request = iconv-then-secret-outside,
+  return = raw), but three maintainability nits remain: (i) the digest EXCLUDE list `['_charset_','digest','submitButton']`
+  is re-literalised in each test instead of referencing `EurobankGateway::DIGEST_EXCLUDED` (it's `private`) — a future
+  add/remove there won't fail the mirrors; fix = expose the constant or a shared test trait. (ii) the invalid-UTF-8
+  guard's `assertNotSame` assumes `iconv//IGNORE` STRIPS `\x80` rather than returning `false` — glibc/libiconv-standard
+  but platform-sensitive. (iii) the non-scalar→`''` concat branch is documented (mirrors `handleWebhook`) but never
+  exercised by a fixture. All P2: fail-closed, ASCII-safe today, no P0/P1. Knock off opportunistically.
 - ✅ **DONE (B1) — Payment gateways write-only secret fields.** `HasSecretConfig` (opt-in interface) +
   `EditPaymentGatewayConnection` mutate hooks: a stored secret is never hydrated back into the form, and a
   blank submit preserves it. `EurobankGateway::secretConfigKeys() = ['shared_secret']`; covered by
