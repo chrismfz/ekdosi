@@ -329,7 +329,9 @@ behaviors below are how the system actually works:
   `->where('company_id', …)`, (b) `CompanyContext::actAs($company, …)`, or (c) a deliberate all-tenant
   sweep → `->withoutGlobalScope(CompanyScope::class)` to DECLARE the intent. A full audit (2026-06-11)
   found **0 live leaks** across ~54 entry points, so the no-op default is load-bearing AND correct.
-  Strict null→throw stays deferred (see `docs/CLAUDE-history.md`).
+  Strict null→throw stays deferred — naive flip breaks ~18 safe explicit-where paths, and an
+  execution-time tripwire false-positives on relation/eager-load FK queries (full note:
+  `docs/BACKLOG.md` tech-debt «Strict tenant scope»).
 - **Activity log** (`TracksActivity` on Invoice/Customer/Payment): `logOnly(loggedAttributes())` —
   business columns only, NEVER the money/myDATA CACHE columns; `logOnlyDirty()` +
   `dontLogEmptyChanges()`. v5 stores the diff in **`attribute_changes`** (not `properties`); causer
