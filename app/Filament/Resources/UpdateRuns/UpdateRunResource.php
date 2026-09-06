@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\UpdateRuns;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\UpdateRuns\Pages\ListUpdateRuns;
 use App\Filament\Resources\UpdateRuns\Pages\ViewUpdateRun;
 use App\Filament\Resources\UpdateRuns\Schemas\UpdateRunInfolist;
@@ -14,7 +15,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
-use UnitEnum;
 
 /**
  * In-app update (Phase 2) — history + live progress of application updates.
@@ -44,7 +44,7 @@ class UpdateRunResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-arrow-up-circle';
 
-    protected static string|UnitEnum|null $navigationGroup = 'Σύστημα';
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?string $navigationLabel = 'Ενημερώσεις';
 

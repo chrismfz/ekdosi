@@ -96,8 +96,14 @@ scannable Clusters, not 60 flat rows.
    `CompanySettings` + `MyDataCodeGuide` + `WhmcsIncomeMapping` + `WhmcsPaymentMapping` (the last two
    register only for WHMCS-integrated tenants — easy to miss); URLs moved under `/settings/…`;
    `MenuStructureTest` uses a WHMCS-integrated tenant so a stray `getNavigationGroup('Ρυθμίσεις')` fails it.
-   **Still to fold in (a follow-up):** the config-ish «Σύστημα» items (GeneralSettings/Preflight/
-   ScheduleSettings/UpdateRuns/Companies/Users) → one clean Settings zone.
+1.5. ✅ **DONE (2026-09-06) — clean Settings zone + «Διαχείριση» split (option B).** The config-ish
+   «Σύστημα» pages (GeneralSettings/Preflight/ScheduleSettings/UpdateRuns) folded INTO the
+   SettingsCluster (now 17 members); «Σύστημα» kept only operational (ActivityFeed/InvoiceMailLogs/
+   AiUsage/SystemHealth + the cluster). Super-admin Users/Companies/Roles moved to a NEW **«Διαχείριση»**
+   group (kept separate from config, per option B). Labels shortened for a future one-line top-nav:
+   «Ψηφιακή Διακίνηση»→«Διακίνηση», «myDATA & Διασυνδέσεις»→«Διασυνδέσεις». `MenuStructureTest` extended.
+   **Optional polish:** sub-group the 17-item cluster (Τιμολόγηση / Κατάλογος / Σύστημα) + a «Ρυθμίσεις»
+   landing page instead of jumping to the first member.
    _(P2, deferred — review #492): `SettingsCluster` + `MyDataCluster` share identical
    `canAccess = canAccessClusteredComponents` boilerplate; when a 3rd cluster lands, extract an
    `abstract BaseNavCluster` to hold it once.)_

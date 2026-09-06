@@ -65,13 +65,16 @@ class AdminPanelProvider extends PanelProvider
                 'Καθημερινά',
                 'Leads',
                 'Είδη & Προμήθειες',
-                'Ψηφιακή Διακίνηση',
+                'Διακίνηση',
                 'Λογιστικά',
-                'myDATA & Διασυνδέσεις',
+                'Διασυνδέσεις',
                 'Πύλη πελατών',
                 'Σύστημα',
+                'Διαχείριση',
                 // «Ρυθμίσεις» is no longer a flat group — it's the SettingsCluster
-                // (one bottom nav entry). See docs/menu-ia.md Step 1.
+                // (in «Σύστημα», last). Config-ish system pages (GeneralSettings/
+                // Scheduler/Preflight/Updates) live INSIDE it now; «Διαχείριση» =
+                // super-admin Users/Companies/Roles. See docs/menu-ia.md Step 1.5.
             ])
             ->discoverResources(in: app_path('Filament/Resources'), for: 'App\Filament\Resources')
             ->discoverPages(in: app_path('Filament/Pages'), for: 'App\Filament\Pages')
@@ -122,7 +125,7 @@ class AdminPanelProvider extends PanelProvider
                 // fluent setters are the supported mechanism — no vendor config keys
                 // exist for it. Empties the old 'Filament Shield' group so it vanishes.
                 FilamentShieldPlugin::make()
-                    ->navigationGroup('Σύστημα')
+                    ->navigationGroup('Διαχείριση')
                     ->navigationSort(30)
                     ->navigationLabel('Ρόλοι'),
             ])

@@ -47,7 +47,7 @@ class DeliveryNoteResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ψηφιακή Διακίνηση';
+    protected static string|UnitEnum|null $navigationGroup = 'Διακίνηση';
 
     protected static ?int $navigationSort = 10;
 

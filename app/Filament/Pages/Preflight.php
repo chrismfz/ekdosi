@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Preflight\ReadinessReport;
 use BackedEnum;
@@ -23,6 +24,8 @@ use Illuminate\Support\Facades\Cache;
 class Preflight extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clipboard-document-check';
+
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 98;
 
@@ -73,11 +76,6 @@ class Preflight extends Page
     public function getTitle(): string
     {
         return 'Έλεγχος ετοιμότητας';
-    }
-
-    public static function getNavigationGroup(): ?string
-    {
-        return 'Σύστημα';
     }
 
     public static function shouldRegisterNavigation(): bool

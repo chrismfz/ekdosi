@@ -2,6 +2,11 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Filament\Clusters\SettingsCluster;
+use App\Filament\Pages\GeneralSettings;
+use App\Filament\Pages\Preflight;
+use App\Filament\Pages\ScheduleSettings;
+use App\Filament\Resources\UpdateRuns\UpdateRunResource;
 use App\Models\Company;
 use App\Models\User;
 use Filament\Facades\Filament;
@@ -11,8 +16,10 @@ use Tests\TestCase;
 
 /**
  * Locks the navigation reorganization: the daily drivers live in «Καθημερινά»
- * (incl. the WHMCS inbox), the Leads trio is one group, Shield's Roles moved into
- * «Σύστημα» as «Ρόλοι», and the old lone/English groups (Setup / Data /
+ * (incl. the WHMCS inbox), the Leads trio is one group, config lives in the
+ * SettingsCluster (not a flat «Ρυθμίσεις» group), super-admin screens (Users/
+ * Companies/Roles) are in «Διαχείριση», the shortened labels («Διακίνηση»,
+ * «Διασυνδέσεις») are in effect, and the old lone/English groups (Setup / Data /
  * «Filament Shield» / «Είσπραξη/Πληρωμές») are gone. Reads the LIVE resolved panel
  * navigation (so it also proves the AdminPanelProvider group order + the Shield
  * plugin's fluent navigation config actually take effect).
@@ -73,12 +80,32 @@ class MenuStructureTest extends TestCase
         }
     }
 
-    public function test_roles_moved_into_system_group(): void
+    public function test_admin_screens_are_in_the_management_group(): void
     {
+        // Step 1.5 (option B): super-admin screens (Users/Companies/Roles) live in
+        // their own «Διαχείριση» group, split out from «Σύστημα».
         $tree = $this->navTree();
 
-        $this->assertArrayHasKey('Σύστημα', $tree);
-        $this->assertContains('Ρόλοι', $tree['Σύστημα'], 'Οι Ρόλοι (Shield) πρέπει να είναι στο «Σύστημα»');
+        $this->assertArrayHasKey('Διαχείριση', $tree);
+        foreach (['Ρόλοι', 'Χρήστες', 'Εταιρείες'] as $item) {
+            $this->assertContains($item, $tree['Διαχείριση'], "«{$item}» πρέπει να είναι στη «Διαχείριση»");
+        }
+    }
+
+    public function test_config_system_pages_moved_into_the_settings_cluster(): void
+    {
+        // Step 1.5: the config-ish «Σύστημα» screens left the flat «Σύστημα» group for
+        // the SettingsCluster — so they are NOT top-level nav items…
+        $allItems = collect($this->navTree())->flatten()->all();
+        foreach (['Ρυθμίσεις συστήματος', 'Έλεγχος ετοιμότητας', 'Χρονοπρογραμματιστής', 'Ενημερώσεις'] as $moved) {
+            $this->assertNotContains($moved, $allItems, "«{$moved}» ζει πλέον μέσα στο SettingsCluster");
+        }
+
+        // …AND positively still belong to the cluster (so «gone from top-level» can't be
+        // satisfied by «dropped from nav entirely» — the actual reorg intent is guarded).
+        foreach ([GeneralSettings::class, Preflight::class, ScheduleSettings::class, UpdateRunResource::class] as $screen) {
+            $this->assertSame(SettingsCluster::class, $screen::getCluster(), $screen.' πρέπει να ανήκει στο SettingsCluster');
+        }
     }
 
     public function test_old_lone_and_english_groups_are_gone(): void
@@ -113,7 +140,7 @@ class MenuStructureTest extends TestCase
             fn ($l) => $l !== '' // drop the ungrouped/top bucket
         ));
 
-        $canonical = ['Καθημερινά', 'Leads', 'Είδη & Προμήθειες', 'Ψηφιακή Διακίνηση', 'Λογιστικά', 'myDATA & Διασυνδέσεις', 'Σύστημα'];
+        $canonical = ['Καθημερινά', 'Leads', 'Είδη & Προμήθειες', 'Διακίνηση', 'Λογιστικά', 'Διασυνδέσεις', 'Σύστημα', 'Διαχείριση'];
 
         // Every rendered group is a known canonical one, and they appear in that order.
         $seen = array_values(array_filter($canonical, fn ($g) => in_array($g, $labels, true)));

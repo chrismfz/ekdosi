@@ -48,7 +48,7 @@ class MyDataMarkDetail extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-qr-code';
 
-    protected static string|UnitEnum|null $navigationGroup = 'myDATA & Διασυνδέσεις';
+    protected static string|UnitEnum|null $navigationGroup = 'Διασυνδέσεις';
 
     protected static ?int $navigationSort = 60;
 
