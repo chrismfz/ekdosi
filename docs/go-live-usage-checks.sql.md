@@ -21,7 +21,7 @@ These are plain **Firebird SQL** — they work the same whether you:
   ```
 - or run against a **live `.fdb`** directly (read-only — `SELECT`s only):
   ```bash
-  isql -user EKDOSI -password ekdosi1234 /opt/Data/ekdosi-myip.fdb
+  isql -user EKDOSI -password <FB_PASSWORD> /opt/Data/ekdosi-myip.fdb
   ```
 
 > Re "do these also stand for direct imports?" — yes. They target the Firebird

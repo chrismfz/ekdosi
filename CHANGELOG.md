@@ -18,6 +18,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Security
+- **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy
+  C++Builder `.dfm`/`.cfg` files carried hardcoded MySQL/SMTP/CS-Cart passwords + an `EncryptedPassword`
+  blob; kept in an offline backup), and scrubbed the Firebird `EKDOSI` password literal from every
+  tracked `.md`/`.php`/test → placeholders. **Note:** this is tree-only — the secrets remain in git
+  history until a history rewrite, and the exposed credentials must be **rotated** (they are compromised
+  regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
+
 ### Added
 - **Απόδειξη είσπραξης (PDF).** Νέο `PaymentReceiptRenderer` + row action «Απόδειξη» στη λίστα Πληρωμές και στο
   παραστατικό: άτυπο αποδεικτικό είσπραξης για όλο το reference-group (κανάλι «Πύλη · Eurobank», κωδ. συναλλαγής,

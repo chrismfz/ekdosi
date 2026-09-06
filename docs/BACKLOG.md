@@ -69,7 +69,10 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
     contract/registry — **design+threat-model: `docs/payment-gateways-design.md`**; office rails card-POS/IRIS
     → `payment-connectors.md`).
 11. **Πυλώνας C — Provisioning modules** (real cPanel/DA/… on the existing seam).
-12. **Πυλώνας D — Customer portal** (2nd panel; deliberately last, needs A+B).
+12. **Πυλώνας D — Customer portal** (foundation ✅ shipped; transactional surfaces per-pillar).
+13. **Πυλώνας E — Support/Ticket system** (NEW, eval-first — spike `laravel-service-desk` vs build).
+14. **Menu / IA architecture** (NEW, epic-wide + already pressing — Clusters-per-domain, Settings
+    Cluster, panel-split only when the audience differs). Both detailed under the epic section below.
 
 **TIER 4 — Blocked-on-external (not actionable now — keep parked, don't re-pick):**
 - **GR Πάροχος live** + **PEPPOL Phase 2** — need real provider creds + sandbox.
@@ -91,6 +94,33 @@ below.)*
 
 **TIER 7 — Ideas / low-commitment** (multi-currency, shared Contacts CRM, setup
 profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
+
+---
+
+## 🔐 SECURITY — leaked secrets remediation (OPEN, do not close until rotated)
+
+**Incident (2026-09-06):** the private repo carried plaintext credentials — the whole
+`legacy/` tree (legacy `.dfm`/`.cfg` with the **MySQL `digipan_csuser`**, **SMTP
+`mail.myip.gr`**, CS-Cart, and an `EncryptedPassword` blob) plus the **Firebird
+`EKDOSI` password** scattered as a plaintext literal across several `.md`, a `.php` command
+comment, and a test fixture.
+
+**Done (tree-level, this commit):**
+- `legacy/` deleted from the tree (262 files; kept in an offline backup).
+- The Firebird password literal scrubbed from every tracked file → placeholder `<FB_PASSWORD>`
+  (docs/command) / a fake fixture value (the FirebirdLiveImport test). `git grep` clean.
+- (`SYSDBA/masterkey` left as-is — it is Firebird's public install default for the local
+  sandbox `.fbk`, not a real secret.)
+
+**NOT done — the parts that actually matter (must schedule):**
+1. **ROTATE every exposed credential NOW** — deleting from the tree does not un-leak them
+   (they are in git history, old branches, any prior clone, and the repo was briefly about to
+   go public). Assume compromised: Firebird `EKDOSI`, the CS-Cart MySQL `digipan_csuser@hermes`,
+   the SMTP `myip.gr` mailbox, and any other password that was ever in `legacy/`. **This is the
+   real fix — do it independently of the history rewrite.**
+2. **History purge** — the «σκληροπυρηνική λύση»: `git filter-repo` (or BFG) to strip `legacy/`
+   + the secret strings from ALL history, then force-push and have every clone re-clone. Coordinate
+   (rewrites SHAs). Until then the secrets remain retrievable from history.
 
 ---
 
@@ -587,6 +617,39 @@ data model + phase gates: **`PLAN.md`**.
   προβολή παραστατικών + «Η καρτέλα μου», όλα read-only, στο `/user`). ΔΕΝ ήταν τελικά μονολιθικά «τελευταίο»:
   η foundation δεν χρειαζόταν A/B/C. Μένουν τα **transactional** surfaces (πλήρωσε → B· domains → A·
   services → C), που προσκολλώνται ανά πυλώνα. Βλ. `PLAN.md §6`.
+- **Πυλώνας E — Support / Ticket system** _(NEW, TODO-eval — μας ξέφυγε από τον epic)._ WHMCS-style
+  υποστήριξη: departments, tickets (public replies + **internal notes** + attachments), statuses/priority,
+  ticket↔customer/service link, canned replies, SLA, ratings, **email ingestion** (IMAP poll + reply/quote/
+  signature strip + threading + outbound). Δύο κόσμοι UI όπως παντού: operators στο Filament panel, πελάτες
+  στο **Flux portal** (`/user`) — άρα ό,τι διαλέξουμε πρέπει να αφήνει και τα δύο δικά μας.
+  **Buy-vs-build (2026-09-06 eval):**
+  - ❌ `rasmuscnielsen/laravel-support-tickets` (packalyst) — Laravel 5.x εποχής, εγκαταλελειμμένο. Drop.
+  - ⭐ `jeffersongoncalves/laravel-service-desk` (MIT, Laravel 11/12/13, **headless**) — ο σοβαρός
+    υποψήφιος: πλούσιο μοντέλο (departments/statuses/operators/internal-notes/SLA/KB/service-catalog/
+    email Mailgun+SendGrid+Resend+Postmark+IMAP). Headless = κρατάμε Filament+Flux δικά μας. Καμπάνες:
+    **νέο/μικρό (~8★)**, **όχι multi-tenant** (θέλει `company_id`/`CompanyScope` retrofit).
+  - Filament-only plugins (Umnidev Helpdesk, Padmission, Creators Ticketing, `jeffersongoncalves/
+    filament-help-desk`, το επί-πληρωμή) → UI μόνο για operators· ΔΕΝ λύνουν το customer-facing Flux —
+    μόνο αν αποφασίσουμε tickets = operator-only (απίθανο, WHMCS έχει customer tickets).
+  - **Build-our-own thin model** = viable (έχουμε ήδη CompanyScope/activitylog/Flux/mail)· το μόνο
+    ακριβό κομμάτι είναι το email ingestion/threading, που δανειζόμαστε (`webklex/php-imap` +
+    `willdurand/email-reply-parser`). Πιθανώς το καθαρότερο long-term δεδομένου πόσο δένουν τα tickets
+    με customer/service/company.
+  - **Επόμενο βήμα:** time-boxed **spike (1-2 μέρες) του `laravel-service-desk`** — πόσο εύκολο το
+    tenancy retrofit + το wiring σε Filament (operators) & Flux (portal). Αποτέλεσμα → buy-or-build.
+- **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._ Το nav
+  είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
+  «Ρυθμίσεις» στα **11**. Με Support (Tickets/Departments/Settings) + μελλοντικά Services/Domains/Servers/
+  Groups/Provisioning γίνεται «πάπυρος». **Κατεύθυνση: βάθος (Clusters), όχι πλάτος (flat groups)·
+  panel-split μόνο όταν αλλάζει ο ρόλος/κοινό:**
+  - **Cluster ανά domain** (το pattern υπάρχει ήδη — `App\Filament\Clusters\MyDataCluster`): Support →
+    ένα top-level «Υποστήριξη» με δικό του sub-nav (Tickets/Departments/Settings μέσα). Domains/Provisioning
+    ομοίως → κάθε πυλώνας = ΕΝΑ entry, όχι 5-6.
+  - **«Ρυθμίσεις» (τα 11) → Settings Cluster** (WHMCS «Configuration» / Blesta «Settings» pattern) — τα
+    config/lookups φεύγουν από το καθημερινό nav.
+  - **2ο Filament panel** (με switcher) **μόνο** όταν το κοινό διαφέρει (π.χ. infra/provisioning ops ≠
+    billing operator) — cross-panel tenant-context = extra plumbing, όχι νωρίτερα.
+  - Στήριξη σε **global search (Cmd+K)** ώστε το βάθος να μη βλάπτει findability.
 
 ## 🟢 Services / Provisioning
 - **Real provisioning modules** (cPanel/Mailcow/license server) — σήμερα μόνο `NullProvisioningModule`. _(= Πυλώνας C του `PLAN.md`.)_

@@ -24,7 +24,7 @@ use RuntimeException;
  *   php artisan migrate:firebird \
  *       --company="MyIP" --slug=myip \
  *       --fdb="/opt/Data/ekdosi-myip.fdb" \
- *       --host=10.23.22.5 --fbuser=EKDOSI --fbpass=ekdosi1234
+ *       --host=10.23.22.5 --fbuser=EKDOSI --fbpass=<FB_PASSWORD>
  *
  * Re-run-safe (PR #29): the new design upserts on (company_id, legacy_id).
  * Rows the operator created entirely in Filament (no legacy_id) are never

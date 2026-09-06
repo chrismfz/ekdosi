@@ -218,7 +218,7 @@ README.md                      # top-level overview (also tracks migration-kit h
 php artisan migrate
 php artisan migrate:firebird --company="MyIP" --slug=myip \
     --fdb="/opt/Data/ekdosi-myip.fdb" --host=10.23.22.5 \
-    --fbuser=EKDOSI --fbpass=ekdosi1234     # repeat per legacy DB
+    --fbuser=EKDOSI --fbpass=<FB_PASSWORD>     # repeat per legacy DB
 ```
 Requires the `pdo_firebird` PHP extension on the artisan host.
 
@@ -545,7 +545,7 @@ This is what `MigrateFromFirebird.php` exists for; spelling out the story:
   ```bash
   php artisan migrate:firebird --company="MyIP" --slug=myip \
       --fdb=/opt/Data/ekdosi-myip.fdb --host=10.23.22.5 \
-      --fbuser=EKDOSI --fbpass=ekdosi1234
+      --fbuser=EKDOSI --fbpass=<FB_PASSWORD>
   ```
 - **Re-runnable** because every legacy row keeps its `legacy_id`
   (unique per company). Re-running upserts on `(company_id, legacy_id)`

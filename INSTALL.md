@@ -1167,7 +1167,7 @@ the snapshot in `legacy/ekdosi-schema.sql`:
 # the .fdb locked, so go through the network. localhost: only works
 # if Firebird's listener binds to loopback; otherwise use the box's
 # external IP (same one the C++Builder app uses, e.g. 10.23.22.5):
-/opt/firebird/bin/isql -x -u EKDOSI -p ekdosi1234 \
+/opt/firebird/bin/isql -x -u EKDOSI -p <FB_PASSWORD> \
     10.23.22.5:/opt/Data/ekdosi-myip.fdb \
     > /tmp/ekdosi-myip-schema-$(date +%F).sql
 
@@ -1191,7 +1191,7 @@ users normally can't run `gbak -b`. Two recoveries on the legacy box:
 # OR — service-manager backup using the app user (works if EKDOSI has
 # the RDB$ADMIN role; check first):
 /opt/firebird/bin/gbak -b \
-    -user EKDOSI -password ekdosi1234 \
+    -user EKDOSI -password <FB_PASSWORD> \
     -se 10.23.22.5:service_mgr \
     10.23.22.5:/opt/Data/ekdosi-myip.fdb \
     /tmp/ekdosi-myip-$(date +%F).fbk
@@ -1208,7 +1208,7 @@ compatible. `--fdb` is then a path **on the legacy server's filesystem**:
 sudo -u ekdosi php artisan migrate:firebird --company="MyIP" --slug=myip \
     --fdb="/opt/Data/ekdosi-myip.fdb" \    # path on the LEGACY box
     --host=10.23.22.5 \
-    --fbuser=EKDOSI --fbpass=ekdosi1234
+    --fbuser=EKDOSI --fbpass=<FB_PASSWORD>
 ```
 
 If you see `Use of database at location ... is not allowed by server
