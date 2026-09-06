@@ -27,6 +27,7 @@ use App\Mcp\Tools\RecentInvoicesMcpTool;
 use App\Mcp\Tools\RecordPaymentMcpTool;
 use App\Mcp\Tools\SendCustomerStatementMcpTool;
 use App\Mcp\Tools\StuckDocumentsMcpTool;
+use App\Mcp\Tools\SupportImapMcpTool;
 use App\Mcp\Tools\TopProductsMcpTool;
 use App\Mcp\Tools\VatSummaryMcpTool;
 use App\Mcp\Tools\WhmcsInboxMcpTool;
@@ -166,5 +167,7 @@ class EkdosiMcpServer extends Server
         MyDataDiscrepanciesMcpTool::class,
         MyDataPreflightMcpTool::class,
         MyDataSettingsMcpTool::class,
+        // Support/ticket IMAP mailbox health (Πυλώνας E, Phase 3b).
+        SupportImapMcpTool::class,
     ];
 }

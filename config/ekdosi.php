@@ -153,6 +153,13 @@ return [
         'whmcs_payment_sync_enabled' => env('EKDOSI_SCHEDULE_WHMCS_PAYMENT_SYNC', false),
         'whmcs_payment_sync_cron' => env('EKDOSI_WHMCS_PAYMENT_SYNC_CRON', '*/30 * * * *'),
 
+        // tickets:poll-imap — poll each support-enabled tenant's mail-configured
+        // departments (IMAP) and route inbound email into tickets (Πυλώνας E).
+        // OFF by default — opt in per deploy once the mailbox config is verified
+        // live («Test σύνδεσης» / MCP support_imap). Every 5 min when armed.
+        'tickets_poll_imap_enabled' => env('EKDOSI_SCHEDULE_TICKETS_POLL_IMAP', false),
+        'tickets_poll_imap_cron' => env('EKDOSI_TICKETS_POLL_IMAP_CRON', '*/5 * * * *'),
+
         // whmcs:reconcile-payments — READ-ONLY detector: recompute the worklist
         // of open «επί πιστώσει» invoices that WHMCS now reports Paid, cache it
         // for the dashboard widget + «Συγχρονισμός πληρωμών» page, and bell-notify

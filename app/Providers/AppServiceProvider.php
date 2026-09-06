@@ -4,6 +4,8 @@ namespace App\Providers;
 
 use App\Models\User;
 use App\Services\Leads\LeadMatcher;
+use App\Services\Support\Inbound\ImapMailbox;
+use App\Services\Support\Inbound\WebklexImapMailbox;
 use App\Support\ErrorAlerts\ExceptionNotifier;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
@@ -35,6 +37,13 @@ class AppServiceProvider extends ServiceProvider
         // Deploy-wide settings store — singleton so the loaded map is shared
         // (one DB/cache read per process; the scheduler reads it on every tick).
         $this->app->singleton(SystemSettings::class);
+
+        // Support/ticket IMAP transport (Πυλώνας E) — the real webklex mailbox behind
+        // the ImapMailbox seam; tests bind a fake.
+        $this->app->bind(
+            ImapMailbox::class,
+            WebklexImapMailbox::class,
+        );
     }
 
     public function boot(): void
