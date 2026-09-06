@@ -76,6 +76,27 @@ class SendTicketReplyEmailTest extends TestCase
         });
     }
 
+    public function test_reply_goes_to_the_requester_address_over_the_customer_primary(): void
+    {
+        Mail::fake();
+        $company = $this->company();
+        $dept = $this->department($company);
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'primary@e.gr']);
+
+        // The customer wrote in from a DIFFERENT address than their primary.
+        $ticket = app(OpenTicket::class)->handle([
+            'company_id' => $company->id, 'customer_id' => $customer->id, 'ticket_department_id' => $dept->id,
+            'requester_email' => 'wrote-from@e.gr', 'subject' => 'X', 'body' => 'y',
+            'author_role' => TicketMessage::ROLE_CUSTOMER, 'via' => TicketMessage::VIA_EMAIL,
+        ]);
+        $reply = app(PostTicketMessage::class)->handle($ticket, [
+            'author_role' => TicketMessage::ROLE_OPERATOR, 'body' => 'απάντηση',
+        ]);
+        $this->deliver($reply);
+
+        Mail::assertSent(TicketReplyMail::class, fn (TicketReplyMail $mail) => $mail->hasTo('wrote-from@e.gr'));
+    }
+
     public function test_no_recipient_sends_nothing(): void
     {
         Mail::fake();

@@ -56,11 +56,14 @@ class SendTicketReplyEmail implements ShouldQueue
 
         $ticket = $message->ticket;
         $company = $ticket?->company;
-        if ($ticket === null || $company === null) {
-            return;
+        if ($ticket === null || $company === null || ! $company->hasSupport()) {
+            return; // pillar turned off for the tenant → don't email from an unmonitored box
         }
 
-        $recipient = trim((string) ($ticket->customer?->email ?: $ticket->requester_email ?: ''));
+        // Prefer the address that actually wrote in (requester_email) over the
+        // customer record's primary — the customer may have contacted from a
+        // secondary/other address and monitors THAT one.
+        $recipient = trim((string) ($ticket->requester_email ?: $ticket->customer?->email ?: ''));
         if ($recipient === '') {
             Log::info('SendTicketReplyEmail: no recipient', ['ticket_id' => $ticket->id]);
 
@@ -85,18 +88,19 @@ class SendTicketReplyEmail implements ShouldQueue
             $message->forceFill(['email_message_id' => $messageId])->save();
         }
 
-        // In-Reply-To = the customer message being answered (their most recent
-        // inbound message that carries a Message-ID). Portal-only tickets have none
-        // → a fresh thread (still threadable via our Message-ID + the subject token).
-        $inReplyTo = TicketMessage::query()
+        // References = the full chain of prior message-ids (chronological, RFC 5322);
+        // In-Reply-To = the immediate parent (the last one). Portal-only tickets have
+        // no ids → a fresh thread (still threadable via our Message-ID + subject token).
+        $chain = TicketMessage::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->where('ticket_id', $ticket->id)
             ->where('id', '<', $message->id)
-            ->where('author_role', TicketMessage::ROLE_CUSTOMER)
             ->whereNotNull('email_message_id')
-            ->orderByDesc('id')
-            ->value('email_message_id');
-        $inReplyTo = $inReplyTo !== null ? (string) $inReplyTo : null;
+            ->orderBy('id')
+            ->pluck('email_message_id')
+            ->map(fn ($id): string => (string) $id)
+            ->all();
+        $inReplyTo = $chain !== [] ? $chain[array_key_last($chain)] : null;
 
         $mailerFactory->for($company)->to($recipient)->send(new TicketReplyMail(
             ticket: $ticket,
@@ -105,7 +109,7 @@ class SendTicketReplyEmail implements ShouldQueue
             fromName: $fromName,
             messageId: $messageId,
             inReplyTo: $inReplyTo,
-            references: $inReplyTo !== null ? [$inReplyTo] : [],
+            references: $chain,
         ));
     }
 }

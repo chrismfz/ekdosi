@@ -63,9 +63,9 @@ class ViewTicket extends ViewRecord
                         'via' => TicketMessage::VIA_OPERATOR,
                         'body' => $data['body'],
                     ]);
-                    // Email the reply to the customer (threaded), Phase 3b-ii.
+                    // Email the reply to the customer (threaded, async), Phase 3b-ii.
                     SendTicketReplyEmail::dispatch($message->id);
-                    Notification::make()->title('Η απάντηση καταχωρήθηκε και στάλθηκε στον πελάτη')->success()->send();
+                    Notification::make()->title('Η απάντηση καταχωρήθηκε — αποστέλλεται στον πελάτη με email')->success()->send();
                 }),
 
             Action::make('note')
