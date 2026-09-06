@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DistributionAims;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\DistributionAims\Pages\CreateDistributionAim;
 use App\Filament\Resources\DistributionAims\Pages\EditDistributionAim;
 use App\Filament\Resources\DistributionAims\Pages\ListDistributionAims;
@@ -20,7 +21,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
-use UnitEnum;
 
 class DistributionAimResource extends Resource
 {
@@ -28,7 +28,7 @@ class DistributionAimResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedPaperAirplane;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 40;
 

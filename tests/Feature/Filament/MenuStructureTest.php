@@ -29,6 +29,12 @@ class MenuStructureTest extends TestCase
             'name' => 'Nav OE', 'slug' => 'nav-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
             'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
+            // WHMCS-integrated on purpose: it registers WhmcsIncomeMapping +
+            // WhmcsPaymentMapping (getNavigationGroup 'Ρυθμίσεις' before Step 1), so the
+            // «no flat Ρυθμίσεις group» assertion actually exercises the WHMCS case (2 of
+            // the 3 real tenants) instead of silently passing on a non-WHMCS tenant.
+            'whmcs_api_url' => 'https://whmcs.example/includes/api.php',
+            'whmcs_api_identifier' => 'id', 'whmcs_api_secret' => 'secret',
         ]);
         $user = User::create(['name' => 'A', 'email' => 'a-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
         $user->companies()->attach($company->id);
@@ -84,6 +90,22 @@ class MenuStructureTest extends TestCase
         }
     }
 
+    public function test_settings_moved_into_a_cluster_not_a_flat_group(): void
+    {
+        // Menu/IA Step 1: the 13-item «Ρυθμίσεις» flat group became the SettingsCluster
+        // (one bottom nav entry). So «Ρυθμίσεις» is NOT a top-level GROUP anymore, but a
+        // nav ITEM exists for the cluster, and its config members no longer sit in the
+        // main nav (they live inside the cluster's sub-navigation).
+        $tree = $this->navTree();
+
+        $this->assertArrayNotHasKey('Ρυθμίσεις', $tree, '«Ρυθμίσεις» δεν είναι πια flat group');
+
+        $allItems = collect($tree)->flatten()->all();
+        $this->assertContains('Ρυθμίσεις', $allItems, 'Το SettingsCluster πρέπει να δίνει ΕΝΑ nav item «Ρυθμίσεις»');
+        // A representative clustered config screen is NOT a top-level nav item now.
+        $this->assertNotContains('Τύποι παραστατικών', $allItems, 'Οι «Τύποι παραστατικών» ζουν πλέον μέσα στο cluster');
+    }
+
     public function test_group_order_is_the_explicit_canonical_order(): void
     {
         $labels = array_values(array_filter(
@@ -91,7 +113,7 @@ class MenuStructureTest extends TestCase
             fn ($l) => $l !== '' // drop the ungrouped/top bucket
         ));
 
-        $canonical = ['Καθημερινά', 'Leads', 'Είδη & Προμήθειες', 'Ψηφιακή Διακίνηση', 'Λογιστικά', 'myDATA & Διασυνδέσεις', 'Ρυθμίσεις', 'Σύστημα'];
+        $canonical = ['Καθημερινά', 'Leads', 'Είδη & Προμήθειες', 'Ψηφιακή Διακίνηση', 'Λογιστικά', 'myDATA & Διασυνδέσεις', 'Σύστημα'];
 
         // Every rendered group is a known canonical one, and they appear in that order.
         $seen = array_values(array_filter($canonical, fn ($g) => in_array($g, $labels, true)));

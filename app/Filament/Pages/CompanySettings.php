@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Support\MailTemplateFields;
 use App\Models\Company;
 use App\Models\CompanyBackupSetting;
@@ -52,6 +53,8 @@ class CompanySettings extends Page implements HasForms
     use InteractsWithForms;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-building-office-2';
+
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 96;
 
@@ -230,11 +233,6 @@ class CompanySettings extends Page implements HasForms
     public function getTitle(): string
     {
         return 'Ρυθμίσεις εταιρείας';
-    }
-
-    public static function getNavigationGroup(): ?string
-    {
-        return 'Ρυθμίσεις';
     }
 
     public static function shouldRegisterNavigation(): bool

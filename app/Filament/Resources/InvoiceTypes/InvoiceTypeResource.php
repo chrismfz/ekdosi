@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\InvoiceTypes;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\InvoiceTypes\Pages\CreateInvoiceType;
 use App\Filament\Resources\InvoiceTypes\Pages\EditInvoiceType;
 use App\Filament\Resources\InvoiceTypes\Pages\ListInvoiceTypes;
@@ -21,7 +22,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
-use UnitEnum;
 
 class InvoiceTypeResource extends Resource
 {
@@ -29,7 +29,7 @@ class InvoiceTypeResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedDocumentText;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 10;
 

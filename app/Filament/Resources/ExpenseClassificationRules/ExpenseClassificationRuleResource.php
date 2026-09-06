@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\ExpenseClassificationRules;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\ExpenseClassificationRules\Pages\CreateExpenseClassificationRule;
 use App\Filament\Resources\ExpenseClassificationRules\Pages\EditExpenseClassificationRule;
 use App\Filament\Resources\ExpenseClassificationRules\Pages\ListExpenseClassificationRules;
@@ -15,7 +16,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
-use UnitEnum;
 
 /**
  * CRUD for the expense auto-classification rules (#5): «προμηθευτής (+ προαιρ.
@@ -29,9 +29,9 @@ class ExpenseClassificationRuleResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedSparkles;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
+    protected static ?string $cluster = SettingsCluster::class;
 
-    protected static ?int $navigationSort = 60;
+    protected static ?int $navigationSort = 65;
 
     protected static ?string $recordTitleAttribute = 'supplier_afm';
 

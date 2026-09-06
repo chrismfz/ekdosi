@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Support\MyData\CodeReference;
 use BackedEnum;
 use Filament\Pages\Page;
@@ -23,6 +24,8 @@ class MyDataCodeGuide extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-book-open';
 
+    protected static ?string $cluster = SettingsCluster::class;
+
     protected static ?int $navigationSort = 98;
 
     protected string $view = 'filament.pages.my-data-code-guide';
@@ -35,11 +38,6 @@ class MyDataCodeGuide extends Page
     public function getTitle(): string
     {
         return 'Οδηγός κωδικών myDATA';
-    }
-
-    public static function getNavigationGroup(): ?string
-    {
-        return 'Ρυθμίσεις';
     }
 
     public static function canAccess(): bool

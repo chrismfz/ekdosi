@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DeliveryMethods;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\DeliveryMethods\Pages\CreateDeliveryMethod;
 use App\Filament\Resources\DeliveryMethods\Pages\EditDeliveryMethod;
 use App\Filament\Resources\DeliveryMethods\Pages\ListDeliveryMethods;
@@ -20,7 +21,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
-use UnitEnum;
 
 class DeliveryMethodResource extends Resource
 {
@@ -28,7 +28,7 @@ class DeliveryMethodResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedTruck;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 30;
 

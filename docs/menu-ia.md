@@ -89,8 +89,18 @@ scannable Clusters, not 60 flat rows.
 
 ## Migration path (incremental — no big-bang)
 
-1. **Now, cheap:** create the **Settings Cluster** and move today's «Ρυθμίσεις» (11) + the config-ish
-   «Σύστημα» items into it, sub-grouped. Immediately shrinks the daily nav.
+1. ✅ **DONE (2026-09-06) — Settings Cluster.** The 13-item «Ρυθμίσεις» flat group is now the
+   `App\Filament\Clusters\SettingsCluster` — one nav entry (bottom, in the «Σύστημα» admin zone,
+   since Filament renders ungrouped items at the TOP so a standalone-bottom entry needs a group)
+   that opens a dedicated settings area with sub-navigation. Members: the 11 lookup Resources +
+   `CompanySettings` + `MyDataCodeGuide` + `WhmcsIncomeMapping` + `WhmcsPaymentMapping` (the last two
+   register only for WHMCS-integrated tenants — easy to miss); URLs moved under `/settings/…`;
+   `MenuStructureTest` uses a WHMCS-integrated tenant so a stray `getNavigationGroup('Ρυθμίσεις')` fails it.
+   **Still to fold in (a follow-up):** the config-ish «Σύστημα» items (GeneralSettings/Preflight/
+   ScheduleSettings/UpdateRuns/Companies/Users) → one clean Settings zone.
+   _(P2, deferred — review #492): `SettingsCluster` + `MyDataCluster` share identical
+   `canAccess = canAccessClusteredComponents` boilerplate; when a 3rd cluster lands, extract an
+   `abstract BaseNavCluster` to hold it once.)_
 2. **Fold** the current 9 flat groups into the ~6 domain Clusters above (mechanical: set
    `$cluster` on each Resource/Page instead of `$navigationGroup`).
 3. **Each new pillar is BORN as a Cluster** (Support/Domains/Servers), gated — so it never adds a
