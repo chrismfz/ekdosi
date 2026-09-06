@@ -73,7 +73,7 @@ class LedgerBookExporter
         $handle = fopen('php://temp', 'r+');
         fwrite($handle, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel
 
-        fputcsv($handle, $this->headers(), ';');
+        fputcsv($handle, $this->headers(), ';', escape: '');
 
         $safe = fn ($v): string => $this->csvSafe((string) $v);
 
@@ -85,16 +85,16 @@ class LedgerBookExporter
                 // Each row foots on ITS side (Έσοδα / Έξοδα); the other side blank.
                 $rec['isIncome'] ? $fmt($rec['net']) : '', $rec['isIncome'] ? $fmt($rec['vat']) : '',
                 $rec['isIncome'] ? '' : $fmt($rec['net']), $rec['isIncome'] ? '' : $fmt($rec['vat']),
-            ], ';');
+            ], ';', escape: '');
         }
 
         // Totals trailer — the 4 money columns are the last 4 of 16; foot each side.
-        fputcsv($handle, [], ';');
+        fputcsv($handle, [], ';', escape: '');
         fputcsv($handle, array_merge(array_pad(['Σύνολα'], 12, ''), [
             $fmt($result->incomeNet()), $fmt($result->incomeVat()), $fmt($result->expenseNet()), $fmt($result->expenseVat()),
-        ]), ';');
-        fputcsv($handle, ['Καθαρό αποτέλεσμα (έσοδα − έξοδα)', $fmt($result->incomeNet() - $result->expenseNet())], ';');
-        fputcsv($handle, ['ΦΠΑ εκροών − εισροών', $fmt($result->vatBalance())], ';');
+        ]), ';', escape: '');
+        fputcsv($handle, ['Καθαρό αποτέλεσμα (έσοδα − έξοδα)', $fmt($result->incomeNet() - $result->expenseNet())], ';', escape: '');
+        fputcsv($handle, ['ΦΠΑ εκροών − εισροών', $fmt($result->vatBalance())], ';', escape: '');
 
         rewind($handle);
         $csv = stream_get_contents($handle);

@@ -57,7 +57,7 @@ class CustomerStatementCsv
         // UTF-8 BOM for Excel.
         fwrite($handle, "\xEF\xBB\xBF");
         foreach ($rows as $row) {
-            fputcsv($handle, $row, ';');
+            fputcsv($handle, $row, ';', escape: ''); // explicit escape: PHP 8.4 deprecates the implicit one
         }
         rewind($handle);
         $csv = stream_get_contents($handle);

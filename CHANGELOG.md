@@ -70,6 +70,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   «ένας adapter». Port field-for-field από το open-source WHMCS module του πελάτη.
 
 ### Fixed
+- **CSV export: PHP 8.4 `fputcsv` deprecation.** Οι κλήσεις `fputcsv` στο `LedgerBookExporter` (6) και στο
+  `CustomerStatementCsv` (Καρτέλα πελάτη) δεν περνούσαν το ρητό `escape:` όρισμα (E_DEPRECATED ανά γραμμή σε
+  PHP 8.4)· προστέθηκε `escape: ''` — πλέον ΟΛΑ τα σημεία CSV του app το περνούν ρητά (ίδια σύμβαση με
+  `AgedReceivables`/`AiUsage`/`SalesActivityReport`). Ο RFC-4180 CSV (doubled quotes) δεν χρειάζεται
+  backslash-escape — καθαρότερο κιόλας.
 - **Τρόποι online πληρωμής: το Eurobank «γκρίνιαζε» required σε συμπληρωμένα Merchant ID / Shared Secret.** Το
   config section των per-gateway πεδίων χτιζόταν με reactive `->schema(fn (Get))` closure — τα πεδία προστίθενταν
   ΜΕΤΑ το `fill()`, οπότε δεν έκαναν hydrate/commit και τα `->default()` (lang/sandbox) αγνοούνταν· η τιμή έμενε
@@ -110,6 +115,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συγχρονίζονται + επαναελέγχονται on-blur. Επίσης το `company_id` γράφεται ρητά στη δημιουργία (explicit tenancy).
 
 ### Changed
+- **VAT seeding: μόνο ηπειρωτικοί συντελεστές (24/13/6).** Οι νησιωτικοί μειωμένοι 17/9/4 (§8.2 κωδικοί 4/5/6)
+  δεν σπείρονται πλέον σε νέους/re-seeded tenants — και οι δύο εταιρείες είναι ηπειρωτικές, ήταν σκέτο θόρυβο σε
+  κάθε VAT picker. Οι κωδικοί/συντελεστές μένουν στο `Codes::VAT_CATEGORY_RATES` (η λογική 4%-override αμετάβλητη),
+  οπότε νησιωτικός tenant τους προσθέτει χειροκίνητα. Μη καταστροφικό (υπάρχουσες γραμμές δεν πειράζονται).
 - **Πύλη πελατών — «Τα παραστατικά μου» ξεχωριστό στο μενού.** Το nav item που έδειχνε τα εκδοθέντα
   παραστατικά μετονομάστηκε από το γενικό «Αρχική» → «Τα παραστατικά μου» (η σελίδα ήταν ήδη αυτό),
   ώστε ο πελάτης να το βρίσκει με το όνομά του· επιπλέον προστέθηκε κουμπί «Τα παραστατικά μου» στην

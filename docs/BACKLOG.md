@@ -82,9 +82,12 @@ Failure (PROV-008), fresh-install onboarding (SETUP-001/002, OPS-001, TEST-001),
 PROV-004/013/015/016. → see «Parked» below.
 
 **TIER 6 — Tech-debt / P2 pile** (DB-state-correct; cosmetic/perf/edge). Mostly leave;
-knock off the genuine one-liners opportunistically → see «Tech debt / latent». Real
-small bugs worth doing: `ExpenseClassificationSubmitter` non-fillable `'date'` ·
-`resolveWhmcsCustomField` `is_array` guard · `AgedReceivables` missing `escape:` (PHP 8.4).
+knock off the genuine one-liners opportunistically → see «Tech debt / latent». *(The
+three previously-listed «real small bugs» were re-verified 2026-09-06 and are all
+already fixed: `resolveWhmcsCustomField` has its `is_array` guard, `AgedReceivables`
++ `LedgerBookExporter` pass `escape: ''`, and the expense submitter writes the fillable
+`mark_date`, not a bare `'date'`. Remaining CSV item = the shared `Csv::stream()` DRY,
+below.)*
 
 **TIER 7 — Ideas / low-commitment** (multi-currency, shared Contacts CRM, setup
 profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
@@ -152,7 +155,11 @@ domestic-services tenants**. Not deleted — parked with the trigger that reacti
 
 - **Exotic VAT** — 3% (code 9), island 4% (code 6) vs ν.5057 4% (code 10), goods-export
   exemptions → the non-0% half of MYD-004 and the goods rows of MYD-007. *No island/ν.5057
-  activity.* (The intra-community 0% case IS in scope — MYD-007, TIER 0.)
+  activity.* (The intra-community 0% case IS in scope — MYD-007, TIER 0.) **The island rates
+  (17/9/4 = codes 4/5/6) are NO LONGER seeded** (2026-09-06, mainland tenants — they were
+  noise in every VAT picker); the codes/rates stay in `Codes::VAT_CATEGORY_RATES`, so an
+  island tenant re-adds the category by hand (or restores the `[1,2,3]`→`[1,2,3,4,5,6]` loop
+  in `vatCategorySeedRows`).
 - **Multi-branch** — **MYD-010** (WATCH). Both tenants single-establishment; `branch=0` is truth.
 - **B2G / POS scopes** — **PROV-012** (public contracts, All-in-one POS). Requirement is
   only that ekdosi not *claim* them — it doesn't.
@@ -792,13 +799,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   (+ into the notes «κωδ. συναλλαγής»), while `reference` stays our ΠΛ- receipt key. The `Payment` table IS the
   transactions ledger (WHMCS `tblaccounts` analog) — no new table needed; a fuller per-gateway event log
   (auth/capture/refund) is only worth it at B4/refunds.
-- **B1 go-live — sandbox-validate the vPOS digest before production (MUST).** The request field set/order
-  (`version,mid,lang,deviceCategory,orderid,orderDesc,orderAmount,currency,payerEmail,bill*,confirmUrl,cancelUrl`)
-  and `currency='EUR'` are ported field-for-field from the tenant's acquirer-validated WHMCS module, but no test
-  hits the real bank (the unit test re-runs our own concatenation). Before flipping `testmode` off: run ONE
-  sandbox transaction end-to-end (redirect accepted + a CAPTURED return that settles) with the tenant's real
-  test creds. If Cardlink rejects the redirect, the likely culprits are the `lang`/`deviceCategory` positions or
-  a numeric currency (`978`) — adjust `redirectForm()` to match what their MAC spec/module actually signs.
+- ✅ **B1 go-live — vPOS digest validated on the REAL acquirer (owner, 2026-09-06).** The field set/order was
+  proven end-to-end by a genuine **production** €1 transaction: redirect accepted, `CAPTURED` return verified
+  and settled, money landed. (No sandbox creds survived the ~10-year gap, so the owner validated live instead —
+  the redirect digest and the return digest both hold against the real bank.) Cross-checked afterwards against
+  the maintained Papaki WooCommerce module (same `shophandlermpi` endpoint + SHA-256 digest scheme). Nothing to
+  change in `redirectForm()`/`handleWebhook()`. *Follow-up only:* whether Cardlink also POSTs `confirmUrl`
+  server-to-server (they ask for the server IP) — if so our session-free controller already settles without an
+  open browser; a config question to the bank, not code.
 - **B1 review — consciously-declined P2s (kept as-is, reasons recorded).** (i) **No auto-cancel of an intent on a
   verified FAILED/CANCELLED return** — same money>tidiness rule as expiry: a REFUSED interim status can be
   followed by a retry-CAPTURE on the SAME orderid, and auto-cancelling would then strand real money via the
@@ -1105,10 +1113,11 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   ->pluck('users.name','users.id')` ζει σε ~6 σημεία (LeadForm/LeadsTable/SalesActivityReport ×2/
   `InteractsWithLeadViews`)· το LeadForm προσθέτει και τον τρέχοντα super_admin (δεν είναι στο pivot).
   Ένα `Company::operatorOptions()` όταν ξαναπιαστεί κάποιο από αυτά.
-- **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables::exportCsv` και
-  `SalesActivityReport::exportCsv` κουβαλούν το ίδιο BOM + formula-guard + `fputcsv(';')`· το
-  `AgedReceivables` δεν περνά `escape:` (E_DEPRECATED ανά γραμμή σε PHP 8.4). Ένα κοινό
-  `App\Support\Csv::stream()` όταν προστεθεί τρίτη σελίδα με CSV.
+- **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables`, `SalesActivityReport`,
+  `LedgerBookExporter`, `AiUsage` και `CustomerStatementCsv` κουβαλούν το ίδιο BOM + formula-guard +
+  `fputcsv(';')`. Το PHP 8.4 `escape:` deprecation **λύθηκε παντού** (ρητό `escape: ''` σε ΟΛΕΣ τις
+  κλήσεις — επιβεβαιώθηκε με grep 2026-09-06)· απομένει μόνο το DRY — ένα κοινό
+  `App\Support\Csv::stream()` τώρα που υπάρχουν 5 σημεία CSV.
 - **ETL (`migrate:firebird`) — διπλό ΑΦΜ ΜΕΣΑ στη legacy πηγή = hard stop** _(από το review του
   ΑΦΜ unique constraint, PR #394)._ Το `assertNoDuplicateLegacyAfm` σταματά όλο το run (τίποτα δεν γράφεται)
   αν δύο CUST_IDs μοιράζονται ένα ΑΦΜ· λύνεται μόνο στη legacy βάση (συγχώνευση/διόρθωση εκεί — η legacy
