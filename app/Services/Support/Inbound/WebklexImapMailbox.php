@@ -23,19 +23,20 @@ class WebklexImapMailbox implements ImapMailbox
 
     public function test(TicketDepartment $department): MailboxTestResult
     {
+        $folderName = $department->imap_folder ?: 'INBOX';
         try {
             $client = $this->client($department);
             $client->connect();
-            $folder = $client->getFolder($department->imap_folder ?: 'INBOX');
+            $folder = $client->getFolder($folderName);
             if ($folder === null) {
                 $client->disconnect();
 
-                return MailboxTestResult::fail('Δεν βρέθηκε ο φάκελος «'.($department->imap_folder ?: 'INBOX').'».');
+                return MailboxTestResult::fail('Δεν βρέθηκε ο φάκελος «'.$folderName.'».');
             }
             $status = $folder->examine();
             $client->disconnect();
 
-            return MailboxTestResult::ok((int) ($status['exists'] ?? 0));
+            return MailboxTestResult::ok((int) ($status['exists'] ?? 0), $folderName);
         } catch (Throwable $e) {
             return MailboxTestResult::fail('Αποτυχία σύνδεσης: '.$e->getMessage());
         }
@@ -84,10 +85,19 @@ class WebklexImapMailbox implements ImapMailbox
 
     private function client(TicketDepartment $department): Client
     {
+        $encryption = $this->encryption($department->imap_encryption);
+        $port = (int) $department->imap_port ?: 993;
+        // A non-SSL mailbox left on the 993 default (the migration default) almost
+        // certainly means the port wasn't set for STARTTLS/plain — use 143. An
+        // explicit non-993 port is always honoured.
+        if ($encryption !== 'ssl' && $port === 993) {
+            $port = 143;
+        }
+
         return (new ClientManager)->make([
             'host' => (string) $department->imap_host,
-            'port' => (int) ($department->imap_port ?: 993),
-            'encryption' => $this->encryption($department->imap_encryption),
+            'port' => $port,
+            'encryption' => $encryption,
             'validate_cert' => true,
             'username' => (string) $department->imap_username,
             'password' => (string) $department->imap_password,
@@ -108,15 +118,26 @@ class WebklexImapMailbox implements ImapMailbox
     private function parse(Message $message): ParsedInboundEmail
     {
         $from = $message->getFrom()->first();
+        $fromEmail = $from?->mail ?? '';
+        $subject = trim((string) $message->getSubject());
+        $body = (string) ($message->getTextBody() ?: $message->getHTMLBody() ?: '');
+        $mid = trim((string) $message->getMessageId());
 
         return new ParsedInboundEmail(
-            fromEmail: $from?->mail ?? '',
+            fromEmail: $fromEmail,
             fromName: ($name = trim((string) ($from?->personal ?? ''))) !== '' ? $name : null,
-            subject: trim((string) $message->getSubject()),
-            body: (string) ($message->getTextBody() ?: $message->getHTMLBody() ?: ''),
-            messageId: ($mid = trim((string) $message->getMessageId())) !== '' ? $mid : null,
+            subject: $subject,
+            body: $body,
+            // Synthesise a stable id when the header is missing (some mailers omit it),
+            // so the router's Message-ID idempotency still collapses a redelivery.
+            messageId: $mid !== '' ? $mid : $this->syntheticId($fromEmail, $subject, (string) $message->getDate(), $body),
             references: array_merge($this->ids($message->getInReplyTo()), $this->ids($message->getReferences())),
         );
+    }
+
+    private function syntheticId(string $from, string $subject, string $date, string $body): string
+    {
+        return 'gen-'.sha1($from.'|'.$subject.'|'.$date.'|'.mb_substr($body, 0, 300));
     }
 
     /**

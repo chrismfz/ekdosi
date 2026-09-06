@@ -16,9 +16,9 @@ final class MailboxTestResult
         public readonly ?int $messageCount = null,
     ) {}
 
-    public static function ok(int $messageCount): self
+    public static function ok(int $messageCount, string $folder = 'INBOX'): self
     {
-        return new self(true, "Σύνδεση OK — {$messageCount} μηνύματα στο INBOX.", $messageCount);
+        return new self(true, "Σύνδεση OK — {$messageCount} μηνύματα στον φάκελο «{$folder}».", $messageCount);
     }
 
     public static function fail(string $reason): self

@@ -113,6 +113,11 @@ class TicketsPollImap extends Command
             return collect([$tenant])->filter(fn (Company $c): bool => $c->hasSupport())->values();
         }
 
-        return Company::query()->where('support_enabled', true)->get();
+        // Same predicate as the single-tenant path (hasSupport), not a raw column —
+        // so the two can't diverge if hasSupport() ever gains logic. Tenant count is
+        // tiny, so loading + filtering in PHP is fine.
+        return Company::query()->where('support_enabled', true)->get()
+            ->filter(fn (Company $c): bool => $c->hasSupport())
+            ->values();
     }
 }
