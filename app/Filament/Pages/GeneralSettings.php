@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Models\Company;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Settings\SystemSettings;
@@ -40,6 +41,8 @@ class GeneralSettings extends Page implements HasForms
     use InteractsWithForms;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
+
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 97;
 
@@ -214,7 +217,7 @@ class GeneralSettings extends Page implements HasForms
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Σύστημα';
+        return null; // lives in SettingsCluster now
     }
 
     public static function shouldRegisterNavigation(): bool

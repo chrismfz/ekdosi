@@ -32,7 +32,7 @@ class MyDataReconciliation extends Page implements HasTable
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-scale';
 
-    protected static string|UnitEnum|null $navigationGroup = 'myDATA & Διασυνδέσεις';
+    protected static string|UnitEnum|null $navigationGroup = 'Διασυνδέσεις';
 
     protected static ?int $navigationSort = 50;
 

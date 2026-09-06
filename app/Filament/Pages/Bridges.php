@@ -106,7 +106,7 @@ class Bridges extends Page
 
     public static function getNavigationGroup(): ?string
     {
-        return 'myDATA & Διασυνδέσεις';
+        return 'Διασυνδέσεις';
     }
 
     public static function shouldRegisterNavigation(): bool

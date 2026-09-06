@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Settings\SystemSettings;
 use BackedEnum;
@@ -37,6 +38,8 @@ class ScheduleSettings extends Page implements HasForms
     use InteractsWithForms;
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clock';
+
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 98;
 
@@ -194,7 +197,7 @@ class ScheduleSettings extends Page implements HasForms
 
     public static function getNavigationGroup(): ?string
     {
-        return 'Σύστημα';
+        return null; // lives in SettingsCluster now
     }
 
     public static function shouldRegisterNavigation(): bool
