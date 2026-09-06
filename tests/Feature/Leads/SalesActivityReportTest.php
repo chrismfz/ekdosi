@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\Leads\SalesActivityReport;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -150,6 +151,12 @@ class SalesActivityReportTest extends TestCase
 
     public function test_csv_is_complete_while_the_page_shows_the_first_300(): void
     {
+        // Pin the clock mid-week: the rows below span ~5h back (now()->subMinutes up to
+        // LOG_LIMIT+5), and the report window is the current week — run near the week
+        // boundary (e.g. just after Monday 00:00) the older rows fall out of range and the
+        // count flakes. A fixed Wednesday noon keeps every row inside the same week.
+        $this->travelTo(Carbon::parse('2026-06-17 12:00:00'));
+
         $lead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Πολυάσχολο']);
         $limit = SalesActivityReport::LOG_LIMIT;
         $rows = [];
