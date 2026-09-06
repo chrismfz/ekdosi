@@ -80,12 +80,14 @@ Transitions are driven by **who** posts, not typed by hand:
 - explicit operator actions: Κλείσιμο (`closed`), Σε αναμονή (`on_hold`), Ανάθεση (`assigned_to`).
 Enum lives in `App\Enums\TicketStatus` (Filament colours/labels), Greek operator labels.
 
-## 4. Reference = unguessable, not a counter
+## 4. Reference = open-date + unguessable tail (not a counter)
 Tickets are **not** legal documents → no gapless ΑΑ, no `InvoiceNumberer` lock. `reference` =
-`TK-` + 8 random base32 chars, `unique(company_id, reference)` with a retry-on-collision. Why
-random not sequential: the ref appears in the **email subject** (`[TK-xxxxxxxx]`) and is the
-threading token — a sequential `TK-000123` is trivially guessable, letting a crafted reply land
-on another tenant's/customer's ticket. Unguessable closes that. (Display shows the same ref.)
+**`TK-YYYY-MM-DD-xxxxxx`** — the **open date** (so we read «πότε άνοιξε» straight off the ref) +
+a **random** base32 tail (≥6 chars), `unique(company_id, reference)` with retry-on-collision.
+The random tail is what makes it safe: the ref is the **email subject token**
+`[TK-2026-09-06-abc123]` and the threading key — a fully sequential ref (`TK-000123`) would let a
+crafted reply land on another ticket; the random tail closes that. The date prefix is public
+info (adds no guessability), pure human sugar. Display shows the same ref.
 
 ## 5. Mail ingestion flow  *(Phase 3)*
 Scheduled `tickets:poll-imap [--tenant=SLUG] [--department=ID]`, gated by
@@ -138,9 +140,14 @@ This mirrors WHMCS (operational Support on the top menu, its config under Config
 Laravel 13 / PHP 8.4 compatibility in the spike). No provider SDKs, no webhooks.
 
 ## 9. Phased build (each phase = its own PR + review gate + changelog/features line)
-- **Phase 0 — spike (throwaway, 1–2 days):** prove `webklex/php-imap` polls `mail.myip.gr` and
-  `email_reply_parser` cleans a real reply; skim `laravel-service-desk` migrations + state machine.
-  Confirms versions and the honest cost before committing.
+- **Phase 0 — spike (throwaway, OPTIONAL, ~½–1 day):** a *scratch* branch that never ships — only to
+  confirm `webklex/php-imap` can talk to `mail.myip.gr` (port/TLS quirks) and `email_reply_parser`
+  cleans a real Greek reply, on PHP 8.4 / Laravel 13. It would use temporary `.env` creds **purely
+  as scaffolding**. **The shipped system NEVER hardcodes mail settings** — they live per-department in
+  `ticket_departments` (encrypted, edited in the Settings Cluster «Υποστήριξη» → Τμήματα) and are read
+  by the poller in Phase 3. Since Phase 1 touches **no mail at all**, we can **skip Phase 0** entirely
+  and fold the webklex/parse validation into the first task of Phase 3, against a real department's
+  stored config — no hardcoding anywhere, ever.
 - **Phase 1 — domain + operator UI, NO mail:** migrations, models (reusing the traits), `TicketStatus`
   enum + transitions, `support_enabled` gate + `hasSupport()`, Support Cluster + `TicketResource`
   (list/view/reply/internal note/canned replies), department + canned-reply config in Settings
@@ -152,14 +159,15 @@ Laravel 13 / PHP 8.4 compatibility in the spike). No provider SDKs, no webhooks.
 - **Phase 4 — parity polish (as needed):** watchers/CC, escalation/SLA timers, merge, spam/block-
   sender, feedback-on-close. **KB + Announcements** = a **separate** later slice, not v1.
 
-## 10. Open decisions (need your call before Phase 1)
-1. **Scope order** — build Phase 1+2 (operator + portal, manual tickets) first, then the hard mail
-   part in Phase 3? *(Recommended: yes — solidify the domain + both UIs before IMAP.)*
-2. **Internal notes** — inline `is_internal_note` messages in the thread (WHMCS-style)? *(Recommended.)*
-3. **Reference** — unguessable random `TK-xxxxxxxx`? *(Recommended, for email-token safety.)*
-4. **KB / Announcements** — defer to a later slice (not v1)? *(Recommended.)*
-5. **Gate name** — `companies.support_enabled` + `Company::hasSupport()`? *(matches `hasWhmcsIntegration`.)*
-6. **Departments/emails** — the real `support@/sales@/info@ myip.gr` boxes are Phase-3 config, not now.
+## 10. Decisions — CONFIRMED (2026-09-06)
+1. **Scope order** — Phase 1+2 (operator + portal, manual tickets) first, then IMAP in Phase 3. ✅
+2. **Internal notes** — inline `is_internal_note` messages in the thread (WHMCS-style). ✅
+3. **Reference** — **`TK-YYYY-MM-DD-xxxxxx`** = open-date + random tail (§4). ✅
+4. **KB / Announcements** — deferred to a later slice, not v1. ✅
+5. **Gate** — `companies.support_enabled` + `Company::hasSupport()` (like `hasWhmcsIntegration`). ✅
+6. **Departments/emails** — the real `support@/sales@/info@ myip.gr` boxes are **Phase-3 config in
+   the Settings Cluster** (`ticket_departments`, encrypted), **never hardcoded**. Phase 0 (any `.env`
+   scaffolding) is an optional throwaway we will likely **skip** — Phase 1 is mail-free. ✅
 
 ## Sources
 Carried from `docs/ticket-system-eval.md` §Sources (service-desk, webklex/php-imap,
