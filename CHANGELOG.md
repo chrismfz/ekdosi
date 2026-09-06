@@ -27,7 +27,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
-- **Σύστημα υποστήριξης (tickets) — IMAP poller + observability (Πυλώνας E, Phase 3b-i).** `tickets:poll-imap`
+- **Σύστημα υποστήριξης (tickets) — outbound email threading (Πυλώνας E, Phase 3b-ii).** Η απάντηση του
+  χειριστή φεύγει email στον πελάτη (`SendTicketReplyEmail` job → `TicketReplyMail`, μέσω του
+  `TenantMailerFactory` per-tenant SMTP) **από το mailbox του τμήματος**, ώστε η απάντηση του πελάτη να
+  γυρίζει εκεί. Threading: κρατάμε το outbound **Message-ID** στο μήνυμα (ώστε το References του πελάτη να
+  δείχνει σε αυτό → ο `InboundTicketRouter` κάνει thread — κλείνει ο κύκλος), + `In-Reply-To`/`References`
+  στο μήνυμα που απαντάται, + `[TK-…]` token στο θέμα (fallback). Μόνο operator public replies· skip
+  όταν δεν υπάρχει παραλήπτης/From. Το πλήρες email→ticket→email loop είναι πλέον live. `tickets:poll-imap`
   πολ-άρει τα mailboxes των τμημάτων (`webklex/php-imap` πίσω από το `ImapMailbox` seam, ώστε η ενορχήστρωση
   να τεστάρεται με fake) → `InboundTicketRouter` → tickets. Per-department isolation· mark `\Seen` μόνο μετά
   από επιτυχές route (idempotent). **Observability πρώτη**: **«Test σύνδεσης»** στο τμήμα (read-only

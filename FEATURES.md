@@ -852,8 +852,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   `ImapMailbox` seam) → `InboundTicketRouter`, per-department isolation, mark-seen-after-route. **«Test
   σύνδεσης»** στο τμήμα, `ticket_poll_runs` health log, structured logging, **MCP `support_imap`** (live
   connect-test). Scheduler `tickets_poll_imap` (**default OFF**).
-- **Επόμενα:** Phase 3b-ii outbound threading (Message-ID/References στην απάντηση) → Phase 4 parity
-  (watchers/SLA/merge, KB)· follow-ups: operator bell σε νέο αίτημα, attachments (πύλη + email).
+- **Outbound email threading (Phase 3b-ii, SHIPPED):** η απάντηση χειριστή → threaded email στον πελάτη
+  (`SendTicketReplyEmail`/`TicketReplyMail`, από το mailbox του τμήματος, με Message-ID/In-Reply-To +
+  `[TK-…]` token)· κρατάμε το Message-ID ώστε η απάντηση του πελάτη να κάνει thread πίσω. **Ο πλήρης
+  κύκλος email→ticket→email είναι live.**
+- **Επόμενα:** Phase 4 parity (watchers/SLA/merge, KB)· follow-ups: operator bell σε νέο αίτημα (πύλη/
+  email), attachments (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle.
 
 ---
 
