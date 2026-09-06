@@ -27,6 +27,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — IMAP poller + observability (Πυλώνας E, Phase 3b-i).** `tickets:poll-imap`
+  πολ-άρει τα mailboxes των τμημάτων (`webklex/php-imap` πίσω από το `ImapMailbox` seam, ώστε η ενορχήστρωση
+  να τεστάρεται με fake) → `InboundTicketRouter` → tickets. Per-department isolation· mark `\Seen` μόνο μετά
+  από επιτυχές route (idempotent). **Observability πρώτη**: **«Test σύνδεσης»** στο τμήμα (read-only
+  connect+login test), `ticket_poll_runs` (connected/fetched/processed/errors ανά run), structured logging,
+  και **MCP tool `support_imap`** (super-admin, cross-tenant: configured?, τελευταίο poll, on-demand **live
+  connect-test**) — για να επιβεβαιώνεις live αν δουλεύουν τα credentials χωρίς deploy. Scheduler entry
+  `tickets_poll_imap` (**default OFF**, `EKDOSI_SCHEDULE_TICKETS_POLL_IMAP`). Νέο dep `webklex/php-imap`.
+  Outbound threading = Phase 3b-ii.
 - **Σύστημα υποστήριξης (tickets) — inbound email routing core (Πυλώνας E, Phase 3a).** `InboundTicketRouter`
   δρομολογεί ένα parsed εισερχόμενο email (`ParsedInboundEmail`, transport-agnostic) σε ticket, μέσω του
   ίδιου `OpenTicket`/`PostTicketMessage` choke-point: (1) **αντιστοίχιση αποστολέα → πελάτη** της εταιρείας

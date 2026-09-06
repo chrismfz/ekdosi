@@ -848,7 +848,11 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   ticket (αντιστοίχιση πελάτη + `clients_only`, threading με References/`[TK-…]` token, καθάρισμα σώματος με
   `email-reply-parser`). Transport-agnostic (`ParsedInboundEmail`) — ο IMAP poller + outbound threading =
   Phase 3b.
-- **Επόμενα:** Phase 3b IMAP poller (`webklex/php-imap`) + outbound threading + scheduler → Phase 4 parity
+- **IMAP poller + observability (Phase 3b-i, SHIPPED):** `tickets:poll-imap` (`webklex/php-imap` πίσω από
+  `ImapMailbox` seam) → `InboundTicketRouter`, per-department isolation, mark-seen-after-route. **«Test
+  σύνδεσης»** στο τμήμα, `ticket_poll_runs` health log, structured logging, **MCP `support_imap`** (live
+  connect-test). Scheduler `tickets_poll_imap` (**default OFF**).
+- **Επόμενα:** Phase 3b-ii outbound threading (Message-ID/References στην απάντηση) → Phase 4 parity
   (watchers/SLA/merge, KB)· follow-ups: operator bell σε νέο αίτημα, attachments (πύλη + email).
 
 ---

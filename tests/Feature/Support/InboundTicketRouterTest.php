@@ -209,6 +209,19 @@ class InboundTicketRouterTest extends TestCase
         $this->assertSame($customer->id, $ticket?->customer_id);
     }
 
+    public function test_a_message_with_no_usable_sender_is_dropped(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company);
+
+        $result = $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: '  ', fromName: null, subject: 'Χωρίς αποστολέα', body: 'σώμα', messageId: '<n@x>',
+        ));
+
+        $this->assertNull($result, 'no From → dropped, not an unanswerable guest ticket');
+        $this->assertSame(0, Ticket::withoutGlobalScope(CompanyScope::class)->count());
+    }
+
     private function open(Company $company, Customer $customer): Ticket
     {
         return app(OpenTicket::class)->handle([

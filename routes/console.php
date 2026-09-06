@@ -174,6 +174,19 @@ $trackSchedule(
     'whmcs_auto_issue'
 );
 
+// tickets:poll-imap — poll each support-enabled tenant's mail-configured
+// department mailboxes and route inbound email into tickets (Πυλώνας E). Reads
+// only, files nothing at AADE; the command isolates each department. OFF by
+// default — arm per deploy once the mailbox config is verified live.
+$trackSchedule(
+    Schedule::command('tickets:poll-imap')
+        ->cron($scheduleCron('tickets_poll_imap_cron', '*/5 * * * *'))
+        ->name('tickets-poll-imap')
+        ->when(fn () => $scheduleEnabled('tickets_poll_imap_enabled'))
+        ->withoutOverlapping(30),
+    'tickets_poll_imap'
+);
+
 // whmcs:sync-payments — INBOUND payment sync: close an ekdosi receivable when
 // its WHMCS-linked invoice (issued επί πιστώσει) gets paid in WHMCS. The command
 // loops every WHMCS-configured tenant itself. Money-write in ekdosi only +

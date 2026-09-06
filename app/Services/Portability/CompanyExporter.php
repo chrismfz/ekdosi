@@ -118,6 +118,7 @@ class CompanyExporter
         'ticket_messages',
         'canned_reply_categories',
         'canned_replies',
+        'ticket_poll_runs', // IMAP poll health log — runtime, re-accrues per poll.
     ];
 
     /**

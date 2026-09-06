@@ -44,6 +44,12 @@ class InboundTicketRouter
 
     public function route(TicketDepartment $department, ParsedInboundEmail $email): ?Ticket
     {
+        // No usable sender → can't bind or thread; drop (junk / system mail) rather
+        // than open an unanswerable guest ticket with a blank requester.
+        if (trim($email->fromEmail) === '') {
+            return null;
+        }
+
         $companyId = (int) $department->company_id;
         $messageId = $this->normaliseId($email->messageId);
 
