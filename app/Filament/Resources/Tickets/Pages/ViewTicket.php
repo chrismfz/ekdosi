@@ -8,7 +8,6 @@ use App\Filament\Resources\Tickets\TicketResource;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use Filament\Actions\Action;
-use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
@@ -20,11 +19,17 @@ class ViewTicket extends ViewRecord
 
     protected function getHeaderActions(): array
     {
+        // Every state-changing action gates on `update` (repo convention, see
+        // ViewInvoice): View:Ticket alone must NOT let a read-only viewer reply,
+        // reassign, or change status.
+        $canUpdate = fn (Ticket $record): bool => auth()->user()?->can('update', $record) ?? false;
+
         return [
             Action::make('reply')
                 ->label('Απάντηση')
                 ->icon('heroicon-o-arrow-uturn-left')
                 ->color('primary')
+                ->authorize($canUpdate)
                 ->schema([
                     Textarea::make('body')->label('Απάντηση προς τον πελάτη')->required()->rows(5),
                 ])
@@ -42,6 +47,7 @@ class ViewTicket extends ViewRecord
                 ->label('Εσωτερική σημείωση')
                 ->icon('heroicon-o-lock-closed')
                 ->color('warning')
+                ->authorize($canUpdate)
                 ->schema([
                     Textarea::make('body')->label('Σημείωση (μόνο για χειριστές)')->required()->rows(4),
                 ])
@@ -60,10 +66,11 @@ class ViewTicket extends ViewRecord
                 ->label('Ανάθεση')
                 ->icon('heroicon-o-user')
                 ->color('gray')
+                ->authorize($canUpdate)
                 ->schema([
                     Select::make('assigned_to')
                         ->label('Χειριστής')
-                        ->options(fn (): array => self::operatorOptions())
+                        ->options(fn (): array => TicketResource::operatorOptions())
                         ->default(fn (Ticket $record): ?int => $record->assigned_to ?? auth()->id())
                         ->searchable()
                         ->placeholder('— χωρίς ανάθεση —'),
@@ -77,6 +84,7 @@ class ViewTicket extends ViewRecord
                 ->label('Σε αναμονή')
                 ->icon('heroicon-o-pause-circle')
                 ->color('gray')
+                ->authorize($canUpdate)
                 ->visible(fn (Ticket $record): bool => ! in_array($record->status, [TicketStatus::Closed, TicketStatus::OnHold], true))
                 ->action(function (Ticket $record): void {
                     $record->update(['status' => TicketStatus::OnHold]);
@@ -87,6 +95,7 @@ class ViewTicket extends ViewRecord
                 ->label('Κλείσιμο')
                 ->icon('heroicon-o-check-circle')
                 ->color('gray')
+                ->authorize($canUpdate)
                 ->visible(fn (Ticket $record): bool => $record->status !== TicketStatus::Closed)
                 ->requiresConfirmation()
                 ->action(function (Ticket $record): void {
@@ -98,17 +107,12 @@ class ViewTicket extends ViewRecord
                 ->label('Επαναφορά')
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
+                ->authorize($canUpdate)
                 ->visible(fn (Ticket $record): bool => $record->status === TicketStatus::Closed)
                 ->action(function (Ticket $record): void {
                     $record->update(['status' => TicketStatus::Open, 'closed_at' => null]);
                     Notification::make()->title('Το αίτημα άνοιξε ξανά')->success()->send();
                 }),
         ];
-    }
-
-    /** @return array<int, string> */
-    private static function operatorOptions(): array
-    {
-        return Filament::getTenant()?->users()->orderBy('name')->pluck('users.name', 'users.id')->all() ?? [];
     }
 }

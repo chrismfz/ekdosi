@@ -4,10 +4,10 @@ namespace App\Filament\Resources\Tickets\Tables;
 
 use App\Enums\TicketPriority;
 use App\Enums\TicketStatus;
+use App\Filament\Resources\Tickets\TicketResource;
 use App\Models\Ticket;
 use App\Models\TicketDepartment;
 use Filament\Actions\ViewAction;
-use Filament\Facades\Filament;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -35,7 +35,15 @@ class TicketsTable
                     ->label('Αιτών')
                     ->state(fn (Ticket $record): string => $record->requesterLabel())
                     ->description(fn (Ticket $record): ?string => $record->isGuest() ? 'GUEST' : null)
-                    ->searchable(['requester_email', 'requester_name']),
+                    // The column shows the linked customer's name too, so search must reach
+                    // the customer relation — not just the guest columns (else a customer
+                    // name matches nothing).
+                    ->searchable(query: fn (Builder $query, string $search): Builder => $query->where(
+                        fn (Builder $q): Builder => $q
+                            ->where('requester_name', 'like', "%{$search}%")
+                            ->orWhere('requester_email', 'like', "%{$search}%")
+                            ->orWhereHas('customer', fn (Builder $c) => $c->where('name', 'like', "%{$search}%"))
+                    )),
                 TextColumn::make('department.name')
                     ->label('Τμήμα')
                     ->placeholder('—')
@@ -73,8 +81,7 @@ class TicketsTable
                     ->options(fn (): array => TicketDepartment::query()->orderBy('name')->pluck('name', 'id')->all()),
                 SelectFilter::make('assigned_to')
                     ->label('Χειριστής')
-                    ->options(fn (): array => Filament::getTenant()
-                        ?->users()->orderBy('name')->pluck('users.name', 'users.id')->all() ?? []),
+                    ->options(fn (): array => TicketResource::operatorOptions()),
             ])
             ->recordActions([
                 ViewAction::make(),

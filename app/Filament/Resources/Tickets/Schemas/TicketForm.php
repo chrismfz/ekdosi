@@ -47,7 +47,10 @@ class TicketForm
                             ->label('Email αιτούντα (GUEST)')
                             ->email()
                             ->maxLength(191)
-                            ->visible(fn (Get $get): bool => blank($get('customer_id'))),
+                            ->visible(fn (Get $get): bool => blank($get('customer_id')))
+                            // A GUEST ticket needs SOME identity — without a customer, the
+                            // email is how the requester is reached (Phase 3) and identified.
+                            ->required(fn (Get $get): bool => blank($get('customer_id'))),
                         TextInput::make('subject')
                             ->label('Θέμα')
                             ->required()

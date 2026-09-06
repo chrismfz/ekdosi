@@ -2,8 +2,10 @@
 
 namespace App\Filament\Resources\Tickets\Schemas;
 
+use App\Models\Customer;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
+use App\Models\User;
 use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
@@ -75,9 +77,33 @@ class TicketInfolist
     private static function authorLabel(TicketMessage $message): string
     {
         return match ($message->author_role) {
-            TicketMessage::ROLE_OPERATOR => $message->author()?->name ?? 'Χειριστής',
-            TicketMessage::ROLE_CUSTOMER => $message->author()?->name ?? 'Πελάτης',
+            TicketMessage::ROLE_OPERATOR => self::authorName(TicketMessage::ROLE_OPERATOR, $message->author_id) ?? 'Χειριστής',
+            TicketMessage::ROLE_CUSTOMER => self::authorName(TicketMessage::ROLE_CUSTOMER, $message->author_id) ?? 'Πελάτης',
             default => 'Σύστημα',
         };
+    }
+
+    /**
+     * Resolve an author's name, memoised per (role, id) so a thread where the
+     * same operator posts many replies costs one query, not one per message
+     * (author is role-typed, not an eager-loadable relation).
+     *
+     * @var array<string, string|null>
+     */
+    private static array $authorNameCache = [];
+
+    private static function authorName(string $role, ?int $id): ?string
+    {
+        if ($id === null) {
+            return null;
+        }
+
+        $key = $role.':'.$id;
+        if (! array_key_exists($key, self::$authorNameCache)) {
+            $model = $role === TicketMessage::ROLE_OPERATOR ? User::find($id) : Customer::find($id);
+            self::$authorNameCache[$key] = $model?->name;
+        }
+
+        return self::$authorNameCache[$key];
     }
 }

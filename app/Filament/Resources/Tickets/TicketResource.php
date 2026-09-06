@@ -61,6 +61,17 @@ class TicketResource extends Resource
         return 'warning';
     }
 
+    /**
+     * The tenant's operators as id => name — the single source for the assignee
+     * Select (view page) and filter (list), so they can't drift.
+     *
+     * @return array<int, string>
+     */
+    public static function operatorOptions(): array
+    {
+        return Filament::getTenant()?->users()->orderBy('name')->pluck('users.name', 'users.id')->all() ?? [];
+    }
+
     public static function form(Schema $schema): Schema
     {
         return TicketForm::configure($schema);
