@@ -40,14 +40,17 @@ class ViewTicket extends ViewRecord
                         ->searchable()
                         ->live()
                         ->dehydrated(false)
-                        ->afterStateUpdated(function ($state, callable $set, $livewire): void {
+                        ->afterStateUpdated(function ($state, callable $set, callable $get, $livewire): void {
                             if (blank($state)) {
                                 return;
                             }
                             $reply = CannedReply::find($state);
                             $ticket = $livewire->getRecord();
                             if ($reply && $ticket instanceof Ticket) {
-                                $set('body', CannedReplyExpander::expand($reply->body, $ticket, auth()->user()));
+                                $expanded = CannedReplyExpander::expand($reply->body, $ticket, auth()->user());
+                                // Append (don't clobber) anything the operator already typed.
+                                $existing = trim((string) $get('body'));
+                                $set('body', $existing === '' ? $expanded : $existing."\n\n".$expanded);
                             }
                         }),
                     Textarea::make('body')->label('Απάντηση προς τον πελάτη')->required()->rows(6),

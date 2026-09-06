@@ -71,7 +71,8 @@ class TicketInfolist
                             ->state(fn (Ticket $record): float => self::customerBalance($record))
                             ->money('EUR')
                             ->weight('bold')
-                            ->color(fn (Ticket $record): string => self::customerBalance($record) > 0.005 ? 'danger' : 'gray'),
+                            // Colour reads the already-computed $state — no second balance query.
+                            ->color(fn ($state): string => (float) $state > 0.005 ? 'danger' : 'gray'),
                         RepeatableEntry::make('recent_invoices')
                             ->label('Πρόσφατα παραστατικά (ζωντανά)')
                             ->columnSpanFull()
@@ -84,8 +85,9 @@ class TicketInfolist
                                 TextEntry::make('status')
                                     ->hiddenLabel()
                                     ->badge()
-                                    ->formatStateUsing(fn (?string $state): string => $state ? PaymentStatus::from($state)->label() : '—')
-                                    ->color(fn (?string $state): string => $state ? PaymentStatus::from($state)->color() : 'gray'),
+                                    // tryFrom (not from): an unexpected cache value degrades to «—», never a 500.
+                                    ->formatStateUsing(fn (?string $state): string => PaymentStatus::tryFrom((string) $state)?->label() ?? '—')
+                                    ->color(fn (?string $state): string => PaymentStatus::tryFrom((string) $state)?->color() ?? 'gray'),
                             ]),
                     ]),
 
@@ -121,13 +123,11 @@ class TicketInfolist
             ]);
     }
 
-    /** @var array<int, float> per-request memo of a ticket's customer outstanding balance */
-    private static array $balanceCache = [];
-
     /**
      * The customer's outstanding balance from the CANONICAL source
      * (Customer::withOutstandingBalance — reconciles with the dashboard/Καρτέλα).
-     * Never hand-rolled. Memoised (queried twice per render: value + colour).
+     * Never hand-rolled. Called once per render (the colour reads the entry's
+     * $state), so no static cache — that would go stale under a persistent worker.
      */
     private static function customerBalance(Ticket $ticket): float
     {
@@ -135,7 +135,7 @@ class TicketInfolist
             return 0.0;
         }
 
-        return self::$balanceCache[(int) $ticket->getKey()] ??= (float) Customer::query()
+        return (float) Customer::query()
             ->whereKey($ticket->customer_id)
             ->withOutstandingBalance((int) $ticket->company_id)
             ->value('outstanding_balance');
@@ -157,6 +157,9 @@ class TicketInfolist
 
         return $customer->invoices()
             ->tap(fn ($query) => InvoiceScope::live($query))
+            // Only ISSUED invoices — exclude unissued drafts, so the list matches what
+            // the outstanding-balance figure above it counts (which excludes drafts).
+            ->where('local_status', '!=', 'draft')
             ->with('invoiceType')
             ->latest('issued_at')
             ->limit(5)
