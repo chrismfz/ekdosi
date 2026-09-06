@@ -817,6 +817,9 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   Το εργαλείο για «πλήρωσα, δεν φαίνεται». Best-effort, runtime (εκτός export).
 - **Κανάλι + auto myDATA «Τρόπος» (SHIPPED):** στήλη «Κανάλι» (Πύλη·gateway vs Χειροκίνητα) στις Πληρωμές· per-connection
   «Τρόπος πληρωμής (myDATA)» που το settle stamp-άρει αυτόματα (Eurobank → «Ηλεκτρονικά μέσα»).
+- **Απόδειξη είσπραξης PDF + στοιχεία στο παραστατικό + ειδοποίηση settle (SHIPPED):** row action «Απόδειξη» (άτυπο
+  αποδεικτικό είσπραξης, ανά reference-group)· στήλη «Κανάλι» στο tab «Πληρωμές» του τιμολογίου· καμπανάκι χειριστή
+  σε αυτόματη είσπραξη πύλης.
 - **Επόμενα:** B2 PayPal/Stripe (2ος redirect adapter) → B3 office rails (card-POS + ΑΑΔΕ) → B4 reconcile/
   prepaid/refund.
 

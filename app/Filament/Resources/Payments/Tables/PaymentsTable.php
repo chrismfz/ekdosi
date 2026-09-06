@@ -3,8 +3,8 @@
 namespace App\Filament\Resources\Payments\Tables;
 
 use App\Enums\PaymentStatus;
+use App\Filament\Support\PaymentReceiptAction;
 use App\Models\Payment;
-use App\Services\Payments\PaymentGatewayRegistry;
 use App\Support\Money;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -49,16 +49,7 @@ class PaymentsTable
                 TextColumn::make('payment_channel')
                     ->label('Κανάλι')
                     ->badge()
-                    ->state(function (Payment $record): string {
-                        if ($record->payment_intent_id === null) {
-                            return 'Χειροκίνητα';
-                        }
-                        $gateway = (string) $record->paymentIntent?->gateway;
-
-                        return $gateway !== ''
-                            ? 'Πύλη · '.app(PaymentGatewayRegistry::class)->label($gateway)
-                            : 'Πύλη';   // intent purged/soft-deleted — still «Πύλη», no stray «· —»
-                    })
+                    ->state(fn (Payment $record): string => $record->channelLabel())
                     ->color(fn (Payment $record): string => $record->payment_intent_id !== null ? 'info' : 'gray'),
 
                 // A refund IS a Payment row (kind='refund'); mark it so it doesn't
@@ -124,6 +115,9 @@ class PaymentsTable
                     ),
             ])
             ->recordActions([
+                // «Απόδειξη είσπραξης» — an informal PDF acknowledgement of the money
+                // received (the whole reference-group), with channel + txn id.
+                PaymentReceiptAction::make(),
                 EditAction::make(),
             ])
             ->toolbarActions([

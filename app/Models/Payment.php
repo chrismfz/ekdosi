@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\TracksActivity;
 use App\Observers\PaymentObserver;
+use App\Services\Payments\PaymentGatewayRegistry;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -108,6 +109,25 @@ class Payment extends Model
     public static function kindLabel(?string $kind): string
     {
         return $kind === 'refund' ? 'Επιστροφή' : 'Πληρωμή';
+    }
+
+    /**
+     * The provenance/channel label (single source for the «Κανάλι» columns + the
+     * receipt): «Πύλη · Eurobank» when the payment was settled from a portal gateway
+     * intent, «Πύλη» if the intent is gone, else «Χειροκίνητα». Resolves the gateway
+     * display name through the registry (a stale/removed key falls back to the key).
+     */
+    public function channelLabel(): string
+    {
+        if ($this->payment_intent_id === null) {
+            return 'Χειροκίνητα';
+        }
+        $gateway = (string) $this->paymentIntent?->gateway;
+        if ($gateway === '') {
+            return 'Πύλη';
+        }
+
+        return 'Πύλη · '.app(PaymentGatewayRegistry::class)->label($gateway);
     }
 
     public function company(): BelongsTo

@@ -11,8 +11,10 @@ use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentGatewayEvent;
 use App\Models\PaymentIntent;
 use App\Models\PaymentMethod;
+use App\Models\User;
 use App\Services\InvoiceBalance;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -260,6 +262,21 @@ class EurobankReturnControllerTest extends TestCase
         $event = PaymentGatewayEvent::query()->where('order_id', '999999')->firstOrFail();
         $this->assertSame(PaymentGatewayEvent::OUTCOME_REJECTED, $event->outcome);
         $this->assertSame('intent_not_found', $event->reason);
+    }
+
+    public function test_a_captured_return_rings_the_operators_bell(): void
+    {
+        // An operator of the tenant should get a database (bell) notification when
+        // an unattended gateway settlement lands.
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $user->companies()->attach($this->t->id);
+
+        $this->creditInvoice(100);
+        $intent = $this->pendingIntent(100);
+        $this->postReturn($this->capturedReturn($intent));
+
+        $this->assertSame(1, DB::table('notifications')
+            ->where('notifiable_id', $user->id)->count());
     }
 
     public function test_a_replayed_capture_logs_an_ignored_event_not_a_second_settled(): void
