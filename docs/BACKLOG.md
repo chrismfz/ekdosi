@@ -646,6 +646,9 @@ data model + phase gates: **`PLAN.md`**.
   - **Συγκεκριμένο design (schema + state machine + mail flow + 2 UIs + PR breakdown) →
     `docs/ticket-system-design.md`** (build-our-own, thin 6-table domain, reuse των υπαρχόντων
     `HasAttachments`/`HasTags`/`TracksActivity`, Support Cluster + config στο Settings Cluster).
+  - **Portability (deferred):** τα ticket tables είναι `INTENTIONALLY_EXCLUDED` από το per-tenant
+    `CompanyExporter` bundle μέχρι να γραφτεί/τεσταριστεί το FK-rewiring (ticket→customer/department/
+    assignee, message→ticket, encrypted per-mailbox creds). Τα whole-DB backups τα καλύπτουν ήδη.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη

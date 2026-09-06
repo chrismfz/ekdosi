@@ -107,6 +107,17 @@ class CompanyExporter
         // carries across VMs (re-accrues per usage; pending actions are ephemeral).
         'ai_usage_log',
         'ai_pending_actions',
+        // Support/Ticket pillar (Πυλώνας E) — NEW and default-off. Wiring its
+        // export/import (FK-rewiring ticket→customer/department/assignee and
+        // message→ticket, plus the encrypted per-mailbox creds) into the per-tenant
+        // portability bundle is a dedicated later slice; until then the support
+        // dataset stays out of the bundle (whole-DB backups still cover it).
+        // Tracked in docs/BACKLOG.md «Πυλώνας E».
+        'ticket_departments',
+        'tickets',
+        'ticket_messages',
+        'canned_reply_categories',
+        'canned_replies',
     ];
 
     /**

@@ -72,6 +72,8 @@ class Company extends Model
         'ai_model',
         'ai_monthly_token_cap',
         'ai_api_key',
+        // Πυλώνας E — Support/Ticket pillar per-tenant kill-switch (default off).
+        'support_enabled',
         // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
         'mydata_send_item_descr',
         'gsis_username',
@@ -149,6 +151,7 @@ class Company extends Model
             'mail_smtp_password' => MaybeEncrypted::class,
             'whmcs_api_secret' => MaybeEncrypted::class,
             'ai_assistant_enabled' => 'boolean',
+            'support_enabled' => 'boolean',
             'ai_monthly_token_cap' => 'integer',
             'ai_api_key' => MaybeEncrypted::class,
             'whmcs_webhook_secret' => MaybeEncrypted::class,
@@ -180,6 +183,16 @@ class Company extends Model
         return ! empty($this->whmcs_api_url)
             && ! empty($this->whmcs_api_identifier)
             && ! empty($this->whmcs_api_secret);
+    }
+
+    /**
+     * True iff the Support/Ticket pillar (Πυλώνας E) is enabled for this tenant.
+     * Default off — gates the Support Cluster, its config screens and the portal
+     * «Τα αιτήματά μου». A super-admin flips it on the Company form.
+     */
+    public function hasSupport(): bool
+    {
+        return (bool) $this->support_enabled;
     }
 
     /**
