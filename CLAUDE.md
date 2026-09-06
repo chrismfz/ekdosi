@@ -60,13 +60,14 @@ cutover.
   whmcs-plugin/ekdosi_bridge/                    # OUR WHMCS-side plugin (deployed to tenant's WHMCS)
   docs/aade/*                                    # the AADE specs (submission + ΔΑ lifecycle)
   docs/CLAUDE-history.md                         # archived full project history
-/legacy/                  # read-only reference (do NOT build)
-  ekdosi-schema.sql                              # isql -x dump (WIN1253 DB; ASCII DDL is clean)
-  ekdosi-main/                                   # C++Builder source — real VAT/rounding math
-  ekdosi-main/db_backup/ekdosi.fbk               # gbak for sandboxed ETL dev
-  ekdosi-main/reports/                           # FastReport 3 templates (out of scope → Blade PDF)
-  whmcs/                                         # the 3 ARCHIVED legacy WHMCS plugins
 ```
+> **`/legacy/` was REMOVED from the repo (2026-09-06, secrets hygiene** — the legacy `.dfm`/`.cfg`
+> files carried hardcoded DB/SMTP/CS-Cart passwords). The C++Builder source, `ekdosi-schema.sql`,
+> the `ekdosi.fbk` gbak and the archived WHMCS plugins now live **only in an offline backup** — its
+> job (understanding the legacy math + one-time ETL) is done. References below to `FAddInvoice.cpp`
+> etc. describe *where the ported logic came from*, not in-repo files. **NOTE:** deleting the folder
+> does NOT purge it from git history — the secrets are still in old commits until a history rewrite,
+> and the exposed credentials must be ROTATED regardless (see the security note in `docs/BACKLOG.md`).
 
 ## Architectural decisions (do not re-litigate without reason)
 - **Multi-tenant, not per-DB.** Superset: can deploy per-DB later; reverse can't.
@@ -164,7 +165,7 @@ php artisan shield:generate                              # (re)sync resource per
 
 # ETL — one tenant per legacy DB, re-runnable (needs pdo_firebird on the artisan host)
 php artisan migrate:firebird --company="MyIP" --slug=myip \
-    --fdb="/opt/Data/ekdosi-myip.fdb" --host=10.23.22.5 --fbuser=EKDOSI --fbpass=ekdosi1234
+    --fdb="/opt/Data/ekdosi-myip.fdb" --host=10.23.22.5 --fbuser=EKDOSI --fbpass=<FB_PASSWORD>
 php artisan invoices:recompute-balances --company=myip   # backfill money cache after import
 
 # myDATA ops (also on the scheduler — routes/console.php; safe to run manually anytime)
@@ -367,16 +368,17 @@ behaviors below are how the system actually works:
 - **`gbak`** in PATH — only for `.fbk` restores. **PHP upload limits** (fpm AND cli php.ini) above
   the largest `.fbk`; `TMPDIR` disk-backed (not tmpfs) for big restores.
 
-## Reading the legacy source
+## Reading the legacy source (now offline-backup only — see repo-layout note)
 C++Builder (VCL): `.cpp`/`.h`/`.dfm`, IBX (`TIBQuery`/`TIBTransaction`), cxGrid, JVCL. Grep for
 `AsCurrency`/`AsFloat` and `*BeforePost`/`*AfterPost`, not Pascal idioms. Files are **WIN1253** —
-`iconv -f WINDOWS-1253 -t UTF-8 FAddInvoice.cpp`. Some shared headers (`CMyData.h` etc.) are NOT in
-this repo — `firebed` replaces all of `CMyData`. File map: `FAddInvoice*`/`FEditInvoice` = issue/edit
-+ VAT math; `FAutoInvoice` = overnight batch; `FInvoiceReturn` = credit notes; `FShow*` = lists;
-`FManage*` = lookup CRUD.
+`iconv -f WINDOWS-1253 -t UTF-8 FAddInvoice.cpp`. Some shared headers (`CMyData.h` etc.) were never
+in this repo — `firebed` replaces all of `CMyData`. File map: `FAddInvoice*`/`FEditInvoice` =
+issue/edit + VAT math; `FAutoInvoice` = overnight batch; `FInvoiceReturn` = credit notes; `FShow*` =
+lists; `FManage*` = lookup CRUD. (Grab the source from the offline backup when you need it.)
 
 ## Sandbox the legacy DB before touching prod
-`/legacy/ekdosi-main/db_backup/ekdosi.fbk` is a `gbak`. Restore: `gbak -r ekdosi.fbk fresh.fdb -user
-SYSDBA -password masterkey` and point the ETL at the restored `.fdb`. Re-runs upsert on
-`(company_id, legacy_id)`; Filament-created rows (`legacy_id` null) are never touched; deleted-from-
+The legacy `ekdosi.fbk` gbak now lives in the **offline backup** (was `/legacy/…`, removed for secrets
+hygiene). Restore it as `gbak -r ekdosi.fbk fresh.fdb -user SYSDBA -password <sandbox-password>` (the
+Firebird install default on a fresh sandbox) and point the ETL at the restored `.fdb`. Re-runs upsert
+on `(company_id, legacy_id)`; Filament-created rows (`legacy_id` null) are never touched; deleted-from-
 source rows are left alone (never auto-deleted).

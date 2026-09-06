@@ -97,6 +97,33 @@ profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
 
 ---
 
+## 🔐 SECURITY — leaked secrets remediation (OPEN, do not close until rotated)
+
+**Incident (2026-09-06):** the private repo carried plaintext credentials — the whole
+`legacy/` tree (legacy `.dfm`/`.cfg` with the **MySQL `digipan_csuser`**, **SMTP
+`mail.myip.gr`**, CS-Cart, and an `EncryptedPassword` blob) plus the **Firebird
+`EKDOSI` password** scattered as a plaintext literal across several `.md`, a `.php` command
+comment, and a test fixture.
+
+**Done (tree-level, this commit):**
+- `legacy/` deleted from the tree (262 files; kept in an offline backup).
+- The Firebird password literal scrubbed from every tracked file → placeholder `<FB_PASSWORD>`
+  (docs/command) / a fake fixture value (the FirebirdLiveImport test). `git grep` clean.
+- (`SYSDBA/masterkey` left as-is — it is Firebird's public install default for the local
+  sandbox `.fbk`, not a real secret.)
+
+**NOT done — the parts that actually matter (must schedule):**
+1. **ROTATE every exposed credential NOW** — deleting from the tree does not un-leak them
+   (they are in git history, old branches, any prior clone, and the repo was briefly about to
+   go public). Assume compromised: Firebird `EKDOSI`, the CS-Cart MySQL `digipan_csuser@hermes`,
+   the SMTP `myip.gr` mailbox, and any other password that was ever in `legacy/`. **This is the
+   real fix — do it independently of the history rewrite.**
+2. **History purge** — the «σκληροπυρηνική λύση»: `git filter-repo` (or BFG) to strip `legacy/`
+   + the secret strings from ALL history, then force-push and have every clone re-clone. Coordinate
+   (rewrites SHAs). Until then the secrets remain retrievable from history.
+
+---
+
 ## 🚀 Cutover / go-live gate — bucket A: ✅ CLOSED (closed record)
 
 **Cutover:** ekdosi replaces the legacy C++Builder app for real invoicing; the

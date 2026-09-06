@@ -1,9 +1,0 @@
-﻿<?xml version="1.0" encoding="utf-8"?>
-<BorlandProject>
-	<Transactions>
-    <Transaction>2022/10/30 00:11:54.998.265,C:\PROJECTS\Ekdosi\Unit1.dfm=C:\PROJECTS\Ekdosi\FrmAboutOptimum.dfm</Transaction>
-    <Transaction>2022/10/30 00:11:54.998.265,C:\PROJECTS\Ekdosi\Unit1.h=C:\PROJECTS\Ekdosi\FrmAboutOptimum.h</Transaction>
-    <Transaction>2022/10/30 00:32:33.999.873,C:\PROJECTS\Ekdosi\FrmAboutOptimum.h=C:\PROJECTS\Ekdosi\FAboutOptimum.h</Transaction>
-    <Transaction>2022/10/30 00:32:33.999.873,C:\PROJECTS\Ekdosi\FrmAboutOptimum.dfm=C:\PROJECTS\Ekdosi\FAboutOptimum.dfm</Transaction>
-  </Transactions>
-</BorlandProject>

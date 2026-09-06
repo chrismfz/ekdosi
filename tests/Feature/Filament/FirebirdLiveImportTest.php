@@ -46,7 +46,7 @@ class FirebirdLiveImportTest extends TestCase
                 'fb_live_port' => 3050,
                 'fb_live_database' => '/opt/Data/ekdosi-myip.fdb',
                 'fb_live_user' => 'EKDOSI',
-                'fb_live_password' => 'ekdosi1234',
+                'fb_live_password' => 'test-fb-password',
             ])
             ->call('create')
             ->assertHasNoFormErrors();
@@ -58,14 +58,14 @@ class FirebirdLiveImportTest extends TestCase
         $this->assertSame('/opt/Data/ekdosi-myip.fdb', $run->fb_database);
         $this->assertSame('10.23.22.5', $run->fb_host);
         // Password must NOT be persisted anywhere on the row.
-        $this->assertStringNotContainsString('ekdosi1234', json_encode($run->getAttributes()));
+        $this->assertStringNotContainsString('test-fb-password', json_encode($run->getAttributes()));
 
         Bus::assertDispatched(RunFirebirdImport::class, function (RunFirebirdImport $j) use ($run) {
             // Encrypted on the job — plaintext never sits in the queue/failed_jobs payload.
-            $this->assertNotSame('ekdosi1234', $j->fbPassword);
-            $this->assertStringNotContainsString('ekdosi1234', serialize($j));
+            $this->assertNotSame('test-fb-password', $j->fbPassword);
+            $this->assertStringNotContainsString('test-fb-password', serialize($j));
 
-            return $j->runId === $run->id && Crypt::decryptString($j->fbPassword) === 'ekdosi1234';
+            return $j->runId === $run->id && Crypt::decryptString($j->fbPassword) === 'test-fb-password';
         });
     }
 
