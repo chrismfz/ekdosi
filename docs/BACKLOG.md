@@ -643,6 +643,9 @@ data model + phase gates: **`PLAN.md`**.
   - **Επόμενο βήμα:** time-boxed **spike (1-2 μέρες)** — (α) διάβασε migrations/state-machine/IMAP poller
     του `laravel-service-desk` + μέτρησε το tenancy-retrofit κόστος, (β) απόδειξε IMAP poll στο
     `mail.myip.gr` + reply-parse. Αποτέλεσμα → adopt (αν φθηνό retrofit) ή build (πιθανό).
+  - **Συγκεκριμένο design (schema + state machine + mail flow + 2 UIs + PR breakdown) →
+    `docs/ticket-system-design.md`** (build-our-own, thin 6-table domain, reuse των υπαρχόντων
+    `HasAttachments`/`HasTags`/`TracksActivity`, Support Cluster + config στο Settings Cluster).
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
