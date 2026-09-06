@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Casts\MaybeEncrypted;
 use App\Models\Concerns\BelongsToCompany;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -56,6 +57,18 @@ class TicketDepartment extends Model
             'is_hidden' => 'boolean',
             'is_active' => 'boolean',
         ];
+    }
+
+    /**
+     * Store a blank email as NULL. The unique(company_id, email) index exempts
+     * only genuine NULLs (not ''), so a second department with no mailbox would
+     * otherwise collide on an empty string.
+     */
+    protected function email(): Attribute
+    {
+        return Attribute::make(
+            set: fn (?string $value): ?string => ($value === null || trim($value) === '') ? null : $value,
+        );
     }
 
     public function company(): BelongsTo

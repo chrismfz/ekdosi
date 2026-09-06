@@ -7,7 +7,9 @@ use App\Actions\Support\PostTicketMessage;
 use App\Enums\TicketStatus;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
+use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Support\Tenancy\CompanyContext;
@@ -174,6 +176,76 @@ class TicketDomainTest extends TestCase
         $linked = $this->open(['customer_id' => $cust->id]);
         $this->assertFalse($linked->isGuest());
         $this->assertSame('Πελ Α', $linked->requesterLabel());
+    }
+
+    public function test_via_defaults_by_author_role(): void
+    {
+        // Opened by a customer via the portal.
+        $ticket = $this->open();
+
+        // Neither call passes `via`: an operator message must NOT default to the
+        // portal, and a customer message must NOT default to the operator channel.
+        app(PostTicketMessage::class)->handle($ticket, ['author_role' => TicketMessage::ROLE_OPERATOR, 'body' => 'answer']);
+        app(PostTicketMessage::class)->handle($ticket->refresh(), ['author_role' => TicketMessage::ROLE_CUSTOMER, 'body' => 'thanks']);
+
+        $opMsg = $ticket->messages()->where('author_role', TicketMessage::ROLE_OPERATOR)->first();
+        $custReply = $ticket->messages()->where('author_role', TicketMessage::ROLE_CUSTOMER)->get()->last();
+        $this->assertSame(TicketMessage::VIA_OPERATOR, $opMsg->via);
+        $this->assertSame(TicketMessage::VIA_PORTAL, $custReply->via);
+    }
+
+    public function test_system_message_neither_advances_status_nor_stamps_last_reply(): void
+    {
+        $ticket = $this->open();
+        app(PostTicketMessage::class)->handle($ticket, ['author_role' => TicketMessage::ROLE_OPERATOR, 'body' => 'answer']);
+        $ticket->refresh();
+        $lastReplyAt = $ticket->last_reply_at;
+
+        // A system autoresponder public message must not read as a customer reply.
+        app(PostTicketMessage::class)->handle($ticket, ['author_role' => TicketMessage::ROLE_SYSTEM, 'body' => 'αυτόματη απάντηση']);
+        $ticket->refresh();
+
+        $this->assertSame(TicketStatus::Answered, $ticket->status, 'system message must not re-queue the ticket');
+        $this->assertEquals($lastReplyAt, $ticket->last_reply_at, 'system message must not stamp last_reply');
+        $this->assertSame('operator', $ticket->last_reply_role);
+        $this->assertSame(TicketMessage::VIA_SYSTEM, $ticket->messages()->get()->last()->via);
+    }
+
+    public function test_blank_department_email_is_stored_as_null(): void
+    {
+        $d1 = TicketDepartment::create(['company_id' => $this->company->id, 'name' => 'Γενικά', 'email' => '']);
+        $d2 = TicketDepartment::create(['company_id' => $this->company->id, 'name' => 'Πωλήσεις', 'email' => '  ']);
+
+        $this->assertNull($d1->fresh()->email);
+        $this->assertNull($d2->fresh()->email);
+        // Two no-mailbox departments coexist — no unique(company_id,email) collision on ''.
+        $this->assertSame(2, TicketDepartment::where('company_id', $this->company->id)->count());
+    }
+
+    public function test_reference_check_is_not_neutralized_by_a_foreign_ambient_tenant(): void
+    {
+        $ticket = $this->open(); // company A, has a reference
+        $other = Company::create([
+            'name' => 'B', 'slug' => 'b-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        app(CompanyContext::class)->set($other);
+
+        // The scope-bypassed existence query (what TicketReference uses) still sees A's row…
+        $this->assertTrue(
+            Ticket::withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $this->company->id)
+                ->where('reference', $ticket->reference)
+                ->exists(),
+            'the bypassed check must find A\'s reference even under a foreign ambient tenant',
+        );
+        // …while a naive scoped query would MISS it — which is exactly why the bypass matters.
+        $this->assertFalse(
+            Ticket::where('company_id', $this->company->id)
+                ->where('reference', $ticket->reference)
+                ->exists(),
+            'CompanyScope hides A under B context — the un-bypassed check would be a no-op',
+        );
     }
 
     private function operator(): User

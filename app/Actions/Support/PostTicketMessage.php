@@ -38,16 +38,23 @@ class PostTicketMessage
                 'body' => $data['body'],
                 'body_original' => $data['body_original'] ?? null,
                 'is_internal_note' => $isNote,
-                'via' => $data['via'] ?? TicketMessage::VIA_OPERATOR,
+                'via' => $data['via'] ?? TicketMessage::defaultViaFor($role),
                 'email_message_id' => $data['email_message_id'] ?? null,
             ]);
 
-            if (! $isNote) {
+            // Only a public reply from the customer or an operator "counts": it
+            // advances status and stamps last_reply. Internal notes AND system
+            // (autoresponder) messages never move the ticket or the last-reply
+            // marker — a system message must not read as if the customer replied.
+            $countsAsReply = ! $isNote
+                && in_array($role, [TicketMessage::ROLE_CUSTOMER, TicketMessage::ROLE_OPERATOR], true);
+
+            if ($countsAsReply) {
                 if ($advanceStatus) {
+                    // afterPublicMessageFrom() only ever returns Answered/CustomerReply,
+                    // so a public reply always reopens a closed ticket.
                     $ticket->status = TicketStatus::afterPublicMessageFrom($role);
-                    if ($ticket->status !== TicketStatus::Closed) {
-                        $ticket->closed_at = null; // a public reply reopens a closed ticket
-                    }
+                    $ticket->closed_at = null;
                 }
                 $ticket->last_reply_at = now();
                 $ticket->last_reply_role = $role === TicketMessage::ROLE_OPERATOR ? 'operator' : 'customer';

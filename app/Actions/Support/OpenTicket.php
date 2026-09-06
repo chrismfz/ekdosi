@@ -47,7 +47,7 @@ class OpenTicket
                 'body' => $data['body'],
                 'body_original' => $data['body_original'] ?? null,
                 'is_internal_note' => false,
-                'via' => $data['via'] ?? TicketMessage::VIA_OPERATOR,
+                'via' => $data['via'] ?? TicketMessage::defaultViaFor($data['author_role']),
                 'email_message_id' => $data['email_message_id'] ?? null,
             ], advanceStatus: false);
 

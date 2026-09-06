@@ -2,6 +2,7 @@
 
 namespace App\Support;
 
+use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
 use Illuminate\Support\Carbon;
 
@@ -27,7 +28,13 @@ class TicketReference
         do {
             $reference = 'TK-'.$date.'-'.self::tail();
         } while (
-            Ticket::withTrashed()
+            // withoutGlobalScope: the explicit company_id is authoritative even if an
+            // ambient CompanyContext is set to a DIFFERENT tenant (a super-admin/queue
+            // path opening a ticket for another company) — otherwise CompanyScope would
+            // append its own company_id, neutralise the check, and let a dup slip to the
+            // unique-index error instead of being retried here.
+            Ticket::withoutGlobalScope(CompanyScope::class)
+                ->withTrashed()
                 ->where('company_id', $companyId)
                 ->where('reference', $reference)
                 ->exists()

@@ -76,6 +76,20 @@ class TicketMessage extends Model
         };
     }
 
+    /**
+     * The channel to record when a caller omits `via`, derived from the author
+     * role — so a customer's message never defaults to the operator channel. A
+     * caller that knows the real channel (portal vs email) passes `via` itself.
+     */
+    public static function defaultViaFor(string $authorRole): string
+    {
+        return match ($authorRole) {
+            self::ROLE_OPERATOR => self::VIA_OPERATOR,
+            self::ROLE_SYSTEM => self::VIA_SYSTEM,
+            default => self::VIA_PORTAL, // customer's default channel
+        };
+    }
+
     public function isFromCustomer(): bool
     {
         return $this->author_role === self::ROLE_CUSTOMER;
