@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\VatCategories;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\VatCategories\Pages\CreateVatCategory;
 use App\Filament\Resources\VatCategories\Pages\EditVatCategory;
 use App\Filament\Resources\VatCategories\Pages\ListVatCategories;
@@ -18,7 +19,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
-use UnitEnum;
 
 class VatCategoryResource extends Resource
 {
@@ -26,7 +26,7 @@ class VatCategoryResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedReceiptPercent;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 60;
 

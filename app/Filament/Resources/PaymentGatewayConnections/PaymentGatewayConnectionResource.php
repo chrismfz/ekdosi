@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\PaymentGatewayConnections;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\PaymentGatewayConnections\Pages\CreatePaymentGatewayConnection;
 use App\Filament\Resources\PaymentGatewayConnections\Pages\EditPaymentGatewayConnection;
 use App\Filament\Resources\PaymentGatewayConnections\Pages\ListPaymentGatewayConnections;
@@ -13,7 +14,6 @@ use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
-use UnitEnum;
 
 /**
  * «Τρόποι online πληρωμής» — per-tenant payment gateways (Πυλώνας B / B0). The
@@ -29,7 +29,7 @@ class PaymentGatewayConnectionResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedCreditCard;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 25;
 

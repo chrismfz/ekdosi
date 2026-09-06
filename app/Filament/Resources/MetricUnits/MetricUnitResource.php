@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\MetricUnits;
 
+use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Resources\MetricUnits\Pages\CreateMetricUnit;
 use App\Filament\Resources\MetricUnits\Pages\EditMetricUnit;
 use App\Filament\Resources\MetricUnits\Pages\ListMetricUnits;
@@ -18,7 +19,6 @@ use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
-use UnitEnum;
 
 class MetricUnitResource extends Resource
 {
@@ -26,7 +26,7 @@ class MetricUnitResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedScale;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Ρυθμίσεις';
+    protected static ?string $cluster = SettingsCluster::class;
 
     protected static ?int $navigationSort = 70;
 

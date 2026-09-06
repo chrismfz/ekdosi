@@ -123,6 +123,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συγχρονίζονται + επαναελέγχονται on-blur. Επίσης το `company_id` γράφεται ρητά στη δημιουργία (explicit tenancy).
 
 ### Changed
+- **Μενού: «Ρυθμίσεις» → SettingsCluster (Menu/IA Βήμα 1).** Οι 13 config/lookup οθόνες (τύποι
+  παραστατικών, τρόποι πληρωμής, ΦΠΑ, πύλες, μονάδες, ετικέτες, ρυθμίσεις εταιρείας, οδηγός κωδικών…)
+  έφυγαν από τον 13-item flat group «Ρυθμίσεις» και μπήκαν σε **ένα** `SettingsCluster` (WHMCS
+  «Configuration» / Blesta pattern): ΕΝΑ nav entry (κάτω, στη ζώνη «Σύστημα», με γρανάζι) που ανοίγει σε
+  δικό του settings area με sub-navigation. Το καθημερινό sidebar ξαλαφρώνει· κάθε οθόνη κρατά permission
+  + λειτουργία (URL τώρα κάτω από `/settings/…`). Πλήρες σχέδιο: `docs/menu-ia.md`.
 - **VAT seeding: μόνο ηπειρωτικοί συντελεστές (24/13/6).** Οι νησιωτικοί μειωμένοι 17/9/4 (§8.2 κωδικοί 4/5/6)
   δεν σπείρονται πλέον σε νέους/re-seeded tenants — και οι δύο εταιρείες είναι ηπειρωτικές, ήταν σκέτο θόρυβο σε
   κάθε VAT picker. Οι κωδικοί/συντελεστές μένουν στο `Codes::VAT_CATEGORY_RATES` (η λογική 4%-override αμετάβλητη),

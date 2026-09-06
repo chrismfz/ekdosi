@@ -84,6 +84,22 @@ class MenuStructureTest extends TestCase
         }
     }
 
+    public function test_settings_moved_into_a_cluster_not_a_flat_group(): void
+    {
+        // Menu/IA Step 1: the 13-item «Ρυθμίσεις» flat group became the SettingsCluster
+        // (one bottom nav entry). So «Ρυθμίσεις» is NOT a top-level GROUP anymore, but a
+        // nav ITEM exists for the cluster, and its config members no longer sit in the
+        // main nav (they live inside the cluster's sub-navigation).
+        $tree = $this->navTree();
+
+        $this->assertArrayNotHasKey('Ρυθμίσεις', $tree, '«Ρυθμίσεις» δεν είναι πια flat group');
+
+        $allItems = collect($tree)->flatten()->all();
+        $this->assertContains('Ρυθμίσεις', $allItems, 'Το SettingsCluster πρέπει να δίνει ΕΝΑ nav item «Ρυθμίσεις»');
+        // A representative clustered config screen is NOT a top-level nav item now.
+        $this->assertNotContains('Τύποι παραστατικών', $allItems, 'Οι «Τύποι παραστατικών» ζουν πλέον μέσα στο cluster');
+    }
+
     public function test_group_order_is_the_explicit_canonical_order(): void
     {
         $labels = array_values(array_filter(
@@ -91,7 +107,7 @@ class MenuStructureTest extends TestCase
             fn ($l) => $l !== '' // drop the ungrouped/top bucket
         ));
 
-        $canonical = ['Καθημερινά', 'Leads', 'Είδη & Προμήθειες', 'Ψηφιακή Διακίνηση', 'Λογιστικά', 'myDATA & Διασυνδέσεις', 'Ρυθμίσεις', 'Σύστημα'];
+        $canonical = ['Καθημερινά', 'Leads', 'Είδη & Προμήθειες', 'Ψηφιακή Διακίνηση', 'Λογιστικά', 'myDATA & Διασυνδέσεις', 'Σύστημα'];
 
         // Every rendered group is a known canonical one, and they appear in that order.
         $seen = array_values(array_filter($canonical, fn ($g) => in_array($g, $labels, true)));
