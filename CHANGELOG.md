@@ -27,6 +27,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — πύλη πελάτη «Τα αιτήματά μου» (Πυλώνας E, Phase 2).** Ο πελάτης στο
+  `/user` ανοίγει/βλέπει/απαντά τα δικά του αιτήματα υποστήριξης: λίστα, «Νέο αίτημα» (τμήμα/θέμα/
+  προτεραιότητα/περιγραφή), σελίδα αιτήματος με το thread + φόρμα απάντησης. **Grant-scoped & fail-closed**
+  (μέσω `CustomerDocumentFeed::grantedTargets`, `withoutGlobalScope` + ρητό company_id/customer_id· άγνωστο
+  ticket id → 404) και **μόνο δημόσια μηνύματα** (`Ticket::publicMessages` — εσωτερική σημείωση δεν διαρρέει
+  ΠΟΤΕ στην πύλη). Γράψιμο μέσω των `OpenTicket`/`PostTicketMessage` (ίδιο state machine· η απάντηση πελάτη
+  πάει στην ουρά χειριστή, ξανα-ανοίγει κλειστό). Νέα `Customer::tickets()` σχέση. `docs/ticket-system-design.md`.
 - **Σύστημα υποστήριξης (tickets) — polish: έτοιμες απαντήσεις + context panel (Πυλώνας E).** (α) **Έτοιμες
   απαντήσεις** (`CannedReplyResource` σε κατηγορίες, Settings Cluster → «Υποστήριξη») με `{{tokens}}`
   ({{customer.name}}, {{ticket.reference}}, {{company.ibans}}, {{operator.name}}…) — picker στη φόρμα

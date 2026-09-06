@@ -841,8 +841,11 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   με picker στη «Απάντηση»· **context panel «Πελάτης»** μέσα στο ticket — ΑΦΜ/email + **υπόλοιπο**
   (canonical `withOutstandingBalance`) + πρόσφατα ζωντανά παραστατικά + «Άνοιγμα Καρτέλας» (native
   πλεονέκτημα έναντι WHMCS, read-only).
-- **Επόμενα:** Phase 2 πύλη πελάτη («Τα αιτήματά μου» στο `/user`) → Phase 3 IMAP ingestion
-  (`webklex/php-imap` + reply-parser) → Phase 4 parity (watchers/SLA/merge, KB).
+- **Πύλη πελάτη «Τα αιτήματά μου» (Phase 2, SHIPPED):** ο πελάτης στο `/user` ανοίγει/βλέπει/απαντά τα
+  αιτήματά του. **Grant-scoped & fail-closed** (`grantedTargets`, ρητό company/customer, 404 σε άγνωστο id)·
+  **μόνο δημόσια μηνύματα** (εσωτερική σημείωση δεν διαρρέει)· γράψιμο μέσω `OpenTicket`/`PostTicketMessage`.
+- **Επόμενα:** Phase 3 IMAP ingestion (`webklex/php-imap` + reply-parser) → Phase 4 parity (watchers/SLA/
+  merge, KB)· και μικρά follow-ups: operator bell σε νέο portal αίτημα, attachments στην πύλη.
 
 ---
 

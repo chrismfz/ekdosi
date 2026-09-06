@@ -215,6 +215,12 @@ class Customer extends Model
         return $this->hasMany(Invoice::class);
     }
 
+    /** Support tickets opened by / for this customer (Πυλώνας E). */
+    public function tickets(): HasMany
+    {
+        return $this->hasMany(Ticket::class);
+    }
+
     /**
      * Every invoice-email attempt for this customer, through their invoices
      * (invoice_mail_log has no direct customer_id). Feeds the per-customer
