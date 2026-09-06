@@ -219,10 +219,12 @@ final class Codes
     ];
 
     /**
-     * The standard sales-line VAT categories to seed. Positive rates (24/13/6/17/
-     * 9/4) carry no exemption; the 0% rows come from {@see ZERO_RATE_SEED} WITH
-     * their §8.3 reason. Skips code 8 (no rate) and code 10 (duplicate 4% of code
-     * 6 — a ν.5057/2023-regime tenant adds it manually).
+     * The standard sales-line VAT categories to seed. Only the MAINLAND positive
+     * rates (24/13/6 = codes 1/2/3) carry no exemption; the 0% rows come from
+     * {@see ZERO_RATE_SEED} WITH their §8.3 reason. The Aegean-island reduced rates
+     * (17/9/4 = codes 4/5/6), the ν.5057 rates (codes 9/10), and code 8 (no rate)
+     * are deliberately NOT seeded — mainland tenants; the codes stay in
+     * {@see VAT_CATEGORY_RATES} so an island/ν.5057 tenant adds them by hand.
      *
      * @return list<array{rate: float, description: string, vat_exemption_category?: int}>
      */

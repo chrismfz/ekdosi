@@ -1113,10 +1113,11 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   ->pluck('users.name','users.id')` ζει σε ~6 σημεία (LeadForm/LeadsTable/SalesActivityReport ×2/
   `InteractsWithLeadViews`)· το LeadForm προσθέτει και τον τρέχοντα super_admin (δεν είναι στο pivot).
   Ένα `Company::operatorOptions()` όταν ξαναπιαστεί κάποιο από αυτά.
-- **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables`, `SalesActivityReport`
-  και `LedgerBookExporter` κουβαλούν το ίδιο BOM + formula-guard + `fputcsv(';')`. Το PHP 8.4
-  `escape:` deprecation **λύθηκε** παντού (`escape: ''` σε όλες τις κλήσεις, 2026-09-06)· απομένει
-  μόνο το DRY — ένα κοινό `App\Support\Csv::stream()` τώρα που υπάρχουν 3+ σημεία CSV.
+- **CSV export helper** _(P2 από το review του Leads L2)._ `AgedReceivables`, `SalesActivityReport`,
+  `LedgerBookExporter`, `AiUsage` και `CustomerStatementCsv` κουβαλούν το ίδιο BOM + formula-guard +
+  `fputcsv(';')`. Το PHP 8.4 `escape:` deprecation **λύθηκε παντού** (ρητό `escape: ''` σε ΟΛΕΣ τις
+  κλήσεις — επιβεβαιώθηκε με grep 2026-09-06)· απομένει μόνο το DRY — ένα κοινό
+  `App\Support\Csv::stream()` τώρα που υπάρχουν 5 σημεία CSV.
 - **ETL (`migrate:firebird`) — διπλό ΑΦΜ ΜΕΣΑ στη legacy πηγή = hard stop** _(από το review του
   ΑΦΜ unique constraint, PR #394)._ Το `assertNoDuplicateLegacyAfm` σταματά όλο το run (τίποτα δεν γράφεται)
   αν δύο CUST_IDs μοιράζονται ένα ΑΦΜ· λύνεται μόνο στη legacy βάση (συγχώνευση/διόρθωση εκεί — η legacy

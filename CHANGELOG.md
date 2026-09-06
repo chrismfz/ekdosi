@@ -70,9 +70,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   «ένας adapter». Port field-for-field από το open-source WHMCS module του πελάτη.
 
 ### Fixed
-- **`LedgerBookExporter` CSV: PHP 8.4 `fputcsv` deprecation.** Οι 6 κλήσεις `fputcsv` δεν περνούσαν το ρητό
-  `escape:` όρισμα (E_DEPRECATED ανά γραμμή σε PHP 8.4)· προστέθηκε `escape: ''` παντού (ίδια σύμβαση με το
-  `AgedReceivables`). Ο RFC-4180 CSV (doubled quotes) δεν χρειάζεται backslash-escape — καθαρότερο κιόλας.
+- **CSV export: PHP 8.4 `fputcsv` deprecation.** Οι κλήσεις `fputcsv` στο `LedgerBookExporter` (6) και στο
+  `CustomerStatementCsv` (Καρτέλα πελάτη) δεν περνούσαν το ρητό `escape:` όρισμα (E_DEPRECATED ανά γραμμή σε
+  PHP 8.4)· προστέθηκε `escape: ''` — πλέον ΟΛΑ τα σημεία CSV του app το περνούν ρητά (ίδια σύμβαση με
+  `AgedReceivables`/`AiUsage`/`SalesActivityReport`). Ο RFC-4180 CSV (doubled quotes) δεν χρειάζεται
+  backslash-escape — καθαρότερο κιόλας.
 - **Τρόποι online πληρωμής: το Eurobank «γκρίνιαζε» required σε συμπληρωμένα Merchant ID / Shared Secret.** Το
   config section των per-gateway πεδίων χτιζόταν με reactive `->schema(fn (Get))` closure — τα πεδία προστίθενταν
   ΜΕΤΑ το `fill()`, οπότε δεν έκαναν hydrate/commit και τα `->default()` (lang/sandbox) αγνοούνταν· η τιμή έμενε
