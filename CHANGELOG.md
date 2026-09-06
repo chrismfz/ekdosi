@@ -27,6 +27,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — inbound email routing core (Πυλώνας E, Phase 3a).** `InboundTicketRouter`
+  δρομολογεί ένα parsed εισερχόμενο email (`ParsedInboundEmail`, transport-agnostic) σε ticket, μέσω του
+  ίδιου `OpenTicket`/`PostTicketMessage` choke-point: (1) **αντιστοίχιση αποστολέα → πελάτη** της εταιρείας
+  του τμήματος (email/secondary_email, case-insensitive)· τμήμα **`clients_only`** ΑΠΟΡΡΙΠΤΕΙ άγνωστο
+  αποστολέα· (2) **threading** — References/In-Reply-To → Message-ID που κρατήσαμε, ή `[TK-…]` token στο
+  θέμα, αλλιώς ΝΕΟ ticket (GUEST αν άγνωστος)· (3) **καθάρισμα σώματος** (`willdurand/email-reply-parser`,
+  αφαιρεί quoted history/υπογραφή, κρατά το raw στο `body_original`). Off-panel scoping (ρητό company_id).
+  Νέο dep `willdurand/email-reply-parser`. Ο IMAP poller + outbound threading = Phase 3b.
 - **Σύστημα υποστήριξης (tickets) — πύλη πελάτη «Τα αιτήματά μου» (Πυλώνας E, Phase 2).** Ο πελάτης στο
   `/user` ανοίγει/βλέπει/απαντά τα δικά του αιτήματα υποστήριξης: λίστα, «Νέο αίτημα» (τμήμα/θέμα/
   προτεραιότητα/περιγραφή), σελίδα αιτήματος με το thread + φόρμα απάντησης. **Grant-scoped & fail-closed**
