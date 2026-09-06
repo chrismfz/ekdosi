@@ -38,15 +38,16 @@ class MyDataLookupSeederTest extends TestCase
 
         $r = $this->svc()->seedVatCategories($tenant);
 
-        // MYD-007: 6 positive rates + ONE correctly-reasoned 0% row (§8.3 4). A
-        // single 0% category keeps the invariant ReverseCharge / WHMCS / the PDF
-        // fallback rely on; the operator adds more via the guided form when needed.
-        $this->assertSame(7, $r['created']);
+        // MYD-007: 3 MAINLAND positive rates (24/13/6) + ONE correctly-reasoned 0% row
+        // (§8.3 4). The island rates (17/9/4) are deliberately not seeded — mainland
+        // tenants. A single 0% category keeps the invariant ReverseCharge / WHMCS / the
+        // PDF fallback rely on; the operator adds more via the guided form when needed.
+        $this->assertSame(4, $r['created']);
         $this->assertSame(0, $r['skipped']);
 
         $cats = VatCategory::where('company_id', $tenant->id)->get();
         $this->assertEqualsCanonicalizing(
-            [0.0, 4.0, 6.0, 9.0, 13.0, 17.0, 24.0],
+            [0.0, 6.0, 13.0, 24.0],
             $cats->pluck('rate')->map(fn ($r) => (float) $r)->all()
         );
         // The 0% row carries a valid §8.3 reason (no reason-less landmine).
@@ -65,7 +66,7 @@ class MyDataLookupSeederTest extends TestCase
         VatCategory::create(['company_id' => $tenant->id, 'description' => 'Δικό μου 24', 'rate' => 24, 'is_default' => true]);
 
         $r1 = $this->svc()->seedVatCategories($tenant);
-        $this->assertSame(6, $r1['created']);   // 7 seed rows minus the existing 24%
+        $this->assertSame(3, $r1['created']);   // 4 seed rows minus the existing 24%
         $this->assertSame(1, $r1['skipped']);
 
         // Existing 24% kept verbatim (not overwritten), still the only default.
@@ -75,7 +76,7 @@ class MyDataLookupSeederTest extends TestCase
         // Second run is a full no-op.
         $r2 = $this->svc()->seedVatCategories($tenant);
         $this->assertSame(0, $r2['created']);
-        $this->assertSame(7, $r2['skipped']);
+        $this->assertSame(4, $r2['skipped']);
     }
 
     public function test_seeds_starter_invoice_types_including_goods_sale(): void

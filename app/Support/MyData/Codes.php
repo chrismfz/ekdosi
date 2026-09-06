@@ -230,7 +230,12 @@ final class Codes
     {
         $rows = [];
         // Positive rates only (skip code 7 / 0% here — seeded below with a reason).
-        foreach ([1, 2, 3, 4, 5, 6] as $code) {
+        // Only the MAINLAND rates (24/13/6 = codes 1/2/3). The Aegean-island reduced
+        // rates (17/9/4 = codes 4/5/6) and the ν.5057 ones are DELIBERATELY not seeded
+        // — both current tenants are mainland, so they'd be noise in every VAT picker.
+        // The codes/rates still exist in VAT_CATEGORY_RATES, so an island tenant just
+        // adds the category by hand (or re-add the codes here) — nothing is lost.
+        foreach ([1, 2, 3] as $code) {
             $rows[] = [
                 'rate' => (float) self::VAT_CATEGORY_RATES[$code],
                 'description' => self::VAT_CATEGORY_LABELS[$code],
