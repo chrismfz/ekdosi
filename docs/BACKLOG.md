@@ -656,6 +656,10 @@ data model + phase gates: **`PLAN.md`**.
   - **2ο Filament panel** (με switcher) **μόνο** όταν το κοινό διαφέρει (π.χ. infra/provisioning ops ≠
     billing operator) — cross-panel tenant-context = extra plumbing, όχι νωρίτερα.
   - Στήριξη σε **global search (Cmd+K)** ώστε το βάθος να μη βλάπτει findability.
+  - **Επιβεβαίωση από το ίδιο το WHMCS** (screenshots 2026-09-06): χωρίζει **Configuration** (Support
+    Departments/Ticket Statuses/Escalation/Spam κάτω από το «Configuration» sidebar) από τα **operational**
+    Support (Tickets/Predefined Replies/KB κάτω από το top «Support» μενού) — ακριβώς το Settings-Cluster
+    split. Λεπτομέρειες στο `docs/ticket-system-eval.md` «WHMCS parity».
 
 ## 🟢 Services / Provisioning
 - **Real provisioning modules** (cPanel/Mailcow/license server) — σήμερα μόνο `NullProvisioningModule`. _(= Πυλώνας C του `PLAN.md`.)_

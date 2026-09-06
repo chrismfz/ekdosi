@@ -86,6 +86,56 @@ replies via our existing mailer, stamping `Message-ID`/`References` for threadin
 3. Decide: adopt service-desk (if tenancy retrofit is cheap) **or** build the thin model (likely).
    Either way the mail layer + the two UIs are ours.
 
+## WHMCS parity — what already works there that we KEEP (from the live panel, 2026-09-06)
+
+The tenant's real WHMCS Support module is the spec. Observed, and worth replicating:
+
+**Departments** (`Support Departments`) — each department = a routing unit with:
+- its own **email address** (`support@`, `sales@`, `info@` on `myip.gr`) — the address both
+  detects inbound and sends outbound for that dept.
+- per-department **mail import** (POP3/IMAP `Mail Provider`: host `mail.myip.gr`, port `995`,
+  user, pass, «Test Configuration») — confirms our **IMAP-poll-our-own-mailbox** decision, one
+  mailbox per department.
+- **Assigned admin users** (which operators own the dept), + toggles: **Clients Only**, Pipe
+  Replies Only, No Autoresponder, **Feedback Request** on close, **Prevent Client Closure**,
+  **Hidden**.
+
+**«Mail κλειδωμένο με πελάτη/εταιρία» — the requester↔customer binding.** WHMCS matches the
+sender email to a registered client → shows an **OWNER** badge; an unknown sender = **GUEST**.
+The **«Clients Only»** dept toggle locks a department so a ticket/reply is accepted ONLY when the
+sender address belongs to a registered client/user/contact. This is exactly the «κλειδωμένο σε
+πελάτη-εταιρία» we want: for us = match inbound `From:` → `Customer` (by email) within the tenant;
+GUEST otherwise; a per-department «μόνο πελάτες» flag. (Our `Customer` already keys on email.)
+
+**Service/context panel inside the ticket** — the single biggest operator win. The ticket view
+lists the requester's **Products/Services** (e.g. `Domain – ptks.gr €19/2yr`, `Starter – ptks.gr
+€100/biennial`, next-due, status) + «Change Associated Service», so the operator answers WITH the
+customer's account in front of them. **Our native advantage:** we can show not just services but
+the customer's **ekdosi invoices / «Καρτέλα» / balance** inline — WHMCS can't, we can (same
+`CustomerLedgerBuilder`).
+
+**Predefined / canned replies** in **categories** — and the tenant's are already invoicing-shaped
+and Greek: `Invoices → InvoiceSend`, `ΑπόδειξηΠαροχής`, `Επιβεβαίωση πληρωμής`, `Τραπεζικοί
+λογαριασμοί` (IBANs). These tie straight into OUR domain — a canned reply that pastes the invoice/
+receipt/bank-account text (even templated from the linked invoice). Keep categories + templating.
+
+**Ticket operations to keep** — customizable **Ticket Statuses** (seen: Open / Answered /
+Customer-Reply / Awaiting Reply / Closed), **priority**, **assigned-to**, **staff participants**,
+**watchers**, **CC recipients**, **tags**, **internal notes** (Add Note), **custom fields**, «Other
+Tickets» (same-client history), **merge**, **pin**, **Block Sender & Delete**, scheduled actions,
+attachments, «Insert Predefined Reply». Plus **Escalation Rules** and **Spam Control**.
+
+**Mail piping — two methods** WHMCS offers, both relevant: (a) email-forwarder **pipe** to
+`pipe.php` (instant), OR (b) **POP3/IMAP cron** `*/5 * * * * … pop.php` (poll every 5'). We chose
+(b) = IMAP poll on our scheduler; keep the *option* of a pipe/forwarder later for instant capture.
+
+**Menu / IA — WHMCS confirms our «Settings Cluster» call.** WHMCS splits it: the **configuration**
+(Support Departments, Ticket Statuses, Escalation Rules, Spam Control) lives under the left
+**«Configuration»/Setup** sidebar, while the **operational** Support (Tickets, Predefined Replies,
+Knowledgebase, Announcements) sits under the **top «Support»** menu. That is precisely the
+«Settings tucked away, WHMCS/Blesta style» pattern in the Menu/IA backlog item → for us: a Support
+**Cluster** for daily ops + config under the **Settings Cluster**, not one flat pile.
+
 ## Sources
 - laravel-service-desk: https://github.com/jeffersongoncalves/laravel-service-desk
 - laravel-mailbox: https://github.com/beyondcode/laravel-mailbox
