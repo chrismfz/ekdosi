@@ -40,11 +40,6 @@ class MyDataCodeGuide extends Page
         return 'Οδηγός κωδικών myDATA';
     }
 
-    public static function getNavigationGroup(): ?string
-    {
-        return null; // lives in SettingsCluster now
-    }
-
     public static function canAccess(): bool
     {
         return (bool) auth()->check();

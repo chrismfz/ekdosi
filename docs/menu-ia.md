@@ -98,6 +98,9 @@ scannable Clusters, not 60 flat rows.
    `MenuStructureTest` uses a WHMCS-integrated tenant so a stray `getNavigationGroup('Ρυθμίσεις')` fails it.
    **Still to fold in (a follow-up):** the config-ish «Σύστημα» items (GeneralSettings/Preflight/
    ScheduleSettings/UpdateRuns/Companies/Users) → one clean Settings zone.
+   _(P2, deferred — review #492): `SettingsCluster` + `MyDataCluster` share identical
+   `canAccess = canAccessClusteredComponents` boilerplate; when a 3rd cluster lands, extract an
+   `abstract BaseNavCluster` to hold it once.)_
 2. **Fold** the current 9 flat groups into the ~6 domain Clusters above (mechanical: set
    `$cluster` on each Resource/Page instead of `$navigationGroup`).
 3. **Each new pillar is BORN as a Cluster** (Support/Domains/Servers), gated — so it never adds a

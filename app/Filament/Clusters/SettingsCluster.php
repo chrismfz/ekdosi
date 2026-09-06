@@ -26,11 +26,11 @@ class SettingsCluster extends Cluster
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-cog-6-tooth';
 
     // Filament renders ungrouped items at the TOP; to keep config «tucked away» we
-    // place the cluster in the bottom «Σύστημα» admin zone (sort 1 = its first item).
-    // A later Menu/IA step folds «Σύστημα»'s own config into this same cluster.
+    // place the cluster in the bottom «Σύστημα» admin zone, sorted LAST within it
+    // (high sort). A later Menu/IA step folds «Σύστημα»'s own config into this cluster.
     protected static string|UnitEnum|null $navigationGroup = 'Σύστημα';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 99;
 
     protected static ?string $slug = 'settings';
 

@@ -235,11 +235,6 @@ class CompanySettings extends Page implements HasForms
         return 'Ρυθμίσεις εταιρείας';
     }
 
-    public static function getNavigationGroup(): ?string
-    {
-        return null; // lives in SettingsCluster now
-    }
-
     public static function shouldRegisterNavigation(): bool
     {
         return static::canAccess();

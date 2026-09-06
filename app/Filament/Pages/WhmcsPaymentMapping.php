@@ -234,11 +234,6 @@ class WhmcsPaymentMapping extends Page
         return 'Αντιστοίχιση WHMCS → τρόπος πληρωμής';
     }
 
-    public static function getNavigationGroup(): ?string
-    {
-        return null; // lives in SettingsCluster now
-    }
-
     public static function shouldRegisterNavigation(): bool
     {
         return static::canAccess();
