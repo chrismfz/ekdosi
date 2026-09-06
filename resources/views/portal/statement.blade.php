@@ -1,7 +1,17 @@
 @php use App\Support\Money; @endphp
 <x-portal-layout title="Η καρτέλα μου">
-    <flux:heading size="xl">Η καρτέλα μου</flux:heading>
-    <flux:text class="mt-2 mb-6">Καλωσήρθες, {{ $user->name }}. Εδώ βλέπεις το υπόλοιπο και τις κινήσεις σου.</flux:text>
+    <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+            <flux:heading size="xl">Η καρτέλα μου</flux:heading>
+            <flux:text class="mt-2 mb-6">Καλωσήρθες, {{ $user->name }}. Εδώ βλέπεις το υπόλοιπο και τις κινήσεις σου.</flux:text>
+        </div>
+        <flux:button
+            size="sm"
+            variant="ghost"
+            icon="document-text"
+            href="{{ route('portal.home') }}"
+        >Τα παραστατικά μου</flux:button>
+    </div>
 
     @forelse ($statements as $st)
         <div class="mb-8">

@@ -181,7 +181,12 @@ class PortalStatementTest extends TestCase
         $this->actingAs($login, 'portal')->get('/user/statement')
             ->assertOk()
             ->assertSee('Η καρτέλα μου')
-            ->assertSee('Οφειλόμενο υπόλοιπο');
+            ->assertSee('Οφειλόμενο υπόλοιπο')
+            // The invoices are reachable both from the nav (relabelled from the
+            // generic «Αρχική») AND a top-of-page button — the statement links to
+            // «Τα παραστατικά μου» so a customer never has to hunt for their documents.
+            ->assertSee('Τα παραστατικά μου')
+            ->assertSee(route('portal.home'), false);
     }
 
     public function test_statement_requires_portal_auth(): void
