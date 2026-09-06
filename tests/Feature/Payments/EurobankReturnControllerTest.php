@@ -72,6 +72,12 @@ class EurobankReturnControllerTest extends TestCase
         ]);
     }
 
+    /**
+     * The vPOS RETURN digest, mirroring EurobankGateway::returnDigest() byte-for-byte:
+     * concat the returned values in received order (minus the browser `_charset_`/
+     * `submitButton` artifacts and the `digest` itself), append the secret, hash the
+     * RAW bytes — NO iconv (the inbound leg hashes exactly what the bank sent).
+     */
     private function sign(array $fields, string $secret): string
     {
         $s = '';
@@ -81,9 +87,8 @@ class EurobankReturnControllerTest extends TestCase
             }
             $s .= (string) $v;
         }
-        $norm = iconv('utf-8', 'utf-8//IGNORE', $s.$secret);
 
-        return base64_encode(hash('sha256', $norm === false ? $s.$secret : $norm, true));
+        return base64_encode(hash('sha256', $s.$secret, true));
     }
 
     /** POST a raw urlencoded return body (order preserved for the digest). */
