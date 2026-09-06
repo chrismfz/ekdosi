@@ -643,7 +643,8 @@ data model + phase gates: **`PLAN.md`**.
   - **Επόμενο βήμα:** time-boxed **spike (1-2 μέρες)** — (α) διάβασε migrations/state-machine/IMAP poller
     του `laravel-service-desk` + μέτρησε το tenancy-retrofit κόστος, (β) απόδειξε IMAP poll στο
     `mail.myip.gr` + reply-parse. Αποτέλεσμα → adopt (αν φθηνό retrofit) ή build (πιθανό).
-- **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._ Το nav
+- **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
+  **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
   «Ρυθμίσεις» στα **11**. Με Support (Tickets/Departments/Settings) + μελλοντικά Services/Domains/Servers/
   Groups/Provisioning γίνεται «πάπυρος». **Κατεύθυνση: βάθος (Clusters), όχι πλάτος (flat groups)·
