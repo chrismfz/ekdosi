@@ -27,6 +27,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — χειριστικό UI (Πυλώνας E, Phase 1b).** Νέο cluster **«Υποστήριξη»**
+  (στα «Καθημερινά», κρυφό όσο το pillar είναι OFF) με `TicketResource`: λίστα με tabs («Στην ουρά»/
+  «Χωρίς ανάθεση»/«Ανοιχτά»/«Όλα») + badges, «Νέο αίτημα» (μέσω `OpenTicket`), και σελίδα προβολής με
+  το **thread** (μηνύματα + εσωτερικές σημειώσεις με ξεχωριστό χρώμα/σήμανση «δεν το βλέπει ο πελάτης»)
+  + ενέργειες **Απάντηση / Εσωτερική σημείωση / Ανάθεση / Σε αναμονή / Κλείσιμο-Επαναφορά**. Ρυθμίσεις
+  **Τμημάτων** (`TicketDepartmentResource`, με IMAP πεδία για Phase 3) στο Settings Cluster → «Υποστήριξη».
+  Toggle ενεργοποίησης στη φόρμα Εταιρείας (super-admin). Απομένουν (follow-up): canned-reply picker +
+  context panel με τιμολόγια/καρτέλα του πελάτη. `docs/ticket-system-design.md`.
 - **Σύστημα υποστήριξης (tickets) — θεμέλιο domain (Πυλώνας E, Phase 1a).** Νέο tenant-scoped domain:
   `tickets` / `ticket_messages` (public reply ή **εσωτερική σημείωση**) / `ticket_departments`
   (+ IMAP config πεδία, encrypted — για Phase 3) / `canned_replies` (κατηγορίες). State machine

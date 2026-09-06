@@ -1125,6 +1125,12 @@ class CompanyForm
                                     ->dehydrated(fn (?string $state) => filled($state))
                                     ->dehydrateStateUsing(fn (string $state) => $state),
                             ]),
+                        Tab::make('Υποστήριξη')
+                            ->schema([
+                                Toggle::make('support_enabled')
+                                    ->label('Ενεργό σύστημα υποστήριξης (tickets)')
+                                    ->helperText('Ενεργοποιεί τον πυλώνα Υποστήριξης (Πυλώνας E) για αυτή την εταιρεία: το μενού «Υποστήριξη», τις ρυθμίσεις τμημάτων/έτοιμων απαντήσεων και (αργότερα) την πύλη πελάτη. Ανενεργό = τελείως κρυμμένο.'),
+                            ]),
                     ]),
             ]);
     }
