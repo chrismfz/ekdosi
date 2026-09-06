@@ -25,6 +25,7 @@
 /storage/*.key
 /storage/app/build.json
 /storage/pail
+/storage/app/private/ekdosi
 /vendor
 _ide_helper.php
 Homestead.json
