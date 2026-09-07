@@ -121,7 +121,9 @@ class ViewTicket extends ViewRecord
                 ->icon('heroicon-o-pause-circle')
                 ->color('gray')
                 ->authorize($canUpdate)
-                ->visible(fn (Ticket $record): bool => ! $record->isMerged() && ! in_array($record->status, [TicketStatus::Closed, TicketStatus::OnHold], true))
+                // hold + close need no explicit isMerged guard: a merged ticket is
+                // always Closed (MergeTickets), which their status check already excludes.
+                ->visible(fn (Ticket $record): bool => ! in_array($record->status, [TicketStatus::Closed, TicketStatus::OnHold], true))
                 ->action(function (Ticket $record): void {
                     $record->update(['status' => TicketStatus::OnHold]);
                     Notification::make()->title('Το αίτημα μπήκε σε αναμονή')->success()->send();
@@ -167,7 +169,7 @@ class ViewTicket extends ViewRecord
                         // server-side so an older valid target is still reachable (no 50-cap gap).
                         ->options(fn (Ticket $record): array => self::mergeTargets($record))
                         ->getSearchResultsUsing(fn (string $search, Ticket $record): array => self::mergeTargets($record, $search))
-                        ->getOptionLabelUsing(fn ($value): ?string => self::mergeTargetLabel($value))
+                        ->getOptionLabelUsing(fn ($value, Ticket $record): ?string => self::mergeTargetLabel($record, $value))
                         ->placeholder('— επίλεξε το αίτημα που θα επιβιώσει —')
                         ->helperText('Μόνο αιτήματα του ΙΔΙΟΥ πελάτη. Τα μηνύματα/παραλήπτες μεταφέρονται εκεί· αυτό το αίτημα κλείνει.'),
                 ])
@@ -328,12 +330,18 @@ class ViewTicket extends ViewRecord
             ->all();
     }
 
-    /** Label for a selected merge target (may come from a server-side search, not the initial list). */
-    private static function mergeTargetLabel(mixed $value): ?string
+    /**
+     * Label for a selected merge target (may come from a server-side search, not the
+     * initial list). Only a VALID same-owner, not-merged target renders a label — so
+     * the picker never presents an ineligible ticket as selectable.
+     */
+    private static function mergeTargetLabel(Ticket $record, mixed $value): ?string
     {
-        $ticket = Ticket::find($value); // CompanyScope keeps this tenant-local
+        $target = Ticket::find($value); // CompanyScope keeps this tenant-local
 
-        return $ticket !== null ? $ticket->reference.' — '.$ticket->subject : null;
+        return $target !== null && $record->canMergeInto($target)
+            ? $target->reference.' — '.$target->subject
+            : null;
     }
 
     /**
