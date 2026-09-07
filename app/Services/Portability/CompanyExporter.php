@@ -121,6 +121,12 @@ class CompanyExporter
         'ticket_poll_runs', // IMAP poll health log — runtime, re-accrues per poll.
         'ticket_watchers', // per-ticket watchers/CC — travels with tickets once FK-rewiring is written.
         'ticket_blocked_senders', // per-tenant spam blocklist — operational, re-created as needed.
+        // Domains pillar (Πυλώνας A) — NEW and default-off. A0 rows are account
+        // shells (registrar/label/mode); the per-registrar creds land at A2, and
+        // THAT slice adds these to the passphrase-sealed machinery next to
+        // payment_gateway_connections (raw APP_KEY ciphertext must never travel).
+        // Tracked in docs/BACKLOG.md «Πυλώνας A».
+        'domain_registrar_connections',
     ];
 
     /**

@@ -94,7 +94,7 @@ Mirror του `billing_connections` (superset· μπορεί να μαζευτε
 | `label` | string | «Openprovider MyIP», «FORTH EPP» |
 | `is_active` | bool | |
 | `mode` | string(20) | `sandbox` \| `production` \| `off` |
-| `config` | **encrypted** json | `MaybeEncrypted::class.':array'` — creds (username/password ή EPP host/user/pass/static-IP) |
+| `config` | **encrypted** json | `encrypted:array` cast (το idiom του `PaymentGatewayConnection` — νέος πίνακας, δεν χρειάζεται το legacy-tolerant `MaybeEncrypted`) — creds (username/password ή EPP host/user/pass/static-IP) |
 | timestamps, softDeletes | | |
 
 **Χωρίς** unique σε `(company_id, registrar)` — ο tenant μπορεί να έχει 2 λογαριασμούς ίδιου
@@ -199,7 +199,10 @@ credentials value-object + factory + Null.
 
 ### 4.1 `App\Contracts\DomainRegistrar`
 Ο σκελετός γεννιέται 1:1 από το **επίσημο WHMCS registrar function index** (κάθε method
-αντιστοιχεί σε Filament action):
+αντιστοιχεί σε Filament action). **A0 note (υλοποιημένο):** το interface ξεκίνησε ΣΛΙΜ —
+`key/capabilities/ping/checkAvailability` — και επεκτείνεται ανά slice (A2 read-only, A3 write),
+ώστε ο Null adapter να μην κουβαλά νεκρές υπογραφές που type-hint-άρουν το ανύπαρκτο-ακόμα
+`Domain` model. Ο πλήρης κατάλογος από κάτω παραμένει το blueprint:
 
 ```
 key(): string

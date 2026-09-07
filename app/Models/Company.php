@@ -74,6 +74,8 @@ class Company extends Model
         'ai_api_key',
         // Πυλώνας E — Support/Ticket pillar per-tenant kill-switch (default off).
         'support_enabled',
+        // Πυλώνας A — Domains pillar per-tenant kill-switch (default off).
+        'enable_domain_management',
         // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
         'mydata_send_item_descr',
         'gsis_username',
@@ -152,6 +154,7 @@ class Company extends Model
             'whmcs_api_secret' => MaybeEncrypted::class,
             'ai_assistant_enabled' => 'boolean',
             'support_enabled' => 'boolean',
+            'enable_domain_management' => 'boolean',
             'ai_monthly_token_cap' => 'integer',
             'ai_api_key' => MaybeEncrypted::class,
             'whmcs_webhook_secret' => MaybeEncrypted::class,
@@ -193,6 +196,16 @@ class Company extends Model
     public function hasSupport(): bool
     {
         return (bool) $this->support_enabled;
+    }
+
+    /**
+     * True iff the Domains pillar (Πυλώνας A) is enabled for this tenant.
+     * Default off — gates the Domains cluster and everything in it. A
+     * super-admin flips it on the Company form. Design: docs/domains/README.md.
+     */
+    public function hasDomainManagement(): bool
+    {
+        return (bool) $this->enable_domain_management;
     }
 
     /**

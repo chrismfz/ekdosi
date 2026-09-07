@@ -600,12 +600,14 @@ data model + phase gates: **`PLAN.md`**.
   «Μεταφορά ιδιοκτησίας», API history). Dedicated `Domain` ↔ `ServiceContract` billing clock·
   registrar modules à la `EInvoiceProviderTransport`: **Openprovider** (gTLDs) + **grEPP** (.gr,
   direct EPP), routing ανά TLD. Φάσεις (stop σε κάθε gate):
-  - **A0** θεμέλιο — `companies.enable_domain_management` flag + nav-gating trait +
-    `DomainRegistrar` contract/registry/creds/Null + `config('ekdosi.domains.registrars')` +
-    `domain_registrar_connections` (super_admin creds).
+  - **A0** θεμέλιο — ✅ **SHIPPED** (βλ. `FEATURES.md §21`): `enable_domain_management` flag +
+    gated `DomainsCluster` + `DomainRegistrar` contract/registry/creds/Null («manual») +
+    `config('ekdosi.domains.registrars')` + `domain_registrar_connections` (super_admin creds).
   - **A1** data model + manual CRUD (`domains`/`domain_tlds`/`domain_tld_prices`/
     `domain_nameservers`/`domain_contacts`) — καταχώριση υπάρχοντος portfolio, μηδέν API.
-  - **A2** Openprovider read-only — availability/WHOIS/`domains:sync` (expiry pull).
+  - **A2** Openprovider read-only — availability/WHOIS/`domains:sync` (expiry pull). Μαζί:
+    credential fields στη σύνδεση (write-only-secret idiom) + `domain_registrar_connections`
+    στο **sealed** export bucket (σήμερα INTENTIONALLY_EXCLUDED — A0 shells χωρίς creds).
   - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
     billing (reuse `StageServiceRenewal`) + grace/redemption.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.

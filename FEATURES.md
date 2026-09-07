@@ -886,6 +886,20 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 
 ---
 
+## 21. Domains (Πυλώνας A) — foundation
+- **Per-tenant kill-switch (A0, SHIPPED):** όλος ο πυλώνας πίσω από `companies.enable_domain_management`
+  (**default OFF, τελείως κρυμμένο** — cluster «Domains» στα «Καθημερινά»), toggle στη φόρμα Εταιρείας
+  (super-admin, Tab «Domains»). Design: `docs/domains/README.md` (+ grEPP υλικό `docs/domains/grepp/`).
+- **Registrar seam (A0, SHIPPED):** contract `DomainRegistrar` + config-driven `DomainRegistrarRegistry`
+  (`ekdosi.domains.registrars`) + capabilities/credentials value objects + `NullDomainRegistrar` = ο
+  first-class **«Manual (χωρίς API)»** registrar (ρίχνει typed exception σε API ενέργειες — ποτέ ψεύτικη
+  επιτυχία). Νέος registrar = μία κλάση + μία γραμμή config (Openprovider A2, grEPP A4).
+- **Συνδέσεις registrar (A0, SHIPPED):** `domain_registrar_connections` per (tenant × λογαριασμός) —
+  label/mode (fail-safe: μόνο ρητό `production` = live)/active, creds **encrypted at rest**,
+  resource **super_admin-only** μέσα στο cluster, με «Έλεγχος σύνδεσης».
+- **Επόμενα:** A1 data model + manual CRUD + import `tbldomains` + αδέσποτα/«Ανάθεση σε πελάτη» ·
+  A2 Openprovider read-only · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md` epic).
+
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·
 `FMysqlSync` MySQL mirror (→ WHMCS API) · `GET_COMB_*` (cross-DB με inline SYSDBA —

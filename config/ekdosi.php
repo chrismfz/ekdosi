@@ -478,6 +478,40 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Domains (Πυλώνας A) — docs/domains/README.md
+    |--------------------------------------------------------------------------
+    |
+    | Map of registrar key → DomainRegistrar adapter, resolved by
+    | DomainRegistrarRegistry. A domain_registrar_connections row's `registrar`
+    | key selects the adapter its API calls go through. EMPTY by default — the
+    | 'manual' key (and every unknown key) resolves to NullDomainRegistrar,
+    | which throws on API operations (never a faked registrar success). The real
+    | adapters drop in here with one line + one class each: 'openprovider' (A2)
+    | and 'grepp' (A4). No core edit. (Mirrors einvoice.providers.)
+    |
+    */
+    'domains' => [
+        'registrars' => [
+            // 'openprovider' => App\Services\Domains\Registrars\OpenproviderRegistrar::class, // A2
+            // 'grepp'        => App\Services\Domains\Registrars\GrEppRegistrar::class,        // A4
+        ],
+
+        /*
+        | Human labels for the connection «Registrar» dropdown. 'manual' is always
+        | offered (the API-less connection domains attach to when managed by hand);
+        | a key listed here is SELECTABLE (and its credentials enterable) before
+        | its adapter class is wired above — until then «Έλεγχος σύνδεσης» and any
+        | API action fail loudly via the Null adapter (never silently).
+        */
+        'registrar_labels' => [
+            'manual' => 'Manual (χωρίς API)',
+            'openprovider' => 'Openprovider',
+            'grepp' => 'grEPP — Μητρώο .gr/.ελ (FORTH)',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | AI «Βοηθός» (assistant)
     |--------------------------------------------------------------------------
     | Phase-1 read-only in-app chat. The global feature switch + the default

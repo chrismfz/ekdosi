@@ -1,0 +1,111 @@
+<?php
+
+namespace Tests\Unit;
+
+use App\Contracts\DomainRegistrar;
+use App\Services\Domains\DomainRegistrarNotConfigured;
+use App\Services\Domains\DomainRegistrarRegistry;
+use App\Services\Domains\NullDomainRegistrar;
+use App\Support\Domains\AvailabilityResult;
+use App\Support\Domains\DomainRegistrarCapabilities;
+use App\Support\Domains\DomainRegistrarCredentials;
+use Tests\TestCase;
+
+/**
+ * A0 seam: the registry resolves a registrar key → adapter, config-driven, and
+ * falls back to the LOUD Null ('manual') adapter for empty/'manual'/unknown keys
+ * — an API operation on it throws instead of faking a registrar success. Pure
+ * logic — no DB. Mirrors ProviderTransportRegistryTest.
+ */
+class DomainRegistrarRegistryTest extends TestCase
+{
+    private function registry(array $registrars = []): DomainRegistrarRegistry
+    {
+        config()->set('ekdosi.domains.registrars', $registrars);
+
+        return new DomainRegistrarRegistry;
+    }
+
+    public function test_empty_or_manual_key_returns_null_adapter(): void
+    {
+        $reg = $this->registry();
+        $this->assertInstanceOf(NullDomainRegistrar::class, $reg->for(''));
+        $this->assertInstanceOf(NullDomainRegistrar::class, $reg->for('manual'));
+        $this->assertInstanceOf(NullDomainRegistrar::class, $reg->for('  '));
+    }
+
+    public function test_unknown_key_falls_back_to_null_adapter(): void
+    {
+        $reg = $this->registry(['fake' => FakeDomainRegistrar::class]);
+
+        $this->assertInstanceOf(NullDomainRegistrar::class, $reg->for('does-not-exist'));
+    }
+
+    public function test_configured_key_resolves_and_caches(): void
+    {
+        $reg = $this->registry(['fake' => FakeDomainRegistrar::class]);
+
+        $adapter = $reg->for('fake');
+        $this->assertInstanceOf(FakeDomainRegistrar::class, $adapter);
+        $this->assertSame('fake', $adapter->key());
+        // cached → same instance
+        $this->assertSame($adapter, $reg->for('fake'));
+    }
+
+    public function test_keys_lists_configured_registrars_only(): void
+    {
+        $reg = $this->registry(['fake' => FakeDomainRegistrar::class]);
+        $this->assertSame(['fake'], $reg->keys());
+    }
+
+    public function test_a_class_not_implementing_the_contract_is_rejected(): void
+    {
+        $reg = $this->registry(['bad' => \stdClass::class]);
+        $this->assertInstanceOf(NullDomainRegistrar::class, $reg->for('bad'));
+    }
+
+    public function test_null_adapter_pings_false_and_throws_on_availability(): void
+    {
+        $null = new NullDomainRegistrar;
+        $creds = new DomainRegistrarCredentials;
+
+        $this->assertSame('manual', $null->key());
+        $this->assertFalse($null->ping($creds));
+        $this->assertFalse($null->capabilities()->supportsTransfer);
+        $this->expectException(DomainRegistrarNotConfigured::class);
+        $null->checkAvailability('example.gr', $creds);
+    }
+
+    public function test_label_falls_back_to_the_raw_key(): void
+    {
+        config()->set('ekdosi.domains.registrar_labels', ['manual' => 'Manual (χωρίς API)']);
+        $reg = $this->registry();
+
+        $this->assertSame('Manual (χωρίς API)', $reg->label('manual'));
+        $this->assertSame('gone-registrar', $reg->label('gone-registrar'));
+    }
+}
+
+/** Minimal test double registered via config. */
+class FakeDomainRegistrar implements DomainRegistrar
+{
+    public function key(): string
+    {
+        return 'fake';
+    }
+
+    public function capabilities(): DomainRegistrarCapabilities
+    {
+        return new DomainRegistrarCapabilities(supportsTransfer: true);
+    }
+
+    public function ping(DomainRegistrarCredentials $credentials): bool
+    {
+        return true;
+    }
+
+    public function checkAvailability(string $fqdn, DomainRegistrarCredentials $credentials): AvailabilityResult
+    {
+        return new AvailabilityResult(fqdn: $fqdn, available: true);
+    }
+}

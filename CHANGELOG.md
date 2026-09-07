@@ -18,6 +18,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Domains πυλώνας (Πυλώνας A) — A0 θεμέλιο.** Νέο per-tenant knob `enable_domain_management`
+  (default OFF, Tab «Domains» στη φόρμα εταιρείας, super_admin) που εμφανίζει το gated cluster
+  «Domains» — για όλους τους άλλους tenants ο πυλώνας είναι τελείως αόρατος. Μέσα: «Συνδέσεις
+  registrar» (super_admin-only — κουβαλούν credentials, `config` encrypted at rest) με «Έλεγχος
+  σύνδεσης». Το modular seam: contract `DomainRegistrar` + `DomainRegistrarRegistry`
+  (config-driven `ekdosi.domains.registrars`, κενό) + `NullDomainRegistrar` = ο first-class
+  **«Manual (χωρίς API)»** registrar που ρίχνει typed `DomainRegistrarNotConfigured` σε κάθε
+  API ενέργεια — ποτέ ψεύτικη επιτυχία. Openprovider (A2) / grEPP (A4) = μία γραμμή config +
+  μία κλάση ο καθένας. Design: `docs/domains/README.md`.
+
 ### Security
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy
   C++Builder `.dfm`/`.cfg` files carried hardcoded MySQL/SMTP/CS-Cart passwords + an `EncryptedPassword`
