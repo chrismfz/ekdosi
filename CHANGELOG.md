@@ -1467,6 +1467,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (un-assigned) domains ως νόμιμη κατάσταση (`customer_id` nullable, εκτός billing μέχρι ανάθεση)
   + action «Ανάθεση σε πελάτη», νέα στήλη `transferred_at`, tab «Domains» στην καρτέλα πελάτη
   (`DomainsRelationManager`), import που δεν μπλοκάρει σε unmatched πελάτες.
+- **Domains design doc — γείωση σε live WHMCS δεδομένα** (§7.1): επιβεβαιωμένο TLD→registrar
+  routing (6×.gr → grEPP, ~29 → Openprovider), πραγματικά margins/τιμές (.gr 2ετίες 19–95€,
+  transfer 0), Automatic Registration ήδη OFF (operator-gated = υπάρχουσα πρακτική). Registrar
+  key `none` → `manual` (Null adapter ως offline registrar, A1-first), status `transferred_away`,
+  non-goals premium domains/addon pricing/slabs, νέο verify-item για DNS mgmt/email-fwd χρήση.
 
 ## [1.12.1] - 2026-07-13
 

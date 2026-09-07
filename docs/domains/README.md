@@ -47,7 +47,9 @@ A0–A5** — σταματάς όπου θες.
 `CompanyForm` όπως `ai_assistant_enabled`). Μόνο η MyIP το ενεργοποιεί → οι άλλοι tenants δεν
 βλέπουν καθόλου το «Domains» (nav gating, §8).
 
-**Non-goal v1:** DNS zone/record hosting, email forwarding, customer portal (Πυλώνας D), CentralNic.
+**Non-goal v1:** DNS zone/record hosting, email forwarding, customer portal (Πυλώνας D), CentralNic,
+premium domains (OFF και στη WHMCS), addon pricing (ID protection κ.λπ. ως χρεώσιμα add-ons),
+pricing slabs ανά client group (καλύπτεται από το υπάρχον per-customer discount).
 
 ---
 
@@ -88,7 +90,7 @@ Mirror του `billing_connections` (superset· μπορεί να μαζευτε
 | col | τύπος | σημείωση |
 |---|---|---|
 | `company_id` | FK | |
-| `registrar` | string(40) | key: `openprovider` \| `grepp` \| `none` |
+| `registrar` | string(40) | key: `openprovider` \| `grepp` \| `manual` — το `manual` = ο Null adapter ως πλήρης «offline» registrar (χειροκίνητη διαχείριση χωρίς API· το A1 build-first target) |
 | `label` | string | «Openprovider MyIP», «FORTH EPP» |
 | `is_active` | bool | |
 | `mode` | string(20) | `sandbox` \| `production` \| `off` |
@@ -138,7 +140,7 @@ Unique `(domain_tld_id, operation, years, currency)`.
 | `service_contract_id` | FK `nullOnDelete` — **το billing clock** |
 | `domain_tld_id`, `registrar_connection_id` | FK (routing· `domains` value wins, TLD = default hint) |
 | `sld`(190), `tld`(30), `fqdn`(190) | unique `(company_id, fqdn)`· `fqdn` = derived, authoritative = `sld`+`tld` |
-| `status`(30) | `active\|pending_register\|pending_transfer\|expired\|grace\|redemption\|cancelled\|deleted` |
+| `status`(30) | `active\|pending_register\|pending_transfer\|expired\|grace\|redemption\|transferred_away\|cancelled\|deleted` — το `transferred_away` γράφεται όταν το `syncDomain` γυρίσει transferredAway (φύγαμε registrar· κρατάμε το record, σταματά billing/sync) |
 | `registered_at`, `expires_at` (date) | **`expires_at` = REGISTRAR truth** (sync clock) |
 | `transferred_at` (date, nullable) | πότε μπήκε σε εμάς με transfer-in — γράφεται όταν το `syncTransfer` γυρίσει `completed`· null = registered/imported απευθείας |
 | `auto_renew`, `transfer_lock`, `whois_privacy`, `dnssec_enabled`, `consent_publish` | bool |
@@ -348,6 +350,31 @@ currency) γράφεται στο `domain_tld_prices.cost`. **Margin engine:** `
 manual override + toggle «sync grace/redemption fee με το ίδιο markup». grEPP = manual pricing.
 Explicit per-year τιμές (1–10). (Ακριβώς το «TLD Import & Pricing Sync» screen της WHMCS.)
 
+### 7.1 Γείωση σε πραγματικά WHMCS δεδομένα (screenshots MyIP, 2026-09)
+
+Από τις live οθόνες «TLD Import & Pricing Sync», «Domain Pricing for .gr» και «Domains/TLDS»:
+
+- **Routing επιβεβαιωμένο:** `.gr/.com.gr/.net.gr/.org.gr/.edu.gr/.gov.gr` → grEPP module·
+  ~29 gTLDs/ccTLDs (`.com/.net/.org/.eu/.biz/.info/.name/.cc/.tv/.co.uk/.asia/.me/.de/.es/
+  .nl/.io/.dev/.co/.uk/.vip/.studio/.online/.shop/.ai/.club/.it/.be/.ch/.at`) → Openprovider.
+  **Lookup Provider = Openprovider** (το availability lookup της WHMCS).
+- **Margin defaults σήμερα:** Percentage **20%**, No rounding, Sync redemption/grace fee = **No**.
+  Τα πραγματικά sell prices όμως αποκλίνουν πολύ από το 20% (π.χ. .com cost 9.45 → sell 16.50 =
+  74.6%· .eu 4.60 → 13.50 = 193%· .me 7.49 → 28.50 = 280%) → το 20% είναι απλώς default για νέα
+  TLDs, τα υπάρχοντα είναι manual per-TLD → **το per-TLD override του engine είναι ο κανόνας,
+  όχι η εξαίρεση**.
+- **Automatic Registration = No** στη WHMCS → η MyIP ΗΔΗ δουλεύει operator-gated (δεν
+  auto-register-άρει με την πληρωμή) — το money-timing μας (§6.1) είναι η υπάρχουσα πρακτική.
+- **.gr pricing (πραγματικό):** EUR μόνο, ενεργά ΜΟΝΟ ζυγά έτη 2/4/6/8/10 = 19/38/57/76/95,
+  renewal = ίδια τιμή με register, **transfer = 0.00** (το μητρώο δεν χρεώνει μεταφορά),
+  redemption «—» → επιβεβαιώνει `min_years=2`/πολλαπλάσια 2ετίας/χωρίς redemption fee, και το
+  WHMCS idiom «-1 = disabled term» → το δικό μας `is_enabled` ανά (operation, years).
+- **Redemption fees (OP):** πραγματικά δεδομένα π.χ. .com €96.50, .eu €25.50, .me €112.50,
+  .nl €107.24 — χοντρά ποσά, γι' αυτό το redemption pricing είναι first-class (§3.3).
+- **ID Protection addon:** πωλείται €5.50/EUR στη WHMCS — το addon pricing (DNS mgmt / email
+  fwd / ID protection ως χρεώσιμα add-ons) μένει **deferred μαζί με τα ίδια τα addons**.
+- **Premium Domains = OFF** στη WHMCS → non-goal (§11).
+
 ---
 
 ## 8. Filament UI
@@ -436,6 +463,10 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 - **Multi-currency invoicing** — EUR settlement v1· USD = display.
 
 **Build-time unknowns (verify πριν το coding):**
+- ⚠ **DNS Management + Email Forwarding εμφανίζονται ΕΝΕΡΓΑ στα Openprovider TLDs της WHMCS**
+  (Domains/TLDS screenshot) — πριν παγιωθεί το «deferred», verify αν πελάτες τα χρησιμοποιούν
+  πραγματικά (ίδιο πνεύμα με `docs/go-live-usage-checks.sql.md`)· αν ναι, ανεβαίνει η προτεραιότητα.
+- Μέγεθος/σύνθεση portfolio (πόσα domains ανά TLD/registrar) — βγαίνει από `tbldomains` πριν το A1.
 - FORTH/grEPP EPP host/port + OT&E credentials (δίνονται σε accredited registrars — η MyIP τα έχει).
 - Openprovider bearer token TTL (~24h· cache + re-auth σε 401 ανεξαρτήτως).
 - .gr «trade» (registrant change) μηχανική/τέλη· .gr WHOIS GDPR auto-redaction.
