@@ -660,7 +660,9 @@ data model + phase gates: **`PLAN.md`**.
   - **Phase 4 SHIPPED:** operator **bell** + **watchers/CC**, **feedback-on-close** (rating),
     **spam/block-sender**, **inbound-CC capture**, **ticket merge** (same-owner· source→Closed+`merged_into_id`·
     πύλη hide+redirect). **Πυλώνας E core = DONE.** **SLA timers σκόπιμα εκτός** (δικό του slice)· ανοιχτά μόνο
-    follow-ups (email-invite στο κλείσιμο, reply-threading για watcher/CC, KB/Announcements = ξεχωριστό slice).
+    follow-ups (email-invite στο κλείσιμο, reply-threading για watcher/CC). **In-app KB: DROPPED** — το
+    **BookStack** (external) καλύπτει ήδη το knowledge base, δεν χτίζουμε δικό μας. **Announcements:** maybe-later,
+    low-prio (όχι τώρα).
     **Deploy σημείωση:** νέο resource «Αποκλεισμένοι αποστολείς» → `shield:generate`
     + re-provision μετά το deploy (όπως κάθε νέο resource perm).
   - **P2 (review Phase-4 spam, deferred):** ένα block ρίχνει ΟΛΑ τα εισερχόμενα του αποστολέα — και reply
@@ -683,6 +685,11 @@ data model + phase gates: **`PLAN.md`**.
     στο κλείσιμο (mailable με link στην αξιολόγηση) για πελάτες που δεν ξαναμπαίνουν στην πύλη· (β) **στήλη/
     φίλτρο** αξιολόγησης στη λίστα tickets + απλό «μέσος όρος ικανοποίησης» metric. Το core (portal rating +
     operator badge) SHIPPED.
+  - **P2 (review feedback-invite, deferred):** το «Κλείσιμο» στέλνει invite σε κάθε close-cycle ενός
+    **αβαθμολόγητου** ticket — close→reopen→close ξαναστέλνει «αξιολόγησε» email. `isRated()` κόβει μόνο το
+    re-nag αφού υπάρχει βαθμός. Πλήρες dedupe θέλει marker (`feedback_invited_at`, καθαρίζεται στο reopen)·
+    χαμηλό impact. **Declined:** το re-rate μέσω του signed link είναι σκόπιμο (συνέπεια με την πύλη· misclick
+    fix) — πλέον bounded από το 30-day expiry του link.
   - **Conscious tradeoff (review Phase-4 r3):** το participant auto-watch λύνει τον operator μέσα από
     το `company->users()` pivot (ίδιο tenant invariant με το «Προσθήκη watcher»). Συνέπεια: ένας operator
     **εκτός pivot** (π.χ. super_admin που απαντά cross-tenant χωρίς membership row) δεν auto-watch-άρεται —
