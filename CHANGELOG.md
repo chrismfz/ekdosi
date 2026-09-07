@@ -27,6 +27,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — reply-threading για watcher/CC (Πυλώνας E, Phase 4 follow-up).** Μια
+  απάντηση από **watcher/CC** ενός ticket (π.χ. τον developer/agency που είχε βάλει ο πελάτης στο CC) κάνει
+  πλέον **thread** στο ίδιο ticket αντί να ανοίγει νέο — ο `senderOwnsTicket` δέχεται και τους email-watchers
+  του ticket. Ο guard κατά injection μένει: το token/References από μόνα τους ΔΕΝ αρκούν· ο αποστολέας πρέπει
+  να είναι όντως στη λίστα watchers (ένας άγνωστος με το token ανοίγει ξεχωριστό ticket, όπως πριν).
 - **Σύστημα υποστήριξης (tickets) — email-invite αξιολόγησης στο κλείσιμο (Πυλώνας E, Phase 4 follow-up).**
   Όταν κλείνει ένα αίτημα τμήματος με `feedback_on_close`, ο πελάτης παίρνει email με **signed link** σε
   δημόσια σελίδα αξιολόγησης (χωρίς login — η υπογραφή είναι το authorization), ώστε να αξιολογεί κι όποιος

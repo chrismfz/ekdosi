@@ -189,8 +189,19 @@ class InboundTicketRouter
         }
 
         $from = mb_strtolower(trim($fromEmail));
+        if ($from === '') {
+            return false;
+        }
 
-        return $from !== '' && mb_strtolower(trim((string) $ticket->requester_email)) === $from;
+        if (mb_strtolower(trim((string) $ticket->requester_email)) === $from) {
+            return true;
+        }
+
+        // A watcher/CC of THIS ticket is a legitimate participant (added by the
+        // customer's CC or by an operator), so a reply from them threads here rather
+        // than opening a new ticket. The token/References alone never suffice — the
+        // sender must actually be on the watcher list, so a stranger can't inject.
+        return in_array($from, $ticket->watcherEmailAddresses(), true);
     }
 
     private function matchCustomer(int $companyId, string $fromEmail): ?Customer
