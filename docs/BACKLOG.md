@@ -735,6 +735,19 @@ data model + phase gates: **`PLAN.md`**.
     συνημμένα) ώστε να μη χαθεί σιωπηλά το αίτημα ούτε να γίνει OOM/poison loop· failed size-probe → επίσης stub
     (ποτέ parse ενός μη-μετρήσιμου μηνύματος «στα τυφλά»). **Deploy req:** το poll/worker process θέλει `memory_limit` ≥ 256M (parse μηνύματος ~cap peaks
     σε few× wire size). **Remaining (χαμηλή προτ.):** dead-letter folder αντί για stub, per-tenant disk quota.
+  - **Holistic Support review (peace-of-mind, 2026-09-07) — NO P0/P1· P2 dispositions.** Ολόκληρο το
+    subsystem reviewed· τα core invariants (tenant isolation, blocklist→idempotency→match→ownership, attachment
+    gating, escaping) κρατάνε. **Fixed αμέσως:** removeWatcher action (stop replies σε ανεπιθύμητο CC — disclosure),
+    department-scoped Message-ID idempotency (email σε 2 τμήματα ίδιας εταιρείας → ticket σε καθένα, όχι σιωπηλή
+    απώλεια), MergeTickets attachment re-parent `withoutGlobalScope`, honest oversized-stub placeholder. **Deferred
+    (P2):** (α) **ambiguous customer match:** `matchCustomer()->first()` σε ΜΗ-μοναδικό email (2 πελάτες ίδιας
+    εταιρείας, ίδιο email) δένει αυθαίρετα → ο operator βλέπει λάθος οικονομικά· fix = «>1 match → guest/flag» (product
+    decision — τι σημαίνει shared email; · εντός ΙΔΙΑΣ εταιρείας, όχι cross-tenant). (β) **systematic `getSize()`
+    failure:** αν ένας server ΔΕΝ υποστηρίζει RFC822.SIZE σε headers-only fetch, ΟΛΑ γίνονται stubs· σπάνιο (RFC822.SIZE
+    ~universal) + retry καλύπτει transient· fix αν πονέσει = εναλλακτικό size path ή bounded body. (γ) **`$authorNameCache`
+    unbounded static** (TicketInfolist) — Octane-only memory growth + stale names· harmless σε FPM (locked). (δ)
+    **dead config:** `autoresponder`/`prevent_client_closure` toggles στο TicketDepartmentForm δεν enforced πουθενά —
+    wire ή hide. (ε) **`syntheticId` first-300-chars** για no-Message-ID mails (pre-existing, comment-acknowledged).
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη

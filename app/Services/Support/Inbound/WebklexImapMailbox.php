@@ -201,9 +201,13 @@ class WebklexImapMailbox implements ImapMailbox
         ];
     }
 
-    /** Placeholder body for an over-cap message we route WITHOUT downloading its body. */
-    private const OVERSIZED_BODY = '⚠ Ο αποστολέας έστειλε ένα πολύ μεγάλο email που δεν λήφθηκε αυτόματα '
-        .'(πάνω από το όριο μεγέθους). Επικοινωνήστε μαζί του για το περιεχόμενο ή τα συνημμένα.';
+    /**
+     * Placeholder body for a message we route WITHOUT downloading its body — either
+     * over the size cap OR one whose size we couldn't read (so we don't parse it on
+     * faith). Wording is honest for both cases.
+     */
+    private const OVERSIZED_BODY = '⚠ Ένα εισερχόμενο email δεν λήφθηκε αυτόματα (πολύ μεγάλο μέγεθος ή '
+        .'αδυναμία λήψης). Επικοινωνήστε με τον αποστολέα για το περιεχόμενο ή τα συνημμένα.';
 
     /**
      * Build a ParsedInboundEmail from the HEADERS ONLY (no body download), for a

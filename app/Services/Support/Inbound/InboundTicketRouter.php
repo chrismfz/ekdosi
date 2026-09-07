@@ -74,12 +74,20 @@ class InboundTicketRouter
 
         $messageId = $this->normaliseId($email->messageId);
 
-        // (0) Already processed this exact message? Return its ticket, don't duplicate.
+        // (0) Already processed this exact message IN THIS DEPARTMENT? Return its
+        // ticket, don't duplicate. Scoped to the department (not just the company):
+        // the same email addressed To BOTH dept-A and dept-B of one company must open
+        // a ticket in EACH — a company-wide dedup would silently drop the second
+        // department's copy. A redelivery to the SAME mailbox still dedups (same
+        // department), which is what this guard is for.
         if ($messageId !== null) {
             $seen = TicketMessage::query()
                 ->withoutGlobalScope(CompanyScope::class)
                 ->where('company_id', $companyId)
                 ->where('email_message_id', $messageId)
+                ->whereHas('ticket', fn (Builder $q): Builder => $q
+                    ->withoutGlobalScope(CompanyScope::class)
+                    ->where('ticket_department_id', $department->id))
                 ->first();
             if ($seen !== null) {
                 return $seen->ticket;
