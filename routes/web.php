@@ -64,6 +64,8 @@ Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
         ->where('ticket', '[0-9]+')->name('portal.tickets.show');
     Route::post('/user/tickets/{ticket}/reply', [PortalTicketController::class, 'reply'])
         ->where('ticket', '[0-9]+')->middleware('throttle:20,1')->name('portal.tickets.reply');
+    Route::post('/user/tickets/{ticket}/rate', [PortalTicketController::class, 'rate'])
+        ->where('ticket', '[0-9]+')->middleware('throttle:20,1')->name('portal.tickets.rate');
     // «Πλήρωσε» (B0b) — start a payment against a granted company/customer, then
     // see where to pay. The browser never settles money (manual = operator
     // confirms; online webhook later). Store is throttled.

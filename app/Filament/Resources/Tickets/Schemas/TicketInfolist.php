@@ -46,6 +46,19 @@ class TicketInfolist
                         TextEntry::make('assignee.name')->label('Χειριστής')->placeholder('— χωρίς ανάθεση —'),
                         TextEntry::make('created_at')->label('Ανοίχτηκε')->dateTime('d/m/Y H:i'),
                         TextEntry::make('last_reply_at')->label('Τελευταία απάντηση')->since()->placeholder('—'),
+                        // Customer feedback (feedback-on-close) — only once the customer has rated.
+                        TextEntry::make('rating')
+                            ->label('Αξιολόγηση πελάτη')
+                            ->badge()
+                            ->visible(fn (Ticket $record): bool => $record->isRated())
+                            ->state(fn (Ticket $record): string => str_repeat('★', (int) $record->rating).' '.$record->rating.'/5')
+                            ->color(fn (Ticket $record): string => match (true) {
+                                (int) $record->rating >= 4 => 'success',
+                                (int) $record->rating === 3 => 'warning',
+                                default => 'danger',
+                            })
+                            ->tooltip(fn (Ticket $record): ?string => $record->rating_comment)
+                            ->columnSpanFull(),
                     ]),
 
                 Section::make('Πελάτης')
