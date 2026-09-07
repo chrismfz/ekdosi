@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Portal;
 
+use App\Actions\Support\MergeTickets;
 use App\Actions\Support\OpenTicket;
 use App\Actions\Support\PostTicketMessage;
 use App\Enums\TicketStatus;
@@ -157,6 +158,26 @@ class PortalTicketTest extends TestCase
         $this->actingAs($login, 'portal')->get('/user/tickets')->assertOk()->assertDontSee($ticket->reference);
         $this->actingAs($login, 'portal')->get("/user/tickets/{$ticket->id}")->assertStatus(404);
         $this->actingAs($login, 'portal')->post("/user/tickets/{$ticket->id}/reply", ['body' => 'x'])->assertStatus(404);
+    }
+
+    public function test_a_merged_ticket_is_hidden_and_redirects_to_its_survivor(): void
+    {
+        $company = $this->company();
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
+        $login = $this->login();
+        $this->grant($login, $customer);
+
+        $target = $this->openFor($company, $customer);
+        $source = $this->openFor($company, $customer);
+        app(MergeTickets::class)->handle($source, $target);
+
+        // the merged duplicate is gone from the list…
+        $this->actingAs($login, 'portal')->get('/user/tickets')
+            ->assertOk()->assertSee($target->reference)->assertDontSee($source->reference);
+
+        // …and opening it redirects the customer to the survivor.
+        $this->actingAs($login, 'portal')->get("/user/tickets/{$source->id}")
+            ->assertRedirect(route('portal.tickets.show', $target->id));
     }
 
     private function openFor(Company $company, Customer $customer): Ticket

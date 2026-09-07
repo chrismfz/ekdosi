@@ -871,7 +871,11 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Inbound-CC → watchers/CC (Phase 4, SHIPPED):** τα `To`/`Cc` ενός εισερχόμενου email **γνωστού πελάτη**
   γίνονται email watchers (`source=cc`), ώστε οι απαντήσεις να κοινοποιούν και τους «άσχετους» παραλήπτες
   (developer/agency…)· μόνο known-customer (όχι open-relay), εξαίρεση αποστολέα/τμήματος/owner/blocked, idempotent.
-- **Επόμενα:** Phase 4 υπόλοιπα (ticket merge)· follow-ups: email-invite στο κλείσιμο + στήλη/φίλτρο
+- **Συγχώνευση αιτημάτων / merge (Phase 4, SHIPPED):** διπλότυπο → ενσωμάτωση σε επιβιωμένο (μηνύματα/
+  watchers/tags/attachments μεταφέρονται, source κλείνει με `merged_into_id`, terminal). **Μόνο same-owner**
+  (ίδιος customer ή guest email) — αλλιώς leak· action «Συγχώνευση» στο ticket· η πύλη κρύβει το source +
+  redirect στο survivor.
+- **Επόμενα:** Phase-4 follow-ups: email-invite στο κλείσιμο + στήλη/φίλτρο
   αξιολόγησης, attachments (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle,
   reply-threading για watcher/CC αποστολείς + visible-CC (αντί Bcc) για cc-sourced.
 

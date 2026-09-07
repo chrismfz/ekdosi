@@ -162,8 +162,9 @@ Laravel 13 / PHP 8.4 compatibility in the spike). No provider SDKs, no webhooks.
   of a `feedback_on_close` department; operator sees ★ n/5). SLA timers **deliberately deferred** (own slice,
   not worth it yet) + **spam/block-sender = SHIPPED** (per-tenant `ticket_blocked_senders`; the inbound
   router drops a blocked address/domain before opening a ticket; resource + one-click block on a ticket).
-  Still open: ticket merge, inbound-CC → watcher auto-capture, email-invite on close. **KB + Announcements**
-  = a **separate** later slice, not v1.
+  + inbound-CC capture + **ticket merge = SHIPPED** (same-owner only; source→Closed+merged_into_id; portal
+  hides the source and redirects to the survivor). Still open: email-invite on close, reply-threading for
+  watcher/CC senders. **KB + Announcements** = a **separate** later slice, not v1. **Πυλώνας E core = done.**
 
 ## 10. Decisions — CONFIRMED (2026-09-06)
 1. **Scope order** — Phase 1+2 (operator + portal, manual tickets) first, then IMAP in Phase 3. ✅

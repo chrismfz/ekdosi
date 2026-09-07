@@ -657,10 +657,11 @@ data model + phase gates: **`PLAN.md`**.
     το ίδιο reply email. Χαμηλό impact (διπλή απάντηση, όχι invoice). Το πλήρες κλείσιμο θέλει το
     at-most-once state machine του `SendInvoiceEmail` (OPS-12: sending/sent + send_key)· άξιο μόνο αν
     γίνει πρόβλημα στην πράξη.
-  - **Phase 4 SHIPPED (μερικώς):** operator **bell** + **watchers/CC**, **feedback-on-close** (rating),
-    **spam/block-sender** (`ticket_blocked_senders` + drop στον `InboundTicketRouter` + one-click block).
-    **SLA timers σκόπιμα εκτός** (δικό του slice, όχι τώρα). **Ανοιχτό Phase-4 item** (baby-step): ticket
-    **merge** (διπλότυπα). **Deploy σημείωση:** νέο resource «Αποκλεισμένοι αποστολείς» → `shield:generate`
+  - **Phase 4 SHIPPED:** operator **bell** + **watchers/CC**, **feedback-on-close** (rating),
+    **spam/block-sender**, **inbound-CC capture**, **ticket merge** (same-owner· source→Closed+`merged_into_id`·
+    πύλη hide+redirect). **Πυλώνας E core = DONE.** **SLA timers σκόπιμα εκτός** (δικό του slice)· ανοιχτά μόνο
+    follow-ups (email-invite στο κλείσιμο, reply-threading για watcher/CC, KB/Announcements = ξεχωριστό slice).
+    **Deploy σημείωση:** νέο resource «Αποκλεισμένοι αποστολείς» → `shield:generate`
     + re-provision μετά το deploy (όπως κάθε νέο resource perm).
   - **P2 (review Phase-4 spam, deferred):** ένα block ρίχνει ΟΛΑ τα εισερχόμενα του αποστολέα — και reply
     πάνω σε **ήδη ανοιχτό** ticket. Ένα domain-block μπορεί έτσι να «καταπιεί» σιωπηλά απάντηση ενός νόμιμου
