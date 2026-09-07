@@ -471,9 +471,15 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
   (αδέσποτο) → πελάτη, + δέσιμο ServiceContract.
 - **Expiry reminders** — 15/10/5 ημέρες πριν, reuse του auto-email infra, sent-log στο `domain_reminders`.
 - **API history** — `domain_registrar_logs` (request/response/status ανά κλήση), «Bridge logs» tab.
-- **Import** — command `domains:import --tenant`:
-  - **WHMCS `tbldomains`** (customer/τιμή/registrar/reminder linkage, upsert σε `legacy_id`),
-  - **+** registrar sync (Openprovider/grEPP) για επαλήθευση expiry/status/NS.
+- **Import** — command `domains:import --tenant` — **bootstrap, όχι εξάρτηση** (τρέχει μέχρι το
+  cutover, μετά πεθαίνει):
+  - **Μέσω WHMCS API `GetClientsDomains`** (πάνω στον υπάρχοντα `WhmcsClient` — το locked
+    «Plugin-API is THE path», ΟΧΙ raw `tbldomains` schema): domainid→`legacy_id` upsert,
+    userid→customer μέσω του υπάρχοντος WHMCS↔customer mapping της γέφυρας, + regdate/expiry/
+    nextduedate/status/registrar/donotrenew. Το WHMCS είναι απλώς το μόνο μέρος που ξέρει το
+    customer↔domain linkage σήμερα.
+  - **+** registrar sync (Openprovider/grEPP, A2) για επαλήθευση expiry/status/NS — μετά το
+    bootstrap Η αλήθεια είναι ο registrar, ποτέ ξανά το WHMCS.
   - Ό,τι ΔΕΝ κάνει match σε πελάτη δεν μπλοκάρει το import — μπαίνει **αδέσποτο**
     (`customer_id=null`, §3.4) και βγαίνει στο worklist «Χωρίς πελάτη» → «Ανάθεση σε πελάτη».
   - Import-first· manual entry (A1) = fallback, όχι main path.
@@ -498,7 +504,12 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 **Deferred (flags/hooks μένουν, λειτουργία μετά):**
 - **DNS zone/record hosting** (A/AAAA/MX/TXT) + **email forwarding** — capability flags στο
   `domain_tlds` τώρα, `getDns/setDns` στο contract, αλλά UI/λειτουργία post-v1.
-- **Customer portal** (Πυλώνας D) — ξεχωριστό doc/phase· εκεί το transfer-out γίνεται self-service.
+- **Customer portal «Τα domains μου»** (`/user`, Flux UI — Πυλώνας D): λίστα/expiry/NS view,
+  αργότερα self-service renew-pay + transfer-out. **Build-ready ΑΠΟ ΤΩΡΑ (A1 discipline):**
+  (α) κάθε domain write = `App\Actions\*` καλέσιμο κι εκτός Filament, (β) read-scoping με το
+  grant-scoped fail-closed μοτίβο της πύλης (όπως «Τα αιτήματά μου»/παραστατικά — ρητό
+  company+customer, 404 σε ξένο id), (γ) τίποτα panel-coupled στα services. Έτσι το portal
+  γίνεται «μία σελίδα», όχι refactor.
 - **CentralNic** adapter — legacy (η MyIP έφυγε)· μπαίνει αργότερα ως drop-in αν χρειαστεί.
 - **Multi-currency invoicing** — EUR settlement v1· USD = display.
 
