@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Collection;
 
 /**
  * A support ticket (Πυλώνας E). Belongs to a department and — when the requester
@@ -88,6 +89,76 @@ class Ticket extends Model
     public function messages(): HasMany
     {
         return $this->hasMany(TicketMessage::class)->orderBy('id');
+    }
+
+    /** Watchers / CC for this ticket (operators AND external emails). */
+    public function watchers(): HasMany
+    {
+        return $this->hasMany(TicketWatcher::class);
+    }
+
+    /**
+     * Add (idempotently) an operator watcher. Returns the row (existing or new).
+     * `source` is only set on creation — a manual watch never gets downgraded to
+     * a participant one by a later reply.
+     */
+    public function watch(User $user, string $source = TicketWatcher::SOURCE_MANUAL): TicketWatcher
+    {
+        return $this->watchers()->firstOrCreate(
+            ['user_id' => $user->id],
+            ['company_id' => $this->company_id, 'source' => $source],
+        );
+    }
+
+    public function unwatch(User $user): void
+    {
+        $this->watchers()->where('user_id', $user->id)->delete();
+    }
+
+    public function isWatchedBy(User $user): bool
+    {
+        return $this->watchers()->where('user_id', $user->id)->exists();
+    }
+
+    /**
+     * Add (idempotently) an external email watcher (Cc'd on outbound replies).
+     * Blank emails are ignored; the address is stored lowercased so the unique
+     * index and the Cc de-dup are case-insensitive. Returns null for a blank.
+     */
+    public function addEmailWatcher(?string $email, string $source = TicketWatcher::SOURCE_MANUAL): ?TicketWatcher
+    {
+        $email = mb_strtolower(trim((string) $email));
+        if ($email === '') {
+            return null;
+        }
+
+        return $this->watchers()->firstOrCreate(
+            ['email' => $email],
+            ['company_id' => $this->company_id, 'source' => $source],
+        );
+    }
+
+    /**
+     * The User models watching this ticket (operator watchers only).
+     *
+     * @return Collection<int, User>
+     */
+    public function operatorWatcherUsers(): Collection
+    {
+        return $this->watchers()->whereNotNull('user_id')->with('user')->get()
+            ->pluck('user')->filter()->values();
+    }
+
+    /**
+     * Lowercased external watcher email addresses (for the reply Cc).
+     *
+     * @return list<string>
+     */
+    public function watcherEmailAddresses(): array
+    {
+        return $this->watchers()->whereNotNull('email')->pluck('email')
+            ->map(fn ($e): string => mb_strtolower(trim((string) $e)))
+            ->filter()->unique()->values()->all();
     }
 
     /** Messages a customer may see (excludes operator-only internal notes). */

@@ -9,10 +9,12 @@ use App\Jobs\SendTicketReplyEmail;
 use App\Models\CannedReply;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
+use App\Models\User;
 use App\Support\CannedReplyExpander;
 use Filament\Actions\Action;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 
@@ -138,7 +140,67 @@ class ViewTicket extends ViewRecord
                     $record->update(['status' => TicketStatus::Open, 'closed_at' => null]);
                     Notification::make()->title('Το αίτημα άνοιξε ξανά')->success()->send();
                 }),
+
+            // Self watch/unwatch (Phase 4): personal — gated on `view`, not `update`.
+            Action::make('watch')
+                ->label(fn (Ticket $record): string => self::watchesRecord($record) ? 'Διακοπή παρακολούθησης' : 'Παρακολούθηση')
+                ->icon(fn (Ticket $record): string => self::watchesRecord($record) ? 'heroicon-o-eye-slash' : 'heroicon-o-eye')
+                ->color('gray')
+                ->authorize(fn (Ticket $record): bool => auth()->user()?->can('view', $record) ?? false)
+                ->action(function (Ticket $record): void {
+                    $user = auth()->user();
+                    if (! $user instanceof User) {
+                        return;
+                    }
+                    if ($record->isWatchedBy($user)) {
+                        $record->unwatch($user);
+                        Notification::make()->title('Σταμάτησες να παρακολουθείς το αίτημα')->success()->send();
+                    } else {
+                        $record->watch($user);
+                        Notification::make()->title('Παρακολουθείς το αίτημα')->success()->send();
+                    }
+                }),
+
+            Action::make('addWatcher')
+                ->label('Προσθήκη watcher')
+                ->icon('heroicon-o-user-plus')
+                ->color('gray')
+                ->authorize($canUpdate)
+                ->schema([
+                    Select::make('user_id')
+                        ->label('Χειριστής')
+                        ->options(fn (): array => TicketResource::operatorOptions())
+                        ->searchable()
+                        ->placeholder('— χειριστής που θα ειδοποιείται —'),
+                    TextInput::make('email')
+                        ->label('ή email (CC στις απαντήσεις)')
+                        ->email()
+                        ->placeholder('someone@example.com'),
+                ])
+                ->action(function (array $data, Ticket $record): void {
+                    $added = false;
+                    if (! empty($data['user_id']) && ($operator = User::find($data['user_id'])) !== null) {
+                        $record->watch($operator);
+                        $added = true;
+                    }
+                    if (! empty($data['email']) && $record->addEmailWatcher($data['email']) !== null) {
+                        $added = true;
+                    }
+
+                    Notification::make()
+                        ->title($added ? 'Προστέθηκε watcher' : 'Δώσε χειριστή ή email')
+                        ->{$added ? 'success' : 'warning'}()
+                        ->send();
+                }),
         ];
+    }
+
+    /** Does the current operator watch this ticket? (null-user safe.) */
+    private static function watchesRecord(Ticket $record): bool
+    {
+        $user = auth()->user();
+
+        return $user instanceof User && $record->isWatchedBy($user);
     }
 
     /**

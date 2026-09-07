@@ -19,7 +19,10 @@ use Illuminate\Mail\Mailables\Headers;
  */
 class TicketReplyMail extends Mailable
 {
-    /** @param  list<string>  $references bare Message-IDs (no angle brackets) */
+    /**
+     * @param  list<string>  $references  bare Message-IDs (no angle brackets)
+     * @param  list<string>  $ccAddresses  external watcher addresses to copy on the reply
+     */
     public function __construct(
         public Ticket $ticket,
         public string $body,
@@ -28,6 +31,7 @@ class TicketReplyMail extends Mailable
         public string $messageId,
         public ?string $inReplyTo = null,
         public array $references = [],
+        public array $ccAddresses = [],
     ) {}
 
     public function envelope(): Envelope
@@ -37,6 +41,7 @@ class TicketReplyMail extends Mailable
         return new Envelope(
             from: $from,
             replyTo: [$from],
+            cc: array_map(fn (string $address): Address => new Address($address), $this->ccAddresses),
             subject: '['.$this->ticket->reference.'] '.$this->ticket->subject,
         );
     }

@@ -97,6 +97,31 @@ class SendTicketReplyEmailTest extends TestCase
         Mail::assertSent(TicketReplyMail::class, fn (TicketReplyMail $mail) => $mail->hasTo('wrote-from@e.gr'));
     }
 
+    public function test_external_watcher_is_cc_d_on_the_reply(): void
+    {
+        Mail::fake();
+        $company = $this->company();
+        $dept = $this->department($company);
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'c@e.gr']);
+
+        $ticket = app(OpenTicket::class)->handle([
+            'company_id' => $company->id, 'customer_id' => $customer->id, 'ticket_department_id' => $dept->id,
+            'subject' => 'X', 'body' => 'y', 'author_role' => TicketMessage::ROLE_CUSTOMER, 'via' => TicketMessage::VIA_EMAIL,
+        ]);
+        $ticket->addEmailWatcher('boss@e.gr');
+
+        $reply = app(PostTicketMessage::class)->handle($ticket, [
+            'author_role' => TicketMessage::ROLE_OPERATOR, 'body' => 'απάντηση',
+        ]);
+        $this->deliver($reply);
+
+        Mail::assertSent(TicketReplyMail::class, function (TicketReplyMail $mail): bool {
+            $cc = collect($mail->envelope()->cc)->map(fn ($a) => $a->address)->all();
+
+            return $mail->hasTo('c@e.gr') && in_array('boss@e.gr', $cc, true);
+        });
+    }
+
     public function test_no_recipient_sends_nothing(): void
     {
         Mail::fake();

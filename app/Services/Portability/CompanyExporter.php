@@ -119,6 +119,7 @@ class CompanyExporter
         'canned_reply_categories',
         'canned_replies',
         'ticket_poll_runs', // IMAP poll health log — runtime, re-accrues per poll.
+        'ticket_watchers', // per-ticket watchers/CC — travels with tickets once FK-rewiring is written.
     ];
 
     /**

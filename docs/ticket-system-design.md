@@ -156,8 +156,11 @@ Laravel 13 / PHP 8.4 compatibility in the spike). No provider SDKs, no webhooks.
   email notification on new customer message, portal↔Customer scoping tests.
 - **Phase 3 — mail ingestion:** `tickets:poll-imap`, threading + customer binding + `clients_only`,
   outbound `Message-ID`/`References` threading, scheduler flag, fixture-based tests.
-- **Phase 4 — parity polish (as needed):** watchers/CC, escalation/SLA timers, merge, spam/block-
-  sender, feedback-on-close. **KB + Announcements** = a **separate** later slice, not v1.
+- **Phase 4 — parity polish (as needed):** **watchers/CC + operator bell = SHIPPED** (customer public
+  message → durable bell to dept-agents/assignee/watchers; operator auto-watches on reply; email watchers
+  Cc'd on replies). SLA timers **deliberately deferred** (own slice, not worth it yet). Still open: merge,
+  spam/block-sender, feedback-on-close, inbound-CC → watcher auto-capture. **KB + Announcements** = a
+  **separate** later slice, not v1.
 
 ## 10. Decisions — CONFIRMED (2026-09-06)
 1. **Scope order** — Phase 1+2 (operator + portal, manual tickets) first, then IMAP in Phase 3. ✅

@@ -657,6 +657,15 @@ data model + phase gates: **`PLAN.md`**.
     το ίδιο reply email. Χαμηλό impact (διπλή απάντηση, όχι invoice). Το πλήρες κλείσιμο θέλει το
     at-most-once state machine του `SendInvoiceEmail` (OPS-12: sending/sent + send_key)· άξιο μόνο αν
     γίνει πρόβλημα στην πράξη.
+  - **Phase 4 SHIPPED (μερικώς):** operator **bell** σε νέο/reply μήνυμα πελάτη + **watchers/CC**
+    (operators watch/unwatch, participant auto-watch, email watchers → CC στις απαντήσεις). **SLA timers
+    σκόπιμα εκτός** (δικό του slice, όχι τώρα). **Ανοιχτά Phase-4 items** (baby-steps, ένα-ένα): ticket
+    **merge** (διπλότυπα), **feedback-on-close** (rating· υπάρχει ήδη `ticket_departments.feedback_on_close`
+    flag αχρησιμοποίητο), **spam/block-sender** (drop πριν το route στον `InboundTicketRouter`).
+  - **Inbound-CC → watcher auto-capture (deferred, Phase-4 follow-up):** τα watcher emails μπαίνουν
+    σήμερα μόνο χειροκίνητα. Auto-capture των `Cc`/`To` ενός εισερχόμενου email ως email-watchers θέλει
+    επέκταση του `ParsedInboundEmail` + του `WebklexImapMailbox` (να διαβάζουν Cc/To) — αγγίζει τον mail
+    adapter, γι' αυτό έμεινε εκτός του watchers PR. Μικρό, καθαρό follow-up.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη

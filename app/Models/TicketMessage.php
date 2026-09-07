@@ -4,6 +4,8 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
+use App\Observers\TicketMessageObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -15,6 +17,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  * without a morph; `via` records the channel; `email_message_id` threads the
  * outbound/inbound mail (Phase 3). Attachments reuse the polymorphic morph.
  */
+#[ObservedBy(TicketMessageObserver::class)]
 class TicketMessage extends Model
 {
     use BelongsToCompany;

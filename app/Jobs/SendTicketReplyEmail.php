@@ -102,6 +102,14 @@ class SendTicketReplyEmail implements ShouldQueue
             ->all();
         $inReplyTo = $chain !== [] ? $chain[array_key_last($chain)] : null;
 
+        // Cc the ticket's external watchers (Phase 4), minus the recipient and the
+        // From box themselves (never Cc a copy back to the sender/recipient).
+        $skip = [mb_strtolower($recipient), mb_strtolower($fromAddress)];
+        $cc = array_values(array_filter(
+            $ticket->watcherEmailAddresses(),
+            fn (string $address): bool => ! in_array($address, $skip, true),
+        ));
+
         $mailerFactory->for($company)->to($recipient)->send(new TicketReplyMail(
             ticket: $ticket,
             body: (string) $message->body,
@@ -110,6 +118,7 @@ class SendTicketReplyEmail implements ShouldQueue
             messageId: $messageId,
             inReplyTo: $inReplyTo,
             references: $chain,
+            ccAddresses: $cc,
         ));
     }
 }
