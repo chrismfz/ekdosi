@@ -13,6 +13,7 @@ use App\Filament\Resources\Domains\Pages\ViewDomain;
 use App\Filament\Resources\Domains\RelationManagers\ContactsRelationManager;
 use App\Filament\Resources\Domains\RelationManagers\NameserversRelationManager;
 use App\Filament\Resources\Domains\Schemas\DomainForm;
+use App\Filament\Resources\Domains\Schemas\DomainInfolist;
 use App\Filament\Resources\Domains\Tables\DomainsTable;
 use App\Models\Company;
 use App\Models\Domain;
@@ -79,6 +80,12 @@ class DomainResource extends Resource
     public static function form(Schema $schema): Schema
     {
         return DomainForm::configure($schema);
+    }
+
+    /** The View header (summary + the two clocks) — see DomainInfolist. */
+    public static function infolist(Schema $schema): Schema
+    {
+        return DomainInfolist::configure($schema);
     }
 
     public static function table(Table $table): Table
