@@ -69,6 +69,10 @@ class PricesRelationManager extends RelationManager
                 ->label('Νόμισμα')
                 ->default('EUR')
                 ->maxLength(3)
+                // Canonical on WRITE (the tld field's pattern): validator,
+                // stored row and DB unique all see the same value — a cleared
+                // field can't slip in as '' next to an 'EUR' row.
+                ->dehydrateStateUsing(fn (?string $state): string => mb_strtoupper(trim((string) $state)) ?: 'EUR')
                 ->helperText('EUR = settlement· άλλα νομίσματα display-only.'),
 
             TextInput::make('cost')

@@ -21,6 +21,9 @@ class DomainTldsTable
         $registry = app(DomainRegistrarRegistry::class);
 
         return $table
+            // The state() registrar column reads the relation per row — eager
+            // load it (the dot-notation auto-eager-load went away with state()).
+            ->modifyQueryUsing(fn ($query) => $query->with('registrarConnection:id,registrar,label'))
             ->columns([
                 TextColumn::make('tld')
                     ->label('TLD')

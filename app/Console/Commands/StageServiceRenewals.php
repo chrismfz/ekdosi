@@ -89,7 +89,7 @@ class StageServiceRenewals extends Command
         $verb = $dryRun ? 'would stage' : 'staged';
         $this->newLine();
         $this->info("Done. {$verb} {$totalStaged} renewal draft(s)"
-            .($totalSkipped > 0 ? "; skipped {$totalSkipped} (no invoice type)" : '')
+            .($totalSkipped > 0 ? "; skipped {$totalSkipped} (χωρίς τύπο παραστατικού ή νεκρό domain — see warnings)" : '')
             .($totalErrors > 0 ? "; {$totalErrors} error(s) — see log" : '')
             .'.');
 
@@ -150,6 +150,9 @@ class StageServiceRenewals extends Command
         // deleted — money-wrong direction: billing a name the tenant no longer
         // holds). One query, keyed by contract. docs/domains/README.md §6.
         $domainsByContract = Domain::query()
+            // withTrashed: a soft-deleted domain's still-Active contract must
+            // ALSO be blocked — a trashed name is not billable either.
+            ->withTrashed()
             ->where('company_id', $tenant->id)
             ->whereIn('service_contract_id', $due->pluck('id'))
             ->get()
@@ -159,9 +162,10 @@ class StageServiceRenewals extends Command
             $label = "#{$contract->id} {$contract->customer?->name} — ".($contract->description ?: 'υπηρεσία');
 
             $domain = $domainsByContract->get($contract->id);
-            if ($domain !== null && ! $domain->status->isRenewable()) {
+            if ($domain !== null && ($domain->trashed() || ! $domain->status->isRenewable())) {
                 $skipped++;
-                $this->warn("  · {$label}: το domain {$domain->fqdn} είναι «{$domain->status->getLabel()}» — δεν χρεώνουμε, skipped.");
+                $state = $domain->trashed() ? 'διαγραμμένο' : $domain->status->getLabel();
+                $this->warn("  · {$label}: το domain {$domain->fqdn} είναι «{$state}» — δεν χρεώνουμε, skipped.");
                 Log::warning('services:stage-renewals skipped a contract — domain not renewable', [
                     'company_id' => $tenant->id,
                     'slug' => $tenant->slug,

@@ -102,9 +102,12 @@ class DomainSyncService
         // Openprovider keeps reporting ACT past the expiry date — derive the
         // documented active→expired transition from the REGISTRAR expiry so a
         // lapsed domain never sits in the «Ενεργά» tab (docs §6.5; the full
-        // grace/redemption windows land with A3).
+        // grace/redemption windows land with A3). Also covers an UNMAPPED
+        // registrar status on a locally-Active row — the lapse must still land.
         $effectiveExpiry = $result->expiresAt ?? $domain->expires_at?->toDateString();
-        if ($newStatus === DomainStatus::Active
+        $wouldBeActive = $newStatus === DomainStatus::Active
+            || ($newStatus === null && $domain->status === DomainStatus::Active);
+        if ($wouldBeActive
             && $effectiveExpiry !== null
             && Carbon::parse($effectiveExpiry)->lt(Carbon::today())) {
             $newStatus = DomainStatus::Expired;

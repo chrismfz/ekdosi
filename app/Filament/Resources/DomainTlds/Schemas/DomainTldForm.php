@@ -26,11 +26,13 @@ class DomainTldForm
                         ->required()
                         ->maxLength(30)
                         ->placeholder('gr, com, com.gr, ελ …')
-                        // In-use TLD strings are frozen: renaming would desync
-                        // every attached domain's stored tld/fqdn and silently
-                        // re-route/re-price them (the EditDomain discipline).
-                        ->disabled(fn (?DomainTld $record): bool => $record !== null && $record->domains()->exists())
-                        ->helperText(fn (?DomainTld $record): string => $record !== null && $record->domains()->exists()
+                        // In-use TLD strings are frozen (incl. trashed tombstones
+                        // — the fqdn-uniqueness check depends on them): renaming
+                        // would desync every attached domain's stored tld/fqdn.
+                        // UX only — the SERVER guard lives in EditDomainTld
+                        // (disabled fields still dehydrate in Filament).
+                        ->disabled(fn (?DomainTld $record): bool => $record !== null && $record->domains()->withTrashed()->exists())
+                        ->helperText(fn (?DomainTld $record): string => $record !== null && $record->domains()->withTrashed()->exists()
                             ? 'Κλειδωμένο — υπάρχουν domains σε αυτό το TLD. Για άλλο TLD, δημιουργήστε νέα εγγραφή.'
                             : 'Χωρίς την αρχική τελεία.')
                         // Ο κανόνας μοναδικότητας είναι per-tenant στη ΒΔ

@@ -74,7 +74,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (`Domain::effectiveRegistrarConnection/EXPIRING_SOON_DAYS`, `connectionLabel`) ώστε λίστα,
   View και sync να μη διαφωνούν ποτέ· «λήγει σήμερα» ≠ «έληξε» (strict-before-today).
 
+### Fixed
+- **Domains — pre-A2c review σκληρύνσεις (2 γύροι).** «Νεκρό» domain (transferred_away/ακυρωμένο/
+  διαγραμμένο — και soft-deleted) δεν χρεώνει ΠΟΤΕ: το `services:stage-renewals` παρακάμπτει το
+  συμβόλαιό του με warning, και η «Μεταφορά ιδιοκτησίας» το αρνείται (ο ίδιος guard με την ανάθεση,
+  σε όλη τη ζωή του domain). Το TLD string κλειδώνει server-side όταν έχει domains (και tombstones).
+  Ληγμένο domain γίνεται «Ληγμένο» από το sync ακόμα κι όταν ο registrar αναφέρει ACT ή άγνωστο
+  status. `domains:sync --limit` μετρά syncable απόπειρες. Friendly validation στα διπλά price rows
+  + κανονικοποίηση νομίσματος στο write.
+
 ### Security
+- **Το Openprovider bearer token αποθηκεύεται ΚΡΥΠΤΟΓΡΑΦΗΜΕΝΟ στην cache** (με DB cache driver
+  ένα plaintext token θα κατέληγε σε κάθε dump του πίνακα `cache`), με αυτόματο re-login σε
+  stale/ξένο ciphertext.
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy
   C++Builder `.dfm`/`.cfg` files carried hardcoded MySQL/SMTP/CS-Cart passwords + an `EncryptedPassword`
   blob; kept in an offline backup), and scrubbed the Firebird `EKDOSI` password literal from every
