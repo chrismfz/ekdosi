@@ -8,6 +8,7 @@ use App\Filament\Support\PickerOptions;
 use App\Models\Customer;
 use App\Models\Domain;
 use App\Models\PaymentMethod;
+use App\Services\Domains\DomainRegistrarRegistry;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\EditAction;
@@ -33,6 +34,8 @@ class DomainsTable
                 'customer:id,name',
                 'contacts:id,domain_id,type,name,email',
                 'registrarConnection:id,registrar,label',
+                'tldRule:id,tld,registrar_connection_id',
+                'tldRule.registrarConnection:id,registrar,label',
             ]))
             ->columns([
                 TextColumn::make('fqdn')
@@ -59,6 +62,22 @@ class DomainsTable
                 TextColumn::make('status')
                     ->label('Κατάσταση')
                     ->badge(),
+
+                TextColumn::make('registrar')
+                    ->label('Registrar')
+                    ->badge()
+                    ->color('gray')
+                    // Routing semantics (§2): the domain's own connection wins,
+                    // else the TLD's default, else the API-less manual.
+                    ->state(function (Domain $record): string {
+                        $registry = app(DomainRegistrarRegistry::class);
+                        $conn = $record->registrarConnection ?? $record->tldRule?->registrarConnection;
+
+                        return $conn === null
+                            ? $registry->label('manual')
+                            : ($conn->label !== null && $conn->label !== '' ? $conn->label : $registry->label((string) $conn->registrar));
+                    })
+                    ->toggleable(),
 
                 TextColumn::make('expires_at')
                     ->label('Λήξη')
