@@ -37,7 +37,12 @@ class DomainRegistrarConnectionsTable
                     ->state(fn (DomainRegistrarConnection $record): string => $record->label !== null && $record->label !== ''
                         ? $record->label
                         : $registry->label((string) $record->registrar))
-                    ->searchable(),
+                    // Search must find what the column SHOWS: label OR (for a
+                    // blank label) the registrar key its fallback name comes from.
+                    ->searchable(query: fn ($query, string $search) => $query->where(
+                        fn ($q) => $q->where('label', 'like', "%{$search}%")
+                            ->orWhere('registrar', 'like', "%{$search}%")
+                    )),
 
                 TextColumn::make('mode')
                     ->label('Περιβάλλον')
@@ -69,6 +74,13 @@ class DomainRegistrarConnectionsTable
                             // The typed «no API / no creds» refusal real adapters
                             // throw — surface it, never a Livewire 500.
                             Notification::make()->title('Η σύνδεση δεν είναι ρυθμισμένη.')->body($e->getMessage())->danger()->send();
+
+                            return;
+                        } catch (\Throwable $e) {
+                            // ping() SHOULD return false on transport failure (the
+                            // contract), but a diagnostics button must never 500 on
+                            // an adapter that lets a timeout escape.
+                            Notification::make()->title('Ο έλεγχος απέτυχε.')->body($e->getMessage())->danger()->send();
 
                             return;
                         }

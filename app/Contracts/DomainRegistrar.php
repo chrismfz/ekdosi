@@ -27,7 +27,11 @@ interface DomainRegistrar
     /** What this adapter can do — the UI/import adapt on these flags (README §2). */
     public function capabilities(): DomainRegistrarCapabilities;
 
-    /** Smoke-test credentials + reachability (the connection «Έλεγχος σύνδεσης» action). */
+    /**
+     * Smoke-test credentials + reachability (the connection «Έλεγχος σύνδεσης»
+     * action). CONTRACT: return false on unreachable/bad-creds/transport failure
+     * — never throw. Diagnostics must stay safe to click.
+     */
     public function ping(DomainRegistrarCredentials $credentials): bool;
 
     /**

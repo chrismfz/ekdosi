@@ -243,6 +243,21 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συγχρονίζονται + επαναελέγχονται on-blur. Επίσης το `company_id` γράφεται ρητά στη δημιουργία (explicit tenancy).
 
 ### Changed
+- **Domains design doc** (`docs/domains/README.md`, πυλώνας A): αδέσποτα (un-assigned) domains ως
+  νόμιμη κατάσταση (`customer_id` nullable, εκτός billing μέχρι ανάθεση) + action «Ανάθεση σε
+  πελάτη», στήλη `transferred_at`, tab «Domains» στην καρτέλα πελάτη, import που δεν μπλοκάρει σε
+  unmatched πελάτες. **Γείωση σε live WHMCS δεδομένα** (§7.1): επιβεβαιωμένο TLD→registrar routing,
+  πραγματικά margins/τιμές, Automatic Registration ήδη OFF· registrar key `none` → `manual`, status
+  `transferred_away`, non-goals premium domains/addon pricing/slabs. **Registrar-first bootstrap**
+  (απόφαση ιδιοκτήτη): λίστα+contacts από τον registrar → manual assign· WHMCS = προαιρετικό hint.
+- **grEPP reference material στο repo** (`docs/domains/grepp/`): οδηγός υλοποίησης EPP για το
+  .gr/.ελ Μητρώο (transport = XML-over-HTTPS με JSESSIONID, ΟΧΙ RFC 5734/TCP-700· extdomain-1.3·
+  χωρίς poll → polling jobs· 1001+protocol· DACoR· grRLS· account balance monitoring) + τα επίσημα
+  v4.3 XML examples/XSDs, reference EppClient.java/PDF και HARICA TLS bundle (public — ελεγμένα,
+  κανένα credential). Το §4.4 του design ξαναγράφτηκε πάνω σε αυτά· endpoints πλέον γνωστά.
+- **Openprovider org χαρτογράφηση + απόφαση transport** (Domains design §4.3/Πηγές): δικός μας thin
+  HTTP client αντί για το επίσημο `rest-client-php` (beta, χωρίς δηλωμένη άδεια — reference only)·
+  WHMCS module = semantics reference μόνο (επίσης χωρίς ορατή άδεια, όχι copy κώδικα).
 - **Μενού: υπο-ομαδοποίηση του `SettingsCluster` σε 4 ενότητες (polish).** Τα config items του cluster
   χωρίστηκαν σε 4 collapsible sub-sections μέσα στο settings area — **«Τιμολόγηση & πληρωμές»**, **«Είδη &
   αποστολή»**, **«Εταιρεία»**, **«Λειτουργία»** — αντί για μία μακριά λίστα, μέσω `navigationGroup` στα
@@ -1479,26 +1494,6 @@ from `[Unreleased]`; `--major` explicit for milestones).
   **Soft** requirements only warn and name the one feature that won't work — `pdo_firebird` → Firebird
   ETL, `gd` → the printed QR (the invoice still issues without it), `curl` → HTTP has a stream fallback,
   `zip` → backups, `bcmath`, `proc_open`, the upload/memory ini ceilings for imports, HTTPS.
-
-### Changed
-- **Domains design doc** (`docs/domains/README.md`, πυλώνας A — still pre-build): αδέσποτα
-  (un-assigned) domains ως νόμιμη κατάσταση (`customer_id` nullable, εκτός billing μέχρι ανάθεση)
-  + action «Ανάθεση σε πελάτη», νέα στήλη `transferred_at`, tab «Domains» στην καρτέλα πελάτη
-  (`DomainsRelationManager`), import που δεν μπλοκάρει σε unmatched πελάτες.
-- **Domains design doc — γείωση σε live WHMCS δεδομένα** (§7.1): επιβεβαιωμένο TLD→registrar
-  routing (6×.gr → grEPP, ~29 → Openprovider), πραγματικά margins/τιμές (.gr 2ετίες 19–95€,
-  transfer 0), Automatic Registration ήδη OFF (operator-gated = υπάρχουσα πρακτική). Registrar
-  key `none` → `manual` (Null adapter ως offline registrar, A1-first), status `transferred_away`,
-  non-goals premium domains/addon pricing/slabs, νέο verify-item για DNS mgmt/email-fwd χρήση.
-- **grEPP reference material στο repo** (`docs/domains/grepp/`): οδηγός υλοποίησης EPP για το
-  .gr/.ελ Μητρώο (transport = XML-over-HTTPS με JSESSIONID, ΟΧΙ RFC 5734/TCP-700· extdomain-1.3·
-  χωρίς poll → polling jobs· 1001+protocol· DACoR· grRLS· account balance monitoring) + τα επίσημα
-  v4.3 XML examples/XSDs, reference EppClient.java/PDF και HARICA TLS bundle (public — ελεγμένα,
-  κανένα credential). Το §4.4 του design ξαναγράφτηκε πάνω σε αυτά· endpoints πλέον γνωστά.
-  DNS mgmt/email-fwd: απόφαση ιδιοκτήτη — εμπορικές υπηρεσίες, αγνοούνται v1 (deferred ισχύει).
-- **Openprovider org χαρτογράφηση + απόφαση transport** (Domains design §4.3/Πηγές): δικός μας thin
-  HTTP client αντί για το επίσημο `rest-client-php` (beta, χωρίς δηλωμένη άδεια — reference only)·
-  WHMCS module = semantics reference μόνο (επίσης χωρίς ορατή άδεια, όχι copy κώδικα).
 
 ## [1.12.1] - 2026-07-13
 
