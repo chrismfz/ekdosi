@@ -3,12 +3,14 @@
 namespace Tests\Unit;
 
 use App\Contracts\DomainRegistrar;
+use App\Models\Domain;
 use App\Services\Domains\DomainRegistrarNotConfigured;
 use App\Services\Domains\DomainRegistrarRegistry;
 use App\Services\Domains\NullDomainRegistrar;
 use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
+use App\Support\Domains\DomainSyncResult;
 use Tests\TestCase;
 
 /**
@@ -119,5 +121,10 @@ class FakeDomainRegistrar implements DomainRegistrar
     public function checkAvailability(string $fqdn, DomainRegistrarCredentials $credentials): AvailabilityResult
     {
         return new AvailabilityResult(fqdn: $fqdn, available: true);
+    }
+
+    public function syncDomain(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        return new DomainSyncResult(expiresAt: '2027-01-01');
     }
 }
