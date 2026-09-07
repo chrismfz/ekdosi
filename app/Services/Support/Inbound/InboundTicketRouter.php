@@ -10,6 +10,7 @@ use App\Models\Ticket;
 use App\Models\TicketBlockedSender;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
+use App\Models\TicketWatcher;
 use App\Support\TicketReference;
 use EmailReplyParser\EmailReplyParser;
 use Illuminate\Database\Eloquent\Builder;
@@ -110,11 +111,12 @@ class InboundTicketRouter
                 'body_original' => $email->body,
                 'email_message_id' => $messageId,
             ]);
+            $this->captureCcWatchers($existing, $email, $department);
 
             return $existing;
         }
 
-        return $this->openTicket->handle([
+        $ticket = $this->openTicket->handle([
             'company_id' => $companyId,
             'customer_id' => $customer?->id,
             'ticket_department_id' => $department->id,
@@ -130,6 +132,40 @@ class InboundTicketRouter
             'body_original' => $email->body,
             'email_message_id' => $messageId,
         ]);
+        $this->captureCcWatchers($ticket, $email, $department);
+
+        return $ticket;
+    }
+
+    /**
+     * Record the email's OTHER recipients (To + Cc) as email watchers/CC on the
+     * ticket (Πυλώνας E, Phase 4) — the parties the sender looped in, so our
+     * replies copy them too. Excludes the sender, the department mailbox, the
+     * ticket owner (customer/requester) and the company's own From address; drops
+     * anything not a valid email. Idempotent (firstOrCreate), so re-captures on a
+     * later reply never duplicate.
+     */
+    private function captureCcWatchers(Ticket $ticket, ParsedInboundEmail $email, TicketDepartment $department): void
+    {
+        $exclude = array_filter(array_map(
+            fn (?string $v): string => mb_strtolower(trim((string) $v)),
+            [
+                $email->fromEmail,
+                $department->email,
+                $ticket->requester_email,
+                $ticket->customer?->email,
+                $ticket->company?->mail_from_address,
+            ],
+        ));
+
+        foreach (array_merge($email->to, $email->cc) as $address) {
+            $address = mb_strtolower(trim($address));
+            if ($address === '' || in_array($address, $exclude, true)
+                || filter_var($address, FILTER_VALIDATE_EMAIL) === false) {
+                continue;
+            }
+            $ticket->addEmailWatcher($address, TicketWatcher::SOURCE_CC);
+        }
     }
 
     /** The sender is the ticket's customer, or (for a guest ticket) its requester_email. */

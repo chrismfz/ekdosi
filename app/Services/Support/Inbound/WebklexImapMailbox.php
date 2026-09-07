@@ -132,7 +132,29 @@ class WebklexImapMailbox implements ImapMailbox
             // so the router's Message-ID idempotency still collapses a redelivery.
             messageId: $mid !== '' ? $mid : $this->syntheticId($fromEmail, $subject, (string) $message->getDate(), $body),
             references: array_merge($this->ids($message->getInReplyTo()), $this->ids($message->getReferences())),
+            to: $this->addresses($message->getTo()),
+            cc: $this->addresses($message->getCc()),
         );
+    }
+
+    /**
+     * A webklex address header (To/Cc) → a flat list of email addresses.
+     *
+     * @return list<string>
+     */
+    private function addresses(mixed $attribute): array
+    {
+        $items = is_object($attribute) && method_exists($attribute, 'all') ? $attribute->all() : [];
+
+        $out = [];
+        foreach ($items as $address) {
+            $mail = trim((string) ($address->mail ?? ''));
+            if ($mail !== '') {
+                $out[] = $mail;
+            }
+        }
+
+        return $out;
     }
 
     private function syntheticId(string $from, string $subject, string $date, string $body): string

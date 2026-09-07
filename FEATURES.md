@@ -868,9 +868,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Αποκλεισμός αποστολέα / spam (Phase 4, SHIPPED):** per-tenant blocklist (`ticket_blocked_senders`)· ο
   inbound router ρίχνει email από αποκλεισμένη διεύθυνση **ή domain** πριν ανοίξει ticket. Resource
   «Αποκλεισμένοι αποστολείς» (Ρυθμίσεις → Υποστήριξη) + ένα κλικ «Αποκλεισμός αποστολέα» στο ticket.
+- **Inbound-CC → watchers/CC (Phase 4, SHIPPED):** τα `To`/`Cc` ενός εισερχόμενου email γίνονται email
+  watchers (`source=cc`), ώστε οι απαντήσεις να κοινοποιούν και τους «άσχετους» παραλήπτες (developer/agency…)·
+  εξαίρεση αποστολέα/τμήματος/owner, idempotent.
 - **Επόμενα:** Phase 4 υπόλοιπα (ticket merge)· follow-ups: email-invite στο κλείσιμο + στήλη/φίλτρο
   αξιολόγησης, attachments (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle,
-  inbound-CC → watcher auto-capture.
+  reply-threading για watcher/CC αποστολείς + visible-CC (αντί Bcc) για cc-sourced.
 
 ---
 

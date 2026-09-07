@@ -13,6 +13,9 @@ final class ParsedInboundEmail
     /**
      * @param  list<string>  $references  Message-IDs from the References + In-Reply-To
      *                                    headers (for threading a reply to a message we sent)
+     * @param  list<string>  $to  To-header addresses (incl. the department mailbox)
+     * @param  list<string>  $cc  Cc-header addresses — the other parties the sender
+     *                            looped in; captured as watchers/CC by the router
      */
     public function __construct(
         public readonly string $fromEmail,
@@ -21,5 +24,7 @@ final class ParsedInboundEmail
         public readonly string $body,
         public readonly ?string $messageId = null,
         public readonly array $references = [],
+        public readonly array $to = [],
+        public readonly array $cc = [],
     ) {}
 }

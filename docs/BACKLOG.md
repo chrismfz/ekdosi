@@ -687,10 +687,12 @@ data model + phase gates: **`PLAN.md`**.
     **εκτός pivot** (π.χ. super_admin που απαντά cross-tenant χωρίς membership row) δεν auto-watch-άρεται —
     μπορεί να κάνει watch χειροκίνητα, και το bell ούτως ή άλλως φτάνει στους agents του τμήματος. Προτιμήθηκε
     το tenant-scope invariant από το βολικό (global `User::find`).
-  - **Inbound-CC → watcher auto-capture (deferred, Phase-4 follow-up):** τα watcher emails μπαίνουν
-    σήμερα μόνο χειροκίνητα. Auto-capture των `Cc`/`To` ενός εισερχόμενου email ως email-watchers θέλει
-    επέκταση του `ParsedInboundEmail` + του `WebklexImapMailbox` (να διαβάζουν Cc/To) — αγγίζει τον mail
-    adapter, γι' αυτό έμεινε εκτός του watchers PR. Μικρό, καθαρό follow-up.
+  - **Inbound-CC → watcher auto-capture (SHIPPED):** τα `To`/`Cc` ενός εισερχόμενου email γίνονται email
+    watchers (`source=cc`, εξαίρεση αποστολέα/τμήματος/owner/From, idempotent). **Remaining refinements
+    (deferred):** (α) **reply-threading** για watcher/CC αποστολείς — σήμερα μια απάντηση από CC'd developer
+    δεν κάνει `senderOwnsTicket` → ανοίγει νέο ticket· επέκταση του guard να δέχεται και watcher emails του
+    referenced ticket (προσοχή injection). (β) **visible CC αντί Bcc** για cc-sourced watchers (ήταν ήδη
+    ανοιχτά στο αρχικό thread), ενώ manual/internal μένουν Bcc.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
