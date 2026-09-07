@@ -6,6 +6,7 @@ use App\Actions\Support\MergeTickets;
 use App\Actions\Support\PostTicketMessage;
 use App\Enums\TicketStatus;
 use App\Filament\Resources\Tickets\TicketResource;
+use App\Jobs\SendTicketFeedbackInvite;
 use App\Jobs\SendTicketReplyEmail;
 use App\Models\CannedReply;
 use App\Models\Ticket;
@@ -138,6 +139,9 @@ class ViewTicket extends ViewRecord
                 ->requiresConfirmation()
                 ->action(function (Ticket $record): void {
                     $record->update(['status' => TicketStatus::Closed, 'closed_at' => now()]);
+                    // Feedback-on-close: email a signed rating link (the job re-checks
+                    // ratability + recipient, so this is safe to always dispatch).
+                    SendTicketFeedbackInvite::dispatch($record->id);
                     Notification::make()->title('Το αίτημα έκλεισε')->success()->send();
                 }),
 

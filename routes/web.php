@@ -11,6 +11,7 @@ use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\Portal\TicketController as PortalTicketController;
 use App\Http\Controllers\PublicInvoicePdfController;
+use App\Http\Controllers\TicketFeedbackController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Support\Facades\Route;
 
@@ -115,6 +116,13 @@ foreach ([
 Route::get('/invoice/{invoice}/official-pdf', PublicInvoicePdfController::class)
     ->middleware('signed')
     ->name('public.invoice.pdf');
+
+// Support feedback — SIGNED, NO login (the emailed link is the authorization). The
+// customer rates a closed ticket of a feedback-enabled department. See controller.
+Route::get('/support/feedback/{ticket}', [TicketFeedbackController::class, 'show'])
+    ->where('ticket', '[0-9]+')->middleware('signed')->name('support.feedback.show');
+Route::post('/support/feedback/{ticket}', [TicketFeedbackController::class, 'store'])
+    ->where('ticket', '[0-9]+')->middleware('signed')->name('support.feedback.store');
 
 // Operator backup download — AUTH + SIGNED (short-lived, generated only for
 // users who may view companies). Streams the bundle from disk so a large `full`

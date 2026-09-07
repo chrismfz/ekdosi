@@ -27,6 +27,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — email-invite αξιολόγησης στο κλείσιμο (Πυλώνας E, Phase 4 follow-up).**
+  Όταν κλείνει ένα αίτημα τμήματος με `feedback_on_close`, ο πελάτης παίρνει email με **signed link** σε
+  δημόσια σελίδα αξιολόγησης (χωρίς login — η υπογραφή είναι το authorization), ώστε να αξιολογεί κι όποιος
+  δεν ξαναμπαίνει στην πύλη. `SendTicketFeedbackInvite` job (dispatch από το «Κλείσιμο», re-check ratability/
+  recipient, best-effort), `TicketFeedbackController` (signed `GET/POST /support/feedback/{ticket}`, gated σε
+  `canBeRated`), `TicketFeedbackMail`. Το rating γράφεται μέσω του ίδιου `recordRating`.
 - **Σύστημα υποστήριξης (tickets) — συγχώνευση αιτημάτων / merge (Πυλώνας E, Phase 4).** Ένα διπλότυπο
   αίτημα ενσωματώνεται σε ένα επιβιωμένο: τα μηνύματα, watchers, tags και ticket-level attachments
   μεταφέρονται στο target, το source κλείνει με `merged_into_id` (τερματικό — δεν ξανα-ανοίγει), system

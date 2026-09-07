@@ -130,7 +130,7 @@ departments (not offered) and `clients_only` (portal user is always a known cust
 
 ## 7. Menu / IA placement (confirms and uses what we just built)
 - **Support Cluster «Υποστήριξη»** = one new **top** entry, **hidden unless `support_enabled`**
-  (pillar-born-as-cluster, per `docs/menu-ia.md`). Members: Tickets (+ future KB/Announcements).
+  (pillar-born-as-cluster, per `docs/menu-ia.md`). Members: Tickets (+ maybe future Announcements).
 - **Config** → the **Settings Cluster**, new sub-section **«Υποστήριξη»** (Τμήματα, Έτοιμες
   απαντήσεις) — exactly the sub-grouping pattern shipped in #494.
 This mirrors WHMCS (operational Support on the top menu, its config under Configuration/Setup).
@@ -164,7 +164,8 @@ Laravel 13 / PHP 8.4 compatibility in the spike). No provider SDKs, no webhooks.
   router drops a blocked address/domain before opening a ticket; resource + one-click block on a ticket).
   + inbound-CC capture + **ticket merge = SHIPPED** (same-owner only; source→Closed+merged_into_id; portal
   hides the source and redirects to the survivor). Still open: email-invite on close, reply-threading for
-  watcher/CC senders. **KB + Announcements** = a **separate** later slice, not v1. **Πυλώνας E core = done.**
+  watcher/CC senders. **In-app KB DROPPED** — BookStack (external) already covers the knowledge base, so
+  ekdosi won't build one. **Announcements** = a maybe-later slice, low priority, not v1. **Πυλώνας E core = done.**
 
 ## 10. Decisions — CONFIRMED (2026-09-06)
 1. **Scope order** — Phase 1+2 (operator + portal, manual tickets) first, then IMAP in Phase 3. ✅

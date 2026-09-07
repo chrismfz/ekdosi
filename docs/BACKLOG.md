@@ -660,7 +660,9 @@ data model + phase gates: **`PLAN.md`**.
   - **Phase 4 SHIPPED:** operator **bell** + **watchers/CC**, **feedback-on-close** (rating),
     **spam/block-sender**, **inbound-CC capture**, **ticket merge** (same-owner· source→Closed+`merged_into_id`·
     πύλη hide+redirect). **Πυλώνας E core = DONE.** **SLA timers σκόπιμα εκτός** (δικό του slice)· ανοιχτά μόνο
-    follow-ups (email-invite στο κλείσιμο, reply-threading για watcher/CC, KB/Announcements = ξεχωριστό slice).
+    follow-ups (email-invite στο κλείσιμο, reply-threading για watcher/CC). **In-app KB: DROPPED** — το
+    **BookStack** (external) καλύπτει ήδη το knowledge base, δεν χτίζουμε δικό μας. **Announcements:** maybe-later,
+    low-prio (όχι τώρα).
     **Deploy σημείωση:** νέο resource «Αποκλεισμένοι αποστολείς» → `shield:generate`
     + re-provision μετά το deploy (όπως κάθε νέο resource perm).
   - **P2 (review Phase-4 spam, deferred):** ένα block ρίχνει ΟΛΑ τα εισερχόμενα του αποστολέα — και reply
