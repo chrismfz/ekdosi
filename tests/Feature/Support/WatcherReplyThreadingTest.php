@@ -74,6 +74,30 @@ class WatcherReplyThreadingTest extends TestCase
         $this->assertSame($ticket->id, $same->id, 'the watcher reply threaded onto the same ticket');
         $this->assertSame($before + 1, $ticket->messages()->count(), 'the reply was appended');
         $this->assertSame(1, Ticket::withoutGlobalScope(CompanyScope::class)->count(), 'no new ticket opened');
+
+        // The real sender is noted in the body (no message-level sender column), so
+        // the developer's words are not mis-attributed to the customer.
+        $this->assertStringContainsString('από dev@agency.tld', (string) $ticket->messages()->get()->last()->body);
+    }
+
+    public function test_a_watcher_customer_reply_does_not_subscribe_third_parties_to_the_owners_ticket(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company);
+        $ticket = $this->ticketWithWatcher($company, $dept); // owner client@acme.gr, watcher dev@agency.tld
+
+        // dev is ALSO a registered customer here, and replies CC'ing a new third party.
+        Customer::create(['company_id' => $company->id, 'name' => 'Dev', 'email' => 'dev@agency.tld']);
+
+        $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: 'dev@agency.tld', fromName: 'Dev', subject: 'Re: ['.$ticket->reference.'] Βοήθεια',
+            body: 'reply', messageId: '<d2@x>',
+            to: ['support@myip.gr'], cc: ['newthird@x.tld'],
+        ));
+
+        // It threaded (dev is a watcher) but must NOT add newthird to the OWNER's ticket.
+        $this->assertNotContains('newthird@x.tld', $ticket->fresh()->watcherEmailAddresses(),
+            'a non-owner reply must not subscribe third parties to the ticket');
     }
 
     public function test_a_stranger_with_the_token_does_not_thread(): void

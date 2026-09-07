@@ -102,12 +102,19 @@ class InboundTicketRouter
         $cleanBody = $this->cleanBody($email->body);
 
         if ($existing !== null) {
+            // A reply from a watcher/CC (not the owner) is threaded, but ticket_messages
+            // has no sender column — so prefix the real sender, else the developer's
+            // words would read as the customer's own in the panel + portal.
+            $body = $this->senderIsOwner($existing, $customer, $email->fromEmail)
+                ? $cleanBody
+                : '(από '.$email->fromEmail.")\n\n".$cleanBody;
+
             $this->postMessage->handle($existing, [
                 'author_role' => TicketMessage::ROLE_CUSTOMER,
                 'author_id' => $customer?->id,
                 'is_internal_note' => false,
                 'via' => TicketMessage::VIA_EMAIL,
-                'body' => $cleanBody,
+                'body' => $body,
                 'body_original' => $email->body,
                 'email_message_id' => $messageId,
             ]);
@@ -151,8 +158,11 @@ class InboundTicketRouter
      */
     private function captureCcWatchers(Ticket $ticket, ParsedInboundEmail $email, TicketDepartment $department, ?Customer $customer): void
     {
-        if ($customer === null) {
-            return; // never auto-subscribe recipients on behalf of an unknown sender
+        // Only the ticket's OWNER may add recipients — never an unknown sender, and
+        // never a watcher-customer replying (they must not subscribe third parties to
+        // someone else's ticket).
+        if ($customer === null || (int) $ticket->customer_id !== (int) $customer->id) {
+            return;
         }
 
         $companyId = (int) $ticket->company_id;
@@ -182,26 +192,36 @@ class InboundTicketRouter
     }
 
     /** The sender is the ticket's customer, or (for a guest ticket) its requester_email. */
-    private function senderOwnsTicket(Ticket $ticket, ?Customer $customer, string $fromEmail): bool
+    /** The sender IS the ticket's owner — its customer, or (for a guest) its requester_email. */
+    private function senderIsOwner(Ticket $ticket, ?Customer $customer, string $fromEmail): bool
     {
         if ($customer !== null && (int) $ticket->customer_id === (int) $customer->id) {
             return true;
         }
 
         $from = mb_strtolower(trim($fromEmail));
-        if ($from === '') {
-            return false;
-        }
 
-        if (mb_strtolower(trim((string) $ticket->requester_email)) === $from) {
+        return $from !== '' && mb_strtolower(trim((string) $ticket->requester_email)) === $from;
+    }
+
+    /**
+     * May this sender thread onto the ticket? The owner, OR a watcher/CC of THIS
+     * ticket (a legitimate participant added by the customer's CC or an operator),
+     * so their reply threads here rather than opening a new ticket. The token/
+     * References alone never suffice — the sender must be the owner or on the watcher
+     * list. NOTE: like the whole inbound path, this trusts the From header (no SPF/
+     * DKIM); broadening the trusted set from the owner to the customer-controllable
+     * watcher list is a conscious tradeoff (see docs/BACKLOG.md).
+     */
+    private function senderOwnsTicket(Ticket $ticket, ?Customer $customer, string $fromEmail): bool
+    {
+        if ($this->senderIsOwner($ticket, $customer, $fromEmail)) {
             return true;
         }
 
-        // A watcher/CC of THIS ticket is a legitimate participant (added by the
-        // customer's CC or by an operator), so a reply from them threads here rather
-        // than opening a new ticket. The token/References alone never suffice — the
-        // sender must actually be on the watcher list, so a stranger can't inject.
-        return in_array($from, $ticket->watcherEmailAddresses(), true);
+        $from = mb_strtolower(trim($fromEmail));
+
+        return $from !== '' && in_array($from, $ticket->watcherEmailAddresses(), true);
     }
 
     private function matchCustomer(int $companyId, string $fromEmail): ?Customer

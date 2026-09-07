@@ -698,7 +698,12 @@ data model + phase gates: **`PLAN.md`**.
   - **Inbound-CC → watcher auto-capture (SHIPPED):** τα `To`/`Cc` ενός εισερχόμενου email γίνονται email
     watchers (`source=cc`, εξαίρεση αποστολέα/τμήματος/owner/From, idempotent). **(α) reply-threading για
     watcher/CC αποστολείς = SHIPPED** — ο `senderOwnsTicket` δέχεται πλέον και τους email-watchers του ticket
-    (anti-injection guard μένει: μόνο πραγματικοί watchers, όχι όποιος έχει το token). **Remaining refinements
+    (anti-injection guard μένει: μόνο πραγματικοί watchers, όχι όποιος έχει το token). **Conscious tradeoffs:**
+    (i) το ticket_messages δεν έχει sender column → η απάντηση watcher μπαίνει ROLE_CUSTOMER με prefix «(από
+    email)» ώστε να μη μπερδεύεται με τον πελάτη· καθαρότερο θα ήταν sender/participant identity στο μήνυμα.
+    (ii) το inbound εμπιστεύεται το From (χωρίς SPF/DKIM), οπότε το threading trust επεκτείνεται από τον owner
+    στη (customer-controllable) watcher list — ίδια κλάση ρίσκου με το υπάρχον requester==From. (iii) απάντηση
+    watcher σε κλειστό ticket το ξ-ανοίγει (WHMCS-consistent). **Remaining refinements
     (deferred):** (β) **visible CC αντί Bcc** για cc-sourced watchers (ήταν ήδη
     ανοιχτά στο αρχικό thread), ενώ manual/internal μένουν Bcc. (γ) **perf:** το CC-capture καλεί
     `isBlocked` ένα query ανά recipient — για μεγάλη CC-λίστα φόρτωσε το blocklist μία φορά in-memory
