@@ -9,6 +9,7 @@ use Throwable;
 use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\ClientManager;
 use Webklex\PHPIMAP\Message;
+use Webklex\PHPIMAP\Support\MessageCollection;
 
 /**
  * The real IMAP transport (Πυλώνας E, Phase 3b) — the isolated, network-touching
@@ -82,38 +83,28 @@ class WebklexImapMailbox implements ImapMailbox
                 return $summary;
             }
 
-            // Fetch HEADERS ONLY (fetchBody(false)); each body is downloaded one at a
-            // time in the loop, so a burst of large mails can't materialise every body
-            // at once and OOM the poller. leaveUnread(): WE mark \Seen, never the fetch.
-            $messages = $folder->query()->whereUnseen()->leaveUnread()->fetchBody(false)
-                ->limit(self::MAX_PER_POLL)->get();
-            $summary->fetched = $messages->count();
-
-            foreach ($messages as $message) {
-                try {
-                    // Size guard BEFORE downloading the body (RFC822.SIZE is a cheap,
-                    // header-level IMAP command). Over the cap — OR a size probe we
-                    // could not read (null) — routes a HEADER-ONLY stub (no body
-                    // download, so no OOM) so the sender's request isn't silently lost
-                    // and a giant we couldn't measure is never parsed on faith; the
-                    // operator sees the stub and follows up. Under the cap → download +
-                    // parse this ONE message. \Seen is set only after the handler
-                    // confirms routing, so nothing wedges the mailbox.
-                    $size = $this->messageSize($message);
-                    if ($size === null || self::isMessageTooLarge($size)) {
-                        $parsed = $this->parseHeadersOnly($message, $size ?? 0);
-                    } else {
-                        $message->parseBody(); // download + parse THIS message only (bounded memory)
-                        $parsed = $this->parse($message);
-                    }
-
-                    if ($handle($parsed) === true) {
-                        $message->setFlag('Seen');
-                        $summary->processed++;
-                    }
-                } catch (Throwable $e) {
-                    $summary->addError('Μήνυμα: '.$e->getMessage());
-                }
+            // Walk the UNSEEN messages ONE AT A TIME (chunk size 1, headers only): each
+            // chunk builds a fresh single-message collection and the previous one is
+            // released before the next, so webklex never holds more than one message's
+            // decoded body/attachments/raw structure at a time — a burst of large mails
+            // can't accumulate and OOM the poller. leaveUnread(): WE mark \Seen, never
+            // the fetch. Stop after MAX_PER_POLL via a sentinel so one poll can't run
+            // unbounded (the rest waits for the next poll).
+            try {
+                $folder->query()->whereUnseen()->leaveUnread()->fetchBody(false)->chunked(
+                    function (MessageCollection $chunk) use ($handle, $summary): void {
+                        foreach ($chunk as $message) {
+                            if ($summary->fetched >= self::MAX_PER_POLL) {
+                                throw new PollBudgetReached;
+                            }
+                            $summary->fetched++;
+                            $this->handleOne($message, $handle, $summary);
+                        }
+                    },
+                    1
+                );
+            } catch (PollBudgetReached) {
+                // hit the per-poll cap — the remaining unseen mail is left for next time
             }
 
             $client->disconnect();
@@ -122,6 +113,35 @@ class WebklexImapMailbox implements ImapMailbox
         }
 
         return $summary;
+    }
+
+    /**
+     * Route ONE fetched (headers-only) message. Size guard BEFORE downloading the body
+     * (RFC822.SIZE is a cheap, header-level IMAP command): over the cap — OR a size we
+     * couldn't read — routes a HEADER-ONLY stub (no body download, so no OOM) so the
+     * sender's request isn't silently lost and a giant we couldn't measure is never
+     * parsed on faith; under the cap → download + parse this one message. \Seen is set
+     * only after the handler confirms routing, so nothing wedges the mailbox. Per-
+     * message errors are isolated (logged, message left unread for the next poll).
+     */
+    private function handleOne(Message $message, callable $handle, MailboxPollSummary $summary): void
+    {
+        try {
+            $size = $this->messageSize($message);
+            if ($size === null || self::isMessageTooLarge($size)) {
+                $parsed = $this->parseHeadersOnly($message, $size ?? 0);
+            } else {
+                $message->parseBody(); // download + parse THIS message only (bounded memory)
+                $parsed = $this->parse($message);
+            }
+
+            if ($handle($parsed) === true) {
+                $message->setFlag('Seen');
+                $summary->processed++;
+            }
+        } catch (Throwable $e) {
+            $summary->addError('Μήνυμα: '.$e->getMessage());
+        }
     }
 
     private function client(TicketDepartment $department): Client
