@@ -878,8 +878,10 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Email-invite αξιολόγησης στο κλείσιμο (Phase 4 follow-up, SHIPPED):** στο «Κλείσιμο» ενός αιτήματος
   τμήματος με `feedback_on_close`, ο πελάτης παίρνει email με **signed link** σε δημόσια σελίδα αξιολόγησης
   (χωρίς login) — και όποιος δεν ξαναμπαίνει στην πύλη αξιολογεί.
+- **Reply-threading για watcher/CC (Phase 4 follow-up, SHIPPED):** απάντηση από watcher/CC ενός ticket κάνει
+  thread εκεί (όχι νέο ticket)· ο anti-injection guard μένει (μόνο πραγματικοί watchers, όχι όποιος έχει το token).
 - **Επόμενα:** Phase-4 follow-ups: στήλη/φίλτρο αξιολόγησης, attachments (πύλη + email), HTML-body strip στο
-  inbound, per-department validate_cert toggle, reply-threading για watcher/CC + visible-CC για cc-sourced.
+  inbound, per-department validate_cert toggle, visible-CC (αντί Bcc) για cc-sourced.
   _(In-app KB DROPPED — το BookStack το καλύπτει· Announcements = maybe-later.)_
 
 ---
