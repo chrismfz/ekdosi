@@ -3,6 +3,7 @@
 namespace App\Services\Support\Inbound;
 
 use App\Models\TicketDepartment;
+use App\Support\HtmlToText;
 use Throwable;
 use Webklex\PHPIMAP\Client;
 use Webklex\PHPIMAP\ClientManager;
@@ -120,7 +121,10 @@ class WebklexImapMailbox implements ImapMailbox
         $from = $message->getFrom()->first();
         $fromEmail = $from?->mail ?? '';
         $subject = trim((string) $message->getSubject());
-        $body = (string) ($message->getTextBody() ?: $message->getHTMLBody() ?: '');
+        // Prefer the text/plain part; fall back to converting the HTML part to text
+        // (many clients send HTML-only) rather than storing raw markup as the body.
+        $text = trim((string) $message->getTextBody());
+        $body = $text !== '' ? $text : HtmlToText::convert((string) $message->getHTMLBody());
         $mid = trim((string) $message->getMessageId());
 
         return new ParsedInboundEmail(
