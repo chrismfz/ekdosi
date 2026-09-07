@@ -89,6 +89,21 @@ class TicketWatcherTest extends TestCase
         $this->assertSame(TicketWatcher::SOURCE_PARTICIPANT, $ticket->watchers()->where('user_id', $op->id)->value('source'));
     }
 
+    public function test_an_internal_note_does_not_auto_watch_the_operator(): void
+    {
+        $company = $this->company();
+        $op = $this->operator($company);
+        $dept = $this->department($company);
+        $ticket = $this->openCustomerTicket($company, $dept);
+
+        app(PostTicketMessage::class)->handle($ticket, [
+            'author_role' => TicketMessage::ROLE_OPERATOR, 'author_id' => $op->id,
+            'is_internal_note' => true, 'body' => 'σημείωση μόνο για εμάς',
+        ]);
+
+        $this->assertFalse($ticket->fresh()->isWatchedBy($op), 'a private note must not subscribe the operator to the bell');
+    }
+
     public function test_recipients_are_agents_assignee_and_watchers_not_the_whole_tenant(): void
     {
         $company = $this->company();

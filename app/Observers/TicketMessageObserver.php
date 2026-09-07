@@ -4,7 +4,6 @@ namespace App\Observers;
 
 use App\Models\TicketMessage;
 use App\Models\TicketWatcher;
-use App\Models\User;
 use App\Services\Support\TicketNotifier;
 use Illuminate\Contracts\Events\ShouldHandleEventsAfterCommit;
 
@@ -26,8 +25,12 @@ class TicketMessageObserver implements ShouldHandleEventsAfterCommit
 
     public function created(TicketMessage $message): void
     {
-        if ($message->author_role === TicketMessage::ROLE_OPERATOR && $message->author_id !== null) {
-            $this->autoWatchAuthor($message);
+        if ($message->author_role === TicketMessage::ROLE_OPERATOR) {
+            // Auto-watch only on a PUBLIC reply — jotting a private internal note
+            // must not subscribe the operator to the customer bell.
+            if ($message->author_id !== null && ! $message->is_internal_note) {
+                $this->autoWatchAuthor($message);
+            }
 
             return; // an operator's own message never rings their own bell
         }
@@ -35,12 +38,20 @@ class TicketMessageObserver implements ShouldHandleEventsAfterCommit
         $this->notifier->notifyNewCustomerMessage($message);
     }
 
-    /** The replying operator becomes a participant watcher (idempotent). */
+    /**
+     * The replying operator becomes a participant watcher (idempotent). The author
+     * is resolved WITHIN the ticket's tenant — the same invariant the «Προσθήκη
+     * watcher» action enforces, so no watcher-creation path attaches a foreign user.
+     */
     private function autoWatchAuthor(TicketMessage $message): void
     {
         $ticket = $message->ticket;
-        $author = User::find($message->author_id);
-        if ($ticket === null || $author === null) {
+        if ($ticket === null) {
+            return;
+        }
+
+        $author = $ticket->company?->users()->whereKey($message->author_id)->first();
+        if ($author === null) {
             return;
         }
 

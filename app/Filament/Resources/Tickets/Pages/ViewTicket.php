@@ -178,25 +178,32 @@ class ViewTicket extends ViewRecord
                         ->placeholder('someone@example.com'),
                 ])
                 ->action(function (array $data, Ticket $record): void {
-                    $added = false;
+                    $resolved = false; // a valid operator/email was supplied
+                    $created = false;  // a NEW watcher row was actually written
                     // Resolve the operator WITHIN the ticket's tenant — never a raw
                     // User::find (a tampered submit could otherwise attach a foreign
                     // user and leak this ticket's subject to them via the bell).
                     if (! empty($data['user_id'])) {
                         $operator = $record->company?->users()->whereKey($data['user_id'])->first();
                         if ($operator !== null) {
-                            $added = $record->watch($operator)->wasRecentlyCreated || $added;
+                            $resolved = true;
+                            $created = $record->watch($operator)->wasRecentlyCreated || $created;
                         }
                     }
                     if (! empty($data['email'])) {
                         $watcher = $record->addEmailWatcher($data['email']);
-                        $added = ($watcher?->wasRecentlyCreated ?? false) || $added;
+                        if ($watcher !== null) {
+                            $resolved = true;
+                            $created = $watcher->wasRecentlyCreated || $created;
+                        }
                     }
 
-                    Notification::make()
-                        ->title($added ? 'Προστέθηκε watcher' : 'Δεν προστέθηκε νέος watcher')
-                        ->{$added ? 'success' : 'warning'}()
-                        ->send();
+                    [$title, $type] = match (true) {
+                        $created => ['Προστέθηκε watcher', 'success'],
+                        $resolved => ['Παρακολουθεί ήδη', 'info'],
+                        default => ['Δώσε χειριστή ή email', 'warning'],
+                    };
+                    Notification::make()->title($title)->{$type}()->send();
                 }),
         ];
     }

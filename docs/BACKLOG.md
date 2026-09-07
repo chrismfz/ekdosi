@@ -664,7 +664,13 @@ data model + phase gates: **`PLAN.md`**.
     flag αχρησιμοποίητο), **spam/block-sender** (drop πριν το route στον `InboundTicketRouter`).
   - **P2 (review Phase-4, deferred):** η λίστα watchers στο ticket infolist (`RepeatableEntry` πάνω στη
     σχέση `watchers`) κάνει lazy-load το `user` ανά γραμμή (`label()`) + ένα ξεχωριστό `exists()` για το
-    visibility → N+1. Αμελητέο (ένα ticket έχει λίγους watchers)· eager-load αν ποτέ γίνει hot.
+    visibility → N+1 / διπλό query. Αμελητέο (ένα ticket έχει λίγους watchers)· eager-load + `isNotEmpty()`
+    αν ποτέ γίνει hot.
+  - **P2 (review Phase-4, deferred):** το operator bell (`TicketNotifier::notifyNewCustomerMessage`)
+    τρέχει **σύγχρονα** στο afterCommit του poller και, όταν ένα τμήμα δεν έχει agents, γράφει
+    `sendToDatabase` σε **ΟΛΟΥΣ** τους χρήστες του tenant ανά μήνυμα → O(μηνύματα × χρήστες) inserts στο
+    hot path ενός poll. Αμελητέο στα σημερινά μεγέθη (λίγοι operators/tenant)· αν μεγαλώσει ένας tenant με
+    agent-less τμήματα, βγάλε το bell σε queued job.
   - **Inbound-CC → watcher auto-capture (deferred, Phase-4 follow-up):** τα watcher emails μπαίνουν
     σήμερα μόνο χειροκίνητα. Auto-capture των `Cc`/`To` ενός εισερχόμενου email ως email-watchers θέλει
     επέκταση του `ParsedInboundEmail` + του `WebklexImapMailbox` (να διαβάζουν Cc/To) — αγγίζει τον mail
