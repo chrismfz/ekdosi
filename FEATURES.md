@@ -862,8 +862,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   → `TicketNotifier`). **Watchers/CC:** operators κάνουν watch/unwatch (auto-watch όποιος απαντά = participant),
   εξωτερικά **emails** κοινοποιούνται (**κρυφό Bcc**) στις απαντήσεις· λίστα watchers στο ticket, «Προσθήκη watcher» (χειριστής
   ή email). _(SLA σκόπιμα εκτός.)_
-- **Επόμενα:** Phase 4 υπόλοιπα (merge, feedback-on-close, spam/block-sender)· follow-ups: attachments
-  (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle, inbound-CC → watcher auto-capture.
+- **Αξιολόγηση εξυπηρέτησης / feedback-on-close (Phase 4, SHIPPED):** όταν ένα αίτημα κλείσει σε τμήμα με
+  `feedback_on_close`, ο πελάτης αξιολογεί **1–5** (+ σχόλιο) από την πύλη· fail-closed (closed + feedback τμήμα
+  + κάτοχος grant)· ο χειριστής βλέπει ★ n/5 + σχόλιο στο ticket. Επανα-υποβάλλεται όσο μένει κλειστό.
+- **Επόμενα:** Phase 4 υπόλοιπα (ticket merge, spam/block-sender)· follow-ups: email-invite στο κλείσιμο +
+  στήλη/φίλτρο αξιολόγησης, attachments (πύλη + email), HTML-body strip στο inbound, per-department
+  validate_cert toggle, inbound-CC → watcher auto-capture.
 
 ---
 

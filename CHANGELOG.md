@@ -27,6 +27,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — αξιολόγηση εξυπηρέτησης / feedback-on-close (Πυλώνας E, Phase 4).**
+  Ενεργοποιεί το ήδη υπαρκτό αλλά αχρησιμοποίητο `ticket_departments.feedback_on_close` flag: όταν ένα αίτημα
+  **κλείσει** και το τμήμα του ζητά feedback, ο πελάτης βλέπει στην πύλη («Τα αιτήματά μου») φόρμα **αξιολόγησης
+  1–5** (+ προαιρετικό σχόλιο)· επανα-υποβάλλεται όσο μένει κλειστό (διόρθωση misclick). Νέο throttled
+  `POST /user/tickets/{id}/rate`, **fail-closed** (μόνο closed + feedback-enabled τμήμα + κάτοχος grant, αλλιώς
+  404). Ο χειριστής βλέπει την αξιολόγηση (★ n/5 + σχόλιο) στην προβολή του ticket. Νέες στήλες
+  `tickets.rating/rating_comment/rated_at`.
 - **Σύστημα υποστήριξης (tickets) — operator bell + watchers/CC (Πυλώνας E, Phase 4).** Κάθε **δημόσιο
   μήνυμα πελάτη** (νέο αίτημα ή reply) χτυπά **καμπανάκι** (Filament database notification) στους operators
   του ticket — recipients = agents του τμήματος (fallback: όλοι οι χρήστες του tenant, όταν το τμήμα δεν έχει

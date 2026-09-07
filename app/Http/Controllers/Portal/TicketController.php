@@ -158,6 +158,28 @@ class TicketController extends Controller
             ->with('status', 'Η απάντησή σας στάλθηκε.');
     }
 
+    public function rate(Request $request, int $ticket): RedirectResponse
+    {
+        $login = $this->login();
+        $model = $this->resolveTicket($login, $ticket);
+        $model->loadMissing('department');
+
+        // Fail-closed: rating is only offered on a closed ticket whose department
+        // invites feedback (`feedback_on_close`). Anything else → 404.
+        abort_unless($model->canBeRated(), 404);
+
+        $data = $request->validate([
+            'rating' => ['required', 'integer', 'between:1,5'],
+            'rating_comment' => ['nullable', 'string', 'max:2000'],
+        ]);
+
+        $model->recordRating((int) $data['rating'], $data['rating_comment'] ?? null);
+
+        return redirect()
+            ->route('portal.tickets.show', $model->id)
+            ->with('status', 'Ευχαριστούμε για την αξιολόγηση!');
+    }
+
     private function login(): CustomerUser
     {
         $login = Auth::guard('portal')->user();

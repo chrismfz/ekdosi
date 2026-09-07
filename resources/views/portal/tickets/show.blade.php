@@ -31,6 +31,31 @@
         @endforeach
     </div>
 
+    {{-- Feedback on close — only on a closed ticket of a feedback-enabled department. --}}
+    @if ($ticket->canBeRated())
+        <div class="mb-6 max-w-xl rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-800">
+            <flux:heading size="sm">Πώς σας φάνηκε η εξυπηρέτηση;</flux:heading>
+            @if ($ticket->isRated())
+                <flux:text class="mt-1 text-sm text-zinc-500">Η αξιολόγησή σας: {{ $ticket->rating }}/5 — μπορείτε να την αλλάξετε.</flux:text>
+            @endif
+            <form method="POST" action="{{ route('portal.tickets.rate', $ticket->id) }}" class="mt-3 flex flex-col gap-3">
+                @csrf
+                <div class="flex flex-wrap gap-2">
+                    @for ($i = 1; $i <= 5; $i++)
+                        <label class="cursor-pointer rounded-lg border px-3 py-2 text-sm has-[:checked]:border-blue-500 has-[:checked]:bg-blue-50 dark:has-[:checked]:bg-blue-950/40">
+                            <input type="radio" name="rating" value="{{ $i }}" class="sr-only" required @checked((int) old('rating', $ticket->rating) === $i)>
+                            {{ $i }} ★
+                        </label>
+                    @endfor
+                </div>
+                @error('rating') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
+                <flux:textarea name="rating_comment" label="Σχόλιο (προαιρετικά)" rows="2">{{ old('rating_comment', $ticket->rating_comment) }}</flux:textarea>
+                @error('rating_comment') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
+                <div><flux:button type="submit" variant="primary">Υποβολή αξιολόγησης</flux:button></div>
+            </form>
+        </div>
+    @endif
+
     {{-- Reply --}}
     @if ($ticket->status === TicketStatus::Closed)
         <flux:text class="mb-2 text-sm text-zinc-500">Το αίτημα είναι κλειστό — μια νέα απάντηση θα το ανοίξει ξανά.</flux:text>

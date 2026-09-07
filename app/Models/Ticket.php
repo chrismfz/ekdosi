@@ -44,6 +44,9 @@ class Ticket extends Model
         'last_reply_at',
         'last_reply_role',
         'closed_at',
+        'rating',
+        'rating_comment',
+        'rated_at',
     ];
 
     protected function casts(): array
@@ -53,6 +56,8 @@ class Ticket extends Model
             'priority' => TicketPriority::class,
             'last_reply_at' => 'datetime',
             'closed_at' => 'datetime',
+            'rating' => 'integer',
+            'rated_at' => 'datetime',
         ];
     }
 
@@ -186,5 +191,36 @@ class Ticket extends Model
     public function isGuest(): bool
     {
         return $this->customer_id === null;
+    }
+
+    /**
+     * The customer may rate iff the ticket is Closed AND its department invites
+     * feedback (`feedback_on_close`). Re-rating while still closed is allowed (a
+     * misclick fix); reopening the ticket makes this false again.
+     */
+    public function canBeRated(): bool
+    {
+        return $this->status === TicketStatus::Closed
+            && (bool) ($this->department?->feedback_on_close);
+    }
+
+    public function isRated(): bool
+    {
+        return $this->rating !== null;
+    }
+
+    /**
+     * Store a customer satisfaction rating (1–5, clamped) + an optional comment.
+     * Callers gate on {@see canBeRated} + ownership first — this only writes.
+     */
+    public function recordRating(int $rating, ?string $comment = null): void
+    {
+        $comment = trim((string) $comment);
+
+        $this->forceFill([
+            'rating' => max(1, min(5, $rating)),
+            'rating_comment' => $comment !== '' ? $comment : null,
+            'rated_at' => now(),
+        ])->save();
     }
 }

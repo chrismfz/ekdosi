@@ -671,6 +671,10 @@ data model + phase gates: **`PLAN.md`**.
     `sendToDatabase` σε **ΟΛΟΥΣ** τους χρήστες του tenant ανά μήνυμα → O(μηνύματα × χρήστες) inserts στο
     hot path ενός poll. Αμελητέο στα σημερινά μεγέθη (λίγοι operators/tenant)· αν μεγαλώσει ένας tenant με
     agent-less τμήματα, βγάλε το bell σε queued job.
+  - **feedback-on-close follow-ups (deferred):** το rating γεμίζει από την πύλη. Follow-ups: (α) **email-invite**
+    στο κλείσιμο (mailable με link στην αξιολόγηση) για πελάτες που δεν ξαναμπαίνουν στην πύλη· (β) **στήλη/
+    φίλτρο** αξιολόγησης στη λίστα tickets + απλό «μέσος όρος ικανοποίησης» metric. Το core (portal rating +
+    operator badge) SHIPPED.
   - **Conscious tradeoff (review Phase-4 r3):** το participant auto-watch λύνει τον operator μέσα από
     το `company->users()` pivot (ίδιο tenant invariant με το «Προσθήκη watcher»). Συνέπεια: ένας operator
     **εκτός pivot** (π.χ. super_admin που απαντά cross-tenant χωρίς membership row) δεν auto-watch-άρεται —
