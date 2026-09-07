@@ -176,7 +176,9 @@ class TicketInfolist
                                     ->hiddenLabel()
                                     ->html()
                                     ->state(fn (TicketMessage $record): ?string => self::attachmentLinks($record))
-                                    ->visible(fn (TicketMessage $record): bool => self::attachmentLinks($record) !== null)
+                                    // Cheap gate on the loaded relation — don't rebuild/re-sign the
+                                    // whole HTML just to test emptiness (->state does that once).
+                                    ->visible(fn (TicketMessage $record): bool => $record->attachments->isNotEmpty())
                                     ->columnSpanFull(),
                             ]),
                     ]),
@@ -188,11 +190,11 @@ class TicketInfolist
      * it is untrusted uploader input). Null when the message has none.
      *
      * Reads the LOADED `attachments` relation (the property, not a fresh
-     * `->attachments()->get()`), so the two calls per message — one from
-     * `->visible()`, one from `->state()` — share a single cached load instead of
-     * firing a query each. Each URL is a short-lived signed link (the operator
-     * download route is `signed`), generated only here for a user already viewing
-     * the ticket.
+     * `->attachments()->get()`), so no query fires per message. Each URL is a signed
+     * link (the operator download route is `signed`), generated only here for a user
+     * already viewing the ticket. The TTL is generous (a ticket tab can stay open a
+     * while) but bounded — a leaked link still needs auth + View:Ticket + tenant
+     * membership to resolve, so the expiry is defence-in-depth, not the gate.
      */
     private static function attachmentLinks(TicketMessage $message): ?string
     {
@@ -202,7 +204,7 @@ class TicketInfolist
         }
 
         return $rows->map(function ($att) use ($message): string {
-            $url = URL::temporarySignedRoute('support.tickets.attachment', now()->addMinutes(30), [
+            $url = URL::temporarySignedRoute('support.tickets.attachment', now()->addHours(6), [
                 'ticket' => $message->ticket_id,
                 'attachment' => $att->id,
             ]);

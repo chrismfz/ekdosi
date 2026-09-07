@@ -5,14 +5,16 @@ namespace App\Http\Controllers;
 use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
 use App\Support\TicketAttachments;
+use Spatie\Permission\PermissionRegistrar;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * Operator download of a ticket attachment (Πυλώνας E, Phase 4 follow-up). AUTH +
- * tenant-checked: the acting user must belong to the ticket's company, and the
- * attachment must genuinely be one of that ticket's message files — never a public
- * URL, always a forced download (see TicketAttachments). The portal has its own
- * grant-scoped route (PortalTicketController::attachment).
+ * SIGNED (route middleware) + permission + tenant-checked: the acting user must
+ * belong to the ticket's company AND hold View:Ticket, and the attachment must
+ * genuinely be one of that ticket's message files — never a public URL, always a
+ * forced download (see TicketAttachments). The portal has its own grant-scoped
+ * route (PortalTicketController::attachment).
  */
 class TicketAttachmentController extends Controller
 {
@@ -20,14 +22,20 @@ class TicketAttachmentController extends Controller
     {
         $user = auth()->user();
         abort_if($user === null, 403);
-        // Permission gate (same as the expense-document sibling): a company member
-        // without the tickets permission must not be able to pull ticket files —
-        // internal-note attachments included.
-        abort_unless($user->can('View:Ticket'), 403);
 
         $model = Ticket::query()->withoutGlobalScope(CompanyScope::class)->find($ticket);
         abort_if($model === null, 404);
+        // Tenant guard: the user must belong to the ticket's company.
         abort_unless($user->companies()->whereKey($model->company_id)->exists(), 403);
+
+        // Permission gate. This route is OUTSIDE the Filament panel, so the TenantSet
+        // listener that normally syncs Spatie's teams team-id never fired — we set it
+        // to the ticket's (already tenant-verified) company here, else a non-super-admin
+        // operator's team-scoped View:Ticket assignment wouldn't match (null team-id).
+        // A company member without the permission still can't pull ticket files,
+        // internal-note attachments included.
+        app(PermissionRegistrar::class)->setPermissionsTeamId($model->company_id);
+        abort_unless($user->can('View:Ticket'), 403);
 
         $file = TicketAttachments::forTicket($model, $attachment);
         abort_if($file === null, 404);

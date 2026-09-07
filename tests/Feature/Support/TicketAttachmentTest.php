@@ -17,10 +17,11 @@ use App\Models\User;
 use App\Support\TicketAttachments;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\UploadedFile;
-use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\URL;
+use Spatie\Permission\Models\Permission;
+use Spatie\Permission\PermissionRegistrar;
 use Tests\TestCase;
 
 /**
@@ -155,41 +156,57 @@ class TicketAttachmentTest extends TestCase
             ->assertNotFound();
     }
 
-    public function test_operator_downloads_only_within_their_tenant(): void
+    public function test_operator_download_is_permission_and_tenant_scoped(): void
     {
-        Gate::before(fn () => true); // satisfy the View:Ticket gate (as the expense-doc sibling test does)
+        $registrar = app(PermissionRegistrar::class);
+        Permission::findOrCreate('View:Ticket', 'web');
 
         $company = $this->company();
         $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
         $ticket = $this->ticket($company, $customer);
         $att = TicketAttachments::storeUploaded($ticket->messages()->first(), [UploadedFile::fake()->create('op.pdf', 10, 'application/pdf')])[0];
 
+        // A member WITH the team-scoped View:Ticket permission for this company.
         $member = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
-        $company->users()->attach($member->id);
+        $member->companies()->attach($company->id);
+        $registrar->setPermissionsTeamId($company->id);
+        $member->givePermissionTo('View:Ticket');
+        $registrar->forgetCachedPermissions();
+
+        // A member of the SAME company WITHOUT the permission.
+        $bare = User::create(['name' => 'Bare', 'email' => 'bare-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $bare->companies()->attach($company->id);
+
+        // An outsider (no company membership).
         $outsider = User::create(['name' => 'Out', 'email' => 'out-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
 
-        // The route is `signed` — the panel generates the link server-side.
+        // Simulate the plain-route context: no Filament panel means the TenantSet
+        // listener never set the teams team-id. The controller must re-scope it from
+        // the ticket's company, else even a permitted operator would 403.
+        $registrar->setPermissionsTeamId(null);
+
         $url = URL::temporarySignedRoute('support.tickets.attachment', now()->addMinutes(30), [
             'ticket' => $ticket->id, 'attachment' => $att->id,
         ]);
+
         $this->actingAs($member)->get($url)->assertOk()->assertDownload('op.pdf');
+        // Same company, no View:Ticket → 403 (the permission gate bites).
+        $this->actingAs($bare)->get($url)->assertForbidden();
         // Outsider fails the tenant guard even with a valid signature → 403.
         $this->actingAs($outsider)->get($url)->assertForbidden();
     }
 
     public function test_an_unsigned_operator_url_is_rejected(): void
     {
-        Gate::before(fn () => true);
-
         $company = $this->company();
         $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
         $ticket = $this->ticket($company, $customer);
         $att = TicketAttachments::storeUploaded($ticket->messages()->first(), [UploadedFile::fake()->create('op.pdf', 10, 'application/pdf')])[0];
 
         $member = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
-        $company->users()->attach($member->id);
+        $member->companies()->attach($company->id);
 
-        // No signature → 403 from the `signed` middleware.
+        // No signature → 403 from the `signed` middleware (before auth/permission even run).
         $this->actingAs($member)
             ->get(route('support.tickets.attachment', ['ticket' => $ticket->id, 'attachment' => $att->id]))
             ->assertForbidden();
