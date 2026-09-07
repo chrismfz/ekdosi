@@ -36,6 +36,12 @@ class EditDomainRegistrarConnection extends EditRecord
 
     protected function mutateFormDataBeforeSave(array $data): array
     {
+        // SERVER-side immutability for the registrar key (the EditDomainTld
+        // lesson: disabledOn('edit') is client-side only — Filament still
+        // dehydrates the state, and a swapped key would restore the OLD
+        // registrar's secrets under the NEW registrar's schema).
+        $data['registrar'] = $this->record->registrar;
+
         $stored = $this->record->config ?? [];
         foreach ($this->secretKeys() as $key) {
             if (blank($data['config'][$key] ?? null) && filled($stored[$key] ?? null)) {

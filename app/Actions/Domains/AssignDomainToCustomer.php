@@ -60,6 +60,16 @@ class AssignDomainToCustomer
                 );
             }
 
+            // The billing clock anchors on the REGISTRAR expiry; without one,
+            // next_due would fall to today and stage a renewal draft TONIGHT
+            // for a period that may run for another year. Draft-first
+            // discipline: never guess a billing date.
+            if ($locked->expires_at === null) {
+                throw new RuntimeException(
+                    'Το domain δεν έχει ημερομηνία λήξης — ορίστε τη (ή συγχρονίστε από τον registrar) πριν την ανάθεση.'
+                );
+            }
+
             [$amount, $years] = $this->renewalPricing($locked);
 
             $contract = ServiceContract::create([
@@ -77,7 +87,8 @@ class AssignDomainToCustomer
                 // The billing clock starts at the registrar expiry: the renewal
                 // draft is staged for the period that begins when the current
                 // registration runs out (the two-clocks discipline, §3.4).
-                'next_due_date' => ($locked->expires_at ?? Carbon::today())->toDateString(),
+                // Guarded non-null above.
+                'next_due_date' => $locked->expires_at->toDateString(),
                 'provisioning_module' => 'none',
                 'domain' => $locked->fqdn,
             ]);
@@ -119,12 +130,15 @@ class AssignDomainToCustomer
             ->where('is_enabled', true)
             ->where('currency', 'EUR')
             ->whereNotNull('price')
+            // Never a term below the TLD's minimum (.gr sells biennial only —
+            // a stray 1yr price row must not create an Annual contract).
+            ->where('years', '>=', $years)
             ->orderBy('years')
             ->first();
 
         if ($row === null) {
             throw new RuntimeException(
-                'Δεν υπάρχει ενεργή τιμή ανανέωσης (EUR) για το .'.$tld->tld.' — ορίστε μία στα «TLDs & τιμές», ή price override στο domain.'
+                'Δεν υπάρχει ενεργή τιμή ανανέωσης (EUR, ≥'.$years.' έτη) για το .'.$tld->tld.' — ορίστε μία στα «TLDs & τιμές», ή price override στο domain.'
             );
         }
 

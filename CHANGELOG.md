@@ -81,7 +81,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   σε όλη τη ζωή του domain). Το TLD string κλειδώνει server-side όταν έχει domains (και tombstones).
   Ληγμένο domain γίνεται «Ληγμένο» από το sync ακόμα κι όταν ο registrar αναφέρει ACT ή άγνωστο
   status. `domains:sync --limit` μετρά syncable απόπειρες. Friendly validation στα διπλά price rows
-  + κανονικοποίηση νομίσματος στο write.
+  + κανονικοποίηση νομίσματος στο write. **Γύρος 3 (full-concept sweep):** ανάθεση αρνείται domain
+  ΧΩΡΙΣ ημερομηνία λήξης (θα έκοβε πρόχειρο ανανέωσης το ίδιο βράδυ)· η τιμή καταλόγου σέβεται το
+  ελάχιστο term του TLD (αδέσποτη 1ετής τιμή σε .gr δεν φτιάχνει ετήσιο συμβόλαιο)· ο registrar
+  key σύνδεσης κλειδώνει και server-side· tombstones δεν συγχρονίζονται ούτε χειροκίνητα· το
+  staging-skip αφορά μόνο τα νεκρά+redemption (τα pending χρεώνουν κανονικά)· TrashedFilter/restore
+  στις συνδέσεις· ενιαίο connection label παντού (helper, όχι αντίγραφα).
 
 ### Security
 - **Το Openprovider bearer token αποθηκεύεται ΚΡΥΠΤΟΓΡΑΦΗΜΕΝΟ στην cache** (με DB cache driver

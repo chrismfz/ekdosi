@@ -41,7 +41,8 @@ class DomainSyncService
     {
         $connection = $this->connectionFor($domain);
 
-        return $connection !== null
+        return ! $domain->trashed() // a tombstone is never rewritten (parity with the nightly command)
+            && $connection !== null
             && $connection->isUsable()
             && $this->factory->for($connection)->key() !== 'manual'
             && ! ($domain->status instanceof DomainStatus && $domain->status->blocksSync());

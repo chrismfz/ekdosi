@@ -11,9 +11,11 @@ use App\Services\Domains\DomainRegistrarRegistry;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\EditAction;
+use Filament\Actions\RestoreBulkAction;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
+use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 
 class DomainRegistrarConnectionsTable
@@ -33,10 +35,8 @@ class DomainRegistrarConnectionsTable
 
                 TextColumn::make('label')
                     ->label('Όνομα')
-                    // The form promises «κενό → όνομα registrar» — honour it here.
-                    ->state(fn (DomainRegistrarConnection $record): string => $record->label !== null && $record->label !== ''
-                        ? $record->label
-                        : $registry->label((string) $record->registrar))
+                    // «Κενό → όνομα registrar» — THE shared helper, no local copy.
+                    ->state(fn (DomainRegistrarConnection $record): string => $registry->connectionLabel($record))
                     // Search must find what the column SHOWS: label OR (for a
                     // blank label) the registrar key its fallback name comes from.
                     ->searchable(query: fn ($query, string $search) => $query->where(
@@ -60,6 +60,9 @@ class DomainRegistrarConnectionsTable
 
                 ToggleColumn::make('is_active')
                     ->label('Ενεργή'),
+            ])
+            ->filters([
+                TrashedFilter::make(),
             ])
             ->recordActions([
                 EditAction::make(),
@@ -98,6 +101,7 @@ class DomainRegistrarConnectionsTable
             ->toolbarActions([
                 BulkActionGroup::make([
                     GuardedDeleteAction::bulk(fn ($record): array => DomainRegistrarConnectionResource::dependents($record)),
+                    RestoreBulkAction::make(),
                 ]),
             ]);
     }

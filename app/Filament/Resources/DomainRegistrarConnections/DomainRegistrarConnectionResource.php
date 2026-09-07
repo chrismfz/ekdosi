@@ -21,7 +21,9 @@ use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
 use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletingScope;
 
 /**
  * «Συνδέσεις registrar» — per-tenant registrar accounts (Πυλώνας A / A0). The
@@ -80,6 +82,12 @@ class DomainRegistrarConnectionResource extends Resource
             'TLDs (δρομολόγηση)' => GuardedDeleteAction::count(DomainTld::class, 'registrar_connection_id', $record->id),
             'domains' => GuardedDeleteAction::count(Domain::class, 'registrar_connection_id', $record->id),
         ];
+    }
+
+    /** Soft-deleting model: let the TrashedFilter reach the tombstones (restore path). */
+    public static function getEloquentQuery(): Builder
+    {
+        return parent::getEloquentQuery()->withoutGlobalScopes([SoftDeletingScope::class]);
     }
 
     public static function form(Schema $schema): Schema

@@ -94,6 +94,34 @@ class AssignDomainToCustomerTest extends TestCase
         $this->assertSame('25.50', (string) $assigned->serviceContract->amount);
     }
 
+    public function test_assign_refuses_without_a_registrar_expiry(): void
+    {
+        // Without a registrar expiry, next_due would fall to today and stage a
+        // renewal draft TONIGHT — never guess a billing date.
+        $domain = $this->domain(['fqdn' => 'noexp.gr', 'sld' => 'noexp', 'expires_at' => null]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('ημερομηνία λήξης');
+        app(AssignDomainToCustomer::class)($domain, $this->customer);
+    }
+
+    public function test_catalogue_pricing_respects_the_tlds_minimum_term(): void
+    {
+        // A stray 1yr row on a min_years=2 TLD (.gr sells biennial only) must
+        // not create an Annual contract — the 2yr row wins.
+        DomainTldPrice::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $this->tld->id,
+            'operation' => 'renewal', 'years' => 1, 'price' => 10.00,
+        ]);
+        $domain = $this->domain(['fqdn' => 'minterm.gr', 'sld' => 'minterm']);
+
+        $assigned = app(AssignDomainToCustomer::class)($domain, $this->customer);
+
+        $sc = $assigned->serviceContract;
+        $this->assertSame('19.00', (string) $sc->amount);
+        $this->assertSame(BillingCycle::Biennial->value, $sc->billing_cycle->value ?? $sc->billing_cycle);
+    }
+
     public function test_assign_refuses_a_terminal_status_domain(): void
     {
         // transferred_away = we no longer hold it — an Active billing clock

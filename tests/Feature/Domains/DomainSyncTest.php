@@ -191,6 +191,11 @@ class DomainSyncTest extends TestCase
         $this->connection->update(['mode' => 'off']);
         $this->assertFalse($service->isSyncable($this->domain()));
         $this->connection->update(['mode' => 'sandbox']);
+
+        // A tombstone is never rewritten (parity with the nightly command).
+        $trashed = $this->domain(['fqdn' => 'tomb.gr', 'sld' => 'tomb']);
+        $trashed->delete(); // soft delete sets deleted_at on the instance
+        $this->assertFalse($service->isSyncable($trashed));
     }
 
     public function test_a_stale_registrar_id_falls_back_to_resolve_by_name(): void

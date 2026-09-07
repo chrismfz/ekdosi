@@ -79,7 +79,7 @@ class DomainForm
                             ->orderBy('id')
                             ->get()
                             ->mapWithKeys(fn (DomainRegistrarConnection $c): array => [
-                                $c->id => ($c->label !== null && $c->label !== '' ? $c->label : $registry->label((string) $c->registrar)),
+                                $c->id => $registry->connectionLabel($c),
                             ])
                             ->all())
                         ->native(false)

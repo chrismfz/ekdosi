@@ -3,6 +3,7 @@
 namespace App\Console\Commands;
 
 use App\Actions\StageServiceRenewal;
+use App\Enums\DomainStatus;
 use App\Models\Company;
 use App\Models\Domain;
 use App\Models\ServiceContract;
@@ -162,7 +163,14 @@ class StageServiceRenewals extends Command
             $label = "#{$contract->id} {$contract->customer?->name} — ".($contract->description ?: 'υπηρεσία');
 
             $domain = $domainsByContract->get($contract->id);
-            if ($domain !== null && ($domain->trashed() || ! $domain->status->isRenewable())) {
+            // Blocked = the DEAD set (trashed/terminal) + redemption (its money
+            // is the A3 restore-fee flow, not a plain renewal draft). A pending
+            // register/transfer domain still stages — the tenant is ACQUIRING
+            // the name and its first period bills normally.
+            $blocked = $domain !== null && ($domain->trashed()
+                || $domain->status->isTerminal()
+                || $domain->status === DomainStatus::Redemption);
+            if ($blocked) {
                 $skipped++;
                 $state = $domain->trashed() ? 'διαγραμμένο' : $domain->status->getLabel();
                 $this->warn("  · {$label}: το domain {$domain->fqdn} είναι «{$state}» — δεν χρεώνουμε, skipped.");
