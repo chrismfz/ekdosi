@@ -74,7 +74,14 @@ class InboundTicketRouter
 
         $messageId = $this->normaliseId($email->messageId);
 
-        // (0) Already processed this exact message? Return its ticket, don't duplicate.
+        // (0) Already processed this exact message? Return its ticket, don't
+        // duplicate. Company-wide on purpose: idempotency answers «have we ingested
+        // THIS message-id anywhere in the company?», and ownership/threading (below)
+        // decides placement. (Keying this by the message's current ticket-department
+        // would duplicate a redelivery whenever the message had threaded/merged into
+        // another department. The «same email to two departments → a ticket in each»
+        // idea needs department-scoped matchTicket+merge too — a design change tracked
+        // in docs/BACKLOG.md, not a dedup tweak.)
         if ($messageId !== null) {
             $seen = TicketMessage::query()
                 ->withoutGlobalScope(CompanyScope::class)

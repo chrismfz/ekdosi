@@ -12,6 +12,7 @@ use App\Models\CannedReply;
 use App\Models\Ticket;
 use App\Models\TicketBlockedSender;
 use App\Models\TicketMessage;
+use App\Models\TicketWatcher;
 use App\Models\User;
 use App\Support\CannedReplyExpander;
 use App\Support\TicketAttachments;
@@ -303,6 +304,35 @@ class ViewTicket extends ViewRecord
                         default => ['Δώσε χειριστή ή email', 'warning'],
                     };
                     Notification::make()->title($title)->{$type}()->send();
+                }),
+
+            // Remove a watcher — so an operator can STOP replies going to an address
+            // the customer once CC'd (e.g. an unrelated/ex third party): our replies
+            // carry account/financial context, so leaving them on is a disclosure.
+            Action::make('removeWatcher')
+                ->label('Αφαίρεση watcher')
+                ->icon('heroicon-o-user-minus')
+                ->color('gray')
+                ->authorize($canUpdate)
+                ->visible(fn (Ticket $record): bool => ! $record->isMerged() && $record->watchers()->exists())
+                ->schema([
+                    Select::make('watcher_id')
+                        ->label('Watcher προς αφαίρεση')
+                        ->required()
+                        ->options(fn (Ticket $record): array => $record->watchers()->get()
+                            ->mapWithKeys(fn (TicketWatcher $w): array => [$w->id => $w->label().' · '.$w->sourceLabel()])
+                            ->all())
+                        ->placeholder('— επίλεξε ποιον να αφαιρέσεις —'),
+                ])
+                ->requiresConfirmation()
+                ->action(function (array $data, Ticket $record): void {
+                    // Scoped to THIS ticket's watchers — a tampered id from another
+                    // ticket simply matches nothing (tenant-safe).
+                    $deleted = $record->watchers()->whereKey($data['watcher_id'])->delete();
+                    Notification::make()
+                        ->title($deleted ? 'Ο watcher αφαιρέθηκε' : 'Δεν βρέθηκε ο watcher')
+                        ->{$deleted ? 'success' : 'warning'}()
+                        ->send();
                 }),
         ];
     }
