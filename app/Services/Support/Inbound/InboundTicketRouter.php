@@ -54,8 +54,11 @@ class InboundTicketRouter
 
         $companyId = (int) $department->company_id;
 
-        // Blocklist (spam/block-sender): drop before any customer match or ticket
-        // creation, so a blocked sender never opens or reopens a ticket.
+        // Blocklist (spam/block-sender): drop before any customer/thread match, so a
+        // blocked sender is fully silenced — no new ticket, no reopen, and no reply
+        // appended to an existing thread. A DOMAIN block is intentionally blunt (it
+        // catches every address on that domain); prefer a full-email block to spare
+        // legitimate colleagues. (Softening to «new/reopen only» is a BACKLOG option.)
         if (TicketBlockedSender::isBlocked($companyId, $email->fromEmail)) {
             Log::info('InboundTicketRouter: blocked sender dropped', [
                 'company_id' => $companyId,

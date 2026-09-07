@@ -42,7 +42,9 @@ class TicketBlockedSender extends Model
      */
     public static function normalizePattern(?string $value): string
     {
-        return ltrim(mb_strtolower(trim((string) $value)), '@');
+        // trim → lowercase → strip a leading «@» → trim again, so «@ bad.gr»
+        // (a space after the @) still normalises to the bare «bad.gr».
+        return trim(ltrim(mb_strtolower(trim((string) $value)), '@'));
     }
 
     /** Store the pattern normalised, so the unique index + matching are case-insensitive. */

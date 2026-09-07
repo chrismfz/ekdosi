@@ -18,7 +18,7 @@ class TicketBlockedSenderForm
                     ->label('Email ή domain')
                     ->required()
                     ->maxLength(191)
-                    ->helperText('π.χ. spammer@example.com (μία διεύθυνση) ή example.com (όλο το domain).')
+                    ->helperText('π.χ. spammer@example.com (μία διεύθυνση) ή example.com (ΟΛΟ το domain — προσοχή, αποκλείει κάθε αποστολέα σε αυτό).')
                     // Store normalised (lowercased, no leading «@») — same as the model mutator.
                     ->dehydrateStateUsing(fn (?string $state): string => TicketBlockedSender::normalizePattern($state))
                     // Tenant-scoped uniqueness on the NORMALISED value (Filament's ->unique

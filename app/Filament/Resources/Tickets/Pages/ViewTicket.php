@@ -142,13 +142,17 @@ class ViewTicket extends ViewRecord
                     Notification::make()->title('Το αίτημα άνοιξε ξανά')->success()->send();
                 }),
 
-            // Block the sender (spam/block-sender) — drops their future inbound email
-            // before it can open a ticket. Only when we have an address that wrote in.
+            // Block the sender (spam/block-sender) — drops ALL their future inbound
+            // email (new, reopen, or a reply to an open thread) before it routes.
+            // Only when we have an address that wrote in. Needs BOTH ticket-update
+            // AND the blocklist create permission (so it can't create a row the
+            // operator couldn't otherwise manage).
             Action::make('blockSender')
                 ->label('Αποκλεισμός αποστολέα')
                 ->icon('heroicon-o-no-symbol')
                 ->color('danger')
-                ->authorize($canUpdate)
+                ->authorize(fn (Ticket $record): bool => ($canUpdate($record))
+                    && (auth()->user()?->can('create', TicketBlockedSender::class) ?? false))
                 ->visible(fn (Ticket $record): bool => filled($record->requester_email))
                 ->requiresConfirmation()
                 ->modalDescription(fn (Ticket $record): string => 'Ο αποστολέας «'.$record->requester_email
