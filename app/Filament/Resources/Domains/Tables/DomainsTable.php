@@ -145,7 +145,9 @@ class DomainsTable
 
                         Notification::make()
                             ->title('Ανατέθηκε στον πελάτη.')
-                            ->body('Δημιουργήθηκε υπηρεσία ανανέωσης «'.$domain->serviceContract?->description.'» ('.$domain->serviceContract?->amount.'€ / '.$domain->serviceContract?->billing_cycle.').')
+                            // billing_cycle is enum-cast — never concatenate the enum itself.
+                            ->body('Δημιουργήθηκε υπηρεσία ανανέωσης «'.$domain->serviceContract?->description.'» ('
+                                .$domain->serviceContract?->amount.'€ / '.$domain->serviceContract?->billing_cycle?->label().').')
                             ->success()
                             ->send();
                     }),

@@ -3,6 +3,7 @@
 namespace App\Actions\Domains;
 
 use App\Enums\BillingCycle;
+use App\Enums\DomainStatus;
 use App\Enums\ServiceContractStatus;
 use App\Models\Customer;
 use App\Models\Domain;
@@ -48,6 +49,15 @@ class AssignDomainToCustomer
             $locked = Domain::query()->whereKey($domain->id)->lockForUpdate()->first();
             if ($locked === null || $locked->customer_id !== null) {
                 throw new RuntimeException('Το domain έχει ήδη ανατεθεί σε πελάτη.');
+            }
+
+            // A terminal domain must never start an Active billing clock — a
+            // transferred-away/cancelled/deleted name would bill the customer
+            // for something the tenant no longer holds (money-wrong direction).
+            if (in_array($locked->status, [DomainStatus::TransferredAway, DomainStatus::Cancelled, DomainStatus::Deleted], true)) {
+                throw new RuntimeException(
+                    'Το domain είναι σε κατάσταση «'.$locked->status->getLabel().'» — δεν ξεκινά χρέωση ανανέωσης. Διορθώστε πρώτα την κατάσταση αν είναι λάθος.'
+                );
             }
 
             [$amount, $years] = $this->renewalPricing($locked);

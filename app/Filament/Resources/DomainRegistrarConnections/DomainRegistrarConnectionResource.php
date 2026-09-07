@@ -8,8 +8,11 @@ use App\Filament\Resources\DomainRegistrarConnections\Pages\EditDomainRegistrarC
 use App\Filament\Resources\DomainRegistrarConnections\Pages\ListDomainRegistrarConnections;
 use App\Filament\Resources\DomainRegistrarConnections\Schemas\DomainRegistrarConnectionForm;
 use App\Filament\Resources\DomainRegistrarConnections\Tables\DomainRegistrarConnectionsTable;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Models\Company;
+use App\Models\Domain;
 use App\Models\DomainRegistrarConnection;
+use App\Models\DomainTld;
 use App\Services\Domains\DomainRegistrarRegistry;
 use BackedEnum;
 use Filament\Facades\Filament;
@@ -63,6 +66,20 @@ class DomainRegistrarConnectionResource extends Resource
         return Filament::getTenant() instanceof Company
             && Filament::getTenant()->hasDomainManagement()
             && (bool) auth()->user()?->isSystemSuperAdmin();
+    }
+
+    /**
+     * In-use guard (GuardedDeleteAction): TLD routing and domains still point
+     * through this connection — deleting it silently degrades them to manual.
+     *
+     * @return array<string, int>
+     */
+    public static function dependents(Model $record): array
+    {
+        return [
+            'TLDs (δρομολόγηση)' => GuardedDeleteAction::count(DomainTld::class, 'registrar_connection_id', $record->id),
+            'domains' => GuardedDeleteAction::count(Domain::class, 'registrar_connection_id', $record->id),
+        ];
     }
 
     public static function form(Schema $schema): Schema

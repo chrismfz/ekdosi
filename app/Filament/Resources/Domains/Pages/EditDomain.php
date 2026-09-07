@@ -25,4 +25,21 @@ class EditDomain extends EditRecord
 
         return $data;
     }
+
+    /**
+     * A rename must not orphan the 1:1 ServiceContract's snapshot: its
+     * domain/description were stamped with the fqdn at assign time and appear
+     * on future renewal invoices (legal documents) — keep the pair consistent.
+     */
+    protected function afterSave(): void
+    {
+        $record = $this->record->refresh();
+        $contract = $record->serviceContract;
+        if ($contract !== null && $contract->domain !== $record->fqdn) {
+            $contract->update([
+                'domain' => $record->fqdn,
+                'description' => 'Ανανέωση domain '.$record->fqdn,
+            ]);
+        }
+    }
 }

@@ -3,7 +3,7 @@
 namespace App\Filament\Resources\DomainRegistrarConnections\Pages;
 
 use App\Filament\Resources\DomainRegistrarConnections\DomainRegistrarConnectionResource;
-use Filament\Actions\DeleteAction;
+use App\Filament\Support\GuardedDeleteAction;
 use Filament\Resources\Pages\EditRecord;
 
 /**
@@ -18,7 +18,7 @@ class EditDomainRegistrarConnection extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            GuardedDeleteAction::make(fn ($record): array => DomainRegistrarConnectionResource::dependents($record)),
         ];
     }
 }

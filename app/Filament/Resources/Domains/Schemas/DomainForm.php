@@ -35,7 +35,15 @@ class DomainForm
                     TextInput::make('sld')
                         ->label('Όνομα (χωρίς κατάληξη)')
                         ->required()
-                        ->maxLength(190)
+                        ->maxLength(63)
+                        // Label rules (§5): unicode letters/digits/hyphen (IDN
+                        // .ελ allowed), no dots/spaces, no leading/trailing
+                        // hyphen — a pasted 'example.gr' must NOT become
+                        // example.gr.gr via the fqdn derivation.
+                        ->regex('/^(?!-)[\p{L}\p{N}-]+(?<!-)$/u')
+                        ->validationMessages([
+                            'regex' => 'Μόνο γράμματα/ψηφία/παύλες, χωρίς τελείες — η κατάληξη επιλέγεται δίπλα.',
+                        ])
                         ->placeholder('example'),
 
                     Select::make('domain_tld_id')

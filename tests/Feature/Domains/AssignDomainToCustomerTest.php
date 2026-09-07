@@ -92,6 +92,17 @@ class AssignDomainToCustomerTest extends TestCase
         $this->assertSame('25.50', (string) $assigned->serviceContract->amount);
     }
 
+    public function test_assign_refuses_a_terminal_status_domain(): void
+    {
+        // transferred_away = we no longer hold it — an Active billing clock
+        // here would bill the customer for someone else's domain.
+        $domain = $this->domain(['fqdn' => 'gone.gr', 'sld' => 'gone', 'status' => 'transferred_away']);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('δεν ξεκινά χρέωση');
+        app(AssignDomainToCustomer::class)($domain, $this->customer);
+    }
+
     public function test_assign_refuses_an_already_assigned_domain(): void
     {
         $domain = $this->domain(['customer_id' => $this->customer->id]);

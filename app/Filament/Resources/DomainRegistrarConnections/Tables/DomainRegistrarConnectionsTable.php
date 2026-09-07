@@ -2,14 +2,14 @@
 
 namespace App\Filament\Resources\DomainRegistrarConnections\Tables;
 
+use App\Filament\Resources\DomainRegistrarConnections\DomainRegistrarConnectionResource;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Models\DomainRegistrarConnection;
 use App\Services\Domains\DomainRegistrarFactory;
 use App\Services\Domains\DomainRegistrarNotConfigured;
 use App\Services\Domains\DomainRegistrarRegistry;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteAction;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\TextColumn;
@@ -93,11 +93,11 @@ class DomainRegistrarConnectionsTable
                                 ->danger();
                         $n->send();
                     }),
-                DeleteAction::make(),
+                GuardedDeleteAction::make(fn ($record): array => DomainRegistrarConnectionResource::dependents($record)),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn ($record): array => DomainRegistrarConnectionResource::dependents($record)),
                 ]),
             ]);
     }
