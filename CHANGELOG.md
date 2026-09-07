@@ -27,6 +27,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — συνημμένα αρχεία, portal + operator (Πυλώνας E, Phase 4 follow-up · PR A).**
+  Ο πελάτης ανεβάζει αρχεία στο άνοιγμα/απάντηση ενός ticket από την πύλη, κι ο χειριστής στην απάντηση/εσωτερική
+  σημείωση από το panel· και οι δύο πλευρές τα βλέπουν ως links λήψης μέσα στο νήμα. **Security-first:** ιδιωτικός
+  δίσκος, **μόνο λήψη** (`Content-Disposition: attachment`, ποτέ inline → κανένας ενεργός κώδικας δεν εκτελείται),
+  allowlist τύπων (έγγραφα/εικόνες/zip — όχι scripts/HTML/SVG/executables), τυχαίο όνομα αρχείου στον δίσκο,
+  escaped filename σε κάθε render. Κάθε λήψη είναι tenant/grant-scoped (ο χειριστής μόνο εντός της εταιρείας του,
+  ο πελάτης μόνο σε ticket που κατέχει), κι ένα συνημμένο **εσωτερικής σημείωσης δεν φτάνει ποτέ στην πύλη**
+  (`publicOnly`). Νέο `App\Support\TicketAttachments` (policy + storage + fail-closed lookup), routes/controllers
+  για operator + portal. (Τα συνημμένα **email** — inbound MIME ingestion + outbound attach — έρχονται σε
+  ξεχωριστό PR B.)
 - **Σύστημα υποστήριξης (tickets) — HTML-body strip + visible-CC (Πυλώνας E, Phase 4 follow-ups).**
   (α) **HTML-only inbound:** ο poller μετατρέπει πλέον το HTML σε καθαρό κείμενο (`App\Support\HtmlToText`
   — drop script/style, block tags → line breaks, decode entities) αντί να αποθηκεύει raw markup ως σώμα του

@@ -171,9 +171,34 @@ class TicketInfolist
                                     ->visible(fn (TicketMessage $record): bool => $record->is_internal_note)
                                     ->columnSpanFull(),
                                 TextEntry::make('body')->hiddenLabel()->columnSpanFull(),
+                                TextEntry::make('attachments_links')
+                                    ->hiddenLabel()
+                                    ->html()
+                                    ->state(fn (TicketMessage $record): ?string => self::attachmentLinks($record))
+                                    ->visible(fn (TicketMessage $record): bool => self::attachmentLinks($record) !== null)
+                                    ->columnSpanFull(),
                             ]),
                     ]),
             ]);
+    }
+
+    /**
+     * Download links for a message's attachments as safe HTML (filename escaped —
+     * it is untrusted uploader input). Null when the message has none.
+     */
+    private static function attachmentLinks(TicketMessage $message): ?string
+    {
+        $rows = $message->attachments()->get(['id', 'original_name', 'size']);
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        return $rows->map(function ($att) use ($message): string {
+            $url = route('support.tickets.attachment', ['ticket' => $message->ticket_id, 'attachment' => $att->id]);
+
+            return '<a href="'.e($url).'" target="_blank" rel="noopener" class="fi-link">📎 '
+                .e($att->original_name).' <span style="color:#71717a">('.e($att->humanSize()).')</span></a>';
+        })->implode('<br>');
     }
 
     /**

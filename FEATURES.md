@@ -882,8 +882,15 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   thread εκεί (όχι νέο ticket)· ο anti-injection guard μένει (μόνο πραγματικοί watchers, όχι όποιος έχει το token).
 - **HTML-body strip + visible-CC (Phase 4 follow-ups, SHIPPED):** HTML-only inbound → καθαρό κείμενο
   (`HtmlToText`)· cc-sourced watchers σε ορατό **Cc** (manual μένουν Bcc).
-- **Επόμενα:** attachments (πύλη + email) = επόμενο, προσεκτικά· maybe: στήλη/φίλτρο αξιολόγησης, per-department
-  validate_cert, structured sender identity.
+- **Συνημμένα αρχεία — portal + operator (Phase 4 follow-up, PR A, SHIPPED):** ο πελάτης ανεβάζει αρχεία στο
+  άνοιγμα/απάντηση από την πύλη, ο χειριστής στην απάντηση/σημείωση από το panel· links λήψης στο νήμα και
+  στις δύο πλευρές. **Security-first:** ιδιωτικός δίσκος, **μόνο λήψη** (`Content-Disposition: attachment`,
+  ποτέ inline), allowlist τύπων (όχι scripts/HTML/SVG/executables), τυχαίο όνομα στον δίσκο, escaped filename,
+  tenant/grant-scoped download (ο πελάτης μόνο σε δικό του ticket, ο χειριστής μόνο εντός εταιρείας), και
+  συνημμένο **εσωτερικής σημείωσης δεν φτάνει ποτέ στην πύλη** (`publicOnly`). `App\Support\TicketAttachments`.
+  _(Τα συνημμένα **email** = PR B, ξεχωριστά.)_
+- **Επόμενα:** email attachments (inbound MIME ingestion + outbound attach) = PR B, προσεκτικά· maybe:
+  στήλη/φίλτρο αξιολόγησης, per-department validate_cert, structured sender identity.
   _(In-app KB DROPPED — το BookStack το καλύπτει· Announcements = maybe-later.)_
 
 ---

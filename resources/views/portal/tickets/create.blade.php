@@ -10,7 +10,7 @@
             <flux:text>Δεν υπάρχει διαθέσιμο τμήμα υποστήριξης αυτή τη στιγμή. Δοκίμασε αργότερα.</flux:text>
         </div>
     @else
-        <form method="POST" action="{{ route('portal.tickets.store') }}" class="flex max-w-xl flex-col gap-5">
+        <form method="POST" action="{{ route('portal.tickets.store') }}" enctype="multipart/form-data" class="flex max-w-xl flex-col gap-5">
             @csrf
 
             {{-- Native <select> on purpose: flux:select renders blank without a Vite build (portal decision). --}}
@@ -43,6 +43,12 @@
             <div>
                 <flux:textarea name="body" label="Περιγραφή" rows="6" required>{{ old('body') }}</flux:textarea>
                 @error('body') <flux:text class="mt-1 text-sm text-red-600">{{ $message }}</flux:text> @enderror
+            </div>
+
+            <div>
+                <label class="mb-1 block text-sm font-medium">Συνημμένα (προαιρετικά, έως {{ \App\Support\TicketAttachments::MAX_COUNT }} αρχεία)</label>
+                <input type="file" name="attachments[]" multiple class="text-sm">
+                @error('attachments.*') <flux:text class="mt-1 text-sm text-red-600">{{ $message }}</flux:text> @enderror
             </div>
 
             <div class="flex gap-2">
