@@ -27,6 +27,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — inbound-CC → watchers/CC (Πυλώνας E, Phase 4).** Ο inbound router
+  διαβάζει πλέον τα `To`/`Cc` ενός εισερχόμενου email (μέσω `webklex`) και προσθέτει τους **άλλους
+  παραλήπτες** (developer/agency/άλλος προμηθευτής…) ως **email watchers/CC** (`source=cc`) στο ticket, ώστε
+  οι απαντήσεις μας να τους κοινοποιούν κι αυτούς. **Μόνο όταν ο αποστολέας είναι γνωστός πελάτης** (αλλιώς
+  ένας ανώνυμος θα μπορούσε να «γράψει» τρίτους στα outbound μας — open-relay). Εξαιρούνται ο αποστολέας, το
+  mailbox του τμήματος (display + polled), ο owner (primary/secondary email + requester), το δικό μας From, οι
+  **αποκλεισμένες** και οι άκυρες διευθύνσεις· idempotent. Πριν, μόνο ο From διαβαζόταν — οι CC αγνοούνταν.
 - **Σύστημα υποστήριξης (tickets) — αποκλεισμός αποστολέα / spam (Πυλώνας E, Phase 4).** Per-tenant
   blocklist (`ticket_blocked_senders`): ο `InboundTicketRouter` ρίχνει ένα εισερχόμενο email **πριν** από
   οποιοδήποτε customer match ή δημιουργία ticket, αν ο αποστολέας (πλήρης διεύθυνση **ή** ολόκληρο το domain)
