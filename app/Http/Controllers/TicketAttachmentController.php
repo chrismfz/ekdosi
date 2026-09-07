@@ -20,6 +20,10 @@ class TicketAttachmentController extends Controller
     {
         $user = auth()->user();
         abort_if($user === null, 403);
+        // Permission gate (same as the expense-document sibling): a company member
+        // without the tickets permission must not be able to pull ticket files —
+        // internal-note attachments included.
+        abort_unless($user->can('View:Ticket'), 403);
 
         $model = Ticket::query()->withoutGlobalScope(CompanyScope::class)->find($ticket);
         abort_if($model === null, 404);

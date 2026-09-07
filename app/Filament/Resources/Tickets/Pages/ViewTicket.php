@@ -22,10 +22,20 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Database\Eloquent\Model;
 
 class ViewTicket extends ViewRecord
 {
     protected static string $resource = TicketResource::class;
+
+    /**
+     * Eager-load the thread's attachments so the infolist's per-message download
+     * links (TicketInfolist::attachmentLinks) don't fire a query per message.
+     */
+    protected function resolveRecord(int|string $key): Model
+    {
+        return parent::resolveRecord($key)->load('messages.attachments');
+    }
 
     protected function getHeaderActions(): array
     {
@@ -309,6 +319,10 @@ class ViewTicket extends ViewRecord
             ->maxFiles(TicketAttachments::MAX_COUNT)
             ->maxSize(TicketAttachments::MAX_SIZE_KB)
             ->acceptedFileTypes(TicketAttachments::MIME_TYPES)
+            // Only files uploaded in THIS session are accepted as final paths — a
+            // tampered Livewire submit can't slip in an arbitrary private-disk path
+            // (TicketAttachments::fromStoredPaths re-checks the same, defence in depth).
+            ->preventFilePathTampering()
             ->storeFileNamesIn('attachment_names')
             ->columnSpanFull();
     }

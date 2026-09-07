@@ -136,11 +136,13 @@ Route::get('/company-backups/{run}/download', CompanyBackupDownloadController::c
     ->middleware(['auth', 'signed'])
     ->name('company-backups.download');
 
-// Operator ticket-attachment download — AUTH + tenant-checked (see controller).
-// Forced download from the private disk, never public/inline.
+// Operator ticket-attachment download — AUTH + SIGNED + permission + tenant-checked
+// (see controller; same posture as the expense-document/backup links below). Forced
+// download from the private disk, never public/inline. The signed link is generated
+// server-side in the ticket infolist for users already viewing the ticket.
 Route::get('/support/tickets/{ticket}/attachments/{attachment}', TicketAttachmentController::class)
     ->where(['ticket' => '[0-9]+', 'attachment' => '[0-9]+'])
-    ->middleware('auth')->name('support.tickets.attachment');
+    ->middleware(['auth', 'signed'])->name('support.tickets.attachment');
 
 // Expense attachment — AUTH + SIGNED + tenant-checked (see controller). Streams
 // the private supplier-document scan from the local disk.

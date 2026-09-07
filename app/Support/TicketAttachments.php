@@ -94,6 +94,15 @@ class TicketAttachments
      * FileUpload (operator path): the component wrote the bytes and gave us paths +
      * a path→original-name map.
      *
+     * SECURITY (defence in depth): the FileUpload is the primary guard
+     * (`preventFilePathTampering()` ties the accepted paths to files uploaded in
+     * THIS session, and `acceptedFileTypes()` enforces the mime allowlist). This
+     * choke-point re-checks INDEPENDENTLY — the path must live under our own
+     * {@see DIRECTORY} AND carry an allowlisted extension — so a tampered Livewire
+     * submit can never make us record (and later, on delete, destroy) an arbitrary
+     * file on the shared private disk (another feature's backup/scan, another
+     * tenant's ticket file).
+     *
      * @param  list<string>  $paths
      * @param  array<string, string>  $names  path => original filename
      * @return list<Attachment>
@@ -102,7 +111,10 @@ class TicketAttachments
     {
         $out = [];
         foreach (array_slice($paths, 0, self::MAX_COUNT) as $path) {
-            if (! is_string($path) || ! Storage::disk(self::DISK)->exists($path)) {
+            if (! is_string($path) || ! self::isOwnedPath($path) || ! self::hasAllowedExtension($path)) {
+                continue;
+            }
+            if (! Storage::disk(self::DISK)->exists($path)) {
                 continue;
             }
             $out[] = $message->attachments()->create([
@@ -146,6 +158,30 @@ class TicketAttachments
         abort_unless(Storage::disk($attachment->disk)->exists($attachment->path), 404);
 
         return Storage::disk($attachment->disk)->download($attachment->path, self::safeName($attachment->original_name));
+    }
+
+    /**
+     * Is this path one WE would have written — i.e. directly under {@see DIRECTORY}
+     * on the private disk (no traversal, no nesting into other features' folders)?
+     * Guards the operator record path against a tampered submit pointing elsewhere.
+     */
+    private static function isOwnedPath(string $path): bool
+    {
+        $path = ltrim($path, '/');
+        if (str_contains($path, '..')) {
+            return false; // no traversal
+        }
+        $prefix = self::DIRECTORY.'/';
+
+        // Exactly one segment under the directory: "ticket-attachments/<file>".
+        return str_starts_with($path, $prefix)
+            && ! str_contains(substr($path, strlen($prefix)), '/');
+    }
+
+    /** Does the path carry an allowlisted extension (case-insensitive)? */
+    private static function hasAllowedExtension(string $path): bool
+    {
+        return in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), self::EXTENSIONS, true);
     }
 
     /** A display/download filename with any path separators + control chars stripped. */

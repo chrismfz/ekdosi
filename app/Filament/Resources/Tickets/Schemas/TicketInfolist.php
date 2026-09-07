@@ -17,6 +17,7 @@ use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\URL;
 
 /**
  * The read-only ticket view: a header (status/priority/who/department) + the
@@ -185,16 +186,26 @@ class TicketInfolist
     /**
      * Download links for a message's attachments as safe HTML (filename escaped —
      * it is untrusted uploader input). Null when the message has none.
+     *
+     * Reads the LOADED `attachments` relation (the property, not a fresh
+     * `->attachments()->get()`), so the two calls per message — one from
+     * `->visible()`, one from `->state()` — share a single cached load instead of
+     * firing a query each. Each URL is a short-lived signed link (the operator
+     * download route is `signed`), generated only here for a user already viewing
+     * the ticket.
      */
     private static function attachmentLinks(TicketMessage $message): ?string
     {
-        $rows = $message->attachments()->get(['id', 'original_name', 'size']);
+        $rows = $message->attachments;
         if ($rows->isEmpty()) {
             return null;
         }
 
         return $rows->map(function ($att) use ($message): string {
-            $url = route('support.tickets.attachment', ['ticket' => $message->ticket_id, 'attachment' => $att->id]);
+            $url = URL::temporarySignedRoute('support.tickets.attachment', now()->addMinutes(30), [
+                'ticket' => $message->ticket_id,
+                'attachment' => $att->id,
+            ]);
 
             return '<a href="'.e($url).'" target="_blank" rel="noopener" class="fi-link">📎 '
                 .e($att->original_name).' <span style="color:#71717a">('.e($att->humanSize()).')</span></a>';
