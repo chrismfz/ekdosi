@@ -215,11 +215,12 @@ class WebklexImapMailbox implements ImapMailbox
     private function parseHeadersOnly(Message $message, int $size): ParsedInboundEmail
     {
         $h = $this->headerFields($message);
-        // When the Message-ID is absent, seed the synthetic id with the message size
-        // too — otherwise two DIFFERENT oversized mails (same sender/subject/second,
-        // fixed placeholder body) would collapse to one id and the second would be
-        // dropped as a redelivery. A true redelivery keeps the same size → still dedup.
-        $seed = self::OVERSIZED_BODY.'|'.$size;
+        // When the Message-ID is absent, the fixed placeholder body can't distinguish
+        // two DIFFERENT oversized mails (same sender/subject/second) — they'd collapse
+        // to one synthetic id and the second would be dropped as a redelivery. Seed
+        // with the mailbox UID (stable per message, unique) so distinct mails separate
+        // while a true redelivery — same UID — still dedups; size is a further nudge.
+        $seed = self::OVERSIZED_BODY.'|'.$size.'|'.$this->messageUid($message);
 
         return new ParsedInboundEmail(
             fromEmail: $h['email'],
@@ -238,14 +239,30 @@ class WebklexImapMailbox implements ImapMailbox
      * The message's whole RFC822 size (RFC822.SIZE), or NULL if the probe fails. A
      * failed probe must NOT be treated as small — that would send a possibly-giant
      * message to parseBody() and OOM. The caller routes a header-only stub on null,
-     * so an unmeasurable message is never downloaded on faith.
+     * so an unmeasurable message is never downloaded on faith. Retried once so a
+     * transient IMAP hiccup doesn't needlessly stub (and lose the body of) an
+     * otherwise-normal email.
      */
     private function messageSize(Message $message): ?int
     {
+        for ($attempt = 1; $attempt <= 2; $attempt++) {
+            try {
+                return (int) $message->getSize();
+            } catch (Throwable $e) {
+                // transient hiccup — fall through to retry, then give up (null)
+            }
+        }
+
+        return null;
+    }
+
+    /** The mailbox UID (stable, unique per message), or '' if it can't be read. */
+    private function messageUid(Message $message): string
+    {
         try {
-            return (int) $message->getSize();
+            return (string) $message->getUid();
         } catch (Throwable $e) {
-            return null;
+            return '';
         }
     }
 
