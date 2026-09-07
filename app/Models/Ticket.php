@@ -44,9 +44,9 @@ class Ticket extends Model
         'last_reply_at',
         'last_reply_role',
         'closed_at',
-        'rating',
-        'rating_comment',
-        'rated_at',
+        // rating/rating_comment/rated_at are intentionally NOT fillable — they are
+        // written only through recordRating() (forceFill), after the canBeRated()
+        // gate, so a customer can never mass-assign a rating.
     ];
 
     protected function casts(): array
@@ -69,6 +69,23 @@ class Ticket extends Model
     protected function loggedAttributes(): array
     {
         return ['status', 'priority', 'ticket_department_id', 'assigned_to', 'customer_id', 'subject'];
+    }
+
+    protected static function booted(): void
+    {
+        // Leaving «Κλειστό» (a reopen) invalidates any rating — it belonged to the
+        // previous closure. Clearing it here covers every reopen path (portal/
+        // operator reply via PostTicketMessage, the explicit «Επαναφορά» action).
+        static::updating(function (Ticket $ticket): void {
+            $was = $ticket->getOriginal('status');
+            $wasClosed = $was === TicketStatus::Closed || $was === TicketStatus::Closed->value;
+
+            if ($ticket->isDirty('status') && $wasClosed && $ticket->status !== TicketStatus::Closed) {
+                $ticket->rating = null;
+                $ticket->rating_comment = null;
+                $ticket->rated_at = null;
+            }
+        });
     }
 
     public function company(): BelongsTo

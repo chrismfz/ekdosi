@@ -3,6 +3,7 @@
 namespace Tests\Feature\Portal;
 
 use App\Actions\Support\OpenTicket;
+use App\Enums\TicketStatus;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\CustomerUser;
@@ -139,6 +140,26 @@ class PortalTicketRatingTest extends TestCase
         $this->actingAs($login, 'portal')->post("/user/tickets/{$ticket->id}/rate", ['rating' => 5]);
 
         $this->assertSame(5, $ticket->fresh()->rating);
+    }
+
+    public function test_reopening_the_ticket_clears_a_stale_rating(): void
+    {
+        $company = $this->company();
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
+        $login = $this->login();
+        $this->grant($login, $customer);
+        $ticket = $this->ticket($company, $customer, $this->department($company, feedback: true));
+
+        $this->actingAs($login, 'portal')->post("/user/tickets/{$ticket->id}/rate", ['rating' => 5]);
+        $this->assertSame(5, $ticket->fresh()->rating);
+
+        // A customer reply reopens the ticket → the rating (tied to the old closure) is dropped.
+        $this->actingAs($login, 'portal')->post("/user/tickets/{$ticket->id}/reply", ['body' => 'ακόμη πρόβλημα']);
+
+        $reopened = $ticket->fresh();
+        $this->assertNotSame(TicketStatus::Closed, $reopened->status);
+        $this->assertNull($reopened->rating);
+        $this->assertNull($reopened->rated_at);
     }
 
     public function test_rating_out_of_range_is_rejected(): void
