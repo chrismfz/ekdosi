@@ -3,9 +3,11 @@
 namespace App\Services\Domains;
 
 use App\Contracts\DomainRegistrar;
+use App\Models\Domain;
 use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
+use App\Support\Domains\DomainSyncResult;
 
 /**
  * The 'manual' registrar (Πυλώνας A) — a first-class API-less adapter, not just
@@ -36,6 +38,13 @@ class NullDomainRegistrar implements DomainRegistrar
     {
         throw new DomainRegistrarNotConfigured(
             'Ο registrar «manual» δεν έχει API — έλεγχος διαθεσιμότητας δεν υποστηρίζεται σε αυτή τη σύνδεση.'
+        );
+    }
+
+    public function syncDomain(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — το domain συντηρείται χειροκίνητα.'
         );
     }
 }

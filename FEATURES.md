@@ -913,9 +913,11 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   cached, single 401 re-login, fail-safe sandbox/production routing) με ping + availability·
   **κανένα mutating endpoint μέχρι το A3** (test-enforced) → production creds ακίνδυνα· credential
   fields στη σύνδεση από config `registrar_fields`, secrets write-only· mock-HTTP tests.
-- **Επόμενα:** A2b `domains:sync` (expiry/status/NS pull) + availability action στο UI ·
-  A2c pricing cost-sync + registrar-first import (λίστα+contacts → manual assign) + sealed
-  export των connections · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md` epic).
+- **Registrar sync + availability (A2b, SHIPPED):** nightly `domains:sync` (gated, default OFF) —
+  λήξη/NS/registrar-id/confident status από τον registrar, `sync_error` ανά row· «Συγχρονισμός»
+  στο View + «Έλεγχος διαθεσιμότητας» στη λίστα (routing μέσω TLD)· stray-request-proof tests.
+- **Επόμενα:** A2c pricing cost-sync + registrar-first import (λίστα+contacts → manual assign) +
+  sealed export των connections · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

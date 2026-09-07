@@ -3,10 +3,13 @@
 namespace App\Services\Domains\Registrars;
 
 use App\Contracts\DomainRegistrar;
+use App\Enums\DomainStatus;
+use App\Models\Domain;
 use App\Services\Domains\DomainRegistrarNotConfigured;
 use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
+use App\Support\Domains\DomainSyncResult;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -86,6 +89,74 @@ class OpenproviderRegistrar implements DomainRegistrar
         );
     }
 
+    /**
+     * Registrar truth for one domain. Uses the stored numeric OP id when we
+     * have it; otherwise resolves it via ?full_name= (and the result carries it
+     * so the caller can persist it — docs/domains/README.md §4.3 gap note).
+     */
+    public function syncDomain(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        $data = $this->fetchDomainData($domain, $credentials);
+
+        $rawStatus = isset($data['status']) ? (string) $data['status'] : null;
+        $expiresAt = null;
+        if (is_string($data['expiration_date'] ?? null) && $data['expiration_date'] !== '') {
+            // OP returns "YYYY-MM-DD HH:MM:SS" — the date part is our clock.
+            $expiresAt = substr($data['expiration_date'], 0, 10);
+        }
+
+        $nameservers = [];
+        foreach ((array) ($data['name_servers'] ?? []) as $ns) {
+            $host = is_array($ns) ? ($ns['name'] ?? null) : (is_string($ns) ? $ns : null);
+            if (is_string($host) && $host !== '') {
+                $nameservers[] = mb_strtolower($host);
+            }
+        }
+
+        return new DomainSyncResult(
+            expiresAt: $expiresAt,
+            nameservers: $nameservers,
+            registrarDomainId: isset($data['id']) ? (string) $data['id'] : null,
+            status: $this->mapStatus($rawStatus),
+            rawStatus: $rawStatus,
+        );
+    }
+
+    /** @return array<string, mixed> */
+    private function fetchDomainData(Domain $domain, DomainRegistrarCredentials $credentials): array
+    {
+        if ($domain->registrar_domain_id !== null && $domain->registrar_domain_id !== '') {
+            $data = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($domain->registrar_domain_id))->json('data');
+            if (is_array($data)) {
+                return $data;
+            }
+        }
+
+        [$name, $extension] = $this->splitFqdn($domain->fqdn);
+        $results = $this->request($credentials, 'GET', '/v1beta/domains?full_name='.rawurlencode($name.'.'.$extension))
+            ->json('data.results');
+        $first = is_array($results) ? ($results[0] ?? null) : null;
+        if (! is_array($first)) {
+            throw new RuntimeException('Το '.$domain->fqdn.' δεν βρέθηκε στον λογαριασμό Openprovider.');
+        }
+
+        return $first;
+    }
+
+    /**
+     * Openprovider status → our lifecycle, CONFIDENT mappings only — anything
+     * else returns null (keep the local status, surface the raw value).
+     */
+    private function mapStatus(?string $raw): ?DomainStatus
+    {
+        return match ($raw) {
+            'ACT' => DomainStatus::Active,
+            'DEL' => DomainStatus::Deleted,
+            'PEN', 'REQ' => DomainStatus::PendingRegister,
+            default => null,
+        };
+    }
+
     // ── plumbing ───────────────────────────────────────────────────────────
 
     /**
@@ -116,7 +187,7 @@ class OpenproviderRegistrar implements DomainRegistrar
         return Http::withToken($token)
             ->acceptJson()
             ->timeout(30)
-            ->send($method, $this->baseUrl($credentials).$path, ['json' => $payload]);
+            ->send($method, $this->baseUrl($credentials).$path, $payload === [] ? [] : ['json' => $payload]);
     }
 
     /** Cached bearer (6h) — Openprovider tokens live ~24h; 401 mid-flight re-logins. */

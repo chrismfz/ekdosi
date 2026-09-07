@@ -161,6 +161,12 @@ return [
         'tickets_poll_imap_enabled' => env('EKDOSI_SCHEDULE_TICKETS_POLL_IMAP', false),
         'tickets_poll_imap_cron' => env('EKDOSI_TICKETS_POLL_IMAP_CRON', '*/5 * * * *'),
 
+        // domains:sync — nightly registrar-truth pull (expiry/status/NS) for
+        // domain-enabled tenants. READ-ONLY at the registrar. OFF by default —
+        // enable once a real registrar connection is configured.
+        'domain_sync_enabled' => env('EKDOSI_SCHEDULE_DOMAIN_SYNC', false),
+        'domain_sync_cron' => env('EKDOSI_DOMAIN_SYNC_CRON', '0 5 * * *'),
+
         // whmcs:reconcile-payments — READ-ONLY detector: recompute the worklist
         // of open «επί πιστώσει» invoices that WHMCS now reports Paid, cache it
         // for the dashboard widget + «Συγχρονισμός πληρωμών» page, and bell-notify

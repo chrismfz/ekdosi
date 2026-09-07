@@ -403,6 +403,19 @@ $trackSchedule(
     'self_update'
 );
 
+// domains:sync — nightly registrar-truth pull (Πυλώνας A / A2b): expiry/status/
+// NS for every syncable domain of domain-enabled tenants. READ-ONLY at the
+// registrar. Default OFF (EKDOSI_SCHEDULE_DOMAIN_SYNC) — enable once a real
+// registrar connection exists. Bounded via withoutOverlapping.
+$trackSchedule(
+    Schedule::command('domains:sync')
+        ->cron($scheduleCron('domain_sync_cron', '0 5 * * *'))
+        ->name('domains-sync')
+        ->when(fn () => $scheduleEnabled('domain_sync_enabled'))
+        ->withoutOverlapping(30),
+    'domain_sync'
+);
+
 // Hygiene: prune failed queue entries older than 14 days. Import jobs carry an
 // ENCRYPTED Firebird password (see RunFirebirdImport), so failed_jobs never holds
 // plaintext — but keeping the table bounded is still good practice.

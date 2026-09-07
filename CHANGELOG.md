@@ -53,6 +53,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   μέρα. Credential fields στη φόρμα σύνδεσης από config `registrar_fields` (το einvoice idiom):
   labeled inputs, secrets **write-only** (ποτέ δεν ξαναφορτώνονται στο browser· κενό = αμετάβλητο).
   Mock-HTTP tests (auth/routing/never-throw ping/availability parsing/401 retry/error surfacing).
+- **Domains — A2b registrar sync + availability στο UI.** `domains:sync [--tenant]` (scheduler-gated
+  `EKDOSI_SCHEDULE_DOMAIN_SYNC` default OFF, καθημερινό 05:00) τραβά την αλήθεια του registrar ανά
+  domain: λήξη, NS delegation, **υιοθέτηση του registrar id** (resolve μέσω `?full_name=` την πρώτη
+  φορά), status μόνο σε confident mapping (ACT/DEL/PEN — άγνωστο = κρατά το τοπικό + raw στο
+  module_meta)· αποτυχίες γράφονται στο `sync_error` ανά row (ορατό ⚠ στο View) και δεν σταματούν
+  τον υπόλοιπο tenant. Κουμπί **«Συγχρονισμός από registrar»** στο View και **«Έλεγχος
+  διαθεσιμότητας»** στη λίστα (δρομολόγηση μέσω TLD). Tests με `Http::preventStrayRequests()` —
+  κανένα live registrar call στο CI, ποτέ.
 
 ### Security
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy

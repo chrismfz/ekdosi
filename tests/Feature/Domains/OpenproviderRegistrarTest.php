@@ -29,6 +29,7 @@ class OpenproviderRegistrarTest extends TestCase
     {
         parent::setUp();
         Cache::flush(); // token cache is keyed per endpoint×username
+        Http::preventStrayRequests(); // no live registrar calls in CI, ever
     }
 
     private function adapter(): OpenproviderRegistrar

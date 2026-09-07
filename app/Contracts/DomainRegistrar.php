@@ -2,9 +2,11 @@
 
 namespace App\Contracts;
 
+use App\Models\Domain;
 use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
+use App\Support\Domains\DomainSyncResult;
 
 /**
  * One registrar adapter per provider (Πυλώνας A) — the domains sibling of
@@ -40,4 +42,12 @@ interface DomainRegistrar
      * it must fail loudly, never guess.
      */
     public function checkAvailability(string $fqdn, DomainRegistrarCredentials $credentials): AvailabilityResult;
+
+    /**
+     * Pull the registrar truth for one domain (expiry/status/NS/registrar id) —
+     * the A2 read clock. Throws DomainRegistrarNotConfigured on an API-less
+     * registrar; transport/API failures throw RuntimeException (the caller
+     * records them in domains.sync_error, never swallows them).
+     */
+    public function syncDomain(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult;
 }
