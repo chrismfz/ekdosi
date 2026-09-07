@@ -59,8 +59,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   φορά), status μόνο σε confident mapping (ACT/DEL/PEN — άγνωστο = κρατά το τοπικό + raw στο
   module_meta)· αποτυχίες γράφονται στο `sync_error` ανά row (ορατό ⚠ στο View) και δεν σταματούν
   τον υπόλοιπο tenant. Κουμπί **«Συγχρονισμός από registrar»** στο View και **«Έλεγχος
-  διαθεσιμότητας»** στη λίστα (δρομολόγηση μέσω TLD). Tests με `Http::preventStrayRequests()` —
-  κανένα live registrar call στο CI, ποτέ.
+  διαθεσιμότητας»** στη λίστα (δρομολόγηση μέσω TLD, gated σε Create:Domain). Tests με
+  `Http::preventStrayRequests()` — κανένα live registrar call στο CI, ποτέ. **Guards (review):**
+  το sync δεν τρέχει/δεν πατά ποτέ operator-terminal statuses (ακυρωμένα/transferred_away — τα
+  δύο ρολόγια μένουν ορθογώνια· το registrar-set Deleted συνεχίζει να παρακολουθείται για
+  redemption restore)· «Ανενεργή» σύνδεση (mode off ή inactive) = καμία API κλήση· stale registrar
+  id → by-name resolve + υιοθέτηση του νέου id· NS snapshot ατομικό· λάθος credentials βγάζουν το
+  μήνυμα του Openprovider (διακριτό από outage) με ΜΙΑ αποτυχημένη login ανά run.
 - **Domains — View header «Τα δύο ρολόγια».** Η σελίδα κάθε domain ανοίγει με infolist σύνοψη:
   ταυτότητα/πελάτης/registrar (routing-aware badge, ίδια απάντηση με το sync), **λήξη registrar
   δίπλα στην επόμενη χρέωση της υπηρεσίας** (+ ποσό/κύκλος) — η πειθαρχία registrar-truth ≠

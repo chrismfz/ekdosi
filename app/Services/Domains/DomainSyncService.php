@@ -33,9 +33,9 @@ class DomainSyncService
 
     /**
      * Can this domain be synced at all? Routed to a USABLE (active, non-off)
-     * non-manual connection AND not in a terminal local status: cancelled is
-     * operator intent the sync must not resurrect, transferred_away 404s at
-     * the old registrar forever (its docblock: «billing/sync stop»).
+     * non-manual connection AND not in an OPERATOR-terminal status (cancelled /
+     * transferred_away — see DomainStatus::blocksSync; a registrar-set Deleted
+     * keeps syncing so a redemption restore is picked up).
      */
     public function isSyncable(Domain $domain): bool
     {
@@ -44,7 +44,7 @@ class DomainSyncService
         return $connection !== null
             && $connection->isUsable()
             && $this->factory->for($connection)->key() !== 'manual'
-            && ! ($domain->status instanceof DomainStatus && $domain->status->isTerminal());
+            && ! ($domain->status instanceof DomainStatus && $domain->status->blocksSync());
     }
 
     /**
@@ -83,17 +83,27 @@ class DomainSyncService
         if ($result->expiresAt !== null) {
             $updates['expires_at'] = $result->expiresAt;
         }
-        if ($result->registrarDomainId !== null && ($domain->registrar_domain_id === null || $domain->registrar_domain_id === '')) {
+        // The by-name resolve is authoritative for THIS fqdn — adopt the id it
+        // reported even over a stale stored one (else every future run repeats
+        // the failing by-id call); keep the old value in module_meta for audit.
+        if ($result->registrarDomainId !== null && $result->registrarDomainId !== $domain->registrar_domain_id) {
+            if ($domain->registrar_domain_id !== null && $domain->registrar_domain_id !== '') {
+                $meta = $updates['module_meta'] ?? ($domain->module_meta ?? []);
+                $meta['previous_registrar_domain_id'] = $domain->registrar_domain_id;
+                $updates['module_meta'] = $meta;
+            }
             $updates['registrar_domain_id'] = $result->registrarDomainId;
         }
-        // The registrar may only PROMOTE our view — never overwrite a TERMINAL
-        // local status (cancelled = operator intent; the two-clocks rule).
-        $terminal = $domain->status instanceof DomainStatus && $domain->status->isTerminal();
-        if ($result->status !== null && ! $terminal) {
+        // The registrar may only PROMOTE our view — never overwrite an
+        // OPERATOR-terminal status (cancelled/transferred_away; a registrar-set
+        // Deleted may be promoted back, e.g. redemption restore → ACT).
+        $frozen = $domain->status instanceof DomainStatus && $domain->status->blocksSync();
+        if ($result->status !== null && ! $frozen) {
             $updates['status'] = $result->status;
         }
         if ($result->rawStatus !== null) {
-            $meta = $domain->module_meta ?? [];
+            // Merge with any meta the id-adoption block above already staged.
+            $meta = $updates['module_meta'] ?? ($domain->module_meta ?? []);
             $meta['registrar_status'] = $result->rawStatus;
             $updates['module_meta'] = $meta;
         }

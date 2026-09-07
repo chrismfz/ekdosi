@@ -127,6 +127,12 @@ class OpenproviderRegistrar implements DomainRegistrar
     /** @return array<string, mixed> */
     private function fetchDomainData(Domain $domain, DomainRegistrarCredentials $credentials): array
     {
+        // Authenticate ONCE up front: a login rejection must throw here (bad
+        // creds = one failed POST per run, not one per fallback branch — OP
+        // rate-limits repeated auth failures) and never be eaten by the
+        // stale-id catch below, which is for domain-fetch errors only.
+        $this->token($credentials);
+
         if ($domain->registrar_domain_id !== null && $domain->registrar_domain_id !== '') {
             try {
                 $data = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($domain->registrar_domain_id))->json('data');
@@ -136,7 +142,8 @@ class OpenproviderRegistrar implements DomainRegistrar
             } catch (RuntimeException) {
                 // Stale/wrong stored id (object re-created under a new id, or a
                 // typo) — fall through to the by-name resolve instead of failing
-                // the domain's sync forever.
+                // the domain's sync forever. The by-name result carries the new
+                // id and DomainSyncService adopts it (no repeat next run).
             }
         }
 
@@ -182,8 +189,10 @@ class OpenproviderRegistrar implements DomainRegistrar
         }
 
         if ($response->failed()) {
+            $desc = $response->json('desc');
+
             throw new RuntimeException(
-                'Openprovider error '.$response->status().': '.((string) ($response->json('desc') ?? $response->body()))
+                'Openprovider error '.$response->status().': '.(is_scalar($desc) && $desc !== '' ? (string) $desc : $response->body())
             );
         }
 
@@ -237,8 +246,10 @@ class OpenproviderRegistrar implements DomainRegistrar
             ]);
 
         if ($response->failed()) {
+            $desc = $response->json('desc');
+
             throw new RuntimeException(
-                'Openprovider login '.$response->status().': '.((string) ($response->json('desc') ?? 'αποτυχία σύνδεσης'))
+                'Openprovider login '.$response->status().': '.(is_scalar($desc) ? (string) $desc : 'αποτυχία σύνδεσης')
             );
         }
 

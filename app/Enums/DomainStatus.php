@@ -86,4 +86,17 @@ enum DomainStatus: string implements HasColor, HasLabel
     {
         return [self::TransferredAway->value, self::Cancelled->value, self::Deleted->value];
     }
+
+    /**
+     * OPERATOR-intent terminals only — the sync must neither run for nor
+     * overwrite these. Deleted is deliberately NOT here: the registrar sets it
+     * (DEL) and can reverse it (redemption restore), so sync keeps watching.
+     */
+    public function blocksSync(): bool
+    {
+        return match ($this) {
+            self::TransferredAway, self::Cancelled => true,
+            default => false,
+        };
+    }
 }

@@ -69,7 +69,7 @@ class SyncDomains extends Command
                 }
             }
 
-            $this->info("{$company->slug}: {$synced} synced, {$skipped} skipped (manual/unrouted), σφάλματα ως τώρα: {$failures}");
+            $this->info("{$company->slug}: {$synced} synced, {$skipped} skipped (manual/ανενεργή σύνδεση/ακυρωμένα), σφάλματα ως τώρα: {$failures}");
         }
 
         return $failures > 0 ? self::FAILURE : self::SUCCESS;

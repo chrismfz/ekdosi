@@ -158,10 +158,15 @@ class DomainSyncTest extends TestCase
     {
         $service = app(DomainSyncService::class);
 
-        // Terminal LOCAL status = operator intent — the sync must not touch it
+        // OPERATOR-terminal status = intent — the sync must not touch it
         // (the two-clocks rule: cancelled would be resurrected by OP's 'ACT').
         $cancelled = $this->domain(['fqdn' => 'cxl.gr', 'sld' => 'cxl', 'status' => 'cancelled']);
         $this->assertFalse($service->isSyncable($cancelled));
+
+        // Registrar-set Deleted keeps syncing (a redemption restore must be
+        // picked up — Deleted blocks assignment, NOT the watch).
+        $deleted = $this->domain(['fqdn' => 'del.gr', 'sld' => 'del', 'status' => 'deleted']);
+        $this->assertTrue($service->isSyncable($deleted));
 
         // mode «Ανενεργό» = skip, never «fall back to sandbox with prod creds».
         $this->connection->update(['mode' => 'off']);
@@ -181,10 +186,13 @@ class DomainSyncTest extends TestCase
 
         $domain = $this->domain(['registrar_domain_id' => '999']);
         app(DomainSyncService::class)->sync($domain);
+        $domain->refresh();
 
-        $this->assertSame('2029-01-01', $domain->refresh()->expires_at->toDateString());
-        // The stored (stale) id is kept — adoption only fills an EMPTY column;
-        // the operator sees the mismatch in the View, sync keeps working.
+        $this->assertSame('2029-01-01', $domain->expires_at->toDateString());
+        // The by-name resolve is authoritative — the NEW id is adopted (no
+        // repeat of the failing by-id call next run), the old kept for audit.
+        $this->assertSame('1000', $domain->registrar_domain_id);
+        $this->assertSame('999', $domain->module_meta['previous_registrar_domain_id']);
     }
 
     public function test_rejected_login_surfaces_openproviders_own_message(): void
