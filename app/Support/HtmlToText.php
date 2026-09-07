@@ -19,8 +19,9 @@ class HtmlToText
         }
 
         // Every preg_replace keeps the previous value on a null return (e.g. a
-        // backtrack-limit hit on a very large body), so we degrade to
-        // strip_tags-only rather than silently emptying the whole message.
+        // backtrack-limit hit on a very large body) rather than casting null → ''
+        // and silently emptying the whole message — worst case that one substitution
+        // is skipped (its markup then strips to inline text) but the body survives.
         // Drop non-content elements entirely (with their content).
         $html = preg_replace('#<(script|style|head|title)\b[^>]*>.*?</\1>#is', '', $html) ?? $html;
 
