@@ -74,8 +74,10 @@ class Ticket extends Model
     protected static function booted(): void
     {
         // Leaving «Κλειστό» (a reopen) invalidates any rating — it belonged to the
-        // previous closure. Clearing it here covers every reopen path (portal/
-        // operator reply via PostTicketMessage, the explicit «Επαναφορά» action).
+        // previous closure. Every reopen path today goes through Eloquent save()
+        // (portal/operator reply via PostTicketMessage, the «Επαναφορά» action), so
+        // this fires. NOTE: a raw query-builder bulk update (Ticket::…->update())
+        // bypasses model events — add the clear there too if such a path is ever added.
         static::updating(function (Ticket $ticket): void {
             $was = $ticket->getOriginal('status');
             $wasClosed = $was === TicketStatus::Closed || $was === TicketStatus::Closed->value;
