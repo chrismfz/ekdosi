@@ -70,13 +70,21 @@ class SendTicketFeedbackInvite implements ShouldQueue
         }
         $fromName = (string) ($department?->name ?: $company->mail_from_name ?: $company->name ?: config('mail.from.name'));
 
-        $url = URL::signedRoute('support.feedback.show', ['ticket' => $ticket->id]);
+        // Expiring link — a feedback invite is worth acting on for a while, not forever.
+        $url = URL::temporarySignedRoute('support.feedback.show', now()->addDays(30), ['ticket' => $ticket->id]);
 
-        $mailerFactory->for($company)->to($recipient)->send(new TicketFeedbackMail(
-            ticket: $ticket,
-            url: $url,
-            fromAddress: $fromAddress,
-            fromName: $fromName,
-        ));
+        // Best-effort: a mail failure must never bubble into the operator's close
+        // action (on the sync queue driver this runs inline). Queue retries still
+        // apply on the async driver for a transient failure before this is reached.
+        try {
+            $mailerFactory->for($company)->to($recipient)->send(new TicketFeedbackMail(
+                ticket: $ticket,
+                url: $url,
+                fromAddress: $fromAddress,
+                fromName: $fromName,
+            ));
+        } catch (\Throwable $e) {
+            Log::warning('SendTicketFeedbackInvite: send failed', ['ticket_id' => $ticket->id, 'error' => $e->getMessage()]);
+        }
     }
 }

@@ -16,7 +16,8 @@
         .subj { font-weight: 600; margin-bottom: 1rem; }
         .stars { display: flex; flex-wrap: wrap; gap: .5rem; margin: .5rem 0 1rem; }
         .stars label { cursor: pointer; border: 1px solid #d4d4d8; border-radius: 10px; padding: .5rem .75rem; font-size: .95rem; user-select: none; }
-        .stars input { position: absolute; opacity: 0; width: 0; height: 0; }
+        /* visually hidden but still focusable (so native "required" validation can focus it) */
+        .stars input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
         .stars label:has(input:checked) { border-color: #2563eb; background: #eff6ff; color: #1d4ed8; font-weight: 600; }
         textarea { width: 100%; border: 1px solid #d4d4d8; border-radius: 10px; padding: .625rem; font: inherit; resize: vertical; }
         label.field { display: block; font-size: .85rem; color: #52525b; margin: .75rem 0 .35rem; }

@@ -685,6 +685,11 @@ data model + phase gates: **`PLAN.md`**.
     στο κλείσιμο (mailable με link στην αξιολόγηση) για πελάτες που δεν ξαναμπαίνουν στην πύλη· (β) **στήλη/
     φίλτρο** αξιολόγησης στη λίστα tickets + απλό «μέσος όρος ικανοποίησης» metric. Το core (portal rating +
     operator badge) SHIPPED.
+  - **P2 (review feedback-invite, deferred):** το «Κλείσιμο» στέλνει invite σε κάθε close-cycle ενός
+    **αβαθμολόγητου** ticket — close→reopen→close ξαναστέλνει «αξιολόγησε» email. `isRated()` κόβει μόνο το
+    re-nag αφού υπάρχει βαθμός. Πλήρες dedupe θέλει marker (`feedback_invited_at`, καθαρίζεται στο reopen)·
+    χαμηλό impact. **Declined:** το re-rate μέσω του signed link είναι σκόπιμο (συνέπεια με την πύλη· misclick
+    fix) — πλέον bounded από το 30-day expiry του link.
   - **Conscious tradeoff (review Phase-4 r3):** το participant auto-watch λύνει τον operator μέσα από
     το `company->users()` pivot (ίδιο tenant invariant με το «Προσθήκη watcher»). Συνέπεια: ένας operator
     **εκτός pivot** (π.χ. super_admin που απαντά cross-tenant χωρίς membership row) δεν auto-watch-άρεται —

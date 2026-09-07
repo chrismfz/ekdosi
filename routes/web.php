@@ -120,9 +120,9 @@ Route::get('/invoice/{invoice}/official-pdf', PublicInvoicePdfController::class)
 // Support feedback — SIGNED, NO login (the emailed link is the authorization). The
 // customer rates a closed ticket of a feedback-enabled department. See controller.
 Route::get('/support/feedback/{ticket}', [TicketFeedbackController::class, 'show'])
-    ->where('ticket', '[0-9]+')->middleware('signed')->name('support.feedback.show');
+    ->where('ticket', '[0-9]+')->middleware(['signed', 'throttle:30,1'])->name('support.feedback.show');
 Route::post('/support/feedback/{ticket}', [TicketFeedbackController::class, 'store'])
-    ->where('ticket', '[0-9]+')->middleware('signed')->name('support.feedback.store');
+    ->where('ticket', '[0-9]+')->middleware(['signed', 'throttle:30,1'])->name('support.feedback.store');
 
 // Operator backup download — AUTH + SIGNED (short-lived, generated only for
 // users who may view companies). Streams the bundle from disk so a large `full`
