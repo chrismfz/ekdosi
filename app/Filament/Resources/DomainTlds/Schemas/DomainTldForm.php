@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\DomainTlds\Schemas;
 
 use App\Models\DomainRegistrarConnection;
+use App\Models\DomainTld;
 use App\Services\Domains\DomainRegistrarRegistry;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -25,7 +26,13 @@ class DomainTldForm
                         ->required()
                         ->maxLength(30)
                         ->placeholder('gr, com, com.gr, ελ …')
-                        ->helperText('Χωρίς την αρχική τελεία.')
+                        // In-use TLD strings are frozen: renaming would desync
+                        // every attached domain's stored tld/fqdn and silently
+                        // re-route/re-price them (the EditDomain discipline).
+                        ->disabled(fn (?DomainTld $record): bool => $record !== null && $record->domains()->exists())
+                        ->helperText(fn (?DomainTld $record): string => $record !== null && $record->domains()->exists()
+                            ? 'Κλειδωμένο — υπάρχουν domains σε αυτό το TLD. Για άλλο TLD, δημιουργήστε νέα εγγραφή.'
+                            : 'Χωρίς την αρχική τελεία.')
                         // Ο κανόνας μοναδικότητας είναι per-tenant στη ΒΔ
                         // (unique company_id+tld) — το DB constraint είναι ο φρουρός.
                         ->dehydrateStateUsing(fn (string $state): string => mb_strtolower(ltrim(trim($state), '.'))),

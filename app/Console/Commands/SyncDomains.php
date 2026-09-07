@@ -41,23 +41,28 @@ class SyncDomains extends Command
 
         $failures = 0;
         foreach ($companies as $company) {
-            $query = Domain::query()
+            $limit = (int) $this->option('limit');
+            $synced = 0;
+            $skipped = 0;
+            $attempted = 0;
+            $domains = Domain::query()
                 ->where('company_id', $company->id)
                 ->whereNull('deleted_at')
                 ->with(['registrarConnection', 'tldRule.registrarConnection'])
-                ->orderBy('id');
-            if ((int) $this->option('limit') > 0) {
-                $query->limit((int) $this->option('limit'));
-            }
-
-            $synced = 0;
-            $skipped = 0;
-            foreach ($query->get() as $domain) {
+                ->orderBy('id')
+                ->get();
+            foreach ($domains as $domain) {
                 if (! $sync->isSyncable($domain)) {
                     $skipped++;
 
                     continue;
                 }
+                // --limit budgets SYNCABLE attempts (a run of manual-routed rows
+                // must not starve the ones the flag exists to bound).
+                if ($limit > 0 && $attempted >= $limit) {
+                    break;
+                }
+                $attempted++;
                 try {
                     $sync->sync($domain);
                     $synced++;

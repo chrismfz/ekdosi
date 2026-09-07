@@ -12,6 +12,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\RelationManagers\RelationManager;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
@@ -49,7 +50,20 @@ class PricesRelationManager extends RelationManager
                 ->numeric()
                 ->required()
                 ->minValue(1)
-                ->maxValue(10),
+                ->maxValue(10)
+                // Friendly duplicate check for the composite unique
+                // (tld × operation × years × currency) — a field message, not
+                // a raw QueryException (the CreateDomain/EditDomain pattern).
+                ->unique(
+                    table: 'domain_tld_prices',
+                    column: 'years',
+                    ignoreRecord: true,
+                    modifyRuleUsing: fn ($rule, Get $get) => $rule
+                        ->where('domain_tld_id', $this->getOwnerRecord()->getKey())
+                        ->where('operation', (string) $get('operation'))
+                        ->where('currency', mb_strtoupper(trim((string) ($get('currency') ?: 'EUR')))),
+                )
+                ->validationMessages(['unique' => 'Υπάρχει ήδη τιμή για αυτόν τον συνδυασμό ενέργειας/ετών/νομίσματος.']),
 
             TextInput::make('currency')
                 ->label('Νόμισμα')

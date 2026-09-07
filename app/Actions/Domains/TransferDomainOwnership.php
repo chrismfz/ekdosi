@@ -2,6 +2,7 @@
 
 namespace App\Actions\Domains;
 
+use App\Enums\DomainStatus;
 use App\Models\Customer;
 use App\Models\Domain;
 use App\Models\Invoice;
@@ -31,6 +32,15 @@ class TransferDomainOwnership
             }
             if ($locked->customer_id === $newCustomer->id) {
                 throw new RuntimeException('Το domain ανήκει ήδη σε αυτόν τον πελάτη.');
+            }
+
+            // Same money-direction guard as the assign action: a terminal
+            // domain's Active contract must not be moved onto (and bill) a
+            // new customer for a name the tenant no longer holds.
+            if ($locked->status instanceof DomainStatus && $locked->status->isTerminal()) {
+                throw new RuntimeException(
+                    'Το domain είναι σε κατάσταση «'.$locked->status->getLabel().'» — δεν μεταφέρεται σε νέο πελάτη.'
+                );
             }
 
             // A staged-but-unissued draft renewal still carries the OLD customer

@@ -172,6 +172,40 @@ class AssignDomainToCustomerTest extends TestCase
         app(TransferDomainOwnership::class)($domain, $newCustomer);
     }
 
+    public function test_ownership_transfer_refuses_a_terminal_domain(): void
+    {
+        // Same money-direction guard as assign: a dead name's Active contract
+        // must not be moved onto (and bill) a new customer.
+        $domain = $this->domain(['fqdn' => 'dead.gr', 'sld' => 'dead']);
+        app(AssignDomainToCustomer::class)($domain, $this->customer);
+        $domain->refresh()->update(['status' => 'transferred_away']);
+
+        $newCustomer = Customer::create(['company_id' => $this->company->id, 'name' => 'Νέος']);
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('δεν μεταφέρεται');
+        app(TransferDomainOwnership::class)($domain->refresh(), $newCustomer);
+    }
+
+    public function test_renewal_staging_skips_a_dead_domains_contract(): void
+    {
+        $domain = $this->domain(['fqdn' => 'stale.gr', 'sld' => 'stale']);
+        app(AssignDomainToCustomer::class)($domain, $this->customer);
+        $domain->refresh();
+
+        // Contract due yesterday, but the domain is gone — no draft, no charge.
+        $domain->serviceContract->forceFill(['next_due_date' => now()->subDay()->toDateString()])->save();
+        $domain->update(['status' => 'transferred_away']);
+
+        $this->artisan('services:stage-renewals', ['--tenant' => $this->company->slug])
+            ->expectsOutputToContain('δεν χρεώνουμε')
+            ->assertExitCode(0);
+
+        $this->assertSame(0, Invoice::query()
+            ->where('company_id', $this->company->id)
+            ->where('service_contract_id', $domain->service_contract_id)
+            ->count(), 'κανένα draft για domain που δεν κατέχουμε');
+    }
+
     public function test_ownership_transfer_refuses_unassigned_or_same_customer(): void
     {
         $unassigned = $this->domain(['fqdn' => 'loose.gr', 'sld' => 'loose']);

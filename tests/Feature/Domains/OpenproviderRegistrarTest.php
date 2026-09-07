@@ -8,6 +8,7 @@ use App\Services\Domains\Registrars\OpenproviderRegistrar;
 use App\Support\Domains\DomainRegistrarCredentials;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 use Tests\TestCase;
@@ -125,7 +126,9 @@ class OpenproviderRegistrarTest extends TestCase
 
     public function test_a_stale_token_relogs_in_once_and_retries(): void
     {
-        Cache::put('domains:op:token:'.md5(self::SANDBOX.'|myip'), 'stale-token', 300);
+        // Tokens are cached ENCRYPTED (a live bearer must never sit plaintext
+        // in the cache table) — seed accordingly.
+        Cache::put('domains:op:token:'.md5(self::SANDBOX.'|myip'), Crypt::encryptString('stale-token'), 300);
 
         Http::fake([
             self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'fresh-token']]),

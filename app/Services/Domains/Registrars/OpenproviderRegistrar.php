@@ -10,8 +10,10 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -207,20 +209,29 @@ class OpenproviderRegistrar implements DomainRegistrar
             ->send($method, $this->baseUrl($credentials).$path, $payload === [] ? [] : ['json' => $payload]);
     }
 
-    /** Cached bearer (6h) — Openprovider tokens live ~24h; 401 mid-flight re-logins. */
+    /**
+     * Cached bearer (6h) — Openprovider tokens live ~24h; 401 mid-flight
+     * re-logins. Cached ENCRYPTED: with the DB cache driver a plaintext entry
+     * would put a live full-access bearer into the `cache` table (and every DB
+     * dump), while the credentials themselves are encrypted at rest.
+     */
     private function token(DomainRegistrarCredentials $credentials): string
     {
         $key = $this->tokenCacheKey($credentials);
         $cached = Cache::get($key);
         if (is_string($cached) && $cached !== '') {
-            return $cached;
+            try {
+                return Crypt::decryptString($cached);
+            } catch (DecryptException) {
+                Cache::forget($key); // stale/foreign ciphertext → re-login
+            }
         }
 
         $token = $this->freshToken($credentials); // throws with OP's own message
         if ($token === null) {
             throw new RuntimeException('Αποτυχία σύνδεσης στο Openprovider (login δεν επέστρεψε token).');
         }
-        Cache::put($key, $token, self::TOKEN_TTL_SECONDS);
+        Cache::put($key, Crypt::encryptString($token), self::TOKEN_TTL_SECONDS);
 
         return $token;
     }

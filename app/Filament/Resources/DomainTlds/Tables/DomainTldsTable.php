@@ -4,6 +4,7 @@ namespace App\Filament\Resources\DomainTlds\Tables;
 
 use App\Filament\Resources\DomainTlds\DomainTldResource;
 use App\Filament\Support\GuardedDeleteAction;
+use App\Models\DomainTld;
 use App\Services\Domains\DomainRegistrarRegistry;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\EditAction;
@@ -27,11 +28,12 @@ class DomainTldsTable
                     ->searchable()
                     ->sortable(),
 
-                TextColumn::make('registrarConnection.registrar')
+                TextColumn::make('registrar')
                     ->label('Registrar')
                     ->badge()
-                    ->placeholder('— manual —')
-                    ->formatStateUsing(fn (string $state): string => $registry->label($state)),
+                    // THE shared label helper — a custom connection label (e.g.
+                    // «Openprovider MyIP») renders the same on every surface.
+                    ->state(fn (DomainTld $record): string => $registry->connectionLabel($record->registrarConnection)),
 
                 TextColumn::make('min_years')
                     ->label('Ελάχ. έτη')

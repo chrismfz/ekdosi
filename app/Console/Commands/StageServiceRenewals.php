@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Actions\StageServiceRenewal;
 use App\Models\Company;
+use App\Models\Domain;
 use App\Models\ServiceContract;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -144,8 +145,33 @@ class StageServiceRenewals extends Command
         $skipped = 0;
         $errors = 0;
 
+        // Domains pillar guard: a contract that IS a domain's 1:1 renewal clock
+        // must not stage while the domain is dead (transferred_away/cancelled/
+        // deleted — money-wrong direction: billing a name the tenant no longer
+        // holds). One query, keyed by contract. docs/domains/README.md §6.
+        $domainsByContract = Domain::query()
+            ->where('company_id', $tenant->id)
+            ->whereIn('service_contract_id', $due->pluck('id'))
+            ->get()
+            ->keyBy('service_contract_id');
+
         foreach ($due as $contract) {
             $label = "#{$contract->id} {$contract->customer?->name} — ".($contract->description ?: 'υπηρεσία');
+
+            $domain = $domainsByContract->get($contract->id);
+            if ($domain !== null && ! $domain->status->isRenewable()) {
+                $skipped++;
+                $this->warn("  · {$label}: το domain {$domain->fqdn} είναι «{$domain->status->getLabel()}» — δεν χρεώνουμε, skipped.");
+                Log::warning('services:stage-renewals skipped a contract — domain not renewable', [
+                    'company_id' => $tenant->id,
+                    'slug' => $tenant->slug,
+                    'service_contract_id' => $contract->id,
+                    'domain' => $domain->fqdn,
+                    'domain_status' => $domain->status->value,
+                ]);
+
+                continue;
+            }
 
             // A contract without a renewal type would make the action throw.
             // Count + warn, never hand it to the action.

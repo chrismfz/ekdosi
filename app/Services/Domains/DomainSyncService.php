@@ -98,8 +98,19 @@ class DomainSyncService
         // OPERATOR-terminal status (cancelled/transferred_away; a registrar-set
         // Deleted may be promoted back, e.g. redemption restore → ACT).
         $frozen = $domain->status instanceof DomainStatus && $domain->status->blocksSync();
-        if ($result->status !== null && ! $frozen) {
-            $updates['status'] = $result->status;
+        $newStatus = $result->status;
+        // Openprovider keeps reporting ACT past the expiry date — derive the
+        // documented active→expired transition from the REGISTRAR expiry so a
+        // lapsed domain never sits in the «Ενεργά» tab (docs §6.5; the full
+        // grace/redemption windows land with A3).
+        $effectiveExpiry = $result->expiresAt ?? $domain->expires_at?->toDateString();
+        if ($newStatus === DomainStatus::Active
+            && $effectiveExpiry !== null
+            && Carbon::parse($effectiveExpiry)->lt(Carbon::today())) {
+            $newStatus = DomainStatus::Expired;
+        }
+        if ($newStatus !== null && ! $frozen) {
+            $updates['status'] = $newStatus;
         }
         if ($result->rawStatus !== null) {
             // Merge with any meta the id-adoption block above already staged.

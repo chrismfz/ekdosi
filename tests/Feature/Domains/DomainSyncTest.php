@@ -94,6 +94,25 @@ class DomainSyncTest extends TestCase
         $this->assertSame(['ns1.myip.gr', 'ns2.myip.gr'], $domain->nameservers()->pluck('host')->all());
     }
 
+    public function test_a_lapsed_expiry_derives_expired_even_when_op_still_reports_act(): void
+    {
+        // OP keeps ACT past the expiry date — the documented active→expired
+        // transition is derived from the registrar expiry (§6.5).
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=example.gr' => Http::response(['data' => ['results' => [[
+                'id' => 5, 'status' => 'ACT',
+                'expiration_date' => now()->subDays(10)->format('Y-m-d').' 00:00:00',
+                'name_servers' => [],
+            ]]]]),
+        ]);
+
+        $domain = $this->domain();
+        app(DomainSyncService::class)->sync($domain);
+
+        $this->assertSame(DomainStatus::Expired, $domain->refresh()->status);
+    }
+
     public function test_unknown_registrar_status_keeps_the_local_status(): void
     {
         Http::fake([
