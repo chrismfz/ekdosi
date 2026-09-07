@@ -42,10 +42,11 @@ class TicketBlockedSender extends Model
      */
     public static function normalizePattern(?string $value): string
     {
-        // lowercase → strip ALL whitespace (a valid email/domain has none, so
-        // «@ bad.gr» and «spammer @bad.gr» collapse correctly) → strip a leading «@»
-        // (a domain entered as «@x.gr» stored bare).
-        $value = preg_replace('/\s+/', '', mb_strtolower((string) $value)) ?? '';
+        // lowercase → strip ALL whitespace incl. unicode separators (NBSP/full-width
+        // from copy-paste), since a valid email/domain has none, so «@ bad.gr» and
+        // «spammer @bad.gr» collapse correctly → strip a leading «@» (a domain entered
+        // as «@x.gr» stored bare).
+        $value = preg_replace('/[\s\p{Z}]+/u', '', mb_strtolower((string) $value)) ?? '';
 
         return ltrim($value, '@');
     }
@@ -65,7 +66,10 @@ class TicketBlockedSender extends Model
      */
     public static function isBlocked(int $companyId, string $fromEmail): bool
     {
-        $from = mb_strtolower(trim($fromEmail));
+        // Canonicalise the incoming address through the SAME normaliser used on
+        // store, so matching and storage can never disagree (a real address has no
+        // leading «@», so that part is a no-op here).
+        $from = self::normalizePattern($fromEmail);
         if ($from === '' || ! str_contains($from, '@')) {
             return false;
         }

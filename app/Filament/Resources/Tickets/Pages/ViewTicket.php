@@ -159,8 +159,8 @@ class ViewTicket extends ViewRecord
                     .'» δεν θα μπορεί να ανοίγει ή να απαντά αιτήματα μέσω email. Μπορείς να τον αφαιρέσεις από τις Ρυθμίσεις → Υποστήριξη.')
                 ->action(function (Ticket $record): void {
                     $pattern = TicketBlockedSender::normalizePattern($record->requester_email);
-                    if ($pattern === '') {
-                        Notification::make()->title('Δεν υπάρχει διεύθυνση αποστολέα')->warning()->send();
+                    if ($pattern === '' || mb_strlen($pattern) > 254) {
+                        Notification::make()->title('Μη έγκυρη διεύθυνση αποστολέα')->warning()->send();
 
                         return;
                     }
