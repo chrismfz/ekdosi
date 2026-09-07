@@ -7,11 +7,13 @@ use App\Actions\Support\PostTicketMessage;
 use App\Models\Customer;
 use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
+use App\Models\TicketBlockedSender;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
 use App\Support\TicketReference;
 use EmailReplyParser\EmailReplyParser;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Routes a parsed inbound email into a ticket (Πυλώνας E, Phase 3a): append to a
@@ -51,6 +53,23 @@ class InboundTicketRouter
         }
 
         $companyId = (int) $department->company_id;
+
+        // Blocklist (spam/block-sender): drop before any customer/thread match, so a
+        // blocked sender is fully silenced — no new ticket, no reopen, and no reply
+        // appended to an existing thread. A DOMAIN block matches that exact domain
+        // (not subdomains) and is intentionally blunt — it catches every address on
+        // it; prefer a full-email block to spare legitimate colleagues. (Softening to
+        // «new/reopen only», and subdomain matching, are BACKLOG options.)
+        if (TicketBlockedSender::isBlocked($companyId, $email->fromEmail)) {
+            Log::info('InboundTicketRouter: blocked sender dropped', [
+                'company_id' => $companyId,
+                'department_id' => $department->id,
+                'from' => $email->fromEmail,
+            ]);
+
+            return null;
+        }
+
         $messageId = $this->normaliseId($email->messageId);
 
         // (0) Already processed this exact message? Return its ticket, don't duplicate.

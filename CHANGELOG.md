@@ -27,6 +27,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — αποκλεισμός αποστολέα / spam (Πυλώνας E, Phase 4).** Per-tenant
+  blocklist (`ticket_blocked_senders`): ο `InboundTicketRouter` ρίχνει ένα εισερχόμενο email **πριν** από
+  οποιοδήποτε customer match ή δημιουργία ticket, αν ο αποστολέας (πλήρης διεύθυνση **ή** ολόκληρο το domain)
+  ταιριάζει — ένας spammer δεν ανοίγει ούτε ξανα-ανοίγει αίτημα. Νέο resource «Αποκλεισμένοι αποστολείς»
+  (Ρυθμίσεις → Υποστήριξη, tenant-scoped, gated) + ένα κλικ **«Αποκλεισμός αποστολέα»** πάνω στο ticket.
+  Τα patterns αποθηκεύονται normalized (lowercase, χωρίς `@`).
 - **Σύστημα υποστήριξης (tickets) — αξιολόγηση εξυπηρέτησης / feedback-on-close (Πυλώνας E, Phase 4).**
   Ενεργοποιεί το ήδη υπαρκτό αλλά αχρησιμοποίητο `ticket_departments.feedback_on_close` flag: όταν ένα αίτημα
   **κλείσει** και το τμήμα του ζητά feedback, ο πελάτης βλέπει στην πύλη («Τα αιτήματά μου») φόρμα **αξιολόγησης

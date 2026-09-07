@@ -8,6 +8,7 @@ use App\Filament\Resources\Tickets\TicketResource;
 use App\Jobs\SendTicketReplyEmail;
 use App\Models\CannedReply;
 use App\Models\Ticket;
+use App\Models\TicketBlockedSender;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Support\CannedReplyExpander;
@@ -139,6 +140,38 @@ class ViewTicket extends ViewRecord
                 ->action(function (Ticket $record): void {
                     $record->update(['status' => TicketStatus::Open, 'closed_at' => null]);
                     Notification::make()->title('Το αίτημα άνοιξε ξανά')->success()->send();
+                }),
+
+            // Block the sender (spam/block-sender) — drops ALL their future inbound
+            // email (new, reopen, or a reply to an open thread) before it routes.
+            // Only when we have an address that wrote in. Needs BOTH ticket-update
+            // AND the blocklist create permission (so it can't create a row the
+            // operator couldn't otherwise manage).
+            Action::make('blockSender')
+                ->label('Αποκλεισμός αποστολέα')
+                ->icon('heroicon-o-no-symbol')
+                ->color('danger')
+                ->authorize(fn (Ticket $record): bool => ($canUpdate($record))
+                    && (auth()->user()?->can('create', TicketBlockedSender::class) ?? false))
+                ->visible(fn (Ticket $record): bool => filled($record->requester_email))
+                ->requiresConfirmation()
+                ->modalDescription(fn (Ticket $record): string => 'Ο αποστολέας «'.$record->requester_email
+                    .'» δεν θα μπορεί να ανοίγει ή να απαντά αιτήματα μέσω email. Μπορείς να τον αφαιρέσεις από τις Ρυθμίσεις → Υποστήριξη.')
+                ->action(function (Ticket $record): void {
+                    $pattern = TicketBlockedSender::normalizePattern($record->requester_email);
+                    if ($pattern === '' || mb_strlen($pattern) > 254) {
+                        Notification::make()->title('Μη έγκυρη διεύθυνση αποστολέα')->warning()->send();
+
+                        return;
+                    }
+                    $row = TicketBlockedSender::firstOrCreate(
+                        ['company_id' => $record->company_id, 'pattern' => $pattern],
+                        ['created_by' => auth()->id()],
+                    );
+                    Notification::make()
+                        ->title($row->wasRecentlyCreated ? 'Ο αποστολέας αποκλείστηκε' : 'Ο αποστολέας ήταν ήδη αποκλεισμένος')
+                        ->{$row->wasRecentlyCreated ? 'success' : 'info'}()
+                        ->send();
                 }),
 
             // Self watch/unwatch (Phase 4): personal — gated on `view`, not `update`.
