@@ -23,6 +23,21 @@ class WebklexImapMailbox implements ImapMailbox
     /** Cap messages handled per poll so a huge backlog can't run unbounded. */
     private const MAX_PER_POLL = 50;
 
+    /**
+     * Hard cap for a whole RFC822 message (headers + MIME-encoded body/attachments).
+     * Above this the message is skipped WITHOUT downloading its body, so a giant can
+     * neither OOM the poller nor — left unread — wedge every future poll. Generous vs
+     * the 25 MB decoded-attachment budget (base64 inflates ~+33%), so it never rejects
+     * a message that could still yield storable attachments.
+     */
+    private const MAX_MESSAGE_BYTES = 50 * 1024 * 1024; // 50 MB
+
+    /** Is a whole-message RFC822 size over the hard cap? (Testable in isolation.) */
+    public static function isMessageTooLarge(int $bytes): bool
+    {
+        return $bytes > self::MAX_MESSAGE_BYTES;
+    }
+
     public function test(TicketDepartment $department): MailboxTestResult
     {
         $folderName = $department->imap_folder ?: 'INBOX';
@@ -61,13 +76,28 @@ class WebklexImapMailbox implements ImapMailbox
                 return $summary;
             }
 
-            // leaveUnread(): don't let webklex auto-flag on fetch — WE mark \Seen only
-            // once the handler confirms the message was routed (idempotent + safe).
-            $messages = $folder->query()->whereUnseen()->leaveUnread()->limit(self::MAX_PER_POLL)->get();
+            // Fetch HEADERS ONLY (fetchBody(false)); each body is downloaded one at a
+            // time in the loop, so a burst of large mails can't materialise every body
+            // at once and OOM the poller. leaveUnread(): WE mark \Seen, never the fetch.
+            $messages = $folder->query()->whereUnseen()->leaveUnread()->fetchBody(false)
+                ->limit(self::MAX_PER_POLL)->get();
             $summary->fetched = $messages->count();
 
             foreach ($messages as $message) {
                 try {
+                    // Size guard BEFORE downloading the body (RFC822.SIZE is a cheap,
+                    // header-level IMAP command). A giant message is skipped AND marked
+                    // \Seen — otherwise, left unread, it would be re-fetched every poll
+                    // and, once we OOM on it, wedge the mailbox forever (poison message).
+                    if (self::isMessageTooLarge((int) $message->getSize())) {
+                        $message->setFlag('Seen');
+                        $summary->skipped++;
+                        $summary->addError('Μήνυμα παραλείφθηκε (μέγεθος πάνω από το όριο).');
+
+                        continue;
+                    }
+
+                    $message->parseBody(); // download + parse THIS message only (bounded memory)
                     if ($handle($this->parse($message)) === true) {
                         $message->setFlag('Seen');
                         $summary->processed++;

@@ -728,10 +728,11 @@ data model + phase gates: **`PLAN.md`**.
     ή κάποιο file λείπει από τον δίσκο → skip), η απάντηση φεύγει χωρίς αυτά με μόνο `Log::warning` (καταγράφει stored vs
     attached) — ο χειριστής δεν ειδοποιείται στο UI (τα αρχεία μένουν ορατά/κατεβάσιμα στο thread, οπότε δεν χάνονται).
     Full feedback θέλει async notification πίσω στον χειριστή (queued job → bell)· χαμηλή προτεραιότητα.
-    (iv) **webklex giant-part memory (P2, review PR B):** το `attachments()` πλέον φράζει το ΔΙΚΟ του DTO list (allowlist
-    + caps πριν το copy), αλλά το webklex αποκωδικοποιεί eager ΟΛΟ το μήνυμα στο fetch — ένα τεράστιο single part
-    φορτώνεται από το webklex πριν καν το δούμε. Πλήρης φραγή θέλει webklex-level streaming/skip oversized parts (ή
-    IMAP `FETCH` με μέγεθος-guard)· pre-existing poller συμπεριφορά για bodies, όχι νέο από PR B.
+    (iv) **webklex giant-part memory — SHIPPED (poller hardening).** Ο poller φέρνει πλέον headers-only και
+    κατεβάζει το σώμα ένα-ένα (`fetchBody(false)` + `parseBody()` per message → peak μνήμη = 1 μήνυμα αντί για ΟΛΑ
+    τα 50 unseen μαζί), και παραλείπει μήνυμα πάνω από 50MB RFC822 (`WebklexImapMailbox::isMessageTooLarge`, έλεγχος
+    `RFC822.SIZE` πριν το body download) μαρκάροντάς το \Seen — σπάει το poison loop. `MailboxPollSummary::skipped`
+    το καταγράφει. **Remaining (χαμηλή προτ.):** dead-letter folder/quota αντί για σκέτο skip, per-tenant disk quota.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
