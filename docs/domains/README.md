@@ -411,11 +411,15 @@ Explicit per-year τιμές (1–10). (Ακριβώς το «TLD Import & Prici
 
 ## 8. Filament UI
 
-### 8.1 Gating (per-tenant + permission)
-Shared trait `GatesOnDomainManagement` με `canAccess()`/`shouldRegisterNavigation()` =
-`Filament::getTenant() instanceof Company && Filament::getTenant()->enable_domain_management &&
-auth()->user()?->can('View:Domain')`. Κάθε Domains resource/page το κουβαλά (δεν υπάρχει
-group-level toggle). Πρότυπο: `ExpenseClassificationRuleResource::canAccess()`.
+### 8.1 Gating (per-tenant + permission) — **cluster, όχι trait**
+Πρότυπο ο **Πυλώνας E**: `app/Filament/Clusters/SupportCluster.php` + `companies.support_enabled`
+(η πειθαρχία του `docs/menu-ia.md`: «κάθε νέος πυλώνας = ΕΝΑ top nav entry, κρυφό αν δεν είναι
+enabled»). Άρα: **`DomainsCluster`** με `canAccess()` = `Filament::getTenant()?->enable_domain_management
+&& canAccessClusteredComponents()` — όλα τα Domains resources/pages γίνονται μέλη του cluster και
+κληρονομούν το gate· κανένα trait ανά resource. Το toggle στο `CompanyForm` σε **δικό του Tab
+«Domains»** (όπως το Tab «Υποστήριξη» με το `support_enabled`), super_admin-only.
+_(Το αρχικό σχέδιο για shared trait `GatesOnDomainManagement` προϋπήρχε του cluster pattern —
+ξεπερασμένο.)_
 
 ### 8.2 `DomainResource` + η πλούσια per-domain View (RICHER από WHMCS)
 Ο ιδιοκτήτης: η WHMCS per-domain οθόνη είναι «φτωχή» (NS + dates + buttons). Η δική μας View
@@ -434,8 +438,9 @@ group-level toggle). Πρότυπο: `ExpenseClassificationRuleResource::canAcce
   registered / **transferred** (`transferred_at`) / expiry / next-due.
 - **Καρτέλα πελάτη — tab «Domains»**: `DomainsRelationManager` στο `CustomerResource` (ίδιο
   pattern με invoices/contracts RMs) — ο operator βλέπει ανά πελάτη τα assigned domains του με
-  status/expiry, με link στην πλήρη View. Gated με το ίδιο `GatesOnDomainManagement` (ο tenant
-  χωρίς domain management δεν βλέπει καν το tab).
+  status/expiry, με link στην πλήρη View. Gated με το ίδιο flag (RM `canViewForRecord()` ελέγχει
+  `enable_domain_management` — ο tenant χωρίς domain management δεν βλέπει καν το tab· τα RMs δεν
+  είναι cluster members, θέλουν δικό τους check).
 - **Reminder history** tab (`domain_reminders`) · **API history** tab (`domain_registrar_logs`,
   «Bridge logs»-style) · shared `ActivityLog`/`Attachments`/`InternalNotes` RMs.
 - Filament-5 idioms: `Schema`/`configure`, `recordActions`/`toolbarActions`, `extends
