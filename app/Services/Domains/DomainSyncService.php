@@ -20,12 +20,13 @@ class DomainSyncService
     public function __construct(private readonly DomainRegistrarFactory $factory) {}
 
     /**
-     * The connection whose adapter serves this domain: the domain's own wins,
-     * else the TLD's default (§2 routing). Null = manual/unrouted.
+     * The connection whose adapter serves this domain — delegates to THE one
+     * routing source (Domain::effectiveRegistrarConnection), so UI and sync
+     * can never disagree about which registrar handles a domain.
      */
     public function connectionFor(Domain $domain): ?DomainRegistrarConnection
     {
-        return $domain->registrarConnection ?? $domain->tldRule?->registrarConnection;
+        return $domain->effectiveRegistrarConnection();
     }
 
     /** Can this domain be synced at all (routed to an is_active, non-manual connection)? */

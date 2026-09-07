@@ -15,7 +15,6 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs\Tab;
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Carbon;
 
 class ListDomains extends BaseListRecords
 {
@@ -76,21 +75,12 @@ class ListDomains extends BaseListRecords
      */
     public function getTabs(): array
     {
-        $soon = fn (): Carbon => Carbon::today()->addDays(45);
-
         return [
             'active' => Tab::make('Ενεργά')
                 ->modifyQueryUsing(fn (Builder $query): Builder => $query->where('status', DomainStatus::Active->value)),
             'expiring' => Tab::make('Λήγουν σύντομα')
-                ->modifyQueryUsing(fn (Builder $query): Builder => $query
-                    ->where('status', DomainStatus::Active->value)
-                    ->whereNotNull('expires_at')
-                    ->where('expires_at', '<=', $soon()))
-                ->badge(fn (): int => Domain::query()
-                    ->where('status', DomainStatus::Active->value)
-                    ->whereNotNull('expires_at')
-                    ->where('expires_at', '<=', $soon())
-                    ->count())
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->expiringSoon())
+                ->badge(fn (): int => Domain::query()->expiringSoon()->count())
                 ->badgeColor('warning'),
             'unassigned' => Tab::make('Χωρίς πελάτη')
                 // Only ASSIGNABLE rows — a terminal-status stray would ring a

@@ -22,7 +22,6 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
-use Illuminate\Support\Carbon;
 use RuntimeException;
 
 class DomainsTable
@@ -67,16 +66,9 @@ class DomainsTable
                     ->label('Registrar')
                     ->badge()
                     ->color('gray')
-                    // Routing semantics (§2): the domain's own connection wins,
-                    // else the TLD's default, else the API-less manual.
-                    ->state(function (Domain $record): string {
-                        $registry = app(DomainRegistrarRegistry::class);
-                        $conn = $record->registrarConnection ?? $record->tldRule?->registrarConnection;
-
-                        return $conn === null
-                            ? $registry->label('manual')
-                            : ($conn->label !== null && $conn->label !== '' ? $conn->label : $registry->label((string) $conn->registrar));
-                    })
+                    // THE shared routing + label pair — never a local copy.
+                    ->state(fn (Domain $record): string => app(DomainRegistrarRegistry::class)
+                        ->connectionLabel($record->effectiveRegistrarConnection()))
                     ->toggleable(),
 
                 TextColumn::make('expires_at')
@@ -84,9 +76,8 @@ class DomainsTable
                     ->date('d/m/Y')
                     ->sortable()
                     ->placeholder('—')
-                    ->color(fn (Domain $record): ?string => $record->expires_at === null ? null
-                        : ($record->expires_at->isPast() ? 'danger'
-                            : ($record->expires_at->lte(Carbon::today()->addDays(45)) ? 'warning' : null))),
+                    ->color(fn (Domain $record): ?string => $record->isExpired() ? 'danger'
+                        : ($record->isExpiringSoon() ? 'warning' : null)),
 
                 IconColumn::make('auto_renew')
                     ->label('Auto-renew')

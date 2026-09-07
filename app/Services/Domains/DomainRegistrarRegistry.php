@@ -3,6 +3,7 @@
 namespace App\Services\Domains;
 
 use App\Contracts\DomainRegistrar;
+use App\Models\DomainRegistrarConnection;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -56,6 +57,22 @@ class DomainRegistrarRegistry
         $labels = config('ekdosi.domains.registrar_labels', []);
 
         return is_array($labels) && is_string($labels[$key] ?? null) ? $labels[$key] : $key;
+    }
+
+    /**
+     * Display label for a connection (null = the manual pseudo-registrar):
+     * its custom label, else its registrar's human label. The one helper the
+     * list column, the View header and any future surface share.
+     */
+    public function connectionLabel(?DomainRegistrarConnection $connection): string
+    {
+        if ($connection === null) {
+            return $this->label('manual');
+        }
+
+        return $connection->label !== null && $connection->label !== ''
+            ? $connection->label
+            : $this->label((string) $connection->registrar);
     }
 
     /**

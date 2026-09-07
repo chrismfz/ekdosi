@@ -61,6 +61,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   τον υπόλοιπο tenant. Κουμπί **«Συγχρονισμός από registrar»** στο View και **«Έλεγχος
   διαθεσιμότητας»** στη λίστα (δρομολόγηση μέσω TLD). Tests με `Http::preventStrayRequests()` —
   κανένα live registrar call στο CI, ποτέ.
+- **Domains — View header «Τα δύο ρολόγια».** Η σελίδα κάθε domain ανοίγει με infolist σύνοψη:
+  ταυτότητα/πελάτης/registrar (routing-aware badge, ίδια απάντηση με το sync), **λήξη registrar
+  δίπλα στην επόμενη χρέωση της υπηρεσίας** (+ ποσό/κύκλος) — η πειθαρχία registrar-truth ≠
+  billing clock ορατή με μια ματιά — ημερομηνίες καταχώρησης/μεταφοράς, flags, τελευταίο sync
+  με το σφάλμα του. Routing/label/«λήγει σύντομα» παράθυρο κεντρικοποιήθηκαν
+  (`Domain::effectiveRegistrarConnection/EXPIRING_SOON_DAYS`, `connectionLabel`) ώστε λίστα,
+  View και sync να μη διαφωνούν ποτέ· «λήγει σήμερα» ≠ «έληξε» (strict-before-today).
 
 ### Security
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy

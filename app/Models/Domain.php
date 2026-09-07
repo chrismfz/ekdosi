@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 
 /**
  * A domain name (Πυλώνας A / A1) — docs/domains/README.md §3.4.
@@ -165,6 +166,43 @@ class Domain extends Model
     {
         return $query->whereNull('customer_id')
             ->whereNotIn('status', DomainStatus::terminalValues());
+    }
+
+    /** ONE «λήγει σύντομα» window for list column, tab, badge AND View header. */
+    public const EXPIRING_SOON_DAYS = 45;
+
+    /**
+     * Expired = strictly BEFORE today: on the expiry date itself the registrar
+     * still holds the name, so the UI must say «λήγει σήμερα», not «έληξε».
+     */
+    public function isExpired(): bool
+    {
+        return $this->expires_at !== null && $this->expires_at->lt(Carbon::today());
+    }
+
+    public function isExpiringSoon(): bool
+    {
+        return $this->expires_at !== null
+            && ! $this->isExpired()
+            && $this->expires_at->lte(Carbon::today()->addDays(self::EXPIRING_SOON_DAYS));
+    }
+
+    /** Query twin of isExpiringSoon() (active domains only) for the worklist tab/badge. */
+    public function scopeExpiringSoon($query)
+    {
+        return $query
+            ->where('status', DomainStatus::Active->value)
+            ->whereNotNull('expires_at')
+            ->where('expires_at', '<=', Carbon::today()->addDays(self::EXPIRING_SOON_DAYS));
+    }
+
+    /**
+     * §2 routing, THE one source (UI display AND the sync both use it): the
+     * domain's own connection wins, else the TLD's default. Null = manual.
+     */
+    public function effectiveRegistrarConnection(): ?DomainRegistrarConnection
+    {
+        return $this->registrarConnection ?? $this->tldRule?->registrarConnection;
     }
 
     /** Keep fqdn derived from the authoritative sld + tld pair. */

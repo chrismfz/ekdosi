@@ -38,16 +38,10 @@ class DomainInfolist
                         ->label('Registrar')
                         ->badge()
                         ->color('gray')
-                        // Routing semantics (§2): domain's connection wins, else
-                        // the TLD default, else the API-less manual.
-                        ->state(function (Domain $record): string {
-                            $registry = app(DomainRegistrarRegistry::class);
-                            $conn = $record->registrarConnection ?? $record->tldRule?->registrarConnection;
-
-                            return $conn === null
-                                ? $registry->label('manual')
-                                : ($conn->label !== null && $conn->label !== '' ? $conn->label : $registry->label((string) $conn->registrar));
-                        }),
+                        // THE shared routing + label pair — same answer as the
+                        // list column and (crucially) the sync itself.
+                        ->state(fn (Domain $record): string => app(DomainRegistrarRegistry::class)
+                            ->connectionLabel($record->effectiveRegistrarConnection())),
                 ]),
 
             Section::make('Τα δύο ρολόγια')
@@ -58,13 +52,23 @@ class DomainInfolist
                         ->label('Λήξη (registrar)')
                         ->date('d/m/Y')
                         ->placeholder('—')
+                        // Shared semantics (Domain::isExpired = strictly BEFORE
+                        // today — on the expiry date the name is still held).
                         ->color(fn (Domain $record): ?string => $record->expires_at === null ? null
-                            : ($record->expires_at->isPast() ? 'danger'
-                                : ($record->expires_at->lte(Carbon::today()->addDays(45)) ? 'warning' : 'success')))
-                        ->helperText(fn (Domain $record): ?string => $record->expires_at === null ? null
-                            : ($record->expires_at->isPast()
+                            : ($record->isExpired() ? 'danger'
+                                : ($record->isExpiringSoon() ? 'warning' : 'success')))
+                        ->helperText(function (Domain $record): ?string {
+                            if ($record->expires_at === null) {
+                                return null;
+                            }
+                            if ($record->expires_at->isToday()) {
+                                return 'λήγει σήμερα';
+                            }
+
+                            return $record->isExpired()
                                 ? 'Έληξε πριν '.$record->expires_at->diffForHumans(short: true, syntax: Carbon::DIFF_ABSOLUTE)
-                                : 'σε '.$record->expires_at->diffForHumans(short: true, syntax: Carbon::DIFF_ABSOLUTE))),
+                                : 'σε '.$record->expires_at->diffForHumans(short: true, syntax: Carbon::DIFF_ABSOLUTE);
+                        }),
                     TextEntry::make('serviceContract.next_due_date')
                         ->label('Επόμενη χρέωση (υπηρεσία)')
                         ->date('d/m/Y')
@@ -77,8 +81,16 @@ class DomainInfolist
                     TextEntry::make('registered_at')
                         ->label('Καταχώρηση / Μεταφορά')
                         ->placeholder('—')
-                        ->state(fn (Domain $record): ?string => $record->registered_at?->format('d/m/Y')
-                            .($record->transferred_at !== null ? ' · σε εμάς '.$record->transferred_at->format('d/m/Y') : '')),
+                        // Either part may be null (a transfer-in often has no
+                        // known original registration date) — no dangling «·».
+                        ->state(function (Domain $record): ?string {
+                            $parts = array_filter([
+                                $record->registered_at?->format('d/m/Y'),
+                                $record->transferred_at !== null ? 'σε εμάς '.$record->transferred_at->format('d/m/Y') : null,
+                            ]);
+
+                            return $parts === [] ? null : implode(' · ', $parts);
+                        }),
                 ]),
 
             Section::make('Registrar & ρυθμίσεις')
