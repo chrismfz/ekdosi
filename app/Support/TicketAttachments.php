@@ -169,12 +169,11 @@ class TicketAttachments
                 continue;
             }
             $name = self::safeName($attachment->filename);
-            if (! self::hasAllowedExtension($name)) {
-                continue; // not an allowlisted type → never stored
-            }
             $size = strlen($attachment->content);
-            if ($size === 0 || $size > self::MAX_SIZE_KB * 1024 || $totalBytes + $size > $budget) {
-                continue; // empty, over the per-file cap, or would blow the per-email budget
+            // Per-item gate (allowlist + per-file cap) shared with the IMAP pre-filter,
+            // plus the stateful per-email budget.
+            if (! self::inboundItemAllowed($name, $size) || $totalBytes + $size > $budget) {
+                continue;
             }
 
             $path = self::DIRECTORY.'/'.Str::random(40).'.'.strtolower(pathinfo($name, PATHINFO_EXTENSION));
@@ -304,6 +303,17 @@ class TicketAttachments
     public static function isAllowedFilename(?string $filename): bool
     {
         return self::hasAllowedExtension(self::safeName($filename));
+    }
+
+    /**
+     * The single «would we store this inbound item?» per-item predicate (allowlisted
+     * type + non-empty + within the per-file cap), shared by {@see storeInbound} and
+     * the IMAP pre-filter so the memory-bounding pre-filter can never drift from the
+     * authoritative store. The stateful per-email budget/count stay in each loop.
+     */
+    public static function inboundItemAllowed(string $safeName, int $size): bool
+    {
+        return $size > 0 && $size <= self::MAX_SIZE_KB * 1024 && self::hasAllowedExtension($safeName);
     }
 
     /**

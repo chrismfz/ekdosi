@@ -160,7 +160,6 @@ class WebklexImapMailbox implements ImapMailbox
     {
         $out = [];
         $totalBytes = 0;
-        $perFile = TicketAttachments::MAX_SIZE_KB * 1024;
         $budget = TicketAttachments::MAX_EMAIL_TOTAL_KB * 1024;
 
         foreach ($message->getAttachments() as $attachment) {
@@ -173,14 +172,18 @@ class WebklexImapMailbox implements ImapMailbox
                 continue;
             }
             $name = trim((string) $attachment->getName());
-            // Drop unnamed or non-allowlisted parts BEFORE copying their bytes.
+            // Drop unnamed or non-allowlisted parts BEFORE copying their bytes (the
+            // memory-bounding pre-filter).
             if ($name === '' || ! TicketAttachments::isAllowedFilename($name)) {
                 continue;
             }
             $content = (string) $attachment->getContent();
             $size = strlen($content);
-            if ($size === 0 || $size > $perFile || $totalBytes + $size > $budget) {
-                continue; // empty, over the per-file cap, or would blow the per-email budget
+            // Authoritative per-item gate — the SAME predicate storeInbound applies —
+            // plus the per-email budget, so this list can never drift from the store.
+            if (! TicketAttachments::inboundItemAllowed(TicketAttachments::safeName($name), $size)
+                || $totalBytes + $size > $budget) {
+                continue;
             }
             $totalBytes += $size;
             $out[] = new InboundEmailAttachment(

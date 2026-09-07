@@ -120,15 +120,18 @@ class SendTicketReplyEmail implements ShouldQueue
         ));
 
         // The operator reply's own attachments (PR B), read from the private disk at
-        // send time. All-or-nothing on the per-email budget: if the set is too big,
-        // outboundPayload returns [] and we send the reply text WITHOUT the files
-        // (a giant that bounces would deliver nothing) — logged so it's not silent.
-        $attachmentFiles = TicketAttachments::outboundPayload($message->attachments);
-        if ($attachmentFiles === [] && $message->attachments->isNotEmpty()) {
-            Log::warning('SendTicketReplyEmail: attachments too large for one email, sent without them', [
+        // send time. outboundPayload drops any file whose bytes are gone and, if the
+        // set exceeds the per-email budget, returns [] (all-or-nothing — a giant that
+        // bounces would deliver nothing). Whenever fewer files go out than are on the
+        // message, log it (missing-on-disk OR over budget) so the drop isn't silent.
+        $stored = $message->attachments;
+        $attachmentFiles = TicketAttachments::outboundPayload($stored);
+        if ($stored->isNotEmpty() && count($attachmentFiles) < $stored->count()) {
+            Log::warning('SendTicketReplyEmail: reply sent without some attachments (missing on disk or over the per-email size budget)', [
                 'ticket_id' => $ticket->id,
                 'ticket_message_id' => $message->id,
-                'attachment_count' => $message->attachments->count(),
+                'stored' => $stored->count(),
+                'attached' => count($attachmentFiles),
             ]);
         }
 

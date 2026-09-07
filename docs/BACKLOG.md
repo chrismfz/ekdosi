@@ -724,9 +724,10 @@ data model + phase gates: **`PLAN.md`**.
     download-only + allowlist (κανένα execution), αλλά ένα malicious έγγραφο μπορεί να κατέβει· χαμηλή προτεραιότητα.
     (ii) **disk-DoS**: 50 msgs/poll × 25MB = ~1.25GB/poll worst-case από spam· φράγμα σήμερα = blocklist + clients_only
     + `ops:health` disk monitor· per-tenant quota αν εμφανιστεί abuse. (iii) **operator UI feedback στο outbound
-    drop (P2, review PR B):** όταν τα συνημμένα μιας απάντησης ξεπερνούν το 25MB budget, στέλνεται η απάντηση χωρίς
-    αρχεία με μόνο `Log::warning` — ο χειριστής δεν ειδοποιείται (τα αρχεία μένουν ορατά/κατεβάσιμα στο thread, οπότε
-    δεν χάνονται). Full feedback θέλει async notification πίσω στον χειριστή (queued job → bell)· χαμηλή προτεραιότητα.
+    drop (P2, review PR B):** όταν τα συνημμένα μιας απάντησης δεν σταλούν όλα (πάνω από το 25MB budget → all-or-nothing,
+    ή κάποιο file λείπει από τον δίσκο → skip), η απάντηση φεύγει χωρίς αυτά με μόνο `Log::warning` (καταγράφει stored vs
+    attached) — ο χειριστής δεν ειδοποιείται στο UI (τα αρχεία μένουν ορατά/κατεβάσιμα στο thread, οπότε δεν χάνονται).
+    Full feedback θέλει async notification πίσω στον χειριστή (queued job → bell)· χαμηλή προτεραιότητα.
     (iv) **webklex giant-part memory (P2, review PR B):** το `attachments()` πλέον φράζει το ΔΙΚΟ του DTO list (allowlist
     + caps πριν το copy), αλλά το webklex αποκωδικοποιεί eager ΟΛΟ το μήνυμα στο fetch — ένα τεράστιο single part
     φορτώνεται από το webklex πριν καν το δούμε. Πλήρης φραγή θέλει webklex-level streaming/skip oversized parts (ή
