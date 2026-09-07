@@ -30,6 +30,10 @@ class ViewTicket extends ViewRecord
         // ViewInvoice): View:Ticket alone must NOT let a read-only viewer reply,
         // reassign, or change status.
         $canUpdate = fn (Ticket $record): bool => auth()->user()?->can('update', $record) ?? false;
+        // A merged ticket is terminal — it lives on in its survivor. No mutation of
+        // the dead duplicate (a reply would reopen it into an Open-but-merged limbo
+        // and never reach the customer, who is redirected to the survivor).
+        $notMerged = fn (Ticket $record): bool => ! $record->isMerged();
 
         return [
             Action::make('reply')
@@ -37,6 +41,7 @@ class ViewTicket extends ViewRecord
                 ->icon('heroicon-o-arrow-uturn-left')
                 ->color('primary')
                 ->authorize($canUpdate)
+                ->visible($notMerged)
                 ->schema([
                     Select::make('canned')
                         ->label('Έτοιμη απάντηση')
@@ -77,6 +82,7 @@ class ViewTicket extends ViewRecord
                 ->icon('heroicon-o-lock-closed')
                 ->color('warning')
                 ->authorize($canUpdate)
+                ->visible($notMerged)
                 ->schema([
                     Textarea::make('body')->label('Σημείωση (μόνο για χειριστές)')->required()->rows(4),
                 ])
@@ -96,6 +102,7 @@ class ViewTicket extends ViewRecord
                 ->icon('heroicon-o-user')
                 ->color('gray')
                 ->authorize($canUpdate)
+                ->visible($notMerged)
                 ->schema([
                     Select::make('assigned_to')
                         ->label('Χειριστής')
@@ -114,7 +121,7 @@ class ViewTicket extends ViewRecord
                 ->icon('heroicon-o-pause-circle')
                 ->color('gray')
                 ->authorize($canUpdate)
-                ->visible(fn (Ticket $record): bool => ! in_array($record->status, [TicketStatus::Closed, TicketStatus::OnHold], true))
+                ->visible(fn (Ticket $record): bool => ! $record->isMerged() && ! in_array($record->status, [TicketStatus::Closed, TicketStatus::OnHold], true))
                 ->action(function (Ticket $record): void {
                     $record->update(['status' => TicketStatus::OnHold]);
                     Notification::make()->title('Το αίτημα μπήκε σε αναμονή')->success()->send();
@@ -155,8 +162,12 @@ class ViewTicket extends ViewRecord
                     Select::make('target_id')
                         ->label('Συγχώνευση σε αίτημα')
                         ->required()
-                        ->options(fn (Ticket $record): array => self::mergeTargets($record))
                         ->searchable()
+                        // Initial list = the most recent same-owner tickets; search runs
+                        // server-side so an older valid target is still reachable (no 50-cap gap).
+                        ->options(fn (Ticket $record): array => self::mergeTargets($record))
+                        ->getSearchResultsUsing(fn (string $search, Ticket $record): array => self::mergeTargets($record, $search))
+                        ->getOptionLabelUsing(fn ($value): ?string => self::mergeTargetLabel($value))
                         ->placeholder('— επίλεξε το αίτημα που θα επιβιώσει —')
                         ->helperText('Μόνο αιτήματα του ΙΔΙΟΥ πελάτη. Τα μηνύματα/παραλήπτες μεταφέρονται εκεί· αυτό το αίτημα κλείνει.'),
                 ])
@@ -184,7 +195,7 @@ class ViewTicket extends ViewRecord
                 ->color('danger')
                 ->authorize(fn (Ticket $record): bool => ($canUpdate($record))
                     && (auth()->user()?->can('create', TicketBlockedSender::class) ?? false))
-                ->visible(fn (Ticket $record): bool => filled($record->requester_email))
+                ->visible(fn (Ticket $record): bool => ! $record->isMerged() && filled($record->requester_email))
                 ->requiresConfirmation()
                 ->modalDescription(fn (Ticket $record): string => 'Ο αποστολέας «'.$record->requester_email
                     .'» δεν θα μπορεί να ανοίγει ή να απαντά αιτήματα μέσω email. Μπορείς να τον αφαιρέσεις από τις Ρυθμίσεις → Υποστήριξη.')
@@ -211,6 +222,7 @@ class ViewTicket extends ViewRecord
                 ->icon(fn (Ticket $record): string => self::watchesRecord($record) ? 'heroicon-o-eye-slash' : 'heroicon-o-eye')
                 ->color('gray')
                 ->authorize(fn (Ticket $record): bool => auth()->user()?->can('view', $record) ?? false)
+                ->visible($notMerged)
                 ->action(function (Ticket $record): void {
                     $user = auth()->user();
                     if (! $user instanceof User) {
@@ -230,6 +242,7 @@ class ViewTicket extends ViewRecord
                 ->icon('heroicon-o-user-plus')
                 ->color('gray')
                 ->authorize($canUpdate)
+                ->visible($notMerged)
                 ->schema([
                     Select::make('user_id')
                         ->label('Χειριστής')
@@ -287,7 +300,7 @@ class ViewTicket extends ViewRecord
      *
      * @return array<int, string>
      */
-    private static function mergeTargets(Ticket $record): array
+    private static function mergeTargets(Ticket $record, ?string $search = null): array
     {
         $query = Ticket::query()
             ->whereKeyNot($record->id)
@@ -300,12 +313,27 @@ class ViewTicket extends ViewRecord
             if ($email === '') {
                 return []; // a guest with no address has no matchable sibling
             }
-            $query->whereNull('customer_id')->whereRaw('LOWER(requester_email) = ?', [$email]);
+            // LOWER(TRIM(...)) matches Ticket::canMergeInto's trim()+lower — the picker
+            // and the safety guard must agree on which guest tickets share an owner.
+            $query->whereNull('customer_id')->whereRaw('LOWER(TRIM(requester_email)) = ?', [$email]);
+        }
+
+        if (($search = trim((string) $search)) !== '') {
+            $like = '%'.$search.'%';
+            $query->where(fn ($q) => $q->where('reference', 'like', $like)->orWhere('subject', 'like', $like));
         }
 
         return $query->orderByDesc('id')->limit(50)->get()
             ->mapWithKeys(fn (Ticket $t): array => [$t->id => $t->reference.' — '.$t->subject])
             ->all();
+    }
+
+    /** Label for a selected merge target (may come from a server-side search, not the initial list). */
+    private static function mergeTargetLabel(mixed $value): ?string
+    {
+        $ticket = Ticket::find($value); // CompanyScope keeps this tenant-local
+
+        return $ticket !== null ? $ticket->reference.' — '.$ticket->subject : null;
     }
 
     /**

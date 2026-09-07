@@ -18,7 +18,12 @@ class TicketsTable
     public static function configure(Table $table): Table
     {
         return $table
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with(['customer', 'department', 'assignee']))
+            // Merged duplicates are retired — they live on in their survivor, so keep
+            // them out of the operator list (same as the portal); reach one by URL if
+            // ever needed for audit.
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query
+                ->whereNull('merged_into_id')
+                ->with(['customer', 'department', 'assignee']))
             ->columns([
                 TextColumn::make('reference')
                     ->label('Κωδικός')
