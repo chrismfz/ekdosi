@@ -27,6 +27,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — συγχώνευση αιτημάτων / merge (Πυλώνας E, Phase 4).** Ένα διπλότυπο
+  αίτημα ενσωματώνεται σε ένα επιβιωμένο: τα μηνύματα, watchers, tags και ticket-level attachments
+  μεταφέρονται στο target, το source κλείνει με `merged_into_id` (τερματικό — δεν ξανα-ανοίγει), system
+  notes και στις δύο πλευρές, ξαναϋπολογίζεται το `last_reply` του target. **Κλειδί ασφαλείας:** merge μόνο
+  μεταξύ αιτημάτων του **ΙΔΙΟΥ owner** (ίδιος `customer_id`, ή guests με ίδιο `requester_email`) — cross-owner
+  θα διέρρεε το νήμα του ενός στην πύλη του άλλου, οπότε απαγορεύεται. UI: action «Συγχώνευση» στο ticket
+  (επιλογή same-owner target). **Πύλη:** το merged source κρύβεται από τη λίστα και η προβολή του redirect-άρει
+  στο survivor.
 - **Σύστημα υποστήριξης (tickets) — inbound-CC → watchers/CC (Πυλώνας E, Phase 4).** Ο inbound router
   διαβάζει πλέον τα `To`/`Cc` ενός εισερχόμενου email (μέσω `webklex`) και προσθέτει τους **άλλους
   παραλήπτες** (developer/agency/άλλος προμηθευτής…) ως **email watchers/CC** (`source=cc`) στο ticket, ώστε

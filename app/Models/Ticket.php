@@ -111,6 +111,53 @@ class Ticket extends Model
         return $this->belongsTo(User::class, 'assigned_to');
     }
 
+    /** The surviving ticket this one was merged into (null unless merged). */
+    public function mergedInto(): BelongsTo
+    {
+        return $this->belongsTo(Ticket::class, 'merged_into_id');
+    }
+
+    /** Tickets that were merged into this one. */
+    public function mergedTickets(): HasMany
+    {
+        return $this->hasMany(Ticket::class, 'merged_into_id');
+    }
+
+    public function isMerged(): bool
+    {
+        return $this->merged_into_id !== null;
+    }
+
+    /**
+     * May this ticket be merged INTO $target? Same tenant, not itself, neither
+     * already merged, and — critically — the SAME owner: same customer, or (for
+     * guests) the same requester email. A cross-owner merge would leak one party's
+     * thread into the other's portal, so it is forbidden.
+     */
+    public function canMergeInto(Ticket $target): bool
+    {
+        if ((int) $this->company_id !== (int) $target->company_id
+            || (int) $this->id === (int) $target->id
+            || $this->isMerged() || $target->isMerged()) {
+            return false;
+        }
+
+        // Same registered customer.
+        if ($this->customer_id !== null && $target->customer_id !== null) {
+            return (int) $this->customer_id === (int) $target->customer_id;
+        }
+
+        // Both guests → same requester email (case-insensitive, non-blank).
+        if ($this->customer_id === null && $target->customer_id === null) {
+            $a = mb_strtolower(trim((string) $this->requester_email));
+            $b = mb_strtolower(trim((string) $target->requester_email));
+
+            return $a !== '' && $a === $b;
+        }
+
+        return false; // one guest, one registered → different owners
+    }
+
     public function messages(): HasMany
     {
         return $this->hasMany(TicketMessage::class)->orderBy('id');
@@ -220,6 +267,7 @@ class Ticket extends Model
     public function canBeRated(): bool
     {
         return $this->status === TicketStatus::Closed
+            && ! $this->isMerged() // a merged duplicate is not a real closure to rate
             && (bool) ($this->department?->feedback_on_close);
     }
 

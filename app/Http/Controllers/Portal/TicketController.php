@@ -49,6 +49,7 @@ class TicketController extends Controller
         $login = $this->login();
 
         $tickets = $this->scopedTicketQuery($this->supportedGrants($login))
+            ->whereNull('merged_into_id') // a merged duplicate lives on in its survivor
             ->with('department')
             ->orderByDesc('last_reply_at')
             ->orderByDesc('id')
@@ -127,10 +128,17 @@ class TicketController extends Controller
             ->with('status', 'Το αίτημα καταχωρήθηκε — θα ειδοποιηθείτε για την απάντηση.');
     }
 
-    public function show(int $ticket): View
+    public function show(int $ticket): View|RedirectResponse
     {
         $login = $this->login();
         $model = $this->resolveTicket($login, $ticket);
+
+        // A merged duplicate has no thread of its own — send the customer to the
+        // survivor (guaranteed same owner, so resolveTicket there also succeeds).
+        if ($model->merged_into_id !== null) {
+            return redirect()->route('portal.tickets.show', $model->merged_into_id);
+        }
+
         $model->load(['department', 'publicMessages']);
 
         return view('portal.tickets.show', ['user' => $login, 'ticket' => $model]);

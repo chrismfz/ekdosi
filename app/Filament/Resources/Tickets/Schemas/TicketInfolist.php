@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Tickets\Schemas;
 
 use App\Enums\PaymentStatus;
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Resources\Tickets\TicketResource;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Ticket;
@@ -46,6 +47,18 @@ class TicketInfolist
                         TextEntry::make('assignee.name')->label('Χειριστής')->placeholder('— χωρίς ανάθεση —'),
                         TextEntry::make('created_at')->label('Ανοίχτηκε')->dateTime('d/m/Y H:i'),
                         TextEntry::make('last_reply_at')->label('Τελευταία απάντηση')->since()->placeholder('—'),
+                        // Merged duplicate → point to the survivor (messages live there now).
+                        TextEntry::make('merged_into')
+                            ->label('Συγχωνεύθηκε στο')
+                            ->badge()
+                            ->color('gray')
+                            ->icon('heroicon-o-arrows-pointing-in')
+                            ->visible(fn (Ticket $record): bool => $record->isMerged())
+                            ->state(fn (Ticket $record): ?string => $record->mergedInto?->reference)
+                            ->url(fn (Ticket $record): ?string => $record->merged_into_id
+                                ? TicketResource::getUrl('view', ['record' => $record->merged_into_id])
+                                : null)
+                            ->columnSpanFull(),
                         // Customer feedback (feedback-on-close) — only once the customer has rated.
                         TextEntry::make('rating')
                             ->label('Αξιολόγηση πελάτη')
