@@ -35,6 +35,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (με `transferred_away`) + resource **«TLDs & τιμές»** στο cluster (operator Create/Update,
   GuardedDelete όταν υπάρχουν domains). Ο operator μπαίνει στο `OPERATOR_PERMISSION_MAP`
   για Domain/DomainTld.
+- **Domains — A1b portfolio CRUD + ανάθεση + καρτέλα πελάτη.** Resource «Domains» με work tabs
+  (Ενεργά / Λήγουν σύντομα / **Χωρίς πελάτη** + nav badge αδέσποτων), χειροκίνητη καταχώρηση
+  (sld+TLD από κατάλογο, fqdn derived), View με inline Επαφές (registrant/admin/tech/billing,
+  μία ανά τύπο) + Nameservers + σημειώσεις/συνημμένα/ιστορικό. **«Ανάθεση σε πελάτη»**
+  (`AssignDomainToCustomer` — guarded action με lock, δημιουργεί το 1:1 ServiceContract:
+  τιμή = per-domain override ή η ενεργή τιμή ανανέωσης του TLD, κύκλος από τα έτη της
+  (.gr 2ετία = biennial), `next_due_date` = η λήξη του registrar) και **«Μεταφορά ιδιοκτησίας»**
+  (νέος πελάτης + το SC τον ακολουθεί· τα ιστορικά παραστατικά μένουν — νομικό αρχείο).
+  Tab «Domains» στην καρτέλα πελάτη (κρυφό σε tenants χωρίς τον πυλώνα). Στο αδέσποτο row
+  φαίνεται ο registrant (όνομα/email) ως βοήθημα χειροκίνητης συσχέτισης.
 
 ### Security
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy

@@ -257,6 +257,11 @@ class Customer extends Model
         return $this->hasMany(ServiceContract::class);
     }
 
+    public function domains(): HasMany
+    {
+        return $this->hasMany(Domain::class);
+    }
+
     /**
      * Named people behind this customer (λογιστήριο, τεχνικός, υπεύθυνος…).
      * Primary first, then by operator sort order, then name.

@@ -903,9 +903,15 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   SC billing clock) · `domain_nameservers` · `domain_contacts` (registrant/admin/tech/billing, ένα
   ανά τύπο — και το χειροκίνητο assign aid). Resource «TLDs & τιμές» (operator Create/Update,
   GuardedDelete), enum `DomainStatus`.
-- **Επόμενα:** A1b Domain CRUD + «Ανάθεση σε πελάτη» (SC 1:1) + Customer tab · A1c/A2
-  registrar-first import (λίστα+contacts από registrar → manual assign) · A2 Openprovider
-  read-only · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md` epic).
+- **Portfolio CRUD + ανάθεση + καρτέλα πελάτη (A1b, SHIPPED):** resource «Domains» (tabs
+  Ενεργά/Λήγουν σύντομα/**Χωρίς πελάτη** + nav badge)· View με inline Επαφές + NS +
+  notes/attachments/activity· **«Ανάθεση σε πελάτη»** = guarded action που δημιουργεί το 1:1
+  `ServiceContract` (τιμή από TLD renewal ή override, κύκλος από έτη, next_due = λήξη registrar)·
+  **«Μεταφορά ιδιοκτησίας»** (SC ακολουθεί, παραστατικά μένουν)· tab «Domains» στην καρτέλα
+  πελάτη (flag-gated)· ο registrant φαίνεται δίπλα στα αδέσποτα ως assign aid.
+- **Επόμενα:** A1c/A2 registrar-first import (λίστα+contacts από registrar → manual assign) ·
+  A2 Openprovider read-only (sync/availability/pricing) · A3 write · A4 grEPP · A5
+  reconciliation (βλ. `docs/BACKLOG.md` epic).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·
