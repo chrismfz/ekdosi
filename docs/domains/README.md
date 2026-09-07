@@ -273,10 +273,32 @@ domain → πραγματικό WHOIS = ξεχωριστή port-43/RDAP πηγή
 resend-FOA, NS/DNS templates, autorenew flag.
 
 ### 4.4 grEPP adapter (.gr direct EPP)
-Ξεχωριστός EPP client (RFC 3730-3735 + FORTH custom extensions), όχι REST — το contract κρύβει τη
-διαφορά. `capabilities`: `supportsPricingSync=false`, `supportsPrivacy=false`, `supportsTransferLock=false`.
-**Build-time unknown:** τα ακριβή FORTH EPP host/port + OT&E δίνονται μόνο σε accredited registrars —
-η MyIP τα έχει (τρέχει ήδη grEPP). Τα .gr rules (§5) ζουν στο **validation layer**, όχι στον adapter.
+**Πλήρης οδηγός υλοποίησης: `docs/domains/grepp/README.md`** (+ τα επίσημα v4.3 XML examples/XSDs,
+το reference `EppClient.java` του Μητρώου και το TLS bundle, δίπλα του). Κρίσιμα σημεία:
+- **ΔΕΝ είναι RFC 5734 EPP over TCP/700** — είναι **XML web service over HTTPS**: `POST /epp/proxy`
+  με `Content-Type: text/xml;charset=UTF-8` + session cookie `JSESSIONID`. Καμία έτοιμη
+  socket-based EPP library δεν δουλεύει ως έχει. Ένα session = σειριακά commands (mutex).
+- **Endpoints ΓΝΩΣΤΑ:** UAT `https://uat-regepp.ics.forth.gr:700/epp/proxy`, prod
+  `https://regepp.ics.forth.gr:700/epp/proxy`· + plain WHOIS/check HTTP βοηθητικά (`grwhois…:800`).
+  IP whitelisting (δήλωσε prod+staging+dev IPs στο Μητρώο).
+- Extensions: **`extdomain-1.3`** (ΟΧΙ το 1.2 του παλιού `emavro/eppgr`) + `account-1.1` +
+  `dacor-1.0` + `ext-gr-rls-1.0`· **χωρίς `<svcExtension>` στο login**. DNSSEC = standard `secDNS-1.1`.
+- **Δεν υπάρχει `<poll>`** (2101) → κάθε async κατάσταση (εγκρίσεις ΕΕΤΤ, DS validation, transfers)
+  θέλει **polling με `domain:info`** — τα jobs σχεδιάζονται από την αρχή, όχι patch.
+- `create` γυρίζει **1001** (επιτυχία-με-εκκρεμότητα, ΟΧΙ σφάλμα) + **`protocol` number** (κράτα το —
+  χρειάζεται για `recallApplication`). Εκχώρηση: ενεργοποίηση ~3h, οριστική στις 5 ημέρες·
+  .gov.gr/γεωγραφικά → έγκριση ΕΕΤΤ έως 20 ημέρες (`pendingRegulatorApproval`).
+- **DACoR** = reset auth code → token στο email του δικαιούχου (λύνει το «έχασα τον κωδικό»).
+- **grRLS (Registry Lock)** = συνδρομητική/χρεώσιμη υπηρεσία του Μητρώου (period/exDate/autoRenew) —
+  εμπορική ευκαιρία, μοντελοποιείται ως προϊόν, όχι flag.
+- **`account:info`** δίνει balance (μπορεί και αρνητικό) + `suspendedOn` → monitoring job + alert
+  (αναστολή λογαριασμού = σταματούν ΟΛΑ τα registrations).
+- Regulator statuses (ΕΕΤΤ, υπερισχύουν) + homograph **bundles** (.ελ `dname`, χρεώσιμο) →
+  χαρτογράφηση σε ανθρώπινα μηνύματα στο UI.
+`capabilities`: `supportsPricingSync=false`, `supportsPrivacy=false`, `supportsTransferLock=false`
+(το grRLS είναι άλλο πράγμα από registrar transfer-lock). Τα .gr rules (§5) ζουν στο **validation
+layer**, όχι στον adapter. Library: πιθανότερα `metaregistrar/php-epp-client` (έχει HTTPS transport)
+ή δικός μας thin client — βλ. grepp/README §11.
 
 ---
 
@@ -288,6 +310,8 @@ resend-FOA, NS/DNS templates, autorenew flag.
 - **Κανένα transfer lock** → κρύψε `setLock` για .gr.
 - **Το auth code το βγάζει το REGISTRY και το στέλνει email στον REGISTRANT** — ο gaining registrar
   δεν το τραβά· το transfer-in UX λέει στον πελάτη «πάρε τον κωδικό από το email του μητρώου».
+  Χαμένος κωδικός → **DACoR** (issue-token μέσω domain:update· token στο email δικαιούχου).
+  Ληγμένο όνομα άλλου καταχωρητή μεταφέρεται και **μέσω renew + auth code** (extdomain:renew).
 - **Έλεγχος .gr ↔ .ελ homograph** (`.ελ` = `xn--qxam`, ξεχωριστό ccTLD· cross-check για confusion).
 - Label rules: 1(2)–63 chars, alnum/hyphen, όχι leading/trailing/consecutive hyphens.
 
@@ -463,14 +487,19 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 - **Multi-currency invoicing** — EUR settlement v1· USD = display.
 
 **Build-time unknowns (verify πριν το coding):**
-- ⚠ **DNS Management + Email Forwarding εμφανίζονται ΕΝΕΡΓΑ στα Openprovider TLDs της WHMCS**
-  (Domains/TLDS screenshot) — πριν παγιωθεί το «deferred», verify αν πελάτες τα χρησιμοποιούν
-  πραγματικά (ίδιο πνεύμα με `docs/go-live-usage-checks.sql.md`)· αν ναι, ανεβαίνει η προτεραιότητα.
 - Μέγεθος/σύνθεση portfolio (πόσα domains ανά TLD/registrar) — βγαίνει από `tbldomains` πριν το A1.
-- FORTH/grEPP EPP host/port + OT&E credentials (δίνονται σε accredited registrars — η MyIP τα έχει).
+- grEPP: **UAT credentials + IP whitelisting** στο Μητρώο (endpoints πλέον ΓΝΩΣΤΑ —
+  `docs/domains/grepp/README.md` §1)· + τα `[ΕΠΙΒΕΒΑΙΩΣΗ]` εκείνου του οδηγού (contact-ID prefix
+  μας, άρτια έτη 2–10 από τον Οδηγό v4.3, WHOIS REST doc, login χωρίς `<svcExtension>`).
 - Openprovider bearer token TTL (~24h· cache + re-auth σε 401 ανεξαρτήτως).
-- .gr «trade» (registrant change) μηχανική/τέλη· .gr WHOIS GDPR auto-redaction.
-- Sandbox accounts (Openprovider `*.sandbox.openprovider.nl` + grEPP OT&E) πριν το A2/A4.
+- .gr αλλαγή δικαιούχου: μηχανική ΓΝΩΣΤΗ (`ownerChange`/`ownerNameChange`, μη ανακλήσιμα,
+  .gov.gr/γεωγραφικά → ΕΕΤΤ) — **τέλη** άγνωστα· .gr WHOIS GDPR auto-redaction.
+- Sandbox accounts (Openprovider `*.sandbox.openprovider.nl` + grEPP UAT) πριν το A2/A4.
+
+**Λυμένα (αποφάσεις/δεδομένα — μην ξανανοίξουν χωρίς λόγο):**
+- DNS Management + Email Forwarding φαίνονται ενεργά στα OP TLDs της WHMCS, αλλά ΑΠΟΦΑΣΗ
+  ιδιοκτήτη (2026-09-07): εμπορικές υπηρεσίες για όποιον τις παρέχει — **τα αγνοούμε για τώρα**,
+  το deferred ισχύει.
 
 **Πάντα:** operator-gated legal docs (ποτέ auto-AADE)· sandbox-first + mock-HTTP tests (mirror
 `MyDataSubmitterSafetyTest`)· κάθε shipped slice → `FEATURES.md` + `CHANGELOG.md` + move BACKLOG item.
@@ -487,3 +516,5 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 - WHMCS registrar function index: developers.whmcs.com/domain-registrars (Function Index, Domain
   Syncing, TLD & Pricing Sync).
 - .gr/.ελ: EETT (regulator) + ICS-FORTH (registry) — 2yr term, no privacy, registry-emailed auth code, .ελ = xn--qxam.
+- **grEPP υλοποίηση: `docs/domains/grepp/`** — οδηγός (`README.md`), επίσημα v4.3 XML examples +
+  XSDs, reference `EppClient.java` + PDF του Μητρώου, HARICA/GEANT TLS bundle (δημόσια certs).

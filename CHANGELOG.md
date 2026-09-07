@@ -1472,6 +1472,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   transfer 0), Automatic Registration ήδη OFF (operator-gated = υπάρχουσα πρακτική). Registrar
   key `none` → `manual` (Null adapter ως offline registrar, A1-first), status `transferred_away`,
   non-goals premium domains/addon pricing/slabs, νέο verify-item για DNS mgmt/email-fwd χρήση.
+- **grEPP reference material στο repo** (`docs/domains/grepp/`): οδηγός υλοποίησης EPP για το
+  .gr/.ελ Μητρώο (transport = XML-over-HTTPS με JSESSIONID, ΟΧΙ RFC 5734/TCP-700· extdomain-1.3·
+  χωρίς poll → polling jobs· 1001+protocol· DACoR· grRLS· account balance monitoring) + τα επίσημα
+  v4.3 XML examples/XSDs, reference EppClient.java/PDF και HARICA TLS bundle (public — ελεγμένα,
+  κανένα credential). Το §4.4 του design ξαναγράφτηκε πάνω σε αυτά· endpoints πλέον γνωστά.
+  DNS mgmt/email-fwd: απόφαση ιδιοκτήτη — εμπορικές υπηρεσίες, αγνοούνται v1 (deferred ισχύει).
 
 ## [1.12.1] - 2026-07-13
 
