@@ -33,9 +33,18 @@ class TicketAttachmentController extends Controller
         // to the ticket's (already tenant-verified) company here, else a non-super-admin
         // operator's team-scoped View:Ticket assignment wouldn't match (null team-id).
         // A company member without the permission still can't pull ticket files,
-        // internal-note attachments included.
-        app(PermissionRegistrar::class)->setPermissionsTeamId($model->company_id);
-        abort_unless($user->can('View:Ticket'), 403);
+        // internal-note attachments included. Restore the prior team-id in a finally so
+        // this global mutation can't bleed into a later request under a persistent
+        // worker (Octane) — harmless under FPM, but the codebase's documented caution.
+        $registrar = app(PermissionRegistrar::class);
+        $priorTeamId = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($model->company_id);
+
+        try {
+            abort_unless($user->can('View:Ticket'), 403);
+        } finally {
+            $registrar->setPermissionsTeamId($priorTeamId);
+        }
 
         $file = TicketAttachments::forTicket($model, $attachment);
         abort_if($file === null, 404);
