@@ -734,7 +734,16 @@ data model + phase gates: **`PLAN.md`**.
     πριν το body download) → **δεν κατεβαίνει· ανοίγει stub ticket με μόνο headers** (placeholder body, χωρίς
     συνημμένα) ώστε να μη χαθεί σιωπηλά το αίτημα ούτε να γίνει OOM/poison loop· failed size-probe → επίσης stub
     (ποτέ parse ενός μη-μετρήσιμου μηνύματος «στα τυφλά»). **Deploy req:** το poll/worker process θέλει `memory_limit` ≥ 256M (parse μηνύματος ~cap peaks
-    σε few× wire size). **Remaining (χαμηλή προτ.):** dead-letter folder αντί για stub, per-tenant disk quota.
+    σε few× wire size). Ο walk γίνεται `chunked(…,1)` (peak = 1 μήνυμα, verified), με `finally` disconnect ώστε να μη
+    διαρρέει socket αν σκάσει. **Remaining (χαμηλή προτ., review):** (α) **round-trips:** το chunk-size-1 κάνει
+    header fetch ανά μήνυμα (≤50 sequential) αντί για ένα batch — latency σε high-RTT mailbox (efficiency, όχι
+    correctness). (β) **poison message (pre-existing):** ένα μήνυμα που το webklex ΔΕΝ μπορεί να parse-άρει σε
+    fetch/make (π.χ. malformed Date header, `soft_fail=false`) πετά GetMessagesFailedException που σταματά το poll·
+    το μήνυμα μένει unseen → ξανα-μπλοκάρει το επόμενο poll (τα από πίσω δεν φτάνουν). Ίδιο και πριν με το παλιό
+    `->get()`. Fix = per-message fetch isolation ή `soft_fail=true` + iteration guard. (γ) **soft_fail infinite
+    loop:** αν κάποτε ενεργοποιηθεί `soft_fail`, το `chunked` do-while μπορεί να γίνει infinite (dropped message →
+    handled δεν φτάνει available)· μη-reachable στο σημερινό default (soft_fail=false)· θέλει per-poll iteration cap
+    αν ποτέ αλλάξει. (δ) dead-letter folder αντί για stub, per-tenant disk quota.
   - **Holistic Support review (peace-of-mind, 2026-09-07) — NO P0/P1· P2 dispositions.** Ολόκληρο το
     subsystem reviewed· τα core invariants (tenant isolation, blocklist→idempotency→match→ownership, attachment
     gating, escaping) κρατάνε. **Fixed αμέσως:** removeWatcher action (stop replies σε ανεπιθύμητο CC — disclosure),

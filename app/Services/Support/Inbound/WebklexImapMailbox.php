@@ -69,6 +69,7 @@ class WebklexImapMailbox implements ImapMailbox
     public function poll(TicketDepartment $department, callable $handle): MailboxPollSummary
     {
         $summary = new MailboxPollSummary;
+        $client = null;
 
         try {
             $client = $this->client($department);
@@ -78,7 +79,6 @@ class WebklexImapMailbox implements ImapMailbox
             $folder = $client->getFolder($department->imap_folder ?: 'INBOX');
             if ($folder === null) {
                 $summary->addError('Δεν βρέθηκε ο φάκελος.');
-                $client->disconnect();
 
                 return $summary;
             }
@@ -106,10 +106,16 @@ class WebklexImapMailbox implements ImapMailbox
             } catch (PollBudgetReached) {
                 // hit the per-poll cap — the remaining unseen mail is left for next time
             }
-
-            $client->disconnect();
         } catch (Throwable $e) {
             $summary->addError('Σύνδεση: '.$e->getMessage());
+        } finally {
+            // Always release the IMAP connection — even if the walk threw (e.g. a
+            // message webklex couldn't parse) — so a poll never leaks a socket.
+            try {
+                $client?->disconnect();
+            } catch (Throwable) {
+                // teardown best-effort
+            }
         }
 
         return $summary;
