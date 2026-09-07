@@ -21,8 +21,10 @@ class TicketReplyMail extends Mailable
 {
     /**
      * @param  list<string>  $references  bare Message-IDs (no angle brackets)
-     * @param  list<string>  $bccAddresses  external watcher addresses (already validated);
-     *                                      Bcc, so the customer never sees the internal watchers
+     * @param  list<string>  $ccAddresses  CC-sourced watchers — VISIBLE Cc (they were
+     *                                     openly on the customer's original thread)
+     * @param  list<string>  $bccAddresses  manually-added watchers (already validated);
+     *                                      Bcc, so the customer never sees the internal ones
      */
     public function __construct(
         public Ticket $ticket,
@@ -32,6 +34,7 @@ class TicketReplyMail extends Mailable
         public string $messageId,
         public ?string $inReplyTo = null,
         public array $references = [],
+        public array $ccAddresses = [],
         public array $bccAddresses = [],
     ) {}
 
@@ -42,8 +45,9 @@ class TicketReplyMail extends Mailable
         return new Envelope(
             from: $from,
             replyTo: [$from],
-            // Watchers go in Bcc — never disclose internal staff addresses to the
-            // customer (nor the customer's address to each watcher).
+            // CC-sourced watchers are visible (openly on the original thread); manual
+            // watchers stay hidden in Bcc (never disclose internal staff addresses).
+            cc: array_map(fn (string $address): Address => new Address($address), $this->ccAddresses),
             bcc: array_map(fn (string $address): Address => new Address($address), $this->bccAddresses),
             subject: '['.$this->ticket->reference.'] '.$this->ticket->subject,
         );

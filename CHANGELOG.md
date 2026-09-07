@@ -27,6 +27,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — HTML-body strip + visible-CC (Πυλώνας E, Phase 4 follow-ups).**
+  (α) **HTML-only inbound:** ο poller μετατρέπει πλέον το HTML σε καθαρό κείμενο (`App\Support\HtmlToText`
+  — drop script/style, block tags → line breaks, decode entities) αντί να αποθηκεύει raw markup ως σώμα του
+  ticket. (β) **visible-CC:** στις outbound απαντήσεις, οι **cc-sourced** watchers (αυτοί που είχε βάλει
+  ΑΝΟΙΧΤΑ στο CC ο πελάτης) μπαίνουν πλέον σε **ορατό Cc** (ήταν ήδη στο αρχικό νήμα), ενώ οι **manual**
+  (operator-added) μένουν **κρυφά σε Bcc**.
 - **Σύστημα υποστήριξης (tickets) — reply-threading για watcher/CC (Πυλώνας E, Phase 4 follow-up).** Μια
   απάντηση από **watcher/CC** ενός ticket (π.χ. τον developer/agency που είχε βάλει ο πελάτης στο CC) κάνει
   πλέον **thread** στο ίδιο ticket αντί να ανοίγει νέο — ο `senderOwnsTicket` δέχεται και τους email-watchers

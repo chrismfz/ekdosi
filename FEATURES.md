@@ -880,8 +880,10 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   (χωρίς login) — και όποιος δεν ξαναμπαίνει στην πύλη αξιολογεί.
 - **Reply-threading για watcher/CC (Phase 4 follow-up, SHIPPED):** απάντηση από watcher/CC ενός ticket κάνει
   thread εκεί (όχι νέο ticket)· ο anti-injection guard μένει (μόνο πραγματικοί watchers, όχι όποιος έχει το token).
-- **Επόμενα:** Phase-4 follow-ups: στήλη/φίλτρο αξιολόγησης, attachments (πύλη + email), HTML-body strip στο
-  inbound, per-department validate_cert toggle, visible-CC (αντί Bcc) για cc-sourced.
+- **HTML-body strip + visible-CC (Phase 4 follow-ups, SHIPPED):** HTML-only inbound → καθαρό κείμενο
+  (`HtmlToText`)· cc-sourced watchers σε ορατό **Cc** (manual μένουν Bcc).
+- **Επόμενα:** attachments (πύλη + email) = επόμενο, προσεκτικά· maybe: στήλη/φίλτρο αξιολόγησης, per-department
+  validate_cert, structured sender identity.
   _(In-app KB DROPPED — το BookStack το καλύπτει· Announcements = maybe-later.)_
 
 ---

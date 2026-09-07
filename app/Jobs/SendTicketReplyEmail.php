@@ -102,14 +102,20 @@ class SendTicketReplyEmail implements ShouldQueue
             ->all();
         $inReplyTo = $chain !== [] ? $chain[array_key_last($chain)] : null;
 
-        // Bcc the ticket's external watchers (Phase 4), minus the recipient and the
-        // From box themselves. Drop any malformed address defensively — one bad
+        // Copy the ticket's external watchers (Phase 4). CC-sourced ones (openly on
+        // the customer's original thread) go VISIBLE Cc; manual ones stay hidden Bcc.
+        // Both minus the recipient/From, and any malformed address dropped — one bad
         // watcher row must never abort the reply to the customer.
         $skip = [mb_strtolower($recipient), mb_strtolower($fromAddress)];
+        $keep = fn (string $address): bool => ! in_array($address, $skip, true)
+            && filter_var($address, FILTER_VALIDATE_EMAIL) !== false;
+
+        $split = $ticket->watcherEmailsForReply();
+        $cc = array_values(array_filter($split['cc'], $keep));
+        // Never Bcc an address already visible in Cc.
         $bcc = array_values(array_filter(
-            $ticket->watcherEmailAddresses(),
-            fn (string $address): bool => ! in_array($address, $skip, true)
-                && filter_var($address, FILTER_VALIDATE_EMAIL) !== false,
+            array_diff($split['bcc'], $cc),
+            $keep,
         ));
 
         $mailerFactory->for($company)->to($recipient)->send(new TicketReplyMail(
@@ -120,6 +126,7 @@ class SendTicketReplyEmail implements ShouldQueue
             messageId: $messageId,
             inReplyTo: $inReplyTo,
             references: $chain,
+            ccAddresses: $cc,
             bccAddresses: $bcc,
         ));
     }

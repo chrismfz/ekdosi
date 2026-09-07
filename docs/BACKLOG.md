@@ -703,9 +703,10 @@ data model + phase gates: **`PLAN.md`**.
     email)» ώστε να μη μπερδεύεται με τον πελάτη· καθαρότερο θα ήταν sender/participant identity στο μήνυμα.
     (ii) το inbound εμπιστεύεται το From (χωρίς SPF/DKIM), οπότε το threading trust επεκτείνεται από τον owner
     στη (customer-controllable) watcher list — ίδια κλάση ρίσκου με το υπάρχον requester==From. (iii) απάντηση
-    watcher σε κλειστό ticket το ξ-ανοίγει (WHMCS-consistent). **Remaining refinements
-    (deferred):** (β) **visible CC αντί Bcc** για cc-sourced watchers (ήταν ήδη
-    ανοιχτά στο αρχικό thread), ενώ manual/internal μένουν Bcc. (γ) **perf:** το CC-capture καλεί
+    watcher σε κλειστό ticket το ξ-ανοίγει (WHMCS-consistent). **(β) visible CC αντί Bcc για cc-sourced =
+    SHIPPED** — οι cc-sourced watchers μπαίνουν σε ορατό Cc στις απαντήσεις, οι manual μένουν Bcc. **Επίσης
+    SHIPPED:** HTML-body strip στο inbound (`HtmlToText` για HTML-only emails). **Remaining refinements
+    (deferred):** (γ) **perf:** το CC-capture καλεί
     `isBlocked` ένα query ανά recipient — για μεγάλη CC-λίστα φόρτωσε το blocklist μία φορά in-memory
     (αμελητέο στα σημερινά μεγέθη). (δ) **catch-all alias:** εξαιρούμε `email` + `imap_username` του τμήματος·
     ένα τρίτο alias/catch-all address δεν εξαιρείται (self-loop churn)· θέλει ρητό πεδίο aliases αν εμφανιστεί.

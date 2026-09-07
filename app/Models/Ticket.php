@@ -240,6 +240,34 @@ class Ticket extends Model
             ->filter()->unique()->values()->all();
     }
 
+    /**
+     * External watcher emails split for an outbound reply: CC-sourced watchers were
+     * openly on the customer's original thread, so they go in a VISIBLE Cc; the rest
+     * (an operator manually added them) stay hidden in Bcc. Bypasses CompanyScope
+     * like the other ticket-constrained watcher reads.
+     *
+     * @return array{cc: list<string>, bcc: list<string>}
+     */
+    public function watcherEmailsForReply(): array
+    {
+        $cc = [];
+        $bcc = [];
+
+        foreach ($this->watchers()->withoutGlobalScope(CompanyScope::class)->whereNotNull('email')->get(['email', 'source']) as $watcher) {
+            $email = mb_strtolower(trim((string) $watcher->email));
+            if ($email === '') {
+                continue;
+            }
+            if ($watcher->source === TicketWatcher::SOURCE_CC) {
+                $cc[] = $email;
+            } else {
+                $bcc[] = $email;
+            }
+        }
+
+        return ['cc' => array_values(array_unique($cc)), 'bcc' => array_values(array_unique($bcc))];
+    }
+
     /** Messages a customer may see (excludes operator-only internal notes). */
     public function publicMessages(): HasMany
     {
