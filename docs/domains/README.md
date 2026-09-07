@@ -341,10 +341,18 @@ public .gr WHOIS auto-redacts natural-person data υπό GDPR (το «no privacy
 
 ### 6.2 Renewals (reuse `ServiceContract` 100%) — **1:1 ΚΛΕΙΔΩΜΕΝΟ** (ιδιοκτήτης 2026-09-07)
 Κάθε domain δένει στο ΔΙΚΟ του ServiceContract (1:1)· η τιμή του SC από το
-`domain_tld_prices` (operation=renewal) του TLD του, με το per-domain `price_override` να νικά.
-`next_due_date` → `App\Actions\StageServiceRenewal` κόβει
-**πρόχειρο** invoice ανανέωσης. `auto_renew=on` → auto-stage draft (operator εκδίδει)· `off` → μόνο
-worklist «λήγουν σύντομα». First-Payment vs Recurring = SC `setup_fee` + `amount`.
+`domain_tld_prices` (operation=renewal) του TLD του (ποτέ term < `min_years`), με το per-domain
+`price_override` να νικά. `next_due_date` (= λήξη registrar· ανάθεση χωρίς λήξη ΑΠΑΓΟΡΕΥΕΤΑΙ) →
+`StageServiceRenewal` κόβει **πρόχειρο** («ΠΡΟΣΧ» semantics: ΧΩΡΙΣ ΑΑ — gapless-at-send, αόρατο
+στην πύλη, μηδενικό ίχνος αν ακυρωθεί). **`auto_renew` ΚΛΕΙΔΩΜΕΝΟ (επιλογή β, ιδιοκτήτης
+2026-09-07):** on → auto-stage draft (η ανάθεση το ανάβει — assignment = intent to bill)· **off →
+ΤΙΠΟΤΑ — ούτε προσχέδιο ούτε γκρίνια** (σιωπηλό skip στο sweep, μία συνολική info γραμμή), μόνο το
+worklist «Λήγουν σύντομα»· το domain απλά λήγει. **«Προσχέδιο ανανέωσης τώρα»**
+(`StageRenewalNowAction`, το «Invoice Selected Items» της WHMCS — κουμπί σε Υπηρεσίες + Domains
+λίστα/View): on-demand early staging για τον πελάτη που θέλει να ανανεώσει νωρίς· η ρητή πρόθεση
+ΠΑΡΑΚΑΜΠΤΕΙ το auto_renew=off, ΠΟΤΕ το dead-set (νεκρό όνομα = αχρέωτο από κάθε μονοπάτι)· ο
+cursor προχωρά στην ΕΚΔΟΣΗ, όχι στο staging (open-draft guard κόβει τα διπλά).
+First-Payment vs Recurring = SC `setup_fee` + `amount`.
 
 ### 6.3 Transfer async state machine (drive από `syncTransfer`)
 ```
@@ -373,6 +381,17 @@ register/renew/transfer = εξωτερικά money+state. **adopt-on-retry** (ί
 `InvoSignTransport::status()` που υιοθετεί MARK αντί να ξαναφάιλάρει): idempotency key +
 `syncDomain`/`GET /domains?full_name=` πριν το ξανακαλέσεις, για το «ο registrar χρέωσε, timeout
 πριν το καταγράψει το ekdosi» → διπλοχρέωση/διπλο-renew. Ο reconciler (A5) έρχεται ΜΑΖΙ με το A3.
+
+**Adopt-on-already-renewed — ΔΕΣΜΕΥΤΙΚΟ για το A3 (war story ιδιοκτήτη, WHMCS 2026-09-07):**
+το κλασικό WHMCS bug που «θεραπεύεται» με χειροκίνητο relid στη MySQL: operator πατά Renew τώρα
+(«ανανέωσέ το και σε πληρώνω τέλος του μήνα»), ο πελάτης πληρώνει αργότερα, το mark-paid του
+invoice ξανα-πυροδοτεί το registrar renew → **διπλή ανανέωση/διπλό κόστος**. Ο δικός μας κανόνας:
+το on-issue hook ΠΡΙΝ καλέσει `renew()` κάνει `syncDomain()` και συγκρίνει την ΤΡΕΧΟΥΣΑ λήξη του
+registrar με την περίοδο που καλύπτει το παραστατικό — **αν η λήξη ήδη καλύπτει τη νέα περίοδο
+(κάποιος ανανέωσε ήδη: χειροκίνητα, από το panel του registrar, από άλλον δρόμο), ΥΙΟΘΕΤΕΙ**
+(ενημερώνει expires_at, προχωρά cursor, ΚΑΜΙΑ κλήση renew). Ο μόνος τρόπος διπλής ανανέωσης να
+συμβεί = να το ζητήσεις ρητά δύο περιόδους. Ισχύει και ανάποδα: το A3 κουμπί «Ανανέωση» στο
+domain θα προωθεί ΚΑΙ το billing cursor, ώστε η μετέπειτα έκδοση/πληρωμή να μην ξαναχρεώνει.
 
 ---
 

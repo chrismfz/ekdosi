@@ -913,6 +913,10 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   cached, single 401 re-login, fail-safe sandbox/production routing) με ping + availability·
   **κανένα mutating endpoint μέχρι το A3** (test-enforced) → production creds ακίνδυνα· credential
   fields στη σύνδεση από config `registrar_fields`, secrets write-only· mock-HTTP tests.
+- **Renewal billing πειθαρχία (SHIPPED):** προσχέδια = «ΠΡΟΣΧ» (χωρίς ΑΑ — gapless-at-send,
+  αόρατα στην πύλη, μηδενικό ίχνος σε ακύρωση)· `auto_renew` off = «αφήνεται να λήξει» (σιωπηλά,
+  επιλογή β)· ανάθεση ανάβει auto_renew· **«Προσχέδιο ανανέωσης τώρα»** on-demand (Υπηρεσίες +
+  Domains) για early renewals· νεκρά domains αχρέωτα από ΚΑΘΕ μονοπάτι (sweep/on-demand/transfer).
 - **Registrar sync + availability (A2b, SHIPPED):** nightly `domains:sync` (gated, default OFF) —
   λήξη/NS/registrar-id/confident status από τον registrar, `sync_error` ανά row· «Συγχρονισμός»
   στο View + «Έλεγχος διαθεσιμότητας» στη λίστα (routing μέσω TLD)· stray-request-proof tests.

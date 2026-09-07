@@ -96,6 +96,12 @@ class AssignDomainToCustomer
             $locked->update([
                 'customer_id' => $customer->id,
                 'service_contract_id' => $contract->id,
+                // Assignment = intent to bill: auto_renew turns ON so the
+                // renewal draft actually stages (staging silently skips
+                // auto_renew=off — the «let it lapse» path, owner decision).
+                // The operator flips it off per domain when the customer
+                // won't renew. Imported strays default to off until assigned.
+                'auto_renew' => true,
             ]);
 
             return $locked->refresh();

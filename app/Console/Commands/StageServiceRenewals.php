@@ -159,10 +159,23 @@ class StageServiceRenewals extends Command
             ->get()
             ->keyBy('service_contract_id');
 
+        $noRenew = 0;
+
         foreach ($due as $contract) {
             $label = "#{$contract->id} {$contract->customer?->name} — ".($contract->description ?: 'υπηρεσία');
 
             $domain = $domainsByContract->get($contract->id);
+
+            // auto_renew=off (owner decision 2026-09-07): the domain is meant
+            // to LAPSE — no draft, no per-row nagging; the «Λήγουν σύντομα»
+            // worklist is the only surface. SILENT: this is a normal state,
+            // not an anomaly.
+            if ($domain !== null && ! $domain->auto_renew) {
+                $noRenew++;
+
+                continue;
+            }
+
             // Blocked = the DEAD set (trashed/terminal) + redemption (its money
             // is the A3 restore-fee flow, not a plain renewal draft). A pending
             // register/transfer domain still stages — the tenant is ACQUIRING
@@ -234,6 +247,11 @@ class StageServiceRenewals extends Command
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+
+        if ($noRenew > 0) {
+            // One quiet info line per tenant (never per row): these lapse by design.
+            $this->line("  · {$noRenew} domain(s) χωρίς αυτόματη ανανέωση — καμία χρέωση, αφήνονται να λήξουν.");
         }
 
         return [$staged, $skipped, $errors];

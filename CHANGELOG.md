@@ -74,6 +74,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (`Domain::effectiveRegistrarConnection/EXPIRING_SOON_DAYS`, `connectionLabel`) ώστε λίστα,
   View και sync να μη διαφωνούν ποτέ· «λήγει σήμερα» ≠ «έληξε» (strict-before-today).
 
+### Added
+- **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):
+  on-demand early staging του επόμενου προσχεδίου ανανέωσης (κουμπί σε Υπηρεσίες + Domains
+  λίστα/View) για πελάτη που θέλει να ανανεώσει νωρίτερα. Η ρητή πρόθεση παρακάμπτει το
+  auto_renew=off, ποτέ το dead-set· ΠΡΟΣΧ semantics (χωρίς ΑΑ/myDATA)· open-draft guard κόβει
+  τα διπλά· ο cursor προχωρά στην έκδοση.
+
+### Changed
+- **Domains — `auto_renew` = επιλογή «β» (απόφαση ιδιοκτήτη).** off = το domain αφήνεται να λήξει:
+  ΚΑΝΕΝΑ προσχέδιο, καμία ανά-γραμμή γκρίνια στο sweep (σιωπηλό skip + μία info γραμμή ανά tenant)
+  — μόνο το worklist «Λήγουν σύντομα». Η «Ανάθεση σε πελάτη» ανάβει το auto_renew (ανάθεση =
+  πρόθεση χρέωσης)· τα αδέσποτα imports μένουν off.
+
 ### Fixed
 - **Domains — pre-A2c review σκληρύνσεις (2 γύροι).** «Νεκρό» domain (transferred_away/ακυρωμένο/
   διαγραμμένο — και soft-deleted) δεν χρεώνει ΠΟΤΕ: το `services:stage-renewals` παρακάμπτει το

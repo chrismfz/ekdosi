@@ -6,6 +6,7 @@ use App\Actions\Domains\AssignDomainToCustomer;
 use App\Actions\Domains\TransferDomainOwnership;
 use App\Enums\BillingCycle;
 use App\Enums\ServiceContractStatus;
+use App\Filament\Support\StageRenewalNowAction;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Domain;
@@ -198,6 +199,61 @@ class AssignDomainToCustomerTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('πρόχειρο παραστατικό');
         app(TransferDomainOwnership::class)($domain, $newCustomer);
+    }
+
+    public function test_assign_turns_auto_renew_on_and_lapse_domains_skip_silently(): void
+    {
+        // Assignment = intent to bill → auto_renew ON.
+        $domain = $this->domain(['fqdn' => 'lapse.gr', 'sld' => 'lapse']);
+        app(AssignDomainToCustomer::class)($domain, $this->customer);
+        $domain->refresh();
+        $this->assertTrue($domain->auto_renew);
+
+        // Operator flips it off (owner decision β): due date arrives → NO
+        // draft, NO per-row nagging — the domain is meant to lapse.
+        $domain->update(['auto_renew' => false]);
+        $domain->serviceContract->forceFill(['next_due_date' => now()->subDay()->toDateString()])->save();
+
+        $this->artisan('services:stage-renewals', ['--tenant' => $this->company->slug])
+            ->expectsOutputToContain('χωρίς αυτόματη ανανέωση')
+            ->doesntExpectOutputToContain('δεν χρεώνουμε')
+            ->assertExitCode(0);
+
+        $this->assertSame(0, Invoice::query()
+            ->where('company_id', $this->company->id)
+            ->where('service_contract_id', $domain->service_contract_id)
+            ->count());
+    }
+
+    public function test_stage_renewal_now_bills_early_and_respects_the_dead_set(): void
+    {
+        $type = InvoiceType::create([
+            'company_id' => $this->company->id, 'code' => 'TDN', 'name' => 'Τιμολόγιο', 'invcount' => 1,
+        ]);
+        $domain = $this->domain(['fqdn' => 'early.gr', 'sld' => 'early']);
+        app(AssignDomainToCustomer::class)($domain, $this->customer, invoiceTypeId: $type->id);
+        $domain->refresh();
+
+        // Early on-demand: due 2027 but the customer wants to renew NOW —
+        // and explicit intent bypasses auto_renew=off (the let-lapse default
+        // is about the automatic sweep only).
+        $domain->update(['auto_renew' => false]);
+        $draft = StageRenewalNowAction::stageNow($domain->serviceContract);
+
+        $this->assertNotNull($draft);
+        $this->assertSame('draft', $draft->local_status);
+        // The cursor does NOT move at staging — it advances when the draft is
+        // ISSUED (InvoiceObserver); until then the open-draft guard blocks dupes.
+        $this->assertSame('2027-03-01', $domain->serviceContract->fresh()->next_due_date->toDateString());
+
+        // Second click: the open draft blocks a duplicate (null, not a second doc).
+        $this->assertNull(StageRenewalNowAction::stageNow($domain->serviceContract->fresh()));
+
+        // Dead domain: unbillable from every path, on-demand included.
+        $domain->update(['status' => 'transferred_away']);
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('δεν κατέχουμε');
+        StageRenewalNowAction::stageNow($domain->serviceContract->fresh());
     }
 
     public function test_ownership_transfer_refuses_a_terminal_domain(): void

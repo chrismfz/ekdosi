@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Domains\Tables;
 use App\Actions\Domains\AssignDomainToCustomer;
 use App\Actions\Domains\TransferDomainOwnership;
 use App\Filament\Support\PickerOptions;
+use App\Filament\Support\StageRenewalNowAction;
 use App\Models\Customer;
 use App\Models\Domain;
 use App\Models\PaymentMethod;
@@ -162,6 +163,7 @@ class DomainsTable
                             ->success()
                             ->send();
                     }),
+                StageRenewalNowAction::forDomain(),
                 Action::make('transferOwnership')
                     ->label('Μεταφορά ιδιοκτησίας')
                     ->icon('heroicon-o-arrows-right-left')

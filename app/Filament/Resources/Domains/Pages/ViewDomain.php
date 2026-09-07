@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Domains\Pages;
 
 use App\Filament\Resources\Domains\DomainResource;
+use App\Filament\Support\StageRenewalNowAction;
 use App\Services\Domains\DomainSyncService;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
@@ -22,6 +23,7 @@ class ViewDomain extends ViewRecord
     protected function getHeaderActions(): array
     {
         return [
+            StageRenewalNowAction::forDomain(),
             Action::make('sync')
                 ->label('Συγχρονισμός από registrar')
                 ->icon('heroicon-o-arrow-path')
