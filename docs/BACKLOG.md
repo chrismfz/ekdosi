@@ -662,6 +662,9 @@ data model + phase gates: **`PLAN.md`**.
     σκόπιμα εκτός** (δικό του slice, όχι τώρα). **Ανοιχτά Phase-4 items** (baby-steps, ένα-ένα): ticket
     **merge** (διπλότυπα), **feedback-on-close** (rating· υπάρχει ήδη `ticket_departments.feedback_on_close`
     flag αχρησιμοποίητο), **spam/block-sender** (drop πριν το route στον `InboundTicketRouter`).
+  - **P2 (review Phase-4, deferred):** η λίστα watchers στο ticket infolist (`RepeatableEntry` πάνω στη
+    σχέση `watchers`) κάνει lazy-load το `user` ανά γραμμή (`label()`) + ένα ξεχωριστό `exists()` για το
+    visibility → N+1. Αμελητέο (ένα ticket έχει λίγους watchers)· eager-load αν ποτέ γίνει hot.
   - **Inbound-CC → watcher auto-capture (deferred, Phase-4 follow-up):** τα watcher emails μπαίνουν
     σήμερα μόνο χειροκίνητα. Auto-capture των `Cc`/`To` ενός εισερχόμενου email ως email-watchers θέλει
     επέκταση του `ParsedInboundEmail` + του `WebklexImapMailbox` (να διαβάζουν Cc/To) — αγγίζει τον mail

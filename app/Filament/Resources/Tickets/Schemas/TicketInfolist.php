@@ -93,7 +93,7 @@ class TicketInfolist
                     ]),
 
                 Section::make('Παρακολούθηση (watchers / CC)')
-                    ->description('Χειριστές που ειδοποιούνται με καμπανάκι + emails που μπαίνουν CC στις απαντήσεις.')
+                    ->description('Χειριστές που ειδοποιούνται με καμπανάκι + emails που κοινοποιούνται (κρυφό Bcc) στις απαντήσεις.')
                     ->columnSpanFull()
                     ->collapsed()
                     ->visible(fn (Ticket $record): bool => $record->watchers()->exists())

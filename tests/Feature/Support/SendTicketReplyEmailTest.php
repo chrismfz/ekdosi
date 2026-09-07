@@ -97,7 +97,7 @@ class SendTicketReplyEmailTest extends TestCase
         Mail::assertSent(TicketReplyMail::class, fn (TicketReplyMail $mail) => $mail->hasTo('wrote-from@e.gr'));
     }
 
-    public function test_external_watcher_is_cc_d_on_the_reply(): void
+    public function test_external_watcher_is_bcc_d_on_the_reply(): void
     {
         Mail::fake();
         $company = $this->company();
@@ -116,9 +116,11 @@ class SendTicketReplyEmailTest extends TestCase
         $this->deliver($reply);
 
         Mail::assertSent(TicketReplyMail::class, function (TicketReplyMail $mail): bool {
+            $bcc = collect($mail->envelope()->bcc)->map(fn ($a) => $a->address)->all();
             $cc = collect($mail->envelope()->cc)->map(fn ($a) => $a->address)->all();
 
-            return $mail->hasTo('c@e.gr') && in_array('boss@e.gr', $cc, true);
+            // Bcc (hidden), never Cc — the customer must not see the internal watcher.
+            return $mail->hasTo('c@e.gr') && in_array('boss@e.gr', $bcc, true) && ! in_array('boss@e.gr', $cc, true);
         });
     }
 

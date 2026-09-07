@@ -173,22 +173,28 @@ class ViewTicket extends ViewRecord
                         ->searchable()
                         ->placeholder('— χειριστής που θα ειδοποιείται —'),
                     TextInput::make('email')
-                        ->label('ή email (CC στις απαντήσεις)')
+                        ->label('ή email (κοινοποίηση στις απαντήσεις, κρυφό Bcc)')
                         ->email()
                         ->placeholder('someone@example.com'),
                 ])
                 ->action(function (array $data, Ticket $record): void {
                     $added = false;
-                    if (! empty($data['user_id']) && ($operator = User::find($data['user_id'])) !== null) {
-                        $record->watch($operator);
-                        $added = true;
+                    // Resolve the operator WITHIN the ticket's tenant — never a raw
+                    // User::find (a tampered submit could otherwise attach a foreign
+                    // user and leak this ticket's subject to them via the bell).
+                    if (! empty($data['user_id'])) {
+                        $operator = $record->company?->users()->whereKey($data['user_id'])->first();
+                        if ($operator !== null) {
+                            $added = $record->watch($operator)->wasRecentlyCreated || $added;
+                        }
                     }
-                    if (! empty($data['email']) && $record->addEmailWatcher($data['email']) !== null) {
-                        $added = true;
+                    if (! empty($data['email'])) {
+                        $watcher = $record->addEmailWatcher($data['email']);
+                        $added = ($watcher?->wasRecentlyCreated ?? false) || $added;
                     }
 
                     Notification::make()
-                        ->title($added ? 'Προστέθηκε watcher' : 'Δώσε χειριστή ή email')
+                        ->title($added ? 'Προστέθηκε watcher' : 'Δεν προστέθηκε νέος watcher')
                         ->{$added ? 'success' : 'warning'}()
                         ->send();
                 }),

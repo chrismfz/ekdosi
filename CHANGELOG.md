@@ -33,7 +33,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   agents) ∪ assignee ∪ **watchers**. Fires post-commit + best-effort από `TicketMessageObserver` →
   `TicketNotifier` (ίδιο μοτίβο με το WHMCS immediate-invoice bell). **Watchers/CC** (νέος `ticket_watchers`):
   operators κάνουν watch/unwatch ένα αίτημα (και όποιος **απαντά** γίνεται αυτόματα participant watcher), ενώ
-  εξωτερικά **emails** μπαίνουν **CC** στις outbound απαντήσεις (`SendTicketReplyEmail` → `TicketReplyMail`).
+  εξωτερικά **emails** κοινοποιούνται (**κρυφό Bcc**) στις outbound απαντήσεις (`SendTicketReplyEmail` → `TicketReplyMail`).
   UI: λίστα watchers στο ticket + «Προσθήκη watcher» (χειριστής ή email), self watch/unwatch toggle. _(SLA
   timers σκόπιμα εκτός αυτού του slice.)_
 - **Σύστημα υποστήριξης (tickets) — outbound email threading (Πυλώνας E, Phase 3b-ii).** Η απάντηση του

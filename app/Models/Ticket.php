@@ -8,6 +8,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -121,7 +122,7 @@ class Ticket extends Model
     }
 
     /**
-     * Add (idempotently) an external email watcher (Cc'd on outbound replies).
+     * Add (idempotently) an external email watcher (Bcc'd on outbound replies).
      * Blank emails are ignored; the address is stored lowercased so the unique
      * index and the Cc de-dup are case-insensitive. Returns null for a blank.
      */
@@ -139,24 +140,31 @@ class Ticket extends Model
     }
 
     /**
-     * The User models watching this ticket (operator watchers only).
+     * The User models watching this ticket (operator watchers only). The read is
+     * already constrained by ticket_id, so it bypasses CompanyScope — it must
+     * return the same set whether it runs in the panel (ambient tenant) or in the
+     * poller/queue (no context), never filtered by a stale ambient company.
      *
      * @return Collection<int, User>
      */
     public function operatorWatcherUsers(): Collection
     {
-        return $this->watchers()->whereNotNull('user_id')->with('user')->get()
+        return $this->watchers()->withoutGlobalScope(CompanyScope::class)
+            ->whereNotNull('user_id')->with('user')->get()
             ->pluck('user')->filter()->values();
     }
 
     /**
-     * Lowercased external watcher email addresses (for the reply Cc).
+     * Lowercased external watcher email addresses (for the reply Bcc). Bypasses
+     * CompanyScope for the same reason as {@see operatorWatcherUsers} — the reply
+     * job may run with no/other ambient context.
      *
      * @return list<string>
      */
     public function watcherEmailAddresses(): array
     {
-        return $this->watchers()->whereNotNull('email')->pluck('email')
+        return $this->watchers()->withoutGlobalScope(CompanyScope::class)
+            ->whereNotNull('email')->pluck('email')
             ->map(fn ($e): string => mb_strtolower(trim((string) $e)))
             ->filter()->unique()->values()->all();
     }

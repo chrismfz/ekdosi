@@ -860,7 +860,7 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   **καμπανάκι** (Filament database notification) στους operators του ticket — recipients = agents τμήματος
   (fallback: όλοι οι χρήστες tenant) ∪ assignee ∪ **watchers**· post-commit, best-effort (`TicketMessageObserver`
   → `TicketNotifier`). **Watchers/CC:** operators κάνουν watch/unwatch (auto-watch όποιος απαντά = participant),
-  εξωτερικά **emails** μπαίνουν **CC** στις απαντήσεις· λίστα watchers στο ticket, «Προσθήκη watcher» (χειριστής
+  εξωτερικά **emails** κοινοποιούνται (**κρυφό Bcc**) στις απαντήσεις· λίστα watchers στο ticket, «Προσθήκη watcher» (χειριστής
   ή email). _(SLA σκόπιμα εκτός.)_
 - **Επόμενα:** Phase 4 υπόλοιπα (merge, feedback-on-close, spam/block-sender)· follow-ups: attachments
   (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle, inbound-CC → watcher auto-capture.
