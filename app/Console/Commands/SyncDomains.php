@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Company;
+use App\Console\Commands\Concerns\ResolvesDomainCompanies;
 use App\Models\Domain;
 use App\Services\Domains\DomainSyncService;
 use Illuminate\Console\Command;
@@ -18,6 +18,8 @@ use Illuminate\Console\Command;
  */
 class SyncDomains extends Command
 {
+    use ResolvesDomainCompanies;
+
     protected $signature = 'domains:sync
         {--tenant= : Slug ή id εταιρείας (κενό = όλες οι domain-enabled)}
         {--limit=0 : Μέγιστα domains ανά tenant (0 = όλα)}';
@@ -26,7 +28,7 @@ class SyncDomains extends Command
 
     public function handle(DomainSyncService $sync): int
     {
-        $companies = $this->companies();
+        $companies = $this->domainCompanies();
         if ($companies === []) {
             // An EXPLICIT --tenant that resolves to nothing is an error (typo,
             // or the pillar is off) — monitoring keyed on the exit code must
@@ -78,28 +80,5 @@ class SyncDomains extends Command
         }
 
         return $failures > 0 ? self::FAILURE : self::SUCCESS;
-    }
-
-    /** @return list<Company> */
-    private function companies(): array
-    {
-        $tenant = (string) ($this->option('tenant') ?? '');
-        if ($tenant !== '') {
-            $company = Company::findBySlugOrId($tenant);
-            if ($company === null) {
-                $this->error("Άγνωστη εταιρεία: {$tenant}");
-
-                return [];
-            }
-            if (! $company->hasDomainManagement()) {
-                $this->error("Η {$company->slug} δεν έχει ενεργή διαχείριση domains.");
-
-                return [];
-            }
-
-            return [$company];
-        }
-
-        return Company::query()->where('enable_domain_management', true)->orderBy('id')->get()->all();
     }
 }

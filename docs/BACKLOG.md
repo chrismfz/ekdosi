@@ -614,6 +614,13 @@ data model + phase gates: **`PLAN.md`**.
     maxLength(63) μετρά unicode chars ενώ το DNS όριο είναι 63 octets του A-label, και το
     `\p{N}` δέχεται μη-ASCII ψηφία· ο σωστός έλεγχος (idn_to_ascii + strlen) μπαίνει μαζί
     με το availability/registry validation του A2 (εκεί απορρίπτεται τελικά έτσι κι αλλιώς).
+    Επίσης (deferred P2, review A2c-1 2026-09-07): **επαλήθευση σε live OP creds του
+    min-term quoting** — το cost-sync γράφει το κόστος στη γραμμή του ελάχιστου term
+    (`max(1, min_years)`) με την υπόθεση ότι το `GET /tlds/{name}?with_price=true`
+    κοστολογεί την ελάχιστη registrable περίοδο· αν το OP κοστολογεί per-year, TLD με
+    min_years>1 παίρνει μισό κόστος. Δεν δαγκώνει σήμερα (τα OP-routed TLDs του tenant
+    είναι όλα min_years=1 — τα .gr πάνε grEPP/manual), αλλά τσεκάρεται στο go-live του
+    A2 με πραγματικά credentials πριν εμπιστευτούμε κόστη πολυετών TLDs.
   - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
     billing (reuse `StageServiceRenewal`) + grace/redemption.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.

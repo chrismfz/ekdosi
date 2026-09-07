@@ -2,7 +2,7 @@
 
 namespace App\Console\Commands;
 
-use App\Models\Company;
+use App\Console\Commands\Concerns\ResolvesDomainCompanies;
 use App\Models\DomainTld;
 use App\Services\Domains\DomainPricingSyncService;
 use Illuminate\Console\Command;
@@ -19,6 +19,8 @@ use Illuminate\Console\Command;
  */
 class SyncDomainPricing extends Command
 {
+    use ResolvesDomainCompanies;
+
     protected $signature = 'domains:sync-pricing
         {--tenant= : Slug ή id εταιρείας (κενό = όλες οι domain-enabled)}
         {--tld= : Μόνο αυτό το TLD (π.χ. gr ή .gr)}';
@@ -27,11 +29,16 @@ class SyncDomainPricing extends Command
 
     public function handle(DomainPricingSyncService $sync): int
     {
-        $companies = $this->companies();
+        $onlyTld = mb_strtolower(ltrim(trim((string) ($this->option('tld') ?? '')), '.'));
+
+        $companies = $this->domainCompanies();
         if ($companies === []) {
-            // An EXPLICIT --tenant that resolves to nothing is an error (typo,
-            // or the pillar is off) — same loud-failure rule as domains:sync.
-            if ((string) ($this->option('tenant') ?? '') !== '') {
+            // An EXPLICIT --tenant (or --tld) that can resolve to nothing is an
+            // error (typo, or the pillar is off) — monitoring keyed on the exit
+            // code must notice a run that silently pulled nothing.
+            if ((string) ($this->option('tenant') ?? '') !== '' || $onlyTld !== '') {
+                $this->error('Καμία εταιρεία με ενεργή διαχείριση domains — δεν έγινε άντληση.');
+
                 return self::FAILURE;
             }
             $this->info('Καμία εταιρεία με ενεργή διαχείριση domains.');
@@ -39,9 +46,9 @@ class SyncDomainPricing extends Command
             return self::SUCCESS;
         }
 
-        $onlyTld = mb_strtolower(ltrim(trim((string) ($this->option('tld') ?? '')), '.'));
         $failures = 0;
         $matched = 0;
+        $syncedTotal = 0;
         foreach ($companies as $company) {
             $synced = 0;
             $updated = 0;
@@ -65,6 +72,11 @@ class SyncDomainPricing extends Command
                     $synced++;
                     $updated += $counts['updated'];
                     $created += $counts['created'];
+                    // A same-term row in another currency keeps a stale cost —
+                    // the operator prices against it, so this is never silent.
+                    if ($counts['currency_mismatches'] !== []) {
+                        $this->warn("  ⚠ .{$tld->tld}: ο registrar κοστολογεί σε άλλο νόμισμα από υπάρχουσα γραμμή (".implode(', ', $counts['currency_mismatches']).') — ελέγξτε το κόστος της παλιάς γραμμής χειροκίνητα.');
+                    }
                 } catch (\Throwable $e) {
                     // Count + keep going — one broken TLD must not stall the
                     // whole tenant (same rule as domains:sync).
@@ -72,41 +84,25 @@ class SyncDomainPricing extends Command
                     $this->warn("  ✗ .{$tld->tld}: ".$e->getMessage());
                 }
             }
+            $syncedTotal += $synced;
 
             $this->info("{$company->slug}: {$synced} TLDs, {$updated} κόστη ενημερώθηκαν, {$created} νέες cost-only γραμμές (ανενεργές), {$skipped} skipped (manual/ανενεργή σύνδεση/χωρίς pricing sync), σφάλματα ως τώρα: {$failures}");
         }
 
-        // An EXPLICIT --tld that matched nothing anywhere is the same typo
-        // class as a bad --tenant — fail loudly instead of a silent no-op.
+        // An EXPLICIT --tld must never no-op silently: unknown TLD = typo,
+        // matched-but-all-skipped = the operator asked for a pull that cannot
+        // happen (manual route / inactive connection) — both exit FAILURE.
         if ($onlyTld !== '' && $matched === 0) {
             $this->error("Το TLD .{$onlyTld} δεν υπάρχει στον κατάλογο καμίας εταιρείας του run.");
 
             return self::FAILURE;
         }
+        if ($onlyTld !== '' && $syncedTotal === 0 && $failures === 0) {
+            $this->error("Το TLD .{$onlyTld} δρομολογείται σε manual/ανενεργή σύνδεση ή χωρίς pricing sync — δεν έγινε άντληση.");
 
-        return $failures > 0 ? self::FAILURE : self::SUCCESS;
-    }
-
-    /** @return list<Company> */
-    private function companies(): array
-    {
-        $tenant = (string) ($this->option('tenant') ?? '');
-        if ($tenant !== '') {
-            $company = Company::findBySlugOrId($tenant);
-            if ($company === null) {
-                $this->error("Άγνωστη εταιρεία: {$tenant}");
-
-                return [];
-            }
-            if (! $company->hasDomainManagement()) {
-                $this->error("Η {$company->slug} δεν έχει ενεργή διαχείριση domains.");
-
-                return [];
-            }
-
-            return [$company];
+            return self::FAILURE;
         }
 
-        return Company::query()->where('enable_domain_management', true)->orderBy('id')->get()->all();
+        return $failures > 0 ? self::FAILURE : self::SUCCESS;
     }
 }

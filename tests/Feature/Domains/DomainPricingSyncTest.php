@@ -82,15 +82,71 @@ class DomainPricingSyncTest extends TestCase
 
         $counts = app(DomainPricingSyncService::class)->sync($tld);
 
-        $this->assertSame(['updated' => 0, 'created' => 4], $counts);
+        $this->assertSame(['updated' => 0, 'created' => 4, 'currency_mismatches' => []], $counts);
         $renewal = $tld->prices()->where('operation', 'renewal')->first();
         $this->assertSame('7.25', $renewal->cost);
         $this->assertNull($renewal->price, 'a synced-in row must never carry a sell price');
         $this->assertFalse($renewal->is_enabled, 'a synced-in row must be born unbillable');
         $this->assertSame(1, $renewal->years);
         $this->assertSame('EUR', $renewal->currency);
-        // reseller (what WE pay) wins over the registry-facing product block
+        // reseller (what WE pay) is the ONLY cost source — never the
+        // registry-facing product block (a different kind of price).
         $this->assertSame('6.50', $tld->prices()->where('operation', 'register')->first()->cost);
+    }
+
+    public function test_a_product_only_price_block_is_skipped_never_recorded_as_cost(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/tlds/eu?with_price=true' => Http::response(['data' => ['prices' => [
+                'create_price' => ['product' => ['currency' => 'USD', 'price' => 99.0]], // no reseller quote
+                'renew_price' => ['reseller' => ['currency' => 'EUR', 'price' => 7.25]],
+            ]]]),
+        ]);
+        $tld = $this->tld();
+
+        $counts = app(DomainPricingSyncService::class)->sync($tld);
+
+        $this->assertSame(1, $counts['created'], 'only the reseller-quoted operation lands');
+        $this->assertNull($tld->prices()->where('operation', 'register')->first(), 'product price is not our cost');
+    }
+
+    public function test_a_no_change_rerun_reports_zero_updates(): void
+    {
+        $this->fakePricing();
+        $tld = $this->tld();
+        $sync = app(DomainPricingSyncService::class);
+
+        $sync->sync($tld);
+        $counts = $sync->sync($tld);
+
+        $this->assertSame(['updated' => 0, 'created' => 0, 'currency_mismatches' => []], $counts);
+    }
+
+    public function test_a_quote_in_another_currency_than_an_existing_row_is_flagged(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/tlds/eu?with_price=true' => Http::response(['data' => ['prices' => [
+                'renew_price' => ['reseller' => ['currency' => 'USD', 'price' => 8.0]],
+            ]]]),
+        ]);
+        $tld = $this->tld();
+        DomainTldPrice::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'operation' => 'renewal', 'years' => 1, 'currency' => 'EUR',
+            'cost' => 5.00, 'price' => 14.00, 'is_enabled' => true,
+        ]);
+
+        $counts = app(DomainPricingSyncService::class)->sync($tld);
+
+        $this->assertSame(['renewal → USD'], $counts['currency_mismatches']);
+        // the EUR row the operator prices against was NOT silently touched
+        $this->assertSame('5.00', $tld->prices()->where('currency', 'EUR')->sole()->cost);
+        // the USD quote still lands, disabled + unpriced
+        $usd = $tld->prices()->where('currency', 'USD')->sole();
+        $this->assertSame('8.00', $usd->cost);
+        $this->assertFalse($usd->is_enabled);
     }
 
     public function test_sync_updates_only_the_cost_on_an_existing_row(): void
@@ -105,7 +161,7 @@ class DomainPricingSyncTest extends TestCase
 
         $counts = app(DomainPricingSyncService::class)->sync($tld);
 
-        $this->assertSame(['updated' => 1, 'created' => 3], $counts);
+        $this->assertSame(['updated' => 1, 'created' => 3, 'currency_mismatches' => []], $counts);
         $row = $tld->prices()->where('operation', 'renewal')->first();
         $this->assertSame('7.25', $row->cost);
         $this->assertSame('14.00', $row->price, 'the operator sell price must never move');
@@ -176,6 +232,27 @@ class DomainPricingSyncTest extends TestCase
         $this->tld();
         $this->artisan('domains:sync-pricing', ['--tenant' => $this->company->slug, '--tld' => '.nosuch'])
             ->assertExitCode(1);
+    }
+
+    public function test_an_explicit_tld_that_only_matches_unsyncable_rows_fails_loudly(): void
+    {
+        // The operator asked for a pull that CANNOT happen (manual route) —
+        // a silent success here is the exact no-op the flag guards against.
+        $manual = DomainRegistrarConnection::create([
+            'company_id' => $this->company->id, 'registrar' => 'manual',
+            'is_active' => true, 'mode' => 'production', 'config' => [],
+        ]);
+        $this->tld(['tld' => 'gr', 'registrar_connection_id' => $manual->id, 'min_years' => 2]);
+
+        $this->artisan('domains:sync-pricing', ['--tenant' => $this->company->slug, '--tld' => 'gr'])
+            ->assertExitCode(1);
+    }
+
+    public function test_an_explicit_tld_with_no_domain_enabled_companies_fails_loudly(): void
+    {
+        $this->company->update(['enable_domain_management' => false]);
+
+        $this->artisan('domains:sync-pricing', ['--tld' => 'eu'])->assertExitCode(1);
     }
 
     public function test_an_api_failure_is_counted_and_the_run_continues(): void

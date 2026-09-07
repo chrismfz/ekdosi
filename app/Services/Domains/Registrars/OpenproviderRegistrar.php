@@ -137,10 +137,11 @@ class OpenproviderRegistrar implements DomainRegistrar
 
     /**
      * Registrar COST per operation for one TLD (A2c cost-sync) — a plain GET,
-     * still read-only by construction. We read the `reseller` price block
-     * (what OUR account is charged, in its own currency); the registry-facing
-     * `product` block is only a fallback. An operation Openprovider didn't
-     * quote is absent from the result — never guessed as 0.00.
+     * still read-only by construction. We read ONLY the `reseller` price block
+     * (what OUR account is charged, in its own currency) — the registry-facing
+     * `product` block is a DIFFERENT kind of price and must never be recorded
+     * as our cost. An operation without a reseller quote is absent from the
+     * result — never guessed as 0.00, never substituted.
      */
     public function getTldPricing(string $tld, DomainRegistrarCredentials $credentials): TldPricing
     {
@@ -158,7 +159,7 @@ class OpenproviderRegistrar implements DomainRegistrar
         $costs = [];
         foreach (self::PRICE_KEYS as $opKey => $operation) {
             $block = $prices[$opKey] ?? null;
-            $entry = is_array($block) ? ($block['reseller'] ?? $block['product'] ?? null) : null;
+            $entry = is_array($block) ? ($block['reseller'] ?? null) : null;
             if (! is_array($entry) || ! is_numeric($entry['price'] ?? null)) {
                 continue;
             }

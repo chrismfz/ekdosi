@@ -45,8 +45,11 @@ class DomainPricingSyncService
     /**
      * Pull + apply. Throws on transport/API failure (the command counts and
      * reports; one broken TLD must not stall the tenant's run).
+     * `currency_mismatches` names operations where the registrar quoted a
+     * DIFFERENT currency than an existing row of the same term — that row's
+     * cost goes stale silently otherwise (the operator prices against it).
      *
-     * @return array{updated: int, created: int}
+     * @return array{updated: int, created: int, currency_mismatches: list<string>}
      */
     public function sync(DomainTld $tld): array
     {
@@ -61,14 +64,15 @@ class DomainPricingSyncService
         return $this->apply($tld, $pricing);
     }
 
-    /** @return array{updated: int, created: int} */
+    /** @return array{updated: int, created: int, currency_mismatches: list<string>} */
     private function apply(DomainTld $tld, TldPricing $pricing): array
     {
         $years = max(1, (int) $tld->min_years);
         $updated = 0;
         $created = 0;
+        $mismatches = [];
 
-        DB::transaction(function () use ($tld, $pricing, $years, &$updated, &$created): void {
+        DB::transaction(function () use ($tld, $pricing, $years, &$updated, &$created, &$mismatches): void {
             foreach ($pricing->costs as $operation => $entry) {
                 $row = $tld->prices()
                     ->where('operation', $operation)
@@ -77,10 +81,27 @@ class DomainPricingSyncService
                     ->first();
 
                 if ($row !== null) {
-                    $row->update(['cost' => round($entry['cost'], 2)]);
-                    $updated++;
+                    // Count only REAL movement — a no-change re-run must not
+                    // report «κόστη ενημερώθηκαν» (decimal cast: compare via fill).
+                    $row->fill(['cost' => round($entry['cost'], 2)]);
+                    if ($row->isDirty('cost')) {
+                        $row->save();
+                        $updated++;
+                    }
 
                     continue;
+                }
+
+                // Same term in ANOTHER currency: we still record the quote, but
+                // the other-currency row (the one the operator likely prices
+                // against) keeps a stale cost — surface it, never silently.
+                $otherCurrency = $tld->prices()
+                    ->where('operation', $operation)
+                    ->where('years', $years)
+                    ->where('currency', '!=', $entry['currency'])
+                    ->exists();
+                if ($otherCurrency) {
+                    $mismatches[] = $operation.' → '.$entry['currency'];
                 }
 
                 $tld->prices()->create([
@@ -96,6 +117,6 @@ class DomainPricingSyncService
             }
         });
 
-        return ['updated' => $updated, 'created' => $created];
+        return ['updated' => $updated, 'created' => $created, 'currency_mismatches' => $mismatches];
     }
 }
