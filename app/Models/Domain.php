@@ -180,6 +180,7 @@ class Domain extends Model
         return $this->expires_at !== null && $this->expires_at->lt(Carbon::today());
     }
 
+    /** Row-color hint (any status — a Grace domain nearing its date still warns). */
     public function isExpiringSoon(): bool
     {
         return $this->expires_at !== null
@@ -187,12 +188,17 @@ class Domain extends Model
             && $this->expires_at->lte(Carbon::today()->addDays(self::EXPIRING_SOON_DAYS));
     }
 
-    /** Query twin of isExpiringSoon() (active domains only) for the worklist tab/badge. */
+    /**
+     * The «Λήγουν σύντομα» WORKLIST (tab/badge): Active domains inside the
+     * window and NOT already expired — deliberately narrower than the color
+     * hint above (an expired or cancelled row is not a renewal to chase here).
+     */
     public function scopeExpiringSoon($query)
     {
         return $query
             ->where('status', DomainStatus::Active->value)
             ->whereNotNull('expires_at')
+            ->where('expires_at', '>=', Carbon::today())
             ->where('expires_at', '<=', Carbon::today()->addDays(self::EXPIRING_SOON_DAYS));
     }
 

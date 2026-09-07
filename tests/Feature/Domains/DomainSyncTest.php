@@ -154,16 +154,67 @@ class DomainSyncTest extends TestCase
         $this->assertTrue($service->isSyncable($this->domain()));
     }
 
-    public function test_the_command_syncs_enabled_tenants_and_reports_failures(): void
+    public function test_terminal_or_off_mode_domains_are_not_syncable_and_terminal_status_is_never_overwritten(): void
     {
-        // Run 1 resolves by name and ADOPTS id 9; run 2 therefore fetches
-        // /domains/9 directly and finds the registrar down → exit 1, error on
-        // the row, never a crash.
+        $service = app(DomainSyncService::class);
+
+        // Terminal LOCAL status = operator intent — the sync must not touch it
+        // (the two-clocks rule: cancelled would be resurrected by OP's 'ACT').
+        $cancelled = $this->domain(['fqdn' => 'cxl.gr', 'sld' => 'cxl', 'status' => 'cancelled']);
+        $this->assertFalse($service->isSyncable($cancelled));
+
+        // mode «Ανενεργό» = skip, never «fall back to sandbox with prod creds».
+        $this->connection->update(['mode' => 'off']);
+        $this->assertFalse($service->isSyncable($this->domain()));
+        $this->connection->update(['mode' => 'sandbox']);
+    }
+
+    public function test_a_stale_registrar_id_falls_back_to_resolve_by_name(): void
+    {
         Http::fake([
             self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/999' => Http::response(['desc' => 'not found'], 404),
             self::SANDBOX.'/v1beta/domains?full_name=example.gr' => Http::response(['data' => ['results' => [[
-                'id' => 9, 'status' => 'ACT', 'expiration_date' => '2028-02-02 00:00:00', 'name_servers' => [],
+                'id' => 1000, 'status' => 'ACT', 'expiration_date' => '2029-01-01 00:00:00', 'name_servers' => [],
             ]]]]),
+        ]);
+
+        $domain = $this->domain(['registrar_domain_id' => '999']);
+        app(DomainSyncService::class)->sync($domain);
+
+        $this->assertSame('2029-01-01', $domain->refresh()->expires_at->toDateString());
+        // The stored (stale) id is kept — adoption only fills an EMPTY column;
+        // the operator sees the mismatch in the View, sync keeps working.
+    }
+
+    public function test_rejected_login_surfaces_openproviders_own_message(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['desc' => 'Authentication failed'], 403),
+        ]);
+
+        $domain = $this->domain();
+        try {
+            app(DomainSyncService::class)->sync($domain);
+            $this->fail('έπρεπε να ρίξει');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Authentication failed', $e->getMessage());
+        }
+        $this->assertStringContainsString('Authentication failed', (string) $domain->refresh()->sync_error);
+    }
+
+    public function test_the_command_syncs_enabled_tenants_and_reports_failures(): void
+    {
+        // Run 1 resolves by name and ADOPTS id 9; run 2 fetches /domains/9,
+        // fails, falls back to the by-name resolve, and finds the registrar
+        // down there too → exit 1, error on the row, never a crash.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=example.gr' => Http::sequence()
+                ->push(['data' => ['results' => [[
+                    'id' => 9, 'status' => 'ACT', 'expiration_date' => '2028-02-02 00:00:00', 'name_servers' => [],
+                ]]]])
+                ->push(['desc' => 'down'], 500),
             self::SANDBOX.'/v1beta/domains/9' => Http::response(['desc' => 'down'], 500),
         ]);
 

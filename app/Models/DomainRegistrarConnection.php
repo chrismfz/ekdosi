@@ -46,4 +46,15 @@ class DomainRegistrarConnection extends Model
     {
         return $this->belongsTo(Company::class);
     }
+
+    /**
+     * May API traffic go through this connection? ONE predicate for the sync,
+     * the availability action and any future registrar call site: active AND
+     * not mode «Ανενεργό» (an 'off' connection must be skipped, not silently
+     * fall back to sandbox with production creds).
+     */
+    public function isUsable(): bool
+    {
+        return $this->is_active && $this->mode !== 'off';
+    }
 }

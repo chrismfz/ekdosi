@@ -2,10 +2,12 @@
 
 namespace App\Services\Domains;
 
+use App\Enums\DomainStatus;
 use App\Models\Domain;
 use App\Models\DomainRegistrarConnection;
 use App\Support\Domains\DomainSyncResult;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Applies one registrar pull to one domain (Πυλώνας A / A2b) — shared by the
@@ -29,14 +31,20 @@ class DomainSyncService
         return $domain->effectiveRegistrarConnection();
     }
 
-    /** Can this domain be synced at all (routed to an is_active, non-manual connection)? */
+    /**
+     * Can this domain be synced at all? Routed to a USABLE (active, non-off)
+     * non-manual connection AND not in a terminal local status: cancelled is
+     * operator intent the sync must not resurrect, transferred_away 404s at
+     * the old registrar forever (its docblock: «billing/sync stop»).
+     */
     public function isSyncable(Domain $domain): bool
     {
         $connection = $this->connectionFor($domain);
 
         return $connection !== null
-            && $connection->is_active
-            && $this->factory->for($connection)->key() !== 'manual';
+            && $connection->isUsable()
+            && $this->factory->for($connection)->key() !== 'manual'
+            && ! ($domain->status instanceof DomainStatus && $domain->status->isTerminal());
     }
 
     /**
@@ -78,7 +86,10 @@ class DomainSyncService
         if ($result->registrarDomainId !== null && ($domain->registrar_domain_id === null || $domain->registrar_domain_id === '')) {
             $updates['registrar_domain_id'] = $result->registrarDomainId;
         }
-        if ($result->status !== null) {
+        // The registrar may only PROMOTE our view — never overwrite a TERMINAL
+        // local status (cancelled = operator intent; the two-clocks rule).
+        $terminal = $domain->status instanceof DomainStatus && $domain->status->isTerminal();
+        if ($result->status !== null && ! $terminal) {
             $updates['status'] = $result->status;
         }
         if ($result->rawStatus !== null) {
@@ -87,21 +98,25 @@ class DomainSyncService
             $updates['module_meta'] = $meta;
         }
 
-        // forceFill: the sync bookkeeping columns are deliberately not fillable
-        // (the InvoiceBalance cache-column discipline); status/expiry are.
-        $domain->forceFill($updates)->save();
+        // One atomic apply: the row update + the NS snapshot replace commit (or
+        // fail) together — a mid-apply crash can't wipe the delegation record.
+        DB::transaction(function () use ($domain, $result, $updates): void {
+            // forceFill: the sync bookkeeping columns are deliberately not
+            // fillable (the InvoiceBalance cache-column discipline).
+            $domain->forceFill($updates)->save();
 
-        // NS delegation snapshot: replace only when the registrar reported any
-        // (an empty answer must not wipe a manual record on a partial response).
-        if ($result->nameservers !== []) {
-            $domain->nameservers()->delete();
-            foreach (array_values($result->nameservers) as $i => $host) {
-                $domain->nameservers()->create([
-                    'company_id' => $domain->company_id,
-                    'host' => $host,
-                    'sort_order' => $i,
-                ]);
+            // NS delegation snapshot: replace only when the registrar reported
+            // any (an empty answer must not wipe a manual record).
+            if ($result->nameservers !== []) {
+                $domain->nameservers()->delete();
+                foreach (array_values($result->nameservers) as $i => $host) {
+                    $domain->nameservers()->create([
+                        'company_id' => $domain->company_id,
+                        'host' => $host,
+                        'sort_order' => $i,
+                    ]);
+                }
             }
-        }
+        });
     }
 }

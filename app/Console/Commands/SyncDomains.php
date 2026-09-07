@@ -28,6 +28,12 @@ class SyncDomains extends Command
     {
         $companies = $this->companies();
         if ($companies === []) {
+            // An EXPLICIT --tenant that resolves to nothing is an error (typo,
+            // or the pillar is off) — monitoring keyed on the exit code must
+            // notice a sync that silently did nothing.
+            if ((string) ($this->option('tenant') ?? '') !== '') {
+                return self::FAILURE;
+            }
             $this->info('Καμία εταιρεία με ενεργή διαχείριση domains.');
 
             return self::SUCCESS;

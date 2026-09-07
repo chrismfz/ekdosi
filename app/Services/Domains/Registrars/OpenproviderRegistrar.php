@@ -80,12 +80,14 @@ class OpenproviderRegistrar implements DomainRegistrar
         }
 
         $status = (string) ($result['status'] ?? '');
+        // The API may return a structured (array) reason for premium/claims
+        // names — only a scalar is presentable; fall back to the raw status.
+        $reason = is_scalar($result['reason'] ?? null) ? (string) $result['reason'] : null;
 
         return new AvailabilityResult(
             fqdn: $fqdn,
             available: $status === 'free',
-            // 'active' = taken; the API also returns per-name reasons/premium info.
-            reason: $status === 'free' ? null : ($result['reason'] ?? $status ?: null),
+            reason: $status === 'free' ? null : ($reason ?? ($status !== '' ? $status : null)),
         );
     }
 
@@ -126,9 +128,15 @@ class OpenproviderRegistrar implements DomainRegistrar
     private function fetchDomainData(Domain $domain, DomainRegistrarCredentials $credentials): array
     {
         if ($domain->registrar_domain_id !== null && $domain->registrar_domain_id !== '') {
-            $data = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($domain->registrar_domain_id))->json('data');
-            if (is_array($data)) {
-                return $data;
+            try {
+                $data = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($domain->registrar_domain_id))->json('data');
+                if (is_array($data)) {
+                    return $data;
+                }
+            } catch (RuntimeException) {
+                // Stale/wrong stored id (object re-created under a new id, or a
+                // typo) — fall through to the by-name resolve instead of failing
+                // the domain's sync forever.
             }
         }
 
@@ -193,21 +201,26 @@ class OpenproviderRegistrar implements DomainRegistrar
     /** Cached bearer (6h) — Openprovider tokens live ~24h; 401 mid-flight re-logins. */
     private function token(DomainRegistrarCredentials $credentials): string
     {
-        $token = Cache::remember(
-            $this->tokenCacheKey($credentials),
-            self::TOKEN_TTL_SECONDS,
-            fn (): ?string => $this->freshToken($credentials),
-        );
+        $key = $this->tokenCacheKey($credentials);
+        $cached = Cache::get($key);
+        if (is_string($cached) && $cached !== '') {
+            return $cached;
+        }
 
-        if (! is_string($token) || $token === '') {
-            Cache::forget($this->tokenCacheKey($credentials));
-
+        $token = $this->freshToken($credentials); // throws with OP's own message
+        if ($token === null) {
             throw new RuntimeException('Αποτυχία σύνδεσης στο Openprovider (login δεν επέστρεψε token).');
         }
+        Cache::put($key, $token, self::TOKEN_TTL_SECONDS);
 
         return $token;
     }
 
+    /**
+     * Null only on a 2xx login without a token; a REJECTED login throws with
+     * Openprovider's own description, so «λάθος credentials» is distinguishable
+     * from a registrar outage in sync_error / the operator's notification.
+     */
     private function freshToken(DomainRegistrarCredentials $credentials): ?string
     {
         if (! $credentials->has('username') || ! $credentials->has('password')) {
@@ -224,7 +237,9 @@ class OpenproviderRegistrar implements DomainRegistrar
             ]);
 
         if ($response->failed()) {
-            return null;
+            throw new RuntimeException(
+                'Openprovider login '.$response->status().': '.((string) ($response->json('desc') ?? 'αποτυχία σύνδεσης'))
+            );
         }
 
         $token = $response->json('data.token');

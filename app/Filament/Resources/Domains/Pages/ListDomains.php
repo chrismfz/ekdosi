@@ -27,6 +27,9 @@ class ListDomains extends BaseListRecords
                 ->label('Έλεγχος διαθεσιμότητας')
                 ->icon('heroicon-o-magnifying-glass')
                 ->color('gray')
+                // Availability feeds a register decision + fires registrar API
+                // traffic — same bar as creating a domain (view-only roles out).
+                ->authorize('create')
                 ->schema([
                     TextInput::make('fqdn')
                         ->label('Domain')
@@ -43,10 +46,12 @@ class ListDomains extends BaseListRecords
                         ->where('company_id', Filament::getTenant()?->getKey())
                         ->where('tld', $extension)
                         ->first()?->registrarConnection;
-                    if ($connection === null) {
+                    if ($connection === null || ! $connection->isUsable()) {
                         Notification::make()
-                            ->title('Χωρίς δρομολόγηση registrar.')
-                            ->body('Το .'.$extension.' δεν έχει σύνδεση registrar στα «TLDs & τιμές».')
+                            ->title('Χωρίς διαθέσιμη σύνδεση registrar.')
+                            ->body($connection === null
+                                ? 'Το .'.$extension.' δεν έχει σύνδεση registrar στα «TLDs & τιμές».'
+                                : 'Η σύνδεση του .'.$extension.' είναι ανενεργή — δεν στέλνουμε API κλήσεις μέσω απενεργοποιημένου λογαριασμού.')
                             ->warning()->send();
 
                         return;
