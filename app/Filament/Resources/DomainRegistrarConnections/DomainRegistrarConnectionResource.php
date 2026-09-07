@@ -10,12 +10,15 @@ use App\Filament\Resources\DomainRegistrarConnections\Schemas\DomainRegistrarCon
 use App\Filament\Resources\DomainRegistrarConnections\Tables\DomainRegistrarConnectionsTable;
 use App\Models\Company;
 use App\Models\DomainRegistrarConnection;
+use App\Services\Domains\DomainRegistrarRegistry;
 use BackedEnum;
 use Filament\Facades\Filament;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
 use Filament\Tables\Table;
+use Illuminate\Contracts\Support\Htmlable;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * «Συνδέσεις registrar» — per-tenant registrar accounts (Πυλώνας A / A0). The
@@ -43,6 +46,16 @@ class DomainRegistrarConnectionResource extends Resource
     protected static ?string $navigationLabel = 'Συνδέσεις registrar';
 
     protected static ?string $recordTitleAttribute = 'label';
+
+    /** «Κενό όνομα → όνομα registrar» — also for the edit-page heading/breadcrumb. */
+    public static function getRecordTitle(?Model $record): string|Htmlable|null
+    {
+        if ($record instanceof DomainRegistrarConnection && ($record->label === null || $record->label === '')) {
+            return app(DomainRegistrarRegistry::class)->label((string) $record->registrar);
+        }
+
+        return parent::getRecordTitle($record);
+    }
 
     /** Pillar flag AND system super-admin — credentials never reach tenant admins. */
     public static function canAccess(): bool

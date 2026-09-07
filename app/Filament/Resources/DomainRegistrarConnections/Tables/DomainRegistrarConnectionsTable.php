@@ -4,6 +4,7 @@ namespace App\Filament\Resources\DomainRegistrarConnections\Tables;
 
 use App\Models\DomainRegistrarConnection;
 use App\Services\Domains\DomainRegistrarFactory;
+use App\Services\Domains\DomainRegistrarNotConfigured;
 use App\Services\Domains\DomainRegistrarRegistry;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
@@ -32,7 +33,10 @@ class DomainRegistrarConnectionsTable
 
                 TextColumn::make('label')
                     ->label('Όνομα')
-                    ->placeholder('— όνομα registrar —')
+                    // The form promises «κενό → όνομα registrar» — honour it here.
+                    ->state(fn (DomainRegistrarConnection $record): string => $record->label !== null && $record->label !== ''
+                        ? $record->label
+                        : $registry->label((string) $record->registrar))
                     ->searchable(),
 
                 TextColumn::make('mode')
@@ -59,7 +63,15 @@ class DomainRegistrarConnectionsTable
                     ->icon('heroicon-o-signal')
                     ->action(function (DomainRegistrarConnection $record): void {
                         $factory = app(DomainRegistrarFactory::class);
-                        $ok = $factory->for($record)->ping($factory->credentialsFor($record));
+                        try {
+                            $ok = $factory->for($record)->ping($factory->credentialsFor($record));
+                        } catch (DomainRegistrarNotConfigured $e) {
+                            // The typed «no API / no creds» refusal real adapters
+                            // throw — surface it, never a Livewire 500.
+                            Notification::make()->title('Η σύνδεση δεν είναι ρυθμισμένη.')->body($e->getMessage())->danger()->send();
+
+                            return;
+                        }
 
                         $n = $ok
                             ? Notification::make()->title('Η σύνδεση απαντά.')->success()

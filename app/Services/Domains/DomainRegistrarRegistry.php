@@ -59,17 +59,25 @@ class DomainRegistrarRegistry
     }
 
     /**
-     * The connection-form options: every labeled registrar ('manual' included),
-     * SELECTABLE even before its adapter class is wired — until then any API
-     * action fails loudly via the Null adapter.
+     * The connection-form options: every labeled registrar ('manual' included)
+     * PLUS every key wired into domains.registrars — so «one config line + one
+     * class» really is enough to make an adapter selectable (a label is polish,
+     * not a second mandatory line; an unlabeled key renders as itself). A
+     * labeled-but-unwired key is also selectable — until its adapter lands, any
+     * API action fails loudly via the Null adapter.
      *
      * @return array<string, string> key => label
      */
     public function selectOptions(): array
     {
         $labels = config('ekdosi.domains.registrar_labels', []);
+        $options = is_array($labels) ? array_filter($labels, 'is_string') : [];
 
-        return is_array($labels) ? array_filter($labels, 'is_string') : [];
+        foreach ($this->keys() as $key) {
+            $options[$key] ??= $key;
+        }
+
+        return $options;
     }
 
     private function null(): DomainRegistrar

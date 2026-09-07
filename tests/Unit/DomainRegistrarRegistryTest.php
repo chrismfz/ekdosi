@@ -84,6 +84,18 @@ class DomainRegistrarRegistryTest extends TestCase
         $this->assertSame('Manual (χωρίς API)', $reg->label('manual'));
         $this->assertSame('gone-registrar', $reg->label('gone-registrar'));
     }
+
+    public function test_select_options_include_wired_but_unlabeled_registrars(): void
+    {
+        // «One config line + one class» must be enough to make an adapter
+        // selectable — a label is polish, not a second mandatory line.
+        config()->set('ekdosi.domains.registrar_labels', ['manual' => 'Manual (χωρίς API)']);
+        $reg = $this->registry(['fake' => FakeDomainRegistrar::class]);
+
+        $options = $reg->selectOptions();
+        $this->assertSame('Manual (χωρίς API)', $options['manual']);
+        $this->assertSame('fake', $options['fake'], 'wired-but-unlabeled key renders as itself');
+    }
 }
 
 /** Minimal test double registered via config. */
