@@ -692,7 +692,10 @@ data model + phase gates: **`PLAN.md`**.
     (deferred):** (α) **reply-threading** για watcher/CC αποστολείς — σήμερα μια απάντηση από CC'd developer
     δεν κάνει `senderOwnsTicket` → ανοίγει νέο ticket· επέκταση του guard να δέχεται και watcher emails του
     referenced ticket (προσοχή injection). (β) **visible CC αντί Bcc** για cc-sourced watchers (ήταν ήδη
-    ανοιχτά στο αρχικό thread), ενώ manual/internal μένουν Bcc.
+    ανοιχτά στο αρχικό thread), ενώ manual/internal μένουν Bcc. (γ) **perf:** το CC-capture καλεί
+    `isBlocked` ένα query ανά recipient — για μεγάλη CC-λίστα φόρτωσε το blocklist μία φορά in-memory
+    (αμελητέο στα σημερινά μεγέθη). (δ) **catch-all alias:** εξαιρούμε `email` + `imap_username` του τμήματος·
+    ένα τρίτο alias/catch-all address δεν εξαιρείται (self-loop churn)· θέλει ρητό πεδίο aliases αν εμφανιστεί.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
