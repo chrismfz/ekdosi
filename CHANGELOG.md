@@ -45,6 +45,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (νέος πελάτης + το SC τον ακολουθεί· τα ιστορικά παραστατικά μένουν — νομικό αρχείο).
   Tab «Domains» στην καρτέλα πελάτη (κρυφό σε tenants χωρίς τον πυλώνα). Στο αδέσποτο row
   φαίνεται ο registrant (όνομα/email) ως βοήθημα χειροκίνητης συσχέτισης.
+- **Domains — A2a Openprovider adapter (READ-ONLY) + credentials.** Πρώτος πραγματικός registrar:
+  `OpenproviderRegistrar` (auth → cached bearer ~6h με single re-login σε 401, fail-safe
+  routing: ΜΟΝΟ ρητό `production` χτυπά το live API, sandbox αλλιώς) με `ping` + `checkAvailability`.
+  **Σκόπιμα ΧΩΡΙΣ κανένα mutating endpoint** (register/renew/transfer ΔΕΝ υπάρχουν στην κλάση
+  μέχρι το A3 — test το επιβάλλει), ώστε production credentials να είναι ακίνδυνα από την πρώτη
+  μέρα. Credential fields στη φόρμα σύνδεσης από config `registrar_fields` (το einvoice idiom):
+  labeled inputs, secrets **write-only** (ποτέ δεν ξαναφορτώνονται στο browser· κενό = αμετάβλητο).
+  Mock-HTTP tests (auth/routing/never-throw ping/availability parsing/401 retry/error surfacing).
 
 ### Security
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy

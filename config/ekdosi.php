@@ -5,6 +5,7 @@ use App\Services\Backup\Destinations\LocalBackupDestination;
 use App\Services\Backup\Destinations\S3BackupDestination;
 use App\Services\Backup\Destinations\SftpBackupDestination;
 use App\Services\Billing\Sources\WhmcsBillingSource;
+use App\Services\Domains\Registrars\OpenproviderRegistrar;
 use App\Services\EInvoice\Transports\InvoSignTransport;
 use App\Services\Payments\Gateways\EurobankGateway;
 use App\Services\Payments\Gateways\ManualPaymentGateway;
@@ -492,8 +493,23 @@ return [
     */
     'domains' => [
         'registrars' => [
-            // 'openprovider' => App\Services\Domains\Registrars\OpenproviderRegistrar::class, // A2
-            // 'grepp'        => App\Services\Domains\Registrars\GrEppRegistrar::class,        // A4
+            'openprovider' => OpenproviderRegistrar::class, // A2: READ-ONLY adapter
+            // 'grepp'     => App\Services\Domains\Registrars\GrEppRegistrar::class,        // A4
+        ],
+
+        /*
+        | Per-registrar credential field schema for the connection form (the
+        | einvoice `provider_fields` idiom): labeled inputs, no raw JSON.
+        | `secret` fields are WRITE-ONLY in the UI (never round-trip to the
+        | browser). Stored into the encrypted domain_registrar_connections.config
+        | blob — adding a registrar's fields never needs a schema change.
+        */
+        'registrar_fields' => [
+            'openprovider' => [
+                'username' => ['label' => 'Username', 'secret' => false],
+                'password' => ['label' => 'Password', 'secret' => true],
+            ],
+            // 'grepp' => EPP host/user/pass — A4.
         ],
 
         /*
