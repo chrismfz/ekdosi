@@ -111,6 +111,32 @@ class DomainPricingSyncTest extends TestCase
         $this->assertNull($tld->prices()->where('operation', 'register')->first(), 'product price is not our cost');
     }
 
+    public function test_an_all_product_answer_with_no_reseller_quote_fails_the_pull_loudly(): void
+    {
+        // Without ANY reseller quote the pull produced nothing — it must throw
+        // (a «synced: 1, 0 κόστη» exit-0 would be the silent no-op class again).
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/tlds/eu?with_price=true' => Http::response(['data' => ['prices' => [
+                'create_price' => ['product' => ['currency' => 'USD', 'price' => 99.0]],
+                'renew_price' => ['product' => ['currency' => 'USD', 'price' => 88.0]],
+            ]]]),
+        ]);
+        $tld = $this->tld();
+
+        try {
+            app(DomainPricingSyncService::class)->sync($tld);
+            $this->fail('an all-empty pricing pull must throw');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('κανένα reseller κόστος', $e->getMessage());
+        }
+        $this->assertSame(0, $tld->prices()->count());
+
+        // …and through the command it is a counted failure → exit FAILURE.
+        $this->artisan('domains:sync-pricing', ['--tenant' => $this->company->slug, '--tld' => 'eu'])
+            ->assertExitCode(1);
+    }
+
     public function test_a_no_change_rerun_reports_zero_updates(): void
     {
         $this->fakePricing();
@@ -141,6 +167,10 @@ class DomainPricingSyncTest extends TestCase
         $counts = app(DomainPricingSyncService::class)->sync($tld);
 
         $this->assertSame(['renewal → USD'], $counts['currency_mismatches']);
+        // NOT one-shot: the stale-EUR-row hazard persists, so the flag must
+        // fire on every run — also after the USD row already exists.
+        $again = app(DomainPricingSyncService::class)->sync($tld);
+        $this->assertSame(['renewal → USD'], $again['currency_mismatches']);
         // the EUR row the operator prices against was NOT silently touched
         $this->assertSame('5.00', $tld->prices()->where('currency', 'EUR')->sole()->cost);
         // the USD quote still lands, disabled + unpriced

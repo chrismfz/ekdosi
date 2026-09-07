@@ -33,10 +33,15 @@ class SyncDomainPricing extends Command
 
         $companies = $this->domainCompanies();
         if ($companies === []) {
-            // An EXPLICIT --tenant (or --tld) that can resolve to nothing is an
-            // error (typo, or the pillar is off) — monitoring keyed on the exit
-            // code must notice a run that silently pulled nothing.
-            if ((string) ($this->option('tenant') ?? '') !== '' || $onlyTld !== '') {
+            // An EXPLICIT --tenant that resolves to nothing already printed its
+            // specific error in the trait — no second (and possibly wrong)
+            // message on top, just the failing exit code.
+            if ((string) ($this->option('tenant') ?? '') !== '') {
+                return self::FAILURE;
+            }
+            // An EXPLICIT --tld with zero domain-enabled companies is the same
+            // typo class — fail loudly instead of a silent no-op.
+            if ($onlyTld !== '') {
                 $this->error('Καμία εταιρεία με ενεργή διαχείριση domains — δεν έγινε άντληση.');
 
                 return self::FAILURE;

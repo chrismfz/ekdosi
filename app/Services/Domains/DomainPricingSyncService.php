@@ -61,6 +61,13 @@ class DomainPricingSyncService
         $adapter = $this->factory->for($connection);
         $pricing = $adapter->getTldPricing($tld->tld, $this->factory->credentialsFor($connection));
 
+        // An all-empty answer (no reseller quote on any operation) is a FAILED
+        // pull, not a quiet success — otherwise «synced: 1, 0 κόστη» exits 0
+        // and the explicit --tld loud-failure guard never sees it.
+        if ($pricing->costs === []) {
+            throw new \RuntimeException('Ο registrar δεν επέστρεψε κανένα reseller κόστος για το .'.$tld->tld.' — τίποτα δεν καταγράφηκε.');
+        }
+
         return $this->apply($tld, $pricing);
     }
 
@@ -74,6 +81,19 @@ class DomainPricingSyncService
 
         DB::transaction(function () use ($tld, $pricing, $years, &$updated, &$created, &$mismatches): void {
             foreach ($pricing->costs as $operation => $entry) {
+                // Same term in ANOTHER currency: that row (the one the operator
+                // likely prices against) keeps a stale cost — flag it on EVERY
+                // run, not just the one that creates the quoted-currency row
+                // (a one-shot warning in a long multi-tenant output is a miss).
+                $otherCurrency = $tld->prices()
+                    ->where('operation', $operation)
+                    ->where('years', $years)
+                    ->where('currency', '!=', $entry['currency'])
+                    ->exists();
+                if ($otherCurrency) {
+                    $mismatches[] = $operation.' → '.$entry['currency'];
+                }
+
                 $row = $tld->prices()
                     ->where('operation', $operation)
                     ->where('years', $years)
@@ -90,18 +110,6 @@ class DomainPricingSyncService
                     }
 
                     continue;
-                }
-
-                // Same term in ANOTHER currency: we still record the quote, but
-                // the other-currency row (the one the operator likely prices
-                // against) keeps a stale cost — surface it, never silently.
-                $otherCurrency = $tld->prices()
-                    ->where('operation', $operation)
-                    ->where('years', $years)
-                    ->where('currency', '!=', $entry['currency'])
-                    ->exists();
-                if ($otherCurrency) {
-                    $mismatches[] = $operation.' → '.$entry['currency'];
                 }
 
                 $tld->prices()->create([
