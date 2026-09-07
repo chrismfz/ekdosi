@@ -166,16 +166,18 @@ class InboundTicketRouterTest extends TestCase
         $this->assertSame(1, $first->fresh()->messages()->count(), 'no duplicate message');
     }
 
-    public function test_same_message_to_two_departments_opens_a_ticket_in_each(): void
+    public function test_message_id_idempotency_is_company_wide_across_departments(): void
     {
         $company = $this->company();
         $deptA = TicketDepartment::create(['company_id' => $company->id, 'name' => 'Τμήμα Α', 'email' => 'a@myip.gr', 'is_active' => true]);
         $deptB = TicketDepartment::create(['company_id' => $company->id, 'name' => 'Τμήμα Β', 'email' => 'b@myip.gr', 'is_active' => true]);
         Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'p@e.gr']);
 
-        // ONE email addressed To both departments → the same Message-ID lands in each
-        // polled mailbox. Idempotency is per-DEPARTMENT, so each opens its own ticket
-        // (a company-wide dedup would silently drop the second department's copy).
+        // The same Message-ID reaching two mailboxes of one company is ingested ONCE
+        // (idempotency answers «seen this message-id in the company?»; placement is
+        // decided by ownership/threading). Deliberately company-wide — a per-department
+        // dedup would duplicate a redelivery of a message that had threaded/merged into
+        // another department. «A ticket per department» is a separate design item.
         $email = new ParsedInboundEmail(
             fromEmail: 'p@e.gr', fromName: 'Πελ', subject: 'Και στα δύο', body: 'σώμα', messageId: '<multi-1@mail>',
         );
@@ -183,15 +185,8 @@ class InboundTicketRouterTest extends TestCase
         $b = $this->router()->route($deptB, $email);
 
         $this->assertNotNull($a);
-        $this->assertNotNull($b);
-        $this->assertNotSame($a->id, $b->id, 'each department gets its own ticket');
-        $this->assertSame($deptA->id, $a->ticket_department_id);
-        $this->assertSame($deptB->id, $b->ticket_department_id);
-
-        // But a redelivery to the SAME department still dedups.
-        $again = $this->router()->route($deptA, $email);
-        $this->assertSame($a->id, $again->id, 'same-department redelivery is still idempotent');
-        $this->assertSame(2, Ticket::withoutGlobalScope(CompanyScope::class)->count());
+        $this->assertSame($a->id, $b->id, 'the second department delivery dedups to the same ticket');
+        $this->assertSame(1, Ticket::withoutGlobalScope(CompanyScope::class)->count());
     }
 
     public function test_stacked_reply_prefixes_are_stripped(): void

@@ -738,9 +738,12 @@ data model + phase gates: **`PLAN.md`**.
   - **Holistic Support review (peace-of-mind, 2026-09-07) — NO P0/P1· P2 dispositions.** Ολόκληρο το
     subsystem reviewed· τα core invariants (tenant isolation, blocklist→idempotency→match→ownership, attachment
     gating, escaping) κρατάνε. **Fixed αμέσως:** removeWatcher action (stop replies σε ανεπιθύμητο CC — disclosure),
-    department-scoped Message-ID idempotency (email σε 2 τμήματα ίδιας εταιρείας → ticket σε καθένα, όχι σιωπηλή
-    απώλεια), MergeTickets attachment re-parent `withoutGlobalScope`, honest oversized-stub placeholder. **Deferred
-    (P2):** (α) **ambiguous customer match:** `matchCustomer()->first()` σε ΜΗ-μοναδικό email (2 πελάτες ίδιας
+    MergeTickets attachment re-parent `withoutGlobalScope`, honest oversized-stub placeholder. **Deferred
+    (P2):** (0) **«ticket ανά τμήμα» για email σε πολλά τμήματα:** σήμερα το idempotency είναι company-wide (σωστό
+    για το «seen this message-id;»), οπότε ένα email σε dept-A + dept-B ίδιας εταιρείας δίνει ΕΝΑ ticket. Το «ένα
+    ticket ανά τμήμα» ΔΕΝ είναι dedup tweak — θέλει department-scoped `matchTicket` + merge μαζί (αλλιώς reply-all
+    ξανα-collapse-άρει, και redelivery μηνύματος που threaded/merged σε άλλο τμήμα διπλασιάζεται)· design change, χαμηλή
+    προτ. (δοκιμάστηκε per-department dedup, έγινε revert γιατί εισήγαγε duplicate-on-redelivery). (α) **ambiguous customer match:** `matchCustomer()->first()` σε ΜΗ-μοναδικό email (2 πελάτες ίδιας
     εταιρείας, ίδιο email) δένει αυθαίρετα → ο operator βλέπει λάθος οικονομικά· fix = «>1 match → guest/flag» (product
     decision — τι σημαίνει shared email; · εντός ΙΔΙΑΣ εταιρείας, όχι cross-tenant). (β) **systematic `getSize()`
     failure:** αν ένας server ΔΕΝ υποστηρίζει RFC822.SIZE σε headers-only fetch, ΟΛΑ γίνονται stubs· σπάνιο (RFC822.SIZE
