@@ -60,6 +60,10 @@ class TenantRoleProvisioner
         'Invoice' => ['ViewAny', 'View', 'Create', 'Update'],
         'Quote' => ['ViewAny', 'View', 'Create', 'Update'],
         'Customer' => ['ViewAny', 'View', 'Create', 'Update'],
+        // Domains (Πυλώνας A): operator manages the portfolio — Create/Update
+        // yes, Delete no (owner decision 2026-09-07, docs/domains/README.md §8.3).
+        'Domain' => ['ViewAny', 'View', 'Create', 'Update'],
+        'DomainTld' => ['ViewAny', 'View', 'Create', 'Update'],
         // Leads (mini-CRM): the «κυνηγός» IS an operator — no separate role
         // (owner decision, docs/archive/leads-mini-crm.md §9).
         'Lead' => ['ViewAny', 'View', 'Create', 'Update'],

@@ -897,8 +897,15 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Συνδέσεις registrar (A0, SHIPPED):** `domain_registrar_connections` per (tenant × λογαριασμός) —
   label/mode (fail-safe: μόνο ρητό `production` = live)/active, creds **encrypted at rest**,
   resource **super_admin-only** μέσα στο cluster, με «Έλεγχος σύνδεσης».
-- **Επόμενα:** A1 data model + manual CRUD + import `tbldomains` + αδέσποτα/«Ανάθεση σε πελάτη» ·
-  A2 Openprovider read-only · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md` epic).
+- **Data model + κατάλογος TLD (A1a, SHIPPED):** `domain_tlds` (κανόνες + routing ανά TLD) ·
+  `domain_tld_prices` (ρητή τιμή ανά ενέργεια×έτος×νόμισμα, enable/disable ανά term) · `domains`
+  (nullable customer = **αδέσποτο**, εκτός billing μέχρι ανάθεση· registrar-truth `expires_at` ×
+  SC billing clock) · `domain_nameservers` · `domain_contacts` (registrant/admin/tech/billing, ένα
+  ανά τύπο — και το χειροκίνητο assign aid). Resource «TLDs & τιμές» (operator Create/Update,
+  GuardedDelete), enum `DomainStatus`.
+- **Επόμενα:** A1b Domain CRUD + «Ανάθεση σε πελάτη» (SC 1:1) + Customer tab · A1c/A2
+  registrar-first import (λίστα+contacts από registrar → manual assign) · A2 Openprovider
+  read-only · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md` epic).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

@@ -28,6 +28,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   **«Manual (χωρίς API)»** registrar που ρίχνει typed `DomainRegistrarNotConfigured` σε κάθε
   API ενέργεια — ποτέ ψεύτικη επιτυχία. Openprovider (A2) / grEPP (A4) = μία γραμμή config +
   μία κλάση ο καθένας. Design: `docs/domains/README.md`.
+- **Domains — A1a data model + κατάλογος TLD.** Οι 5 πίνακες του πυρήνα (`domain_tlds` με
+  κανόνες/routing ανά TLD, `domain_tld_prices` με ρητή τιμή ανά ενέργεια×έτος×νόμισμα + το
+  «-1 disables» ως toggle, `domains` με nullable `customer_id` = αδέσποτο & δύο ορθογώνια
+  ρολόγια, `domain_nameservers`, `domain_contacts` ένα ανά τύπο) + enum `DomainStatus`
+  (με `transferred_away`) + resource **«TLDs & τιμές»** στο cluster (operator Create/Update,
+  GuardedDelete όταν υπάρχουν domains). Ο operator μπαίνει στο `OPERATOR_PERMISSION_MAP`
+  για Domain/DomainTld.
 
 ### Security
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy

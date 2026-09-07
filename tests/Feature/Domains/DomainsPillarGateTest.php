@@ -4,6 +4,7 @@ namespace Tests\Feature\Domains;
 
 use App\Filament\Clusters\DomainsCluster;
 use App\Filament\Resources\DomainRegistrarConnections\DomainRegistrarConnectionResource;
+use App\Filament\Resources\DomainTlds\DomainTldResource;
 use App\Models\Company;
 use App\Models\DomainRegistrarConnection;
 use App\Models\User;
@@ -57,6 +58,7 @@ class DomainsPillarGateTest extends TestCase
         $this->bootPanelFor($this->company(domains: false));
 
         $this->assertFalse(DomainRegistrarConnectionResource::canAccess(), 'Οι συνδέσεις registrar δεν πρέπει να φαίνονται με ανενεργό pillar');
+        $this->assertFalse(DomainTldResource::canAccess(), 'Το «TLDs & τιμές» δεν πρέπει να φαίνεται με ανενεργό pillar');
         $this->assertFalse(DomainsCluster::canAccess(), 'Το cluster «Domains» πρέπει να είναι κρυμμένο');
     }
 
@@ -65,6 +67,7 @@ class DomainsPillarGateTest extends TestCase
         $this->bootPanelFor($this->company(domains: true));
 
         $this->assertTrue(DomainRegistrarConnectionResource::canAccess());
+        $this->assertTrue(DomainTldResource::canAccess());
         $this->assertTrue(DomainsCluster::canAccess());
     }
 

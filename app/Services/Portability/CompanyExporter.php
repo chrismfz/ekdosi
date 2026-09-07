@@ -127,6 +127,16 @@ class CompanyExporter
         // payment_gateway_connections (raw APP_KEY ciphertext must never travel).
         // Tracked in docs/BACKLOG.md «Πυλώνας A».
         'domain_registrar_connections',
+        // A1 data model: wiring the pillar's export/import (FK-rewiring
+        // domain→customer/service-contract/tld/connection, tld→connection) into
+        // the portability bundle is a dedicated later slice, same as the Support
+        // pillar above; until then whole-DB backups cover it. Tracked in
+        // docs/BACKLOG.md «Πυλώνας A».
+        'domain_tlds',
+        'domain_tld_prices',
+        'domains',
+        'domain_nameservers',
+        'domain_contacts',
     ];
 
     /**
