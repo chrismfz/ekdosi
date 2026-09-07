@@ -17,6 +17,7 @@ use Filament\Infolists\Components\RepeatableEntry;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\URL;
 
 /**
  * The read-only ticket view: a header (status/priority/who/department) + the
@@ -171,9 +172,46 @@ class TicketInfolist
                                     ->visible(fn (TicketMessage $record): bool => $record->is_internal_note)
                                     ->columnSpanFull(),
                                 TextEntry::make('body')->hiddenLabel()->columnSpanFull(),
+                                TextEntry::make('attachments_links')
+                                    ->hiddenLabel()
+                                    ->html()
+                                    ->state(fn (TicketMessage $record): ?string => self::attachmentLinks($record))
+                                    // Cheap gate on the loaded relation — don't rebuild/re-sign the
+                                    // whole HTML just to test emptiness (->state does that once).
+                                    ->visible(fn (TicketMessage $record): bool => $record->attachments->isNotEmpty())
+                                    ->columnSpanFull(),
                             ]),
                     ]),
             ]);
+    }
+
+    /**
+     * Download links for a message's attachments as safe HTML (filename escaped —
+     * it is untrusted uploader input). Null when the message has none.
+     *
+     * Reads the LOADED `attachments` relation (the property, not a fresh
+     * `->attachments()->get()`), so no query fires per message. Each URL is a signed
+     * link (the operator download route is `signed`), generated only here for a user
+     * already viewing the ticket. The TTL is generous (a ticket tab can stay open a
+     * while) but bounded — a leaked link still needs auth + View:Ticket + tenant
+     * membership to resolve, so the expiry is defence-in-depth, not the gate.
+     */
+    private static function attachmentLinks(TicketMessage $message): ?string
+    {
+        $rows = $message->attachments;
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        return $rows->map(function ($att) use ($message): string {
+            $url = URL::temporarySignedRoute('support.tickets.attachment', now()->addHours(6), [
+                'ticket' => $message->ticket_id,
+                'attachment' => $att->id,
+            ]);
+
+            return '<a href="'.e($url).'" target="_blank" rel="noopener" class="fi-link">📎 '
+                .e($att->original_name).' <span style="color:#71717a">('.e($att->humanSize()).')</span></a>';
+        })->implode('<br>');
     }
 
     /**

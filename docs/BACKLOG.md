@@ -710,6 +710,17 @@ data model + phase gates: **`PLAN.md`**.
     `isBlocked` ένα query ανά recipient — για μεγάλη CC-λίστα φόρτωσε το blocklist μία φορά in-memory
     (αμελητέο στα σημερινά μεγέθη). (δ) **catch-all alias:** εξαιρούμε `email` + `imap_username` του τμήματος·
     ένα τρίτο alias/catch-all address δεν εξαιρείται (self-loop churn)· θέλει ρητό πεδίο aliases αν εμφανιστεί.
+  - **Συνημμένα ticket — PR A (portal + operator) SHIPPED / PR B (email) deferred.** **PR A (SHIPPED):**
+    ο πελάτης ανεβάζει από την πύλη (open/reply), ο χειριστής από το panel (reply/note)· links λήψης στο νήμα.
+    Security: ιδιωτικός δίσκος, **download-only** (`Content-Disposition: attachment`, ποτέ inline), allowlist
+    τύπων (όχι scripts/HTML/SVG/exe), τυχαίο όνομα, escaped filename, tenant/grant-scoped, internal-note
+    attachment invisible στην πύλη (`publicOnly`). `App\Support\TicketAttachments` + routes/controllers.
+    **PR B (DEFERRED, next, προσεκτικά):** (α) **inbound** — ο IMAP poller αγνοεί σήμερα τα MIME parts· να
+    εξάγει τα attachments ενός εισερχόμενου email (ίδιο allowlist/size cap, skip inline/related cids) και να
+    τα δένει στο μήνυμα. (β) **outbound** — να επισυνάπτει τα attachments μιας απάντησης χειριστή στο threaded
+    email προς τον πελάτη (`TicketReplyMail`). Ρίσκα να προσεχθούν στο PR B: κακόβουλα MIME parts (zip-bomb,
+    διπλή επέκταση, spoofed content-type — εμπιστεύσου έλεγχο περιεχομένου όχι το δηλωμένο mime), όριο
+    συνολικού μεγέθους email, να μη γίνει ο poller αργός/να μη σκάσει σε τεράστιο attachment.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη

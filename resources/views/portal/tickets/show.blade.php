@@ -27,6 +27,15 @@
                     <flux:text class="text-xs text-zinc-500">{{ $msg->created_at->diffForHumans() }}</flux:text>
                 </div>
                 <div class="text-sm whitespace-pre-line">{{ $msg->body }}</div>
+                @if ($msg->attachments->isNotEmpty())
+                    <div class="mt-3 flex flex-col gap-1 border-t border-zinc-200 pt-2 dark:border-zinc-700">
+                        @foreach ($msg->attachments as $att)
+                            <flux:link href="{{ route('portal.tickets.attachment', ['ticket' => $ticket->id, 'attachment' => $att->id]) }}" class="text-sm">
+                                📎 {{ $att->original_name }} <span class="text-zinc-500">({{ $att->humanSize() }})</span>
+                            </flux:link>
+                        @endforeach
+                    </div>
+                @endif
             </div>
         @endforeach
     </div>
@@ -60,10 +69,15 @@
     @if ($ticket->status === TicketStatus::Closed)
         <flux:text class="mb-2 text-sm text-zinc-500">Το αίτημα είναι κλειστό — μια νέα απάντηση θα το ανοίξει ξανά.</flux:text>
     @endif
-    <form method="POST" action="{{ route('portal.tickets.reply', $ticket->id) }}" class="flex max-w-xl flex-col gap-3">
+    <form method="POST" action="{{ route('portal.tickets.reply', $ticket->id) }}" enctype="multipart/form-data" class="flex max-w-xl flex-col gap-3">
         @csrf
         <flux:textarea name="body" label="Η απάντησή σας" rows="4" required>{{ old('body') }}</flux:textarea>
         @error('body') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
+        <div>
+            <flux:text class="mb-1 text-sm text-zinc-500">Συνημμένα (προαιρετικά, έως {{ \App\Support\TicketAttachments::MAX_COUNT }} αρχεία)</flux:text>
+            <input type="file" name="attachments[]" multiple class="text-sm">
+            @error('attachments.*') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
+        </div>
         <div><flux:button type="submit" variant="primary">Αποστολή απάντησης</flux:button></div>
     </form>
 </x-portal-layout>
