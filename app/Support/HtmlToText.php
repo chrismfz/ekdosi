@@ -18,15 +18,20 @@ class HtmlToText
             return '';
         }
 
+        // Every preg_replace keeps the previous value on a null return (e.g. a
+        // backtrack-limit hit on a very large body), so we degrade to
+        // strip_tags-only rather than silently emptying the whole message.
         // Drop non-content elements entirely (with their content).
-        $html = (string) preg_replace('#<(script|style|head|title)\b[^>]*>.*?</\1>#is', '', $html);
+        $html = preg_replace('#<(script|style|head|title)\b[^>]*>.*?</\1>#is', '', $html) ?? $html;
 
         // Line breaks + list bullets from common block/break tags. Paragraphs and
-        // blockquotes get a blank line; lighter blocks get a single newline.
-        $html = (string) preg_replace('#</(p|blockquote)>#i', "\n\n", $html);
-        $html = (string) preg_replace('#<br\s*/?>#i', "\n", $html);
-        $html = (string) preg_replace('#</(div|tr|h[1-6]|li)>#i', "\n", $html);
-        $html = (string) preg_replace('#<li\b[^>]*>#i', '• ', $html);
+        // blockquotes get a blank line; lighter blocks get a single newline; table
+        // cells get a space so columns don't run together.
+        $html = preg_replace('#</(p|blockquote)>#i', "\n\n", $html) ?? $html;
+        $html = preg_replace('#<br\s*/?>#i', "\n", $html) ?? $html;
+        $html = preg_replace('#</(div|tr|h[1-6]|li)>#i', "\n", $html) ?? $html;
+        $html = preg_replace('#</(td|th)>#i', ' ', $html) ?? $html;
+        $html = preg_replace('#<li\b[^>]*>#i', '• ', $html) ?? $html;
 
         // Strip every remaining tag, then decode entities (&amp; &nbsp; …).
         $text = strip_tags($html);
@@ -35,8 +40,8 @@ class HtmlToText
         // Tidy: normalise newlines, trim trailing spaces per line, collapse 3+ blank
         // lines to one, and trim the whole thing.
         $text = str_replace(["\r\n", "\r"], "\n", $text);
-        $text = (string) preg_replace('/[ \t]+\n/', "\n", $text);
-        $text = (string) preg_replace('/\n{3,}/', "\n\n", $text);
+        $text = preg_replace('/[ \t]+\n/', "\n", $text) ?? $text;
+        $text = preg_replace('/\n{3,}/', "\n\n", $text) ?? $text;
 
         return trim($text);
     }

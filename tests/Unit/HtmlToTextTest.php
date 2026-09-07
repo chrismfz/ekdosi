@@ -38,6 +38,15 @@ class HtmlToTextTest extends TestCase
         $this->assertSame("ένα\n\nδύο", HtmlToText::convert($html));
     }
 
+    public function test_table_cells_are_separated_not_run_together(): void
+    {
+        $html = '<table><tr><td>Ποσό</td><td>10€</td></tr><tr><td>ΦΠΑ</td><td>2€</td></tr></table>';
+        $out = HtmlToText::convert($html);
+        $this->assertStringContainsString('Ποσό 10€', $out);   // cells spaced, not «Ποσό10€»
+        $this->assertStringContainsString('ΦΠΑ 2€', $out);
+        $this->assertStringContainsString("\n", $out);          // rows on separate lines
+    }
+
     public function test_blank_input_is_empty(): void
     {
         $this->assertSame('', HtmlToText::convert(null));
