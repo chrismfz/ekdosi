@@ -7,6 +7,7 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\TldPricing;
 
 /**
  * One registrar adapter per provider (Πυλώνας A) — the domains sibling of
@@ -50,4 +51,12 @@ interface DomainRegistrar
      * records them in domains.sync_error, never swallows them).
      */
     public function syncDomain(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult;
+
+    /**
+     * What the registrar charges US for one TLD (the A2c cost-sync feed) —
+     * meaningful only when capabilities()->supportsPricingSync. Throws
+     * DomainRegistrarNotConfigured on an API-less registrar; transport/API
+     * failures throw RuntimeException (the command counts + reports them).
+     */
+    public function getTldPricing(string $tld, DomainRegistrarCredentials $credentials): TldPricing;
 }

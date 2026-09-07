@@ -73,6 +73,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   με το σφάλμα του. Routing/label/«λήγει σύντομα» παράθυρο κεντρικοποιήθηκαν
   (`Domain::effectiveRegistrarConnection/EXPIRING_SOON_DAYS`, `connectionLabel`) ώστε λίστα,
   View και sync να μη διαφωνούν ποτέ· «λήγει σήμερα» ≠ «έληξε» (strict-before-today).
+- **Domains — A2c-1 pricing cost-sync.** `domains:sync-pricing [--tenant] [--tld]` (manual-run)
+  τραβά το κόστος ανά TLD από registrars με `supportsPricingSync` (Openprovider: το `reseller`
+  price block = τι χρεώνεται ο λογαριασμός μας). Πειθαρχία: γράφεται **ΜΟΝΟ το `cost`**
+  (τιμή πώλησης/is_enabled δεν κινούνται ποτέ από sync), γραμμές που λείπουν γεννιούνται
+  **ανενεργές + απούλητες** (αχρέωτες εκ κατασκευής), το κόστος πάει στη γραμμή του ελάχιστου
+  term (.gr → years=2). Ρητό `--tenant`/`--tld` που δεν βρίσκει τίποτα = exit FAILURE.
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

@@ -8,6 +8,7 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\TldPricing;
 
 /**
  * The 'manual' registrar (Πυλώνας A) — a first-class API-less adapter, not just
@@ -45,6 +46,13 @@ class NullDomainRegistrar implements DomainRegistrar
     {
         throw new DomainRegistrarNotConfigured(
             'Ο registrar «manual» δεν έχει API — το domain συντηρείται χειροκίνητα.'
+        );
+    }
+
+    public function getTldPricing(string $tld, DomainRegistrarCredentials $credentials): TldPricing
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — οι τιμές κόστους καταχωρούνται χειροκίνητα στα «TLDs & τιμές».'
         );
     }
 }

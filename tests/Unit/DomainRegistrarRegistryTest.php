@@ -11,6 +11,7 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\TldPricing;
 use Tests\TestCase;
 
 /**
@@ -126,5 +127,10 @@ class FakeDomainRegistrar implements DomainRegistrar
     public function syncDomain(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
     {
         return new DomainSyncResult(expiresAt: '2027-01-01');
+    }
+
+    public function getTldPricing(string $tld, DomainRegistrarCredentials $credentials): TldPricing
+    {
+        return new TldPricing(tld: $tld, costs: ['renewal' => ['cost' => 10.0, 'currency' => 'EUR']]);
     }
 }

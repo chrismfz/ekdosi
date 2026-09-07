@@ -920,8 +920,14 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Registrar sync + availability (A2b, SHIPPED):** nightly `domains:sync` (gated, default OFF) —
   λήξη/NS/registrar-id/confident status από τον registrar, `sync_error` ανά row· «Συγχρονισμός»
   στο View + «Έλεγχος διαθεσιμότητας» στη λίστα (routing μέσω TLD)· stray-request-proof tests.
-- **Επόμενα:** A2c pricing cost-sync + registrar-first import (λίστα+contacts → manual assign) +
-  sealed export των connections · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md`).
+- **Pricing cost-sync (A2c-1, SHIPPED):** `domains:sync-pricing [--tenant] [--tld]` (manual-run) —
+  `getTldPricing()` ανά TLD με `supportsPricingSync` → γράφει **ΜΟΝΟ** το `cost` στη γραμμή του
+  ελάχιστου term (π.χ. .gr → years=2)· γραμμές που λείπουν γεννιούνται **ανενεργές + χωρίς τιμή
+  πώλησης** (αχρέωτες εκ κατασκευής)· τιμή πώλησης/enable = πάντα χέρι operator (τα περιθώρια
+  είναι manual per-TLD, §7.1).
+- **Επόμενα:** A2c-2 registrar-first import (λίστα+contacts → manual assign) + A2c-3 sealed export
+  των connections · margin engine (αν χρειαστεί) · A3 write · A4 grEPP · A5 reconciliation
+  (βλ. `docs/BACKLOG.md`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

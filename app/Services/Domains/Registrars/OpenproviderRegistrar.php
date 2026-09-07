@@ -10,6 +10,7 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\TldPricing;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
@@ -39,6 +40,14 @@ class OpenproviderRegistrar implements DomainRegistrar
     private const SANDBOX_URL = 'http://api.sandbox.openprovider.nl:8480';
 
     private const TOKEN_TTL_SECONDS = 6 * 3600;
+
+    /** Openprovider price block → OUR DomainTldPrice operation. */
+    private const PRICE_KEYS = [
+        'create_price' => 'register',
+        'renew_price' => 'renewal',
+        'transfer_price' => 'transfer',
+        'restore_price' => 'restore',
+    ];
 
     public function key(): string
     {
@@ -124,6 +133,42 @@ class OpenproviderRegistrar implements DomainRegistrar
             status: $this->mapStatus($rawStatus),
             rawStatus: $rawStatus,
         );
+    }
+
+    /**
+     * Registrar COST per operation for one TLD (A2c cost-sync) — a plain GET,
+     * still read-only by construction. We read the `reseller` price block
+     * (what OUR account is charged, in its own currency); the registry-facing
+     * `product` block is only a fallback. An operation Openprovider didn't
+     * quote is absent from the result — never guessed as 0.00.
+     */
+    public function getTldPricing(string $tld, DomainRegistrarCredentials $credentials): TldPricing
+    {
+        $tld = mb_strtolower(ltrim(trim($tld), '.'));
+        if ($tld === '') {
+            throw new RuntimeException('Κενό TLD για άντληση τιμών.');
+        }
+
+        $data = $this->request($credentials, 'GET', '/v1beta/tlds/'.rawurlencode($tld).'?with_price=true')->json('data');
+        $prices = is_array($data) && is_array($data['prices'] ?? null) ? $data['prices'] : null;
+        if ($prices === null) {
+            throw new RuntimeException('Το Openprovider δεν επέστρεψε τιμές για το .'.$tld.'.');
+        }
+
+        $costs = [];
+        foreach (self::PRICE_KEYS as $opKey => $operation) {
+            $block = $prices[$opKey] ?? null;
+            $entry = is_array($block) ? ($block['reseller'] ?? $block['product'] ?? null) : null;
+            if (! is_array($entry) || ! is_numeric($entry['price'] ?? null)) {
+                continue;
+            }
+            $currency = is_string($entry['currency'] ?? null) && trim($entry['currency']) !== ''
+                ? strtoupper(trim($entry['currency']))
+                : 'EUR';
+            $costs[$operation] = ['cost' => (float) $entry['price'], 'currency' => $currency];
+        }
+
+        return new TldPricing(tld: $tld, costs: $costs);
     }
 
     /** @return array<string, mixed> */

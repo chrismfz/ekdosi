@@ -399,12 +399,21 @@ domain θα προωθεί ΚΑΙ το billing cursor, ώστε η μετέπε�
 
 3-tier resolution: **TLD price → per-customer discount (υπάρχει) → per-domain override (nullable)**.
 
-**Cost-sync** (registrars με `supportsPricingSync`, δηλ. Openprovider): command
-`domains:sync-pricing --tenant --registrar` καλεί `getTldPricing()` → cost (→ **EUR**, system
-currency) γράφεται στο `domain_tld_prices.cost`. **Margin engine:** `margin_type`
-(percentage/fixed) + `margin_value` (π.χ. 20%) + `round_to` → derived sell `price`, με per-TLD
-manual override + toggle «sync grace/redemption fee με το ίδιο markup». grEPP = manual pricing.
-Explicit per-year τιμές (1–10). (Ακριβώς το «TLD Import & Pricing Sync» screen της WHMCS.)
+**Cost-sync (A2c-1, SHIPPED):** command `domains:sync-pricing [--tenant] [--tld]` (manual-run —
+τα κόστη αλλάζουν σπάνια) → `DomainPricingSyncService` καλεί `getTldPricing()` για κάθε ενεργό
+TLD δρομολογημένο σε usable σύνδεση με `supportsPricingSync`. Πειθαρχία γραφής (το ουσιώδες):
+γράφεται **ΜΟΝΟ το `cost`** — sell `price`/`is_enabled` δεν κινούνται ποτέ από sync· γραμμή που
+λείπει γεννιέται cost-only (**is_enabled=false, price=null** → αχρέωτη εκ κατασκευής, το assign
+απαιτεί enabled+priced)· το κόστος προσγειώνεται στη γραμμή του **ελάχιστου term**
+(`max(1, min_years)` — ο registrar κοστολογεί την ελάχιστη περίοδο, .gr = 2ετία). Από OP
+διαβάζουμε το `reseller` block (τι χρεώνεται ο λογαριασμός ΜΑΣ, στο νόμισμά του — συνήθως EUR)·
+operation που δεν κοστολογήθηκε απλώς λείπει, ποτέ 0.00. grEPP = manual pricing.
+
+**Margin engine (ΔΕΝ χτίστηκε — συνειδητά):** τα πραγματικά sell prices είναι manual per-TLD
+(§7.1 — το 20% default της WHMCS δεν το ακολουθεί κανένα υπάρχον TLD), οπότε ο operator βάζει
+τιμή πώλησης με το χέρι δίπλα στο συγχρονισμένο cost. Αν ποτέ χρειαστεί: `margin_type`
+(percentage/fixed) + `margin_value` + `round_to` → derived sell, per-TLD override.
+Explicit per-year τιμές (1–10) στηρίζονται ήδη από το schema.
 
 ### 7.1 Γείωση σε πραγματικά WHMCS δεδομένα (screenshots MyIP, 2026-09)
 
