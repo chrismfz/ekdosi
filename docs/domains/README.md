@@ -339,8 +339,10 @@ public .gr WHOIS auto-redacts natural-person data υπό GDPR (το «no privacy
   `InvoiceObserver` προωθεί τον cursor → domain post-issue hook → `$registrar->renew()`.
 - **Ποτέ auto-file** στην ΑΑΔΕ — τα renewals είναι πρόχειρα (ίδια πειθαρχία με WHMCS inbox / SC).
 
-### 6.2 Renewals (reuse `ServiceContract` 100%)
-Το domain δένει σε `ServiceContract`· `next_due_date` → `App\Actions\StageServiceRenewal` κόβει
+### 6.2 Renewals (reuse `ServiceContract` 100%) — **1:1 ΚΛΕΙΔΩΜΕΝΟ** (ιδιοκτήτης 2026-09-07)
+Κάθε domain δένει στο ΔΙΚΟ του ServiceContract (1:1)· η τιμή του SC από το
+`domain_tld_prices` (operation=renewal) του TLD του, με το per-domain `price_override` να νικά.
+`next_due_date` → `App\Actions\StageServiceRenewal` κόβει
 **πρόχειρο** invoice ανανέωσης. `auto_renew=on` → auto-stage draft (operator εκδίδει)· `off` → μόνο
 worklist «λήγουν σύντομα». First-Payment vs Recurring = SC `setup_fee` + `amount`.
 
@@ -454,8 +456,10 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 που λήγουν» (mirror `UpcomingRenewalsTable`).
 
 ### 8.3 Permissions (Shield)
-`company_admin` κληρονομεί αυτόματα τα `Domain*` perms (default-allow, `ADMIN_FORBIDDEN_RESOURCES`).
-`operator` θέλει ρητή εγγραφή στο `OPERATOR_PERMISSION_MAP` (`'Domain' => ['ViewAny','View','Create','Update']`).
+`company_admin` κληρονομεί αυτόματα τα `Domain*` perms (default-allow, `ADMIN_FORBIDDEN_RESOURCES`
+— πλην `DomainRegistrarConnection` που είναι ρητά forbidden/super_admin). `operator` θέλει ρητή
+εγγραφή στο `OPERATOR_PERMISSION_MAP` — **απόφαση ιδιοκτήτη 2026-09-07: Create/Update ΝΑΙ**
+(`'Domain' => ['ViewAny','View','Create','Update']`, ίδια για `DomainTld` — όχι Delete).
 Μετά deploy: `shield:generate` + re-provision.
 
 ---
@@ -471,18 +475,23 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
   (αδέσποτο) → πελάτη, + δέσιμο ServiceContract.
 - **Expiry reminders** — 15/10/5 ημέρες πριν, reuse του auto-email infra, sent-log στο `domain_reminders`.
 - **API history** — `domain_registrar_logs` (request/response/status ανά κλήση), «Bridge logs» tab.
-- **Import** — command `domains:import --tenant` — **bootstrap, όχι εξάρτηση** (τρέχει μέχρι το
-  cutover, μετά πεθαίνει):
-  - **Μέσω WHMCS API `GetClientsDomains`** (πάνω στον υπάρχοντα `WhmcsClient` — το locked
-    «Plugin-API is THE path», ΟΧΙ raw `tbldomains` schema): domainid→`legacy_id` upsert,
-    userid→customer μέσω του υπάρχοντος WHMCS↔customer mapping της γέφυρας, + regdate/expiry/
-    nextduedate/status/registrar/donotrenew. Το WHMCS είναι απλώς το μόνο μέρος που ξέρει το
-    customer↔domain linkage σήμερα.
-  - **+** registrar sync (Openprovider/grEPP, A2) για επαλήθευση expiry/status/NS — μετά το
-    bootstrap Η αλήθεια είναι ο registrar, ποτέ ξανά το WHMCS.
-  - Ό,τι ΔΕΝ κάνει match σε πελάτη δεν μπλοκάρει το import — μπαίνει **αδέσποτο**
-    (`customer_id=null`, §3.4) και βγαίνει στο worklist «Χωρίς πελάτη» → «Ανάθεση σε πελάτη».
-  - Import-first· manual entry (A1) = fallback, όχι main path.
+- **Import — REGISTRAR-FIRST bootstrap** (απόφαση ιδιοκτήτη 2026-09-07 — «να μην εξαρτιόμαστε
+  από WHMCS db»):
+  - **Κύρια πηγή = ο registrar** (A2): Openprovider `GET /v1beta/domains` (paginated λίστα ΟΛΩΝ
+    των domains του λογαριασμού) + pull των **registrant/admin/tech/billing contacts** (handles →
+    details) → κάθε domain μπαίνει **αδέσποτο με γεμάτα `domain_contacts`**, και ο operator κάνει
+    το assign ΧΕΙΡΟΚΙΝΗΤΑ από το worklist «Χωρίς πελάτη» βλέποντας δίπλα όνομα/email/εταιρεία
+    του contact (η λίστα συσχέτισης domain ↔ owner).
+  - ⚠ **.gr caveat:** το EPP ΔΕΝ έχει list-my-domains command — η αρχική .gr λίστα έρχεται από
+    export του grweb portal (ή το προαιρετικό WHMCS pull), μία φορά· μετά το `domain:info`
+    polling. `[ΕΠΙΒΕΒΑΙΩΣΗ μορφής export]`
+  - **WHMCS = προαιρετικό βοήθημα**, όχι εξάρτηση: `GetClientsDomains` (πάνω στον υπάρχοντα
+    `WhmcsClient` — «Plugin-API is THE path», ποτέ raw `tbldomains`) μπορεί να προτείνει linkage
+    (userid → `customers.whmcs_client_id`) ως ΥΠΟΔΕΙΞΗ στο assign UI + να γεμίσει `legacy_id`.
+    Το status/expiry ΔΕΝ έρχεται ποτέ από WHMCS — μόνο από registrar sync.
+  - Ό,τι δεν γίνεται assign δεν μπλοκάρει τίποτα — μένει **αδέσποτο** (`customer_id=null`, §3.4),
+    εκτός billing, ορατό στο worklist.
+  - Manual entry (A1) = ο τρόπος να δουλέψει το σύστημα ΠΡΙΝ καν συνδεθεί registrar.
 
 ---
 
