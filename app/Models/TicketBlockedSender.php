@@ -42,9 +42,12 @@ class TicketBlockedSender extends Model
      */
     public static function normalizePattern(?string $value): string
     {
-        // trim → lowercase → strip a leading «@» → trim again, so «@ bad.gr»
-        // (a space after the @) still normalises to the bare «bad.gr».
-        return trim(ltrim(mb_strtolower(trim((string) $value)), '@'));
+        // lowercase → strip ALL whitespace (a valid email/domain has none, so
+        // «@ bad.gr» and «spammer @bad.gr» collapse correctly) → strip a leading «@»
+        // (a domain entered as «@x.gr» stored bare).
+        $value = preg_replace('/\s+/', '', mb_strtolower((string) $value)) ?? '';
+
+        return ltrim($value, '@');
     }
 
     /** Store the pattern normalised, so the unique index + matching are case-insensitive. */

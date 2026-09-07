@@ -18,7 +18,7 @@ return new class extends Migration
         Schema::create('ticket_blocked_senders', function (Blueprint $t) {
             $t->id();
             $t->foreignId('company_id')->constrained()->cascadeOnDelete();
-            $t->string('pattern', 191); // full email OR bare domain, lowercased (191 = form cap + index-safe)
+            $t->string('pattern', 254); // full email (RFC max) OR bare domain, lowercased; matches the form cap
             $t->string('reason')->nullable();
             $t->foreignId('created_by')->nullable()->constrained('users')->nullOnDelete();
             $t->timestamps();

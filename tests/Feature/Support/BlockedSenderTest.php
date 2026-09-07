@@ -91,7 +91,8 @@ class BlockedSenderTest extends TestCase
     public function test_normalize_pattern_lowercases_and_strips_leading_at(): void
     {
         $this->assertSame('bad.gr', TicketBlockedSender::normalizePattern(' @Bad.GR '));
-        $this->assertSame('bad.gr', TicketBlockedSender::normalizePattern('@ Bad.GR'), 'space after @ is stripped too');
+        $this->assertSame('bad.gr', TicketBlockedSender::normalizePattern('@ Bad.GR'), 'space after @ is stripped');
+        $this->assertSame('spammer@bad.gr', TicketBlockedSender::normalizePattern('spammer @Bad.GR'), 'internal space stripped');
         $this->assertSame('spammer@bad.gr', TicketBlockedSender::normalizePattern('Spammer@Bad.GR'));
         $this->assertSame('', TicketBlockedSender::normalizePattern('   '));
     }

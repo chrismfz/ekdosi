@@ -667,7 +667,8 @@ data model + phase gates: **`PLAN.md`**.
     συναδέλφου στο ίδιο domain. Deliberate (blocklist = πλήρης αποκλεισμός· full-email block είναι ακριβές,
     domain block είναι blunt & προειδοποιείται στη φόρμα). Εναλλακτική αν πονέσει: soften σε «new/reopen only»
     (επίτρεψε reply σε ανοιχτό ticket που ανήκει στον αποστολέα)· + ίσως «blocked» counter στο `TicketPollRun`
-    για ορατότητα.
+    για ορατότητα. Επίσης: το domain-block είναι **exact** (`bad.gr` δεν πιάνει `x@mail.bad.gr`)· subdomain
+    matching (έλεγχος και των parent domains) αν χρειαστεί.
   - **P2 (review Phase-4, deferred):** η λίστα watchers στο ticket infolist (`RepeatableEntry` πάνω στη
     σχέση `watchers`) κάνει lazy-load το `user` ανά γραμμή (`label()`) + ένα ξεχωριστό `exists()` για το
     visibility → N+1 / διπλό query. Αμελητέο (ένα ticket έχει λίγους watchers)· eager-load + `isNotEmpty()`
