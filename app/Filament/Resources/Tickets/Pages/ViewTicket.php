@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Tickets\Pages;
 use App\Actions\Support\PostTicketMessage;
 use App\Enums\TicketStatus;
 use App\Filament\Resources\Tickets\TicketResource;
+use App\Jobs\SendTicketReplyEmail;
 use App\Models\CannedReply;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
@@ -56,13 +57,15 @@ class ViewTicket extends ViewRecord
                     Textarea::make('body')->label('Απάντηση προς τον πελάτη')->required()->rows(6),
                 ])
                 ->action(function (array $data, Ticket $record): void {
-                    app(PostTicketMessage::class)->handle($record, [
+                    $message = app(PostTicketMessage::class)->handle($record, [
                         'author_role' => TicketMessage::ROLE_OPERATOR,
                         'author_id' => auth()->id(),
                         'via' => TicketMessage::VIA_OPERATOR,
                         'body' => $data['body'],
                     ]);
-                    Notification::make()->title('Η απάντηση καταχωρήθηκε')->success()->send();
+                    // Email the reply to the customer (threaded, async), Phase 3b-ii.
+                    SendTicketReplyEmail::dispatch($message->id);
+                    Notification::make()->title('Η απάντηση καταχωρήθηκε — αποστέλλεται στον πελάτη με email')->success()->send();
                 }),
 
             Action::make('note')

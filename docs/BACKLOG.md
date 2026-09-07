@@ -652,6 +652,11 @@ data model + phase gates: **`PLAN.md`**.
   - **P2 (review #496, deferred):** το nav-badge queue-count και το «Στην ουρά» tab badge τρέχουν το
     ίδιο `COUNT` ξεχωριστά ανά render της λίστας — δύο πανομοιότυπα counts. Αμελητέο· ένωσέ τα αν ποτέ
     γίνει hot. Follow-up UI: canned-reply picker (token expansion) + context panel (τιμολόγια/καρτέλα inline).
+  - **P2 (review #501, deferred):** το `SendTicketReplyEmail` δεν έχει πλήρες resend guard — ένα
+    retry μετά από επιτυχή αποστολή (worker died πριν το ack) ή double-dispatch μπορεί να ξαναστείλει
+    το ίδιο reply email. Χαμηλό impact (διπλή απάντηση, όχι invoice). Το πλήρες κλείσιμο θέλει το
+    at-most-once state machine του `SendInvoiceEmail` (OPS-12: sending/sent + send_key)· άξιο μόνο αν
+    γίνει πρόβλημα στην πράξη.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη
