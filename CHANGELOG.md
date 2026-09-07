@@ -27,6 +27,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — operator bell + watchers/CC (Πυλώνας E, Phase 4).** Κάθε **δημόσιο
+  μήνυμα πελάτη** (νέο αίτημα ή reply) χτυπά **καμπανάκι** (Filament database notification) στους operators
+  του ticket — recipients = agents του τμήματος (fallback: όλοι οι χρήστες του tenant, όταν το τμήμα δεν έχει
+  agents) ∪ assignee ∪ **watchers**. Fires post-commit + best-effort από `TicketMessageObserver` →
+  `TicketNotifier` (ίδιο μοτίβο με το WHMCS immediate-invoice bell). **Watchers/CC** (νέος `ticket_watchers`):
+  operators κάνουν watch/unwatch ένα αίτημα (και όποιος **απαντά** γίνεται αυτόματα participant watcher), ενώ
+  εξωτερικά **emails** κοινοποιούνται (**κρυφό Bcc**) στις outbound απαντήσεις (`SendTicketReplyEmail` → `TicketReplyMail`).
+  UI: λίστα watchers στο ticket + «Προσθήκη watcher» (χειριστής ή email), self watch/unwatch toggle. _(SLA
+  timers σκόπιμα εκτός αυτού του slice.)_
 - **Σύστημα υποστήριξης (tickets) — outbound email threading (Πυλώνας E, Phase 3b-ii).** Η απάντηση του
   χειριστή φεύγει email στον πελάτη (`SendTicketReplyEmail` job → `TicketReplyMail`, μέσω του
   `TenantMailerFactory` per-tenant SMTP) **από το mailbox του τμήματος**, ώστε η απάντηση του πελάτη να

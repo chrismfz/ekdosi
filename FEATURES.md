@@ -856,8 +856,14 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   (`SendTicketReplyEmail`/`TicketReplyMail`, από το mailbox του τμήματος, με Message-ID/In-Reply-To +
   `[TK-…]` token)· κρατάμε το Message-ID ώστε η απάντηση του πελάτη να κάνει thread πίσω. **Ο πλήρης
   κύκλος email→ticket→email είναι live.**
-- **Επόμενα:** Phase 4 parity (watchers/SLA/merge, KB)· follow-ups: operator bell σε νέο αίτημα (πύλη/
-  email), attachments (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle.
+- **Operator bell + watchers/CC (Phase 4, SHIPPED):** κάθε **δημόσιο μήνυμα πελάτη** (νέο ή reply) χτυπά
+  **καμπανάκι** (Filament database notification) στους operators του ticket — recipients = agents τμήματος
+  (fallback: όλοι οι χρήστες tenant) ∪ assignee ∪ **watchers**· post-commit, best-effort (`TicketMessageObserver`
+  → `TicketNotifier`). **Watchers/CC:** operators κάνουν watch/unwatch (auto-watch όποιος απαντά = participant),
+  εξωτερικά **emails** κοινοποιούνται (**κρυφό Bcc**) στις απαντήσεις· λίστα watchers στο ticket, «Προσθήκη watcher» (χειριστής
+  ή email). _(SLA σκόπιμα εκτός.)_
+- **Επόμενα:** Phase 4 υπόλοιπα (merge, feedback-on-close, spam/block-sender)· follow-ups: attachments
+  (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle, inbound-CC → watcher auto-capture.
 
 ---
 

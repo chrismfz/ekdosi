@@ -657,6 +657,29 @@ data model + phase gates: **`PLAN.md`**.
     το ίδιο reply email. Χαμηλό impact (διπλή απάντηση, όχι invoice). Το πλήρες κλείσιμο θέλει το
     at-most-once state machine του `SendInvoiceEmail` (OPS-12: sending/sent + send_key)· άξιο μόνο αν
     γίνει πρόβλημα στην πράξη.
+  - **Phase 4 SHIPPED (μερικώς):** operator **bell** σε νέο/reply μήνυμα πελάτη + **watchers/CC**
+    (operators watch/unwatch, participant auto-watch, email watchers → CC στις απαντήσεις). **SLA timers
+    σκόπιμα εκτός** (δικό του slice, όχι τώρα). **Ανοιχτά Phase-4 items** (baby-steps, ένα-ένα): ticket
+    **merge** (διπλότυπα), **feedback-on-close** (rating· υπάρχει ήδη `ticket_departments.feedback_on_close`
+    flag αχρησιμοποίητο), **spam/block-sender** (drop πριν το route στον `InboundTicketRouter`).
+  - **P2 (review Phase-4, deferred):** η λίστα watchers στο ticket infolist (`RepeatableEntry` πάνω στη
+    σχέση `watchers`) κάνει lazy-load το `user` ανά γραμμή (`label()`) + ένα ξεχωριστό `exists()` για το
+    visibility → N+1 / διπλό query. Αμελητέο (ένα ticket έχει λίγους watchers)· eager-load + `isNotEmpty()`
+    αν ποτέ γίνει hot.
+  - **P2 (review Phase-4, deferred):** το operator bell (`TicketNotifier::notifyNewCustomerMessage`)
+    τρέχει **σύγχρονα** στο afterCommit του poller και, όταν ένα τμήμα δεν έχει agents, γράφει
+    `sendToDatabase` σε **ΟΛΟΥΣ** τους χρήστες του tenant ανά μήνυμα → O(μηνύματα × χρήστες) inserts στο
+    hot path ενός poll. Αμελητέο στα σημερινά μεγέθη (λίγοι operators/tenant)· αν μεγαλώσει ένας tenant με
+    agent-less τμήματα, βγάλε το bell σε queued job.
+  - **Conscious tradeoff (review Phase-4 r3):** το participant auto-watch λύνει τον operator μέσα από
+    το `company->users()` pivot (ίδιο tenant invariant με το «Προσθήκη watcher»). Συνέπεια: ένας operator
+    **εκτός pivot** (π.χ. super_admin που απαντά cross-tenant χωρίς membership row) δεν auto-watch-άρεται —
+    μπορεί να κάνει watch χειροκίνητα, και το bell ούτως ή άλλως φτάνει στους agents του τμήματος. Προτιμήθηκε
+    το tenant-scope invariant από το βολικό (global `User::find`).
+  - **Inbound-CC → watcher auto-capture (deferred, Phase-4 follow-up):** τα watcher emails μπαίνουν
+    σήμερα μόνο χειροκίνητα. Auto-capture των `Cc`/`To` ενός εισερχόμενου email ως email-watchers θέλει
+    επέκταση του `ParsedInboundEmail` + του `WebklexImapMailbox` (να διαβάζουν Cc/To) — αγγίζει τον mail
+    adapter, γι' αυτό έμεινε εκτός του watchers PR. Μικρό, καθαρό follow-up.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη

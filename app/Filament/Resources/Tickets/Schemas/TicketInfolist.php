@@ -8,6 +8,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
+use App\Models\TicketWatcher;
 use App\Models\User;
 use App\Support\InvoiceScope;
 use Filament\Actions\Action;
@@ -88,6 +89,32 @@ class TicketInfolist
                                     // tryFrom (not from): an unexpected cache value degrades to «—», never a 500.
                                     ->formatStateUsing(fn (?string $state): string => PaymentStatus::tryFrom((string) $state)?->label() ?? '—')
                                     ->color(fn (?string $state): string => PaymentStatus::tryFrom((string) $state)?->color() ?? 'gray'),
+                            ]),
+                    ]),
+
+                Section::make('Παρακολούθηση (watchers / CC)')
+                    ->description('Χειριστές που ειδοποιούνται με καμπανάκι + emails που κοινοποιούνται (κρυφό Bcc) στις απαντήσεις.')
+                    ->columnSpanFull()
+                    ->collapsed()
+                    ->visible(fn (Ticket $record): bool => $record->watchers()->exists())
+                    ->schema([
+                        RepeatableEntry::make('watchers')
+                            ->hiddenLabel()
+                            ->columns(2)
+                            ->schema([
+                                TextEntry::make('label')
+                                    ->hiddenLabel()
+                                    ->state(fn (TicketWatcher $record): string => $record->label())
+                                    ->badge()
+                                    ->icon(fn (TicketWatcher $record): string => $record->user_id !== null
+                                        ? 'heroicon-o-user'
+                                        : 'heroicon-o-envelope')
+                                    ->color(fn (TicketWatcher $record): string => $record->user_id !== null ? 'success' : 'info'),
+                                TextEntry::make('source')
+                                    ->hiddenLabel()
+                                    ->state(fn (TicketWatcher $record): string => $record->sourceLabel())
+                                    ->color('gray')
+                                    ->alignEnd(),
                             ]),
                     ]),
 
