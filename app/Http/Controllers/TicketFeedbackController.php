@@ -26,8 +26,9 @@ class TicketFeedbackController extends Controller
         return view('support.feedback', [
             'ticket' => $model,
             'ratable' => $model->canBeRated(),
-            // Short-lived (the operator is on the page now) — bounds replay of the POST.
-            'storeUrl' => URL::temporarySignedRoute('support.feedback.store', now()->addHours(2), ['ticket' => $model->id]),
+            // Generous window — the customer may open the page and submit later; still
+            // bounded (not a forever link) + throttled at the route.
+            'storeUrl' => URL::temporarySignedRoute('support.feedback.store', now()->addDays(30), ['ticket' => $model->id]),
         ]);
     }
 
@@ -46,7 +47,7 @@ class TicketFeedbackController extends Controller
         $model->recordRating((int) $data['rating'], $data['rating_comment'] ?? null);
 
         return redirect()
-            ->to(URL::temporarySignedRoute('support.feedback.show', now()->addHours(2), ['ticket' => $model->id]))
+            ->to(URL::temporarySignedRoute('support.feedback.show', now()->addDays(30), ['ticket' => $model->id]))
             ->with('status', 'Ευχαριστούμε για την αξιολόγηση!');
     }
 

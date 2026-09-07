@@ -73,9 +73,6 @@ class SendTicketFeedbackInvite implements ShouldQueue
         // Expiring link — a feedback invite is worth acting on for a while, not forever.
         $url = URL::temporarySignedRoute('support.feedback.show', now()->addDays(30), ['ticket' => $ticket->id]);
 
-        // Best-effort: a mail failure must never bubble into the operator's close
-        // action (on the sync queue driver this runs inline). Queue retries still
-        // apply on the async driver for a transient failure before this is reached.
         try {
             $mailerFactory->for($company)->to($recipient)->send(new TicketFeedbackMail(
                 ticket: $ticket,
@@ -85,6 +82,12 @@ class SendTicketFeedbackInvite implements ShouldQueue
             ));
         } catch (\Throwable $e) {
             Log::warning('SendTicketFeedbackInvite: send failed', ['ticket_id' => $ticket->id, 'error' => $e->getMessage()]);
+            // On the SYNC driver the job runs inline, so a throw would surface into the
+            // operator's close action — swallow there. On an async driver (prod uses
+            // `database`) re-throw so $tries/backoff() retry a transient failure.
+            if (($this->connection ?? config('queue.default')) !== 'sync') {
+                throw $e;
+            }
         }
     }
 }
