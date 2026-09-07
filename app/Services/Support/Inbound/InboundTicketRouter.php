@@ -105,9 +105,11 @@ class InboundTicketRouter
             // A reply from a watcher/CC (not the owner) is threaded, but ticket_messages
             // has no sender column — so prefix the real sender, else the developer's
             // words would read as the customer's own in the panel + portal.
+            // The prefixed address is the normalised sender — and in this branch it is
+            // necessarily one of the ticket's (validated) watcher addresses, not arbitrary.
             $body = $this->senderIsOwner($existing, $customer, $email->fromEmail)
                 ? $cleanBody
-                : '(από '.$email->fromEmail.")\n\n".$cleanBody;
+                : '(από '.mb_strtolower(trim($email->fromEmail)).")\n\n".$cleanBody;
 
             $this->postMessage->handle($existing, [
                 'author_role' => TicketMessage::ROLE_CUSTOMER,
@@ -191,7 +193,6 @@ class InboundTicketRouter
         }
     }
 
-    /** The sender is the ticket's customer, or (for a guest ticket) its requester_email. */
     /** The sender IS the ticket's owner — its customer, or (for a guest) its requester_email. */
     private function senderIsOwner(Ticket $ticket, ?Customer $customer, string $fromEmail): bool
     {
