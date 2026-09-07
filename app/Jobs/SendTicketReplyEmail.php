@@ -7,6 +7,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Models\TicketMessage;
 use App\Services\Support\Inbound\InboundTicketRouter;
 use App\Services\TenantMailerFactory;
+use App\Support\TicketAttachments;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -118,6 +119,22 @@ class SendTicketReplyEmail implements ShouldQueue
             $keep,
         ));
 
+        // The operator reply's own attachments (PR B), read from the private disk at
+        // send time. outboundPayload drops any file whose bytes are gone and, if the
+        // set exceeds the per-email budget, returns [] (all-or-nothing — a giant that
+        // bounces would deliver nothing). Whenever fewer files go out than are on the
+        // message, log it (missing-on-disk OR over budget) so the drop isn't silent.
+        $stored = $message->attachments;
+        $attachmentFiles = TicketAttachments::outboundPayload($stored);
+        if ($stored->isNotEmpty() && count($attachmentFiles) < $stored->count()) {
+            Log::warning('SendTicketReplyEmail: reply sent without some attachments (missing on disk or over the per-email size budget)', [
+                'ticket_id' => $ticket->id,
+                'ticket_message_id' => $message->id,
+                'stored' => $stored->count(),
+                'attached' => count($attachmentFiles),
+            ]);
+        }
+
         $mailerFactory->for($company)->to($recipient)->send(new TicketReplyMail(
             ticket: $ticket,
             body: (string) $message->body,
@@ -128,6 +145,7 @@ class SendTicketReplyEmail implements ShouldQueue
             references: $chain,
             ccAddresses: $cc,
             bccAddresses: $bcc,
+            attachmentFiles: $attachmentFiles,
         ));
     }
 }

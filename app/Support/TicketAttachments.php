@@ -6,8 +6,10 @@ use App\Models\Attachment;
 use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
+use App\Services\Support\Inbound\InboundEmailAttachment;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -28,6 +30,13 @@ class TicketAttachments
     public const MAX_SIZE_KB = 20480; // 20 MB per file
 
     public const MAX_COUNT = 5; // per message
+
+    /**
+     * Cap for the attachment set of a SINGLE email (PR B), both directions: inbound,
+     * how many bytes we'll ingest+store from one message; outbound, above which we
+     * send the reply WITHOUT attachments rather than generate an undeliverable giant.
+     */
+    public const MAX_EMAIL_TOTAL_KB = 25600; // 25 MB total per email
 
     /** Allowed extensions — documents/images/archives only, never active content. */
     public const EXTENSIONS = [
@@ -80,7 +89,7 @@ class TicketAttachments
                 'disk' => self::DISK,
                 'path' => $path,
                 'original_name' => self::safeName($file->getClientOriginalName()),
-                'mime_type' => $file->getClientMimeType(),
+                'mime_type' => self::safeMime($file->getClientMimeType()),
                 'size' => $file->getSize(),
                 'uploaded_by_user_id' => $uploaderId,
             ]);
@@ -122,13 +131,115 @@ class TicketAttachments
                 'disk' => self::DISK,
                 'path' => $path,
                 'original_name' => self::safeName($names[$path] ?? basename($path)),
-                'mime_type' => Storage::disk(self::DISK)->mimeType($path) ?: null,
+                'mime_type' => self::safeMime(Storage::disk(self::DISK)->mimeType($path) ?: null),
                 'size' => Storage::disk(self::DISK)->size($path),
                 'uploaded_by_user_id' => $uploaderId,
             ]);
         }
 
         return $out;
+    }
+
+    /**
+     * Store the attachments of an INBOUND email onto its ticket message (PR B). The
+     * sender is fully untrusted (anyone who can email the department), so every guard
+     * is independent of what the email declared:
+     *   - EXTENSION allowlist on the (sanitised) filename — the real gate. We do NOT
+     *     trust the Content-Type header, and we do NOT reject on the content-sniffed
+     *     mime either (OOXML docx/xlsx sniff as application/zip, which would drop
+     *     legitimate office files); the download-only disposition (never inline) is
+     *     what neutralises a mislabelled file, so the extension gate is sufficient.
+     *   - per-file size cap ({@see MAX_SIZE_KB}), count cap ({@see MAX_COUNT}), and a
+     *     per-email byte budget ({@see MAX_EMAIL_TOTAL_KB}) so one message can't fill
+     *     the disk. We never decompress, so a zip-bomb just sits inert within the cap.
+     * Stored on the private disk with a RANDOM name (+ the allowlisted extension);
+     * `uploaded_by_user_id` is null (it came from the customer/sender, not an operator).
+     *
+     * @param  list<InboundEmailAttachment>  $attachments
+     * @return list<Attachment>
+     */
+    public static function storeInbound(TicketMessage $message, array $attachments): array
+    {
+        $out = [];
+        $totalBytes = 0;
+        $budget = self::MAX_EMAIL_TOTAL_KB * 1024;
+
+        foreach ($attachments as $attachment) {
+            if (count($out) >= self::MAX_COUNT || ! $attachment instanceof InboundEmailAttachment) {
+                continue;
+            }
+            $name = self::safeName($attachment->filename);
+            $size = strlen($attachment->content);
+            // Per-item gate (allowlist + per-file cap) shared with the IMAP pre-filter,
+            // plus the stateful per-email budget.
+            if (! self::inboundItemAllowed($name, $size) || $totalBytes + $size > $budget) {
+                continue;
+            }
+
+            $path = self::DIRECTORY.'/'.Str::random(40).'.'.strtolower(pathinfo($name, PATHINFO_EXTENSION));
+            if (! Storage::disk(self::DISK)->put($path, $attachment->content)) {
+                continue;
+            }
+            try {
+                $row = $message->attachments()->create([
+                    'company_id' => $message->company_id,
+                    'disk' => self::DISK,
+                    'path' => $path,
+                    'original_name' => $name,
+                    // Normalise the stored mime to the allowlist (a crafted part can sniff
+                    // as text/html / image/svg+xml) so a future inline-serving surface can
+                    // never be tricked into rendering it. Prefer the disk sniff over the
+                    // sender's declared type; both pass through safeMime.
+                    'mime_type' => self::safeMime(Storage::disk(self::DISK)->mimeType($path) ?: $attachment->mimeType),
+                    'size' => $size,
+                    'uploaded_by_user_id' => null,
+                ]);
+            } catch (\Throwable $e) {
+                // Don't orphan the bytes if the row insert fails (deadlock, etc.).
+                Storage::disk(self::DISK)->delete($path);
+
+                continue;
+            }
+            $totalBytes += $size;
+            $out[] = $row;
+        }
+
+        return $out;
+    }
+
+    /**
+     * Build the mail-attachment descriptor list for an outbound reply (PR B) from a
+     * message's stored attachments. All-or-nothing on the per-email budget: if the
+     * set is too large for one email, returns [] (the caller sends the reply text
+     * WITHOUT files rather than a giant that bounces and delivers nothing). Reads
+     * only our own already-validated rows, so no re-check of type is needed.
+     *
+     * @param  iterable<Attachment>  $attachments
+     * @return list<array{disk:string, path:string, name:string, mime:?string}>
+     */
+    public static function outboundPayload(iterable $attachments): array
+    {
+        $files = [];
+        $totalBytes = 0;
+
+        foreach ($attachments as $attachment) {
+            $disk = $attachment->disk ?: self::DISK;
+            $path = (string) $attachment->path;
+            // Skip a row whose bytes are gone — attaching a missing path would make the
+            // mailer throw and the whole reply (text included) would never be delivered.
+            if (! Storage::disk($disk)->exists($path)) {
+                continue;
+            }
+            $totalBytes += (int) $attachment->size;
+            $files[] = [
+                'disk' => $disk,
+                'path' => $path,
+                'name' => self::safeName($attachment->original_name),
+                'mime' => $attachment->mime_type ?: null,
+            ];
+        }
+
+        return $totalBytes > self::MAX_EMAIL_TOTAL_KB * 1024 ? [] : $files;
     }
 
     /**
@@ -184,12 +295,65 @@ class TicketAttachments
         return in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), self::EXTENSIONS, true);
     }
 
-    /** A display/download filename with any path separators + control chars stripped. */
+    /**
+     * Public allowlist check for an inbound (untrusted) filename, run on the SANITISED
+     * name so it agrees with what {@see storeInbound} would store. Lets the IMAP layer
+     * drop a bad-type part BEFORE copying its bytes into memory.
+     */
+    public static function isAllowedFilename(?string $filename): bool
+    {
+        return self::hasAllowedExtension(self::safeName($filename));
+    }
+
+    /**
+     * The single «would we store this inbound item?» per-item predicate (allowlisted
+     * type + non-empty + within the per-file cap), shared by {@see storeInbound} and
+     * the IMAP pre-filter so the memory-bounding pre-filter can never drift from the
+     * authoritative store. The stateful per-email budget/count stay in each loop.
+     */
+    public static function inboundItemAllowed(string $safeName, int $size): bool
+    {
+        return $size > 0 && $size <= self::MAX_SIZE_KB * 1024 && self::hasAllowedExtension($safeName);
+    }
+
+    /**
+     * Normalise a stored mime to the allowlist. A crafted attachment can sniff as
+     * text/html or image/svg+xml; anything not on the allowlist is stored as the inert
+     * application/octet-stream, so no download surface can be tricked into rendering
+     * active content from the stored type. Metadata only — never the security gate.
+     */
+    public static function safeMime(?string $mime): string
+    {
+        $mime = mb_strtolower(trim((string) explode(';', (string) $mime)[0]));
+
+        return in_array($mime, self::MIME_TYPES, true) ? $mime : 'application/octet-stream';
+    }
+
+    /**
+     * A display/download filename with any path separators + control chars stripped,
+     * capped at 200 chars — but the EXTENSION is preserved when truncating a very long
+     * name, so a legitimate «<200 chars>.pdf» never loses its «.pdf» (which would make
+     * the allowlist reject it).
+     */
     public static function safeName(?string $name): string
     {
         $name = basename(trim((string) $name)); // drop any directory components
         $name = (string) preg_replace('/[\x00-\x1F\x7F]/u', '', $name); // control chars
 
-        return $name !== '' ? mb_substr($name, 0, 200) : 'αρχείο';
+        if ($name === '') {
+            return 'αρχείο';
+        }
+        if (mb_strlen($name) <= 200) {
+            return $name;
+        }
+
+        // Keep the extension on the tail; truncate the stem to fit within 200 chars.
+        $ext = pathinfo($name, PATHINFO_EXTENSION);
+        if ($ext === '' || mb_strlen($ext) > 20) {
+            return mb_substr($name, 0, 200); // no (sane) extension → plain truncate
+        }
+        $stem = mb_substr($name, 0, mb_strlen($name) - mb_strlen($ext) - 1);
+
+        return mb_substr($stem, 0, 200 - mb_strlen($ext) - 1).'.'.$ext;
     }
 }
