@@ -610,6 +610,10 @@ data model + phase gates: **`PLAN.md`**.
   - **A2** Openprovider read-only — availability/WHOIS/`domains:sync` (expiry pull). Μαζί:
     credential fields στη σύνδεση (write-only-secret idiom) + `domain_registrar_connections`
     στο **sealed** export bucket (σήμερα INTENTIONALLY_EXCLUDED — A0 shells χωρίς creds).
+    Επίσης (deferred P2, review r3 2026-09-07): **IDN/punycode validation στο sld** — το
+    maxLength(63) μετρά unicode chars ενώ το DNS όριο είναι 63 octets του A-label, και το
+    `\p{N}` δέχεται μη-ASCII ψηφία· ο σωστός έλεγχος (idn_to_ascii + strlen) μπαίνει μαζί
+    με το availability/registry validation του A2 (εκεί απορρίπτεται τελικά έτσι κι αλλιώς).
   - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
     billing (reuse `StageServiceRenewal`) + grace/redemption.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
