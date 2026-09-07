@@ -45,8 +45,10 @@ class ListDomains extends BaseListRecords
                     ->count())
                 ->badgeColor('warning'),
             'unassigned' => Tab::make('Χωρίς πελάτη')
-                ->modifyQueryUsing(fn (Builder $query): Builder => $query->whereNull('customer_id'))
-                ->badge(fn (): int => Domain::query()->whereNull('customer_id')->count())
+                // Only ASSIGNABLE rows — a terminal-status stray would ring a
+                // worklist whose action always refuses it.
+                ->modifyQueryUsing(fn (Builder $query): Builder => $query->assignable())
+                ->badge(fn (): int => Domain::query()->assignable()->count())
                 ->badgeColor('warning'),
             'all' => Tab::make('Όλα'),
         ];

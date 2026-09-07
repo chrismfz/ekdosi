@@ -11,6 +11,8 @@ use App\Models\Customer;
 use App\Models\Domain;
 use App\Models\DomainTld;
 use App\Models\DomainTldPrice;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 use Tests\TestCase;
@@ -146,6 +148,28 @@ class AssignDomainToCustomerTest extends TestCase
 
         $this->assertSame($newCustomer->id, $moved->customer_id);
         $this->assertSame($newCustomer->id, $moved->serviceContract->customer_id);
+    }
+
+    public function test_ownership_transfer_refuses_while_an_open_draft_renewal_exists(): void
+    {
+        $domain = $this->domain(['fqdn' => 'draft.gr', 'sld' => 'draft']);
+        app(AssignDomainToCustomer::class)($domain, $this->customer);
+        $domain->refresh();
+
+        // A staged-but-unissued renewal draft on the CURRENT customer.
+        $type = InvoiceType::create([
+            'company_id' => $this->company->id, 'code' => 'TDA', 'name' => 'Τιμολόγιο', 'invcount' => 1,
+        ]);
+        Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $domain->service_contract_id,
+            'code' => 1, 'invcode' => 'TDA1', 'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+
+        $newCustomer = Customer::create(['company_id' => $this->company->id, 'name' => 'Νέος']);
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('πρόχειρο παραστατικό');
+        app(TransferDomainOwnership::class)($domain, $newCustomer);
     }
 
     public function test_ownership_transfer_refuses_unassigned_or_same_customer(): void

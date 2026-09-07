@@ -31,8 +31,11 @@ class DomainsRelationManager extends RelationManager
 
     public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
     {
+        // Flag AND the default policy gate (viewAny:Domain) — overriding must
+        // not WIDEN access vs the Domains resource itself.
         return Filament::getTenant() instanceof Company
-            && Filament::getTenant()->hasDomainManagement();
+            && Filament::getTenant()->hasDomainManagement()
+            && parent::canViewForRecord($ownerRecord, $pageClass);
     }
 
     public function form(Schema $schema): Schema

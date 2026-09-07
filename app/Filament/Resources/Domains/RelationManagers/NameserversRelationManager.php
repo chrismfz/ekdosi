@@ -51,9 +51,9 @@ class NameserversRelationManager extends RelationManager
             ->headerActions([
                 CreateAction::make()
                     ->label('Προσθήκη NS')
+                    // host normalization lives in the model mutator (create+edit).
                     ->mutateDataUsing(function (array $data): array {
                         $data['company_id'] = Filament::getTenant()?->getKey();
-                        $data['host'] = mb_strtolower(trim((string) $data['host']));
 
                         return $data;
                     }),

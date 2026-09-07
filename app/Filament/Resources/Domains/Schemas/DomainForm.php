@@ -3,8 +3,6 @@
 namespace App\Filament\Resources\Domains\Schemas;
 
 use App\Enums\DomainStatus;
-use App\Filament\Support\PickerOptions;
-use App\Models\Customer;
 use App\Models\DomainRegistrarConnection;
 use App\Models\DomainTld;
 use App\Services\Domains\DomainRegistrarRegistry;
@@ -66,19 +64,10 @@ class DomainForm
                         ->required()
                         ->native(false),
 
-                    Select::make('customer_id')
-                        ->label('Πελάτης')
-                        ->searchable()
-                        ->options(fn () => PickerOptions::favouriteCustomerOptions())
-                        ->getSearchResultsUsing(fn (string $search) => PickerOptions::searchCustomerOptions($search))
-                        ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
-                            ->where('company_id', Filament::getTenant()?->getKey())
-                            ->find($value))->name)
-                        // Assign-with-billing goes through the guarded action; the
-                        // form field only serves manual entry of an already-known
-                        // owner (no ServiceContract is created here).
-                        ->helperText('Κενό = αδέσποτο. Η «Ανάθεση σε πελάτη» (με έναρξη χρέωσης) γίνεται από τη λίστα.')
-                        ->visibleOn('create'),
+                    // Deliberately NO customer field: a customer set here would
+                    // skip the guarded «Ανάθεση σε πελάτη» action (which creates
+                    // the 1:1 ServiceContract) and leave the domain in a billing
+                    // dead-end — assignment happens ONLY through the action.
                 ])->columns(2),
 
             Section::make('Δρομολόγηση registrar')

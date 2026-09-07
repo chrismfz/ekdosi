@@ -4,6 +4,7 @@ namespace App\Actions\Domains;
 
 use App\Models\Customer;
 use App\Models\Domain;
+use App\Models\Invoice;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -30,6 +31,23 @@ class TransferDomainOwnership
             }
             if ($locked->customer_id === $newCustomer->id) {
                 throw new RuntimeException('Το domain ανήκει ήδη σε αυτόν τον πελάτη.');
+            }
+
+            // A staged-but-unissued draft renewal still carries the OLD customer
+            // (party snapshot included) and would block staging for the new one —
+            // worse, issuing it bills the wrong customer on a legal document.
+            // The operator resolves the draft first; we never auto-cancel drafts.
+            if ($locked->service_contract_id !== null) {
+                $openDraft = Invoice::query()
+                    ->where('company_id', $locked->company_id)
+                    ->where('service_contract_id', $locked->service_contract_id)
+                    ->where('local_status', 'draft')
+                    ->exists();
+                if ($openDraft) {
+                    throw new RuntimeException(
+                        'Υπάρχει πρόχειρο παραστατικό ανανέωσης για το domain στον τρέχοντα πελάτη — εκδώστε ή ακυρώστε το πρώτα.'
+                    );
+                }
             }
 
             $locked->update(['customer_id' => $newCustomer->id]);

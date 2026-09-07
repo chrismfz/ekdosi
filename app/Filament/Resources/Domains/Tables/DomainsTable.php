@@ -7,7 +7,6 @@ use App\Actions\Domains\TransferDomainOwnership;
 use App\Filament\Support\PickerOptions;
 use App\Models\Customer;
 use App\Models\Domain;
-use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
@@ -88,7 +87,10 @@ class DomainsTable
                 Action::make('assign')
                     ->label('Ανάθεση σε πελάτη')
                     ->icon('heroicon-o-user-plus')
-                    ->visible(fn (Domain $record): bool => $record->customer_id === null && $record->deleted_at === null)
+                    ->authorize('update')
+                    // In sync with the action's own guard: terminal statuses can
+                    // never be assigned, so don't offer the button (or ring badges).
+                    ->visible(fn (Domain $record): bool => $record->isAssignable() && $record->deleted_at === null)
                     ->schema([
                         Select::make('customer_id')
                             ->label('Πελάτης')
@@ -101,11 +103,10 @@ class DomainsTable
                                 ->find($value))->name),
                         Select::make('invoice_type_id')
                             ->label('Τύπος παραστατικού ανανέωσης')
-                            ->options(fn (): array => InvoiceType::query()
-                                ->where('company_id', Filament::getTenant()?->getKey())
-                                ->orderBy('description')
-                                ->pluck('description', 'id')
-                                ->all())
+                            // The shared picker: monetary-only + show_on_menu —
+                            // a renewal must never draft under a movement-only
+                            // (9.x ΔΑ) or retired type (MYD-003).
+                            ->options(fn (): array => PickerOptions::invoiceTypeOptions())
                             ->native(false)
                             ->helperText('Με ποιόν τύπο θα κόβεται το πρόχειρο ανανέωσης. Ορίζεται και αργότερα στην υπηρεσία.'),
                         Select::make('payment_method_id')
@@ -154,6 +155,7 @@ class DomainsTable
                 Action::make('transferOwnership')
                     ->label('Μεταφορά ιδιοκτησίας')
                     ->icon('heroicon-o-arrows-right-left')
+                    ->authorize('update')
                     ->visible(fn (Domain $record): bool => $record->customer_id !== null && $record->deleted_at === null)
                     ->schema([
                         Select::make('customer_id')

@@ -54,7 +54,7 @@ class AssignDomainToCustomer
             // A terminal domain must never start an Active billing clock — a
             // transferred-away/cancelled/deleted name would bill the customer
             // for something the tenant no longer holds (money-wrong direction).
-            if (in_array($locked->status, [DomainStatus::TransferredAway, DomainStatus::Cancelled, DomainStatus::Deleted], true)) {
+            if ($locked->status instanceof DomainStatus && $locked->status->isTerminal()) {
                 throw new RuntimeException(
                     'Το domain είναι σε κατάσταση «'.$locked->status->getLabel().'» — δεν ξεκινά χρέωση ανανέωσης. Διορθώστε πρώτα την κατάσταση αν είναι λάθος.'
                 );

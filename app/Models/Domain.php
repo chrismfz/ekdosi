@@ -149,6 +149,24 @@ class Domain extends Model
         return $this->customer_id === null;
     }
 
+    /**
+     * Offerable for «Ανάθεση σε πελάτη»: unassigned AND not in a terminal
+     * status (the assign action's guard refuses those — button/badges stay in
+     * sync via this one predicate + scopeAssignable).
+     */
+    public function isAssignable(): bool
+    {
+        return $this->customer_id === null
+            && ! ($this->status instanceof DomainStatus && $this->status->isTerminal());
+    }
+
+    /** Query twin of isAssignable() for worklist tabs/badges. */
+    public function scopeAssignable($query)
+    {
+        return $query->whereNull('customer_id')
+            ->whereNotIn('status', DomainStatus::terminalValues());
+    }
+
     /** Keep fqdn derived from the authoritative sld + tld pair. */
     public static function fqdnFor(string $sld, string $tld): string
     {

@@ -58,10 +58,10 @@ class DomainResource extends Resource
             && parent::canAccess();
     }
 
-    /** The assign worklist signal: unassigned domains ring on the nav. */
+    /** The assign worklist signal: ASSIGNABLE unassigned domains ring on the nav. */
     public static function getNavigationBadge(): ?string
     {
-        $count = Domain::query()->whereNull('customer_id')->count();
+        $count = Domain::query()->assignable()->count();
 
         return $count > 0 ? (string) $count : null;
     }

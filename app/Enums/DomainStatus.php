@@ -67,4 +67,23 @@ enum DomainStatus: string implements HasColor, HasLabel
             default => false,
         };
     }
+
+    /**
+     * Terminal = the tenant no longer holds (or wants) the name — assignment/
+     * billing must never start here. One source for the guard, the assign
+     * visibility AND the «Χωρίς πελάτη» worklist badges (kept in sync).
+     */
+    public function isTerminal(): bool
+    {
+        return match ($this) {
+            self::TransferredAway, self::Cancelled, self::Deleted => true,
+            default => false,
+        };
+    }
+
+    /** @return list<string> */
+    public static function terminalValues(): array
+    {
+        return [self::TransferredAway->value, self::Cancelled->value, self::Deleted->value];
+    }
 }
