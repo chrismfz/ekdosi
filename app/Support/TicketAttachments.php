@@ -89,7 +89,7 @@ class TicketAttachments
                 'disk' => self::DISK,
                 'path' => $path,
                 'original_name' => self::safeName($file->getClientOriginalName()),
-                'mime_type' => $file->getClientMimeType(),
+                'mime_type' => self::safeMime($file->getClientMimeType()),
                 'size' => $file->getSize(),
                 'uploaded_by_user_id' => $uploaderId,
             ]);
@@ -131,7 +131,7 @@ class TicketAttachments
                 'disk' => self::DISK,
                 'path' => $path,
                 'original_name' => self::safeName($names[$path] ?? basename($path)),
-                'mime_type' => Storage::disk(self::DISK)->mimeType($path) ?: null,
+                'mime_type' => self::safeMime(Storage::disk(self::DISK)->mimeType($path) ?: null),
                 'size' => Storage::disk(self::DISK)->size($path),
                 'uploaded_by_user_id' => $uploaderId,
             ]);
@@ -181,17 +181,28 @@ class TicketAttachments
             if (! Storage::disk(self::DISK)->put($path, $attachment->content)) {
                 continue;
             }
+            try {
+                $row = $message->attachments()->create([
+                    'company_id' => $message->company_id,
+                    'disk' => self::DISK,
+                    'path' => $path,
+                    'original_name' => $name,
+                    // Normalise the stored mime to the allowlist (a crafted part can sniff
+                    // as text/html / image/svg+xml) so a future inline-serving surface can
+                    // never be tricked into rendering it. Prefer the disk sniff over the
+                    // sender's declared type; both pass through safeMime.
+                    'mime_type' => self::safeMime(Storage::disk(self::DISK)->mimeType($path) ?: $attachment->mimeType),
+                    'size' => $size,
+                    'uploaded_by_user_id' => null,
+                ]);
+            } catch (\Throwable $e) {
+                // Don't orphan the bytes if the row insert fails (deadlock, etc.).
+                Storage::disk(self::DISK)->delete($path);
+
+                continue;
+            }
             $totalBytes += $size;
-            $out[] = $message->attachments()->create([
-                'company_id' => $message->company_id,
-                'disk' => self::DISK,
-                'path' => $path,
-                'original_name' => $name,
-                // Prefer the disk's own sniff over the sender's declared type (metadata only).
-                'mime_type' => Storage::disk(self::DISK)->mimeType($path) ?: ($attachment->mimeType ?: null),
-                'size' => $size,
-                'uploaded_by_user_id' => null,
-            ]);
+            $out[] = $row;
         }
 
         return $out;
@@ -213,10 +224,17 @@ class TicketAttachments
         $totalBytes = 0;
 
         foreach ($attachments as $attachment) {
+            $disk = $attachment->disk ?: self::DISK;
+            $path = (string) $attachment->path;
+            // Skip a row whose bytes are gone — attaching a missing path would make the
+            // mailer throw and the whole reply (text included) would never be delivered.
+            if (! Storage::disk($disk)->exists($path)) {
+                continue;
+            }
             $totalBytes += (int) $attachment->size;
             $files[] = [
-                'disk' => $attachment->disk ?: self::DISK,
-                'path' => (string) $attachment->path,
+                'disk' => $disk,
+                'path' => $path,
                 'name' => self::safeName($attachment->original_name),
                 'mime' => $attachment->mime_type ?: null,
             ];
@@ -278,12 +296,54 @@ class TicketAttachments
         return in_array(strtolower(pathinfo($path, PATHINFO_EXTENSION)), self::EXTENSIONS, true);
     }
 
-    /** A display/download filename with any path separators + control chars stripped. */
+    /**
+     * Public allowlist check for an inbound (untrusted) filename, run on the SANITISED
+     * name so it agrees with what {@see storeInbound} would store. Lets the IMAP layer
+     * drop a bad-type part BEFORE copying its bytes into memory.
+     */
+    public static function isAllowedFilename(?string $filename): bool
+    {
+        return self::hasAllowedExtension(self::safeName($filename));
+    }
+
+    /**
+     * Normalise a stored mime to the allowlist. A crafted attachment can sniff as
+     * text/html or image/svg+xml; anything not on the allowlist is stored as the inert
+     * application/octet-stream, so no download surface can be tricked into rendering
+     * active content from the stored type. Metadata only — never the security gate.
+     */
+    public static function safeMime(?string $mime): string
+    {
+        $mime = mb_strtolower(trim((string) explode(';', (string) $mime)[0]));
+
+        return in_array($mime, self::MIME_TYPES, true) ? $mime : 'application/octet-stream';
+    }
+
+    /**
+     * A display/download filename with any path separators + control chars stripped,
+     * capped at 200 chars — but the EXTENSION is preserved when truncating a very long
+     * name, so a legitimate «<200 chars>.pdf» never loses its «.pdf» (which would make
+     * the allowlist reject it).
+     */
     public static function safeName(?string $name): string
     {
         $name = basename(trim((string) $name)); // drop any directory components
         $name = (string) preg_replace('/[\x00-\x1F\x7F]/u', '', $name); // control chars
 
-        return $name !== '' ? mb_substr($name, 0, 200) : 'αρχείο';
+        if ($name === '') {
+            return 'αρχείο';
+        }
+        if (mb_strlen($name) <= 200) {
+            return $name;
+        }
+
+        // Keep the extension on the tail; truncate the stem to fit within 200 chars.
+        $ext = pathinfo($name, PATHINFO_EXTENSION);
+        if ($ext === '' || mb_strlen($ext) > 20) {
+            return mb_substr($name, 0, 200); // no (sane) extension → plain truncate
+        }
+        $stem = mb_substr($name, 0, mb_strlen($name) - mb_strlen($ext) - 1);
+
+        return mb_substr($stem, 0, 200 - mb_strlen($ext) - 1).'.'.$ext;
     }
 }

@@ -216,6 +216,54 @@ class TicketEmailAttachmentTest extends TestCase
         });
     }
 
+    public function test_store_inbound_normalises_a_crafted_mime_and_keeps_a_long_filename_extension(): void
+    {
+        $company = $this->company();
+        $ticket = $this->emailTicket($company);
+        $message = $ticket->messages()->first();
+
+        // A .txt whose sniffed/declared mime is dangerous → stored inert, not text/html.
+        $crafted = TicketAttachments::storeInbound($message, [
+            $this->att('note.txt', 'plain text body', 'text/html'),
+        ]);
+        $this->assertCount(1, $crafted);
+        $this->assertNotSame('text/html', $crafted[0]->mime_type, 'a crafted mime is never stored verbatim');
+
+        // A legitimate >200-char filename ending in .pdf keeps its extension (else the
+        // allowlist would drop it after truncation).
+        $longName = str_repeat('α', 260).'.pdf';
+        $made = TicketAttachments::storeInbound($message, [$this->att($longName, 'PDF')]);
+        $this->assertCount(1, $made, 'a long-named pdf is not lost to truncation');
+        $this->assertStringEndsWith('.pdf', $made[0]->original_name);
+        $this->assertLessThanOrEqual(200, mb_strlen($made[0]->original_name));
+    }
+
+    public function test_outbound_skips_a_row_whose_file_is_missing_so_the_reply_still_sends(): void
+    {
+        Mail::fake();
+        $company = $this->company();
+        $dept = $this->department($company);
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'c@e.gr']);
+
+        $ticket = app(OpenTicket::class)->handle([
+            'company_id' => $company->id, 'customer_id' => $customer->id, 'ticket_department_id' => $dept->id,
+            'subject' => 'X', 'body' => 'y', 'author_role' => TicketMessage::ROLE_CUSTOMER, 'via' => TicketMessage::VIA_EMAIL,
+        ]);
+        $reply = app(PostTicketMessage::class)->handle($ticket, [
+            'author_role' => TicketMessage::ROLE_OPERATOR, 'via' => TicketMessage::VIA_OPERATOR, 'body' => 'ορίστε',
+        ]);
+        // A row that points at a file that is NOT on disk (pruned/lost).
+        $reply->attachments()->create([
+            'company_id' => $company->id, 'disk' => 'local', 'path' => TicketAttachments::DIRECTORY.'/gone.pdf',
+            'original_name' => 'gone.pdf', 'mime_type' => 'application/pdf', 'size' => 10,
+        ]);
+
+        (new SendTicketReplyEmail($reply->id))->handle(app(TenantMailerFactory::class));
+
+        // The reply is still delivered — the missing file is skipped, not fatal.
+        Mail::assertSent(TicketReplyMail::class, fn (TicketReplyMail $mail): bool => $mail->attachmentFiles === []);
+    }
+
     public function test_outbound_payload_is_all_or_nothing_over_the_email_budget(): void
     {
         $company = $this->company();
@@ -223,9 +271,13 @@ class TicketEmailAttachmentTest extends TestCase
         $message = $ticket->messages()->first();
 
         // Two rows whose sizes together exceed the per-email budget → payload is [].
+        // The bytes MUST exist on disk (a missing file is skipped for a different
+        // reason) so it's the budget, not existence, that empties the payload here.
         foreach (['a', 'b'] as $n) {
+            $path = TicketAttachments::DIRECTORY.'/'.$n.'.pdf';
+            Storage::disk('local')->put($path, 'x');
             $message->attachments()->create([
-                'company_id' => $company->id, 'disk' => 'local', 'path' => TicketAttachments::DIRECTORY.'/'.$n.'.pdf',
+                'company_id' => $company->id, 'disk' => 'local', 'path' => $path,
                 'original_name' => $n.'.pdf', 'mime_type' => 'application/pdf',
                 'size' => (int) (TicketAttachments::MAX_EMAIL_TOTAL_KB * 1024 * 0.75),
             ]);

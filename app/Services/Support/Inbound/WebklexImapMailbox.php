@@ -146,29 +146,43 @@ class WebklexImapMailbox implements ImapMailbox
     /**
      * The email's REAL attachments as transport-agnostic DTOs (PR B). Skips INLINE
      * parts (embedded signature/logo images referenced by the HTML body via a
-     * Content-ID) — only genuine file attachments become ticket attachments. All the
-     * validation (allowlist, size, count, total budget) is applied later in
-     * {@see TicketAttachments::storeInbound}; here we only marshal bytes.
+     * Content-ID) — only genuine file attachments become ticket attachments.
+     *
+     * The allowlist + size/count/total caps are enforced HERE, during extraction, so
+     * a bad-type or oversized part is never copied into the returned list — bounding
+     * this method's own memory to at most the per-email budget regardless of how much
+     * an untrusted sender crams into one message. {@see TicketAttachments::storeInbound}
+     * re-checks the same, authoritatively, when it persists.
      *
      * @return list<InboundEmailAttachment>
      */
     private function attachments(Message $message): array
     {
         $out = [];
+        $totalBytes = 0;
+        $perFile = TicketAttachments::MAX_SIZE_KB * 1024;
+        $budget = TicketAttachments::MAX_EMAIL_TOTAL_KB * 1024;
+
         foreach ($message->getAttachments() as $attachment) {
+            if (count($out) >= TicketAttachments::MAX_COUNT) {
+                break; // never build more DTOs than we'd ever store
+            }
             // Inline parts are page furniture (logos in a signature), not files the
             // sender meant to attach — leave them out of the ticket.
             if (mb_strtolower((string) $attachment->getDisposition()) === 'inline') {
                 continue;
             }
-            $content = (string) $attachment->getContent();
-            if ($content === '') {
+            $name = trim((string) $attachment->getName());
+            // Drop unnamed or non-allowlisted parts BEFORE copying their bytes.
+            if ($name === '' || ! TicketAttachments::isAllowedFilename($name)) {
                 continue;
             }
-            $name = trim((string) $attachment->getName());
-            if ($name === '') {
-                continue; // unnamed part — nothing meaningful to store/show
+            $content = (string) $attachment->getContent();
+            $size = strlen($content);
+            if ($size === 0 || $size > $perFile || $totalBytes + $size > $budget) {
+                continue; // empty, over the per-file cap, or would blow the per-email budget
             }
+            $totalBytes += $size;
             $out[] = new InboundEmailAttachment(
                 filename: $name,
                 mimeType: $attachment->getMimeType() ?: null,
