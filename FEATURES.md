@@ -888,9 +888,14 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   ποτέ inline), allowlist τύπων (όχι scripts/HTML/SVG/executables), τυχαίο όνομα στον δίσκο, escaped filename,
   tenant/grant-scoped download (ο πελάτης μόνο σε δικό του ticket, ο χειριστής μόνο εντός εταιρείας), και
   συνημμένο **εσωτερικής σημείωσης δεν φτάνει ποτέ στην πύλη** (`publicOnly`). `App\Support\TicketAttachments`.
-  _(Τα συνημμένα **email** = PR B, ξεχωριστά.)_
-- **Επόμενα:** email attachments (inbound MIME ingestion + outbound attach) = PR B, προσεκτικά· maybe:
-  στήλη/φίλτρο αξιολόγησης, per-department validate_cert, structured sender identity.
+- **Συνημμένα αρχεία μέσω email — inbound + outbound (Phase 4 follow-up, PR B, SHIPPED):** ο IMAP poller εξάγει
+  τα πραγματικά (μη-inline) attachments εισερχόμενου email → στο μήνυμα του ticket· τα συνημμένα απάντησης χειριστή
+  επισυνάπτονται στο outbound threaded email. **Untrusted sender:** extension allowlist (όχι scripts/HTML/SVG/exe),
+  per-file (20MB) + count (5) + **per-email total (25MB)** caps, ΔΕΝ εμπιστευόμαστε το Content-Type, ποτέ
+  decompress (zip-bomb αδρανές), inline parts αγνοούνται· download-only όπως στο PR A. Outbound = all-or-nothing
+  στο budget (αλλιώς reply χωρίς αρχεία + log). `TicketAttachments::storeInbound()`/`outboundPayload()`.
+- **Επόμενα:** maybe: στήλη/φίλτρο αξιολόγησης, per-department validate_cert, structured sender identity,
+  AV-scanning συνημμένων (ClamAV) αν χρειαστεί.
   _(In-app KB DROPPED — το BookStack το καλύπτει· Announcements = maybe-later.)_
 
 ---

@@ -11,6 +11,7 @@ use App\Models\TicketBlockedSender;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
 use App\Models\TicketWatcher;
+use App\Support\TicketAttachments;
 use App\Support\TicketReference;
 use EmailReplyParser\EmailReplyParser;
 use Illuminate\Database\Eloquent\Builder;
@@ -111,7 +112,7 @@ class InboundTicketRouter
                 ? $cleanBody
                 : '(από '.mb_strtolower(trim($email->fromEmail)).")\n\n".$cleanBody;
 
-            $this->postMessage->handle($existing, [
+            $posted = $this->postMessage->handle($existing, [
                 'author_role' => TicketMessage::ROLE_CUSTOMER,
                 'author_id' => $customer?->id,
                 'is_internal_note' => false,
@@ -121,6 +122,7 @@ class InboundTicketRouter
                 'email_message_id' => $messageId,
             ]);
             $this->captureCcWatchers($existing, $email, $department, $customer);
+            $this->storeAttachments($posted, $email);
 
             return $existing;
         }
@@ -142,8 +144,25 @@ class InboundTicketRouter
             'email_message_id' => $messageId,
         ]);
         $this->captureCcWatchers($ticket, $email, $department, $customer);
+        // The opening message is the oldest — messages() is ordered id ASC, so first().
+        $opening = $ticket->messages()->first();
+        if ($opening !== null) {
+            $this->storeAttachments($opening, $email);
+        }
 
         return $ticket;
+    }
+
+    /**
+     * Persist the email's (already-extracted, non-inline) attachments onto the just-
+     * stored ticket message. All type/size/count/total guards live in
+     * {@see TicketAttachments::storeInbound} — the sender is untrusted.
+     */
+    private function storeAttachments(TicketMessage $message, ParsedInboundEmail $email): void
+    {
+        if ($email->attachments !== []) {
+            TicketAttachments::storeInbound($message, $email->attachments);
+        }
     }
 
     /**

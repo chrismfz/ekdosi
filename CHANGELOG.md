@@ -27,6 +27,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Σύστημα υποστήριξης (tickets) — συνημμένα αρχεία μέσω email, inbound + outbound (Πυλώνας E, Phase 4 follow-up · PR B).**
+  (α) **inbound:** ο IMAP poller εξάγει πλέον τα πραγματικά (μη-inline) attachments ενός εισερχόμενου email και τα
+  δένει στο μήνυμα του ticket. (β) **outbound:** τα συνημμένα μιας απάντησης χειριστή επισυνάπτονται στο threaded
+  email προς τον πελάτη. **Security-first (ο inbound αποστολέας είναι πλήρως untrusted):** κάθε part περνά από
+  extension allowlist (όχι scripts/HTML/SVG/executables — απορρίπτεται πριν γραφτεί καν στον δίσκο), per-file cap
+  (20MB), count cap (5) και **per-email total budget** (25MB) ώστε ένα μήνυμα να μη γεμίζει τον δίσκο· ΔΕΝ
+  εμπιστευόμαστε το δηλωμένο Content-Type (η επικύρωση είναι στην επέκταση, το mime κρατιέται μόνο ως metadata)·
+  δεν αποσυμπιέζουμε ποτέ (zip-bomb μένει αδρανές εντός cap)· inline parts (logo υπογραφής) αγνοούνται. Το outbound
+  είναι all-or-nothing στο budget — αν το σύνολο δεν χωράει σε ένα email, στέλνεται η απάντηση **χωρίς** τα αρχεία
+  (με log) αντί για undeliverable giant. Νέα `TicketAttachments::storeInbound()` / `outboundPayload()`,
+  `InboundEmailAttachment` DTO.
 - **Σύστημα υποστήριξης (tickets) — συνημμένα αρχεία, portal + operator (Πυλώνας E, Phase 4 follow-up · PR A).**
   Ο πελάτης ανεβάζει αρχεία στο άνοιγμα/απάντηση ενός ticket από την πύλη, κι ο χειριστής στην απάντηση/εσωτερική
   σημείωση από το panel· και οι δύο πλευρές τα βλέπουν ως links λήψης μέσα στο νήμα. **Security-first:** ιδιωτικός

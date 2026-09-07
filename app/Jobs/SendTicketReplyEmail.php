@@ -7,6 +7,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Models\TicketMessage;
 use App\Services\Support\Inbound\InboundTicketRouter;
 use App\Services\TenantMailerFactory;
+use App\Support\TicketAttachments;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -118,6 +119,19 @@ class SendTicketReplyEmail implements ShouldQueue
             $keep,
         ));
 
+        // The operator reply's own attachments (PR B), read from the private disk at
+        // send time. All-or-nothing on the per-email budget: if the set is too big,
+        // outboundPayload returns [] and we send the reply text WITHOUT the files
+        // (a giant that bounces would deliver nothing) — logged so it's not silent.
+        $attachmentFiles = TicketAttachments::outboundPayload($message->attachments);
+        if ($attachmentFiles === [] && $message->attachments->isNotEmpty()) {
+            Log::warning('SendTicketReplyEmail: attachments too large for one email, sent without them', [
+                'ticket_id' => $ticket->id,
+                'ticket_message_id' => $message->id,
+                'attachment_count' => $message->attachments->count(),
+            ]);
+        }
+
         $mailerFactory->for($company)->to($recipient)->send(new TicketReplyMail(
             ticket: $ticket,
             body: (string) $message->body,
@@ -128,6 +142,7 @@ class SendTicketReplyEmail implements ShouldQueue
             references: $chain,
             ccAddresses: $cc,
             bccAddresses: $bcc,
+            attachmentFiles: $attachmentFiles,
         ));
     }
 }
