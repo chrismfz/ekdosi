@@ -657,11 +657,11 @@ data model + phase gates: **`PLAN.md`**.
     το ίδιο reply email. Χαμηλό impact (διπλή απάντηση, όχι invoice). Το πλήρες κλείσιμο θέλει το
     at-most-once state machine του `SendInvoiceEmail` (OPS-12: sending/sent + send_key)· άξιο μόνο αν
     γίνει πρόβλημα στην πράξη.
-  - **Phase 4 SHIPPED (μερικώς):** operator **bell** σε νέο/reply μήνυμα πελάτη + **watchers/CC**
-    (operators watch/unwatch, participant auto-watch, email watchers → CC στις απαντήσεις). **SLA timers
-    σκόπιμα εκτός** (δικό του slice, όχι τώρα). **Ανοιχτά Phase-4 items** (baby-steps, ένα-ένα): ticket
-    **merge** (διπλότυπα), **feedback-on-close** (rating· υπάρχει ήδη `ticket_departments.feedback_on_close`
-    flag αχρησιμοποίητο), **spam/block-sender** (drop πριν το route στον `InboundTicketRouter`).
+  - **Phase 4 SHIPPED (μερικώς):** operator **bell** + **watchers/CC**, **feedback-on-close** (rating),
+    **spam/block-sender** (`ticket_blocked_senders` + drop στον `InboundTicketRouter` + one-click block).
+    **SLA timers σκόπιμα εκτός** (δικό του slice, όχι τώρα). **Ανοιχτό Phase-4 item** (baby-step): ticket
+    **merge** (διπλότυπα). **Deploy σημείωση:** νέο resource «Αποκλεισμένοι αποστολείς» → `shield:generate`
+    + re-provision μετά το deploy (όπως κάθε νέο resource perm).
   - **P2 (review Phase-4, deferred):** η λίστα watchers στο ticket infolist (`RepeatableEntry` πάνω στη
     σχέση `watchers`) κάνει lazy-load το `user` ανά γραμμή (`label()`) + ένα ξεχωριστό `exists()` για το
     visibility → N+1 / διπλό query. Αμελητέο (ένα ticket έχει λίγους watchers)· eager-load + `isNotEmpty()`

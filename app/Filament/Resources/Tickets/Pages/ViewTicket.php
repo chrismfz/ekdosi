@@ -8,6 +8,7 @@ use App\Filament\Resources\Tickets\TicketResource;
 use App\Jobs\SendTicketReplyEmail;
 use App\Models\CannedReply;
 use App\Models\Ticket;
+use App\Models\TicketBlockedSender;
 use App\Models\TicketMessage;
 use App\Models\User;
 use App\Support\CannedReplyExpander;
@@ -139,6 +140,34 @@ class ViewTicket extends ViewRecord
                 ->action(function (Ticket $record): void {
                     $record->update(['status' => TicketStatus::Open, 'closed_at' => null]);
                     Notification::make()->title('Το αίτημα άνοιξε ξανά')->success()->send();
+                }),
+
+            // Block the sender (spam/block-sender) — drops their future inbound email
+            // before it can open a ticket. Only when we have an address that wrote in.
+            Action::make('blockSender')
+                ->label('Αποκλεισμός αποστολέα')
+                ->icon('heroicon-o-no-symbol')
+                ->color('danger')
+                ->authorize($canUpdate)
+                ->visible(fn (Ticket $record): bool => filled($record->requester_email))
+                ->requiresConfirmation()
+                ->modalDescription(fn (Ticket $record): string => 'Ο αποστολέας «'.$record->requester_email
+                    .'» δεν θα μπορεί να ανοίγει ή να απαντά αιτήματα μέσω email. Μπορείς να τον αφαιρέσεις από τις Ρυθμίσεις → Υποστήριξη.')
+                ->action(function (Ticket $record): void {
+                    $pattern = TicketBlockedSender::normalizePattern($record->requester_email);
+                    if ($pattern === '') {
+                        Notification::make()->title('Δεν υπάρχει διεύθυνση αποστολέα')->warning()->send();
+
+                        return;
+                    }
+                    $row = TicketBlockedSender::firstOrCreate(
+                        ['company_id' => $record->company_id, 'pattern' => $pattern],
+                        ['created_by' => auth()->id()],
+                    );
+                    Notification::make()
+                        ->title($row->wasRecentlyCreated ? 'Ο αποστολέας αποκλείστηκε' : 'Ο αποστολέας ήταν ήδη αποκλεισμένος')
+                        ->{$row->wasRecentlyCreated ? 'success' : 'info'}()
+                        ->send();
                 }),
 
             // Self watch/unwatch (Phase 4): personal — gated on `view`, not `update`.

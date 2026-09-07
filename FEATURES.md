@@ -865,9 +865,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Αξιολόγηση εξυπηρέτησης / feedback-on-close (Phase 4, SHIPPED):** όταν ένα αίτημα κλείσει σε τμήμα με
   `feedback_on_close`, ο πελάτης αξιολογεί **1–5** (+ σχόλιο) από την πύλη· fail-closed (closed + feedback τμήμα
   + κάτοχος grant)· ο χειριστής βλέπει ★ n/5 + σχόλιο στο ticket. Επανα-υποβάλλεται όσο μένει κλειστό.
-- **Επόμενα:** Phase 4 υπόλοιπα (ticket merge, spam/block-sender)· follow-ups: email-invite στο κλείσιμο +
-  στήλη/φίλτρο αξιολόγησης, attachments (πύλη + email), HTML-body strip στο inbound, per-department
-  validate_cert toggle, inbound-CC → watcher auto-capture.
+- **Αποκλεισμός αποστολέα / spam (Phase 4, SHIPPED):** per-tenant blocklist (`ticket_blocked_senders`)· ο
+  inbound router ρίχνει email από αποκλεισμένη διεύθυνση **ή domain** πριν ανοίξει ticket. Resource
+  «Αποκλεισμένοι αποστολείς» (Ρυθμίσεις → Υποστήριξη) + ένα κλικ «Αποκλεισμός αποστολέα» στο ticket.
+- **Επόμενα:** Phase 4 υπόλοιπα (ticket merge)· follow-ups: email-invite στο κλείσιμο + στήλη/φίλτρο
+  αξιολόγησης, attachments (πύλη + email), HTML-body strip στο inbound, per-department validate_cert toggle,
+  inbound-CC → watcher auto-capture.
 
 ---
 

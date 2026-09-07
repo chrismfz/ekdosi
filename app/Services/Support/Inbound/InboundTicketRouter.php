@@ -7,11 +7,13 @@ use App\Actions\Support\PostTicketMessage;
 use App\Models\Customer;
 use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
+use App\Models\TicketBlockedSender;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
 use App\Support\TicketReference;
 use EmailReplyParser\EmailReplyParser;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Routes a parsed inbound email into a ticket (Πυλώνας E, Phase 3a): append to a
@@ -51,6 +53,19 @@ class InboundTicketRouter
         }
 
         $companyId = (int) $department->company_id;
+
+        // Blocklist (spam/block-sender): drop before any customer match or ticket
+        // creation, so a blocked sender never opens or reopens a ticket.
+        if (TicketBlockedSender::isBlocked($companyId, $email->fromEmail)) {
+            Log::info('InboundTicketRouter: blocked sender dropped', [
+                'company_id' => $companyId,
+                'department_id' => $department->id,
+                'from' => $email->fromEmail,
+            ]);
+
+            return null;
+        }
+
         $messageId = $this->normaliseId($email->messageId);
 
         // (0) Already processed this exact message? Return its ticket, don't duplicate.
