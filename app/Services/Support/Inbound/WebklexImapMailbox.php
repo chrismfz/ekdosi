@@ -24,15 +24,20 @@ class WebklexImapMailbox implements ImapMailbox
     private const MAX_PER_POLL = 50;
 
     /**
-     * Hard cap for a whole RFC822 message (headers + MIME-encoded body/attachments).
-     * Above this the message is skipped WITHOUT downloading its body, so a giant can
-     * neither OOM the poller nor — left unread — wedge every future poll. Generous vs
-     * the 25 MB decoded-attachment budget (base64 inflates ~+33%), so it never rejects
-     * a message that could still yield storable attachments.
+     * Hard cap for a whole RFC822 message we will DOWNLOAD + parse. Above this we do
+     * NOT fetch the body at all — we open a header-only stub ticket instead (see
+     * poll()), so a giant can neither OOM the poller nor be silently lost. Sized just
+     * above our 25 MB decoded-attachment budget (base64 inflates ~+33% → ~34 MB on the
+     * wire), so a message that could still yield storable attachments is always parsed.
+     *
+     * NOTE (deploy): parsing a message near this cap peaks at a few × its wire size
+     * (raw + decoded parts held at once), so the poll process / queue worker wants
+     * `memory_limit` ≥ 256M. The cap bounds the worst case to ONE such message at a
+     * time (bodies are fetched one-by-one), never the whole 50-message batch.
      */
-    private const MAX_MESSAGE_BYTES = 50 * 1024 * 1024; // 50 MB
+    private const MAX_MESSAGE_BYTES = 35 * 1024 * 1024; // 35 MB
 
-    /** Is a whole-message RFC822 size over the hard cap? (Testable in isolation.) */
+    /** Is a whole-message RFC822 size over the download cap? (Testable in isolation.) */
     public static function isMessageTooLarge(int $bytes): bool
     {
         return $bytes > self::MAX_MESSAGE_BYTES;
@@ -86,19 +91,19 @@ class WebklexImapMailbox implements ImapMailbox
             foreach ($messages as $message) {
                 try {
                     // Size guard BEFORE downloading the body (RFC822.SIZE is a cheap,
-                    // header-level IMAP command). A giant message is skipped AND marked
-                    // \Seen — otherwise, left unread, it would be re-fetched every poll
-                    // and, once we OOM on it, wedge the mailbox forever (poison message).
-                    if (self::isMessageTooLarge((int) $message->getSize())) {
-                        $message->setFlag('Seen');
-                        $summary->skipped++;
-                        $summary->addError('Μήνυμα παραλείφθηκε (μέγεθος πάνω από το όριο).');
-
-                        continue;
+                    // header-level IMAP command). Over the cap → route a HEADER-ONLY
+                    // stub (no body download, so no OOM) so the sender's request isn't
+                    // silently lost; the operator sees it and follows up. Under the cap
+                    // → download + parse this ONE message. Either way \Seen is set only
+                    // after the handler confirms routing, so nothing wedges the mailbox.
+                    if (self::isMessageTooLarge($this->messageSize($message))) {
+                        $parsed = $this->parseHeadersOnly($message);
+                    } else {
+                        $message->parseBody(); // download + parse THIS message only (bounded memory)
+                        $parsed = $this->parse($message);
                     }
 
-                    $message->parseBody(); // download + parse THIS message only (bounded memory)
-                    if ($handle($this->parse($message)) === true) {
+                    if ($handle($parsed) === true) {
                         $message->setFlag('Seen');
                         $summary->processed++;
                     }
@@ -171,6 +176,51 @@ class WebklexImapMailbox implements ImapMailbox
             cc: $this->addresses($message->getCc()),
             attachments: $this->attachments($message),
         );
+    }
+
+    /** Placeholder body for an over-cap message we route WITHOUT downloading its body. */
+    private const OVERSIZED_BODY = '⚠ Ο αποστολέας έστειλε ένα πολύ μεγάλο email που δεν λήφθηκε αυτόματα '
+        .'(πάνω από το όριο μεγέθους). Επικοινωνήστε μαζί του για το περιεχόμενο ή τα συνημμένα.';
+
+    /**
+     * Build a ParsedInboundEmail from the HEADERS ONLY (no body download), for a
+     * message over {@see MAX_MESSAGE_BYTES}. The sender/subject/threading survive so
+     * it routes into a ticket like any other mail — the operator sees a stub with a
+     * placeholder body and follows up — but nothing giant is ever loaded into memory
+     * and the request is never silently lost.
+     */
+    private function parseHeadersOnly(Message $message): ParsedInboundEmail
+    {
+        $from = $message->getFrom()->first();
+        $fromEmail = $from?->mail ?? '';
+        $subject = trim((string) $message->getSubject());
+        $mid = trim((string) $message->getMessageId());
+
+        return new ParsedInboundEmail(
+            fromEmail: $fromEmail,
+            fromName: ($name = trim((string) ($from?->personal ?? ''))) !== '' ? $name : null,
+            subject: $subject,
+            body: self::OVERSIZED_BODY,
+            messageId: $mid !== '' ? $mid : $this->syntheticId($fromEmail, $subject, (string) $message->getDate(), self::OVERSIZED_BODY),
+            references: array_merge($this->ids($message->getInReplyTo()), $this->ids($message->getReferences())),
+            to: $this->addresses($message->getTo()),
+            cc: $this->addresses($message->getCc()),
+            attachments: [],
+        );
+    }
+
+    /**
+     * The message's whole RFC822 size (RFC822.SIZE), or 0 if the probe fails — a
+     * failed size probe must not become a poison point (leave-unread + re-fetch
+     * forever), so we degrade to «treat as small» and let the bounded parse proceed.
+     */
+    private function messageSize(Message $message): int
+    {
+        try {
+            return (int) $message->getSize();
+        } catch (Throwable $e) {
+            return 0;
+        }
     }
 
     /**

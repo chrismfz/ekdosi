@@ -21,10 +21,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ### Security
 - **IMAP poller memory hardening (availability, Πυλώνας E).** Ο poller φέρνει πλέον **headers-only** και
   κατεβάζει το σώμα **ένα-ένα** μήνυμα (πριν φόρτωνε τα σώματα ΟΛΩΝ των έως 50 unseen μαζί — webklex
-  `content($uids)`), και **παραλείπει** ένα μήνυμα πάνω από hard cap (50MB RFC822) **πριν** κατεβάσει το σώμα
-  του (μέσω του φθηνού `RFC822.SIZE`), μαρκάροντάς το \Seen. Έτσι μια ριπή/ένα τεράστιο email δεν μπορεί ούτε
-  να κάνει OOM τον poller ούτε — μένοντας unread — να τον «κλειδώσει» σε poison loop που ξαναφέρνει το ίδιο
-  μήνυμα σε κάθε poll. Νέο `skipped` μετρητής στο poll summary.
+  `content($uids)`). Ένα μήνυμα πάνω από hard cap (35MB RFC822, ελεγμένο με το φθηνό `RFC822.SIZE` **πριν**
+  κατεβεί το σώμα) δεν κατεβαίνει καθόλου — αντ' αυτού ανοίγει **stub ticket με μόνο τα headers** (αποστολέας/
+  θέμα/threading + placeholder σώμα, χωρίς συνημμένα), ώστε ο operator να το δει και να επικοινωνήσει, χωρίς
+  ούτε OOM ούτε σιωπηλή απώλεια αιτήματος πελάτη. Έτσι μια ριπή/ένα τεράστιο email δεν κάνει OOM ούτε
+  «κλειδώνει» τον poller σε poison loop. _(Deploy: το poll/worker process θέλει `memory_limit` ≥ 256M για το
+  parse ενός μηνύματος κοντά στο cap.)_
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy
   C++Builder `.dfm`/`.cfg` files carried hardcoded MySQL/SMTP/CS-Cart passwords + an `EncryptedPassword`
   blob; kept in an offline backup), and scrubbed the Firebird `EKDOSI` password literal from every

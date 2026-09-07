@@ -15,7 +15,6 @@ final class MailboxPollSummary
         public int $fetched = 0,
         public int $processed = 0,
         public array $errors = [],
-        public int $skipped = 0,
     ) {}
 
     public function addError(string $error): void
@@ -23,14 +22,13 @@ final class MailboxPollSummary
         $this->errors[] = $error;
     }
 
-    /** @return array{connected:bool, fetched:int, processed:int, skipped:int, errors:list<string>} */
+    /** @return array{connected:bool, fetched:int, processed:int, errors:list<string>} */
     public function toArray(): array
     {
         return [
             'connected' => $this->connected,
             'fetched' => $this->fetched,
             'processed' => $this->processed,
-            'skipped' => $this->skipped,
             'errors' => $this->errors,
         ];
     }
