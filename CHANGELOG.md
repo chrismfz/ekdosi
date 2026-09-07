@@ -21,7 +21,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ### Security
 - **IMAP poller memory hardening (availability, Πυλώνας E).** Ο poller φέρνει πλέον **headers-only** και
   κατεβάζει το σώμα **ένα-ένα** μήνυμα (πριν φόρτωνε τα σώματα ΟΛΩΝ των έως 50 unseen μαζί — webklex
-  `content($uids)`). Ένα μήνυμα πάνω από hard cap (35MB RFC822, ελεγμένο με το φθηνό `RFC822.SIZE` **πριν**
+  `content($uids)`). Ένα μήνυμα πάνω από hard cap (40MB RFC822, ελεγμένο με το φθηνό `RFC822.SIZE` **πριν**
   κατεβεί το σώμα) δεν κατεβαίνει καθόλου — αντ' αυτού ανοίγει **stub ticket με μόνο τα headers** (αποστολέας/
   θέμα/threading + placeholder σώμα, χωρίς συνημμένα), ώστε ο operator να το δει και να επικοινωνήσει, χωρίς
   ούτε OOM ούτε σιωπηλή απώλεια αιτήματος πελάτη. Έτσι μια ριπή/ένα τεράστιο email δεν κάνει OOM ούτε

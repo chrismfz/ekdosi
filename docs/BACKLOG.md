@@ -730,10 +730,10 @@ data model + phase gates: **`PLAN.md`**.
     Full feedback θέλει async notification πίσω στον χειριστή (queued job → bell)· χαμηλή προτεραιότητα.
     (iv) **webklex giant-part memory — SHIPPED (poller hardening).** Ο poller φέρνει πλέον headers-only και
     κατεβάζει το σώμα ένα-ένα (`fetchBody(false)` + `parseBody()` per message → peak μνήμη = 1 μήνυμα αντί για ΟΛΑ
-    τα 50 unseen μαζί). Μήνυμα πάνω από 35MB RFC822 (`WebklexImapMailbox::isMessageTooLarge`, έλεγχος `RFC822.SIZE`
+    τα 50 unseen μαζί). Μήνυμα πάνω από 40MB RFC822 (`WebklexImapMailbox::isMessageTooLarge`, έλεγχος `RFC822.SIZE`
     πριν το body download) → **δεν κατεβαίνει· ανοίγει stub ticket με μόνο headers** (placeholder body, χωρίς
-    συνημμένα) ώστε να μη χαθεί σιωπηλά το αίτημα ούτε να γίνει OOM/poison loop· failed size-probe → degrade σε
-    «treat as small». **Deploy req:** το poll/worker process θέλει `memory_limit` ≥ 256M (parse μηνύματος ~cap peaks
+    συνημμένα) ώστε να μη χαθεί σιωπηλά το αίτημα ούτε να γίνει OOM/poison loop· failed size-probe → επίσης stub
+    (ποτέ parse ενός μη-μετρήσιμου μηνύματος «στα τυφλά»). **Deploy req:** το poll/worker process θέλει `memory_limit` ≥ 256M (parse μηνύματος ~cap peaks
     σε few× wire size). **Remaining (χαμηλή προτ.):** dead-letter folder αντί για stub, per-tenant disk quota.
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav

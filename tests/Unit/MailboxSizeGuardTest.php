@@ -14,12 +14,12 @@ class MailboxSizeGuardTest extends TestCase
 {
     public function test_a_message_over_the_cap_is_too_large(): void
     {
-        $cap = 35 * 1024 * 1024; // keep in sync with WebklexImapMailbox::MAX_MESSAGE_BYTES
+        $cap = 40 * 1024 * 1024; // keep in sync with WebklexImapMailbox::MAX_MESSAGE_BYTES
 
-        $this->assertFalse(WebklexImapMailbox::isMessageTooLarge(0), 'a failed size probe (0) parses normally');
+        $this->assertFalse(WebklexImapMailbox::isMessageTooLarge(0));
         // A message big enough to carry the full 25MB decoded-attachment budget
-        // (~34MB on the wire) is still parsed, not stubbed.
-        $this->assertFalse(WebklexImapMailbox::isMessageTooLarge(34 * 1024 * 1024));
+        // (~34MB on the wire, plus body/MIME overhead) is still parsed, not stubbed.
+        $this->assertFalse(WebklexImapMailbox::isMessageTooLarge(37 * 1024 * 1024));
         $this->assertFalse(WebklexImapMailbox::isMessageTooLarge($cap), 'exactly the cap is parsed');
         $this->assertTrue(WebklexImapMailbox::isMessageTooLarge($cap + 1), 'one byte over → header-only stub');
     }

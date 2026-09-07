@@ -24,18 +24,19 @@ class WebklexImapMailbox implements ImapMailbox
     private const MAX_PER_POLL = 50;
 
     /**
-     * Hard cap for a whole RFC822 message we will DOWNLOAD + parse. Above this we do
+     * Hard cap for a whole RFC822 message we will DOWNLOAD + parse. At/over this we do
      * NOT fetch the body at all — we open a header-only stub ticket instead (see
-     * poll()), so a giant can neither OOM the poller nor be silently lost. Sized just
-     * above our 25 MB decoded-attachment budget (base64 inflates ~+33% → ~34 MB on the
-     * wire), so a message that could still yield storable attachments is always parsed.
+     * poll()), so a giant can neither OOM the poller nor be silently lost. Sized with
+     * headroom above our 25 MB decoded-attachment budget on the wire (base64 ~+33% ≈
+     * 33 MB, plus the HTML/text body + MIME boundaries + headers), so a message
+     * carrying the full attachment budget is still parsed, not stubbed.
      *
      * NOTE (deploy): parsing a message near this cap peaks at a few × its wire size
      * (raw + decoded parts held at once), so the poll process / queue worker wants
      * `memory_limit` ≥ 256M. The cap bounds the worst case to ONE such message at a
      * time (bodies are fetched one-by-one), never the whole 50-message batch.
      */
-    private const MAX_MESSAGE_BYTES = 35 * 1024 * 1024; // 35 MB
+    private const MAX_MESSAGE_BYTES = 40 * 1024 * 1024; // 40 MB
 
     /** Is a whole-message RFC822 size over the download cap? (Testable in isolation.) */
     public static function isMessageTooLarge(int $bytes): bool
@@ -91,13 +92,16 @@ class WebklexImapMailbox implements ImapMailbox
             foreach ($messages as $message) {
                 try {
                     // Size guard BEFORE downloading the body (RFC822.SIZE is a cheap,
-                    // header-level IMAP command). Over the cap → route a HEADER-ONLY
-                    // stub (no body download, so no OOM) so the sender's request isn't
-                    // silently lost; the operator sees it and follows up. Under the cap
-                    // → download + parse this ONE message. Either way \Seen is set only
-                    // after the handler confirms routing, so nothing wedges the mailbox.
-                    if (self::isMessageTooLarge($this->messageSize($message))) {
-                        $parsed = $this->parseHeadersOnly($message);
+                    // header-level IMAP command). Over the cap — OR a size probe we
+                    // could not read (null) — routes a HEADER-ONLY stub (no body
+                    // download, so no OOM) so the sender's request isn't silently lost
+                    // and a giant we couldn't measure is never parsed on faith; the
+                    // operator sees the stub and follows up. Under the cap → download +
+                    // parse this ONE message. \Seen is set only after the handler
+                    // confirms routing, so nothing wedges the mailbox.
+                    $size = $this->messageSize($message);
+                    if ($size === null || self::isMessageTooLarge($size)) {
+                        $parsed = $this->parseHeadersOnly($message, $size ?? 0);
                     } else {
                         $message->parseBody(); // download + parse THIS message only (bounded memory)
                         $parsed = $this->parse($message);
@@ -154,28 +158,47 @@ class WebklexImapMailbox implements ImapMailbox
 
     private function parse(Message $message): ParsedInboundEmail
     {
-        $from = $message->getFrom()->first();
-        $fromEmail = $from?->mail ?? '';
-        $subject = trim((string) $message->getSubject());
+        $h = $this->headerFields($message);
         // Prefer the text/plain part; fall back to converting the HTML part to text
         // (many clients send HTML-only) rather than storing raw markup as the body.
         $text = trim((string) $message->getTextBody());
         $body = $text !== '' ? $text : HtmlToText::convert((string) $message->getHTMLBody());
-        $mid = trim((string) $message->getMessageId());
 
         return new ParsedInboundEmail(
-            fromEmail: $fromEmail,
-            fromName: ($name = trim((string) ($from?->personal ?? ''))) !== '' ? $name : null,
-            subject: $subject,
+            fromEmail: $h['email'],
+            fromName: $h['name'],
+            subject: $h['subject'],
             body: $body,
             // Synthesise a stable id when the header is missing (some mailers omit it),
             // so the router's Message-ID idempotency still collapses a redelivery.
-            messageId: $mid !== '' ? $mid : $this->syntheticId($fromEmail, $subject, (string) $message->getDate(), $body),
-            references: array_merge($this->ids($message->getInReplyTo()), $this->ids($message->getReferences())),
-            to: $this->addresses($message->getTo()),
-            cc: $this->addresses($message->getCc()),
+            messageId: $h['messageId'] !== '' ? $h['messageId'] : $this->syntheticId($h['email'], $h['subject'], (string) $message->getDate(), $body),
+            references: $h['references'],
+            to: $h['to'],
+            cc: $h['cc'],
             attachments: $this->attachments($message),
         );
+    }
+
+    /**
+     * The header fields both {@see parse} and {@see parseHeadersOnly} need — the ONE
+     * place they're extracted, so the stub path can't drift from the normal one.
+     *
+     * @return array{email:string, name:?string, subject:string, messageId:string, references:list<string>, to:list<string>, cc:list<string>}
+     */
+    private function headerFields(Message $message): array
+    {
+        $from = $message->getFrom()->first();
+        $name = trim((string) ($from?->personal ?? ''));
+
+        return [
+            'email' => $from?->mail ?? '',
+            'name' => $name !== '' ? $name : null,
+            'subject' => trim((string) $message->getSubject()),
+            'messageId' => trim((string) $message->getMessageId()),
+            'references' => array_merge($this->ids($message->getInReplyTo()), $this->ids($message->getReferences())),
+            'to' => $this->addresses($message->getTo()),
+            'cc' => $this->addresses($message->getCc()),
+        ];
     }
 
     /** Placeholder body for an over-cap message we route WITHOUT downloading its body. */
@@ -189,37 +212,40 @@ class WebklexImapMailbox implements ImapMailbox
      * placeholder body and follows up — but nothing giant is ever loaded into memory
      * and the request is never silently lost.
      */
-    private function parseHeadersOnly(Message $message): ParsedInboundEmail
+    private function parseHeadersOnly(Message $message, int $size): ParsedInboundEmail
     {
-        $from = $message->getFrom()->first();
-        $fromEmail = $from?->mail ?? '';
-        $subject = trim((string) $message->getSubject());
-        $mid = trim((string) $message->getMessageId());
+        $h = $this->headerFields($message);
+        // When the Message-ID is absent, seed the synthetic id with the message size
+        // too — otherwise two DIFFERENT oversized mails (same sender/subject/second,
+        // fixed placeholder body) would collapse to one id and the second would be
+        // dropped as a redelivery. A true redelivery keeps the same size → still dedup.
+        $seed = self::OVERSIZED_BODY.'|'.$size;
 
         return new ParsedInboundEmail(
-            fromEmail: $fromEmail,
-            fromName: ($name = trim((string) ($from?->personal ?? ''))) !== '' ? $name : null,
-            subject: $subject,
+            fromEmail: $h['email'],
+            fromName: $h['name'],
+            subject: $h['subject'],
             body: self::OVERSIZED_BODY,
-            messageId: $mid !== '' ? $mid : $this->syntheticId($fromEmail, $subject, (string) $message->getDate(), self::OVERSIZED_BODY),
-            references: array_merge($this->ids($message->getInReplyTo()), $this->ids($message->getReferences())),
-            to: $this->addresses($message->getTo()),
-            cc: $this->addresses($message->getCc()),
+            messageId: $h['messageId'] !== '' ? $h['messageId'] : $this->syntheticId($h['email'], $h['subject'], (string) $message->getDate(), $seed),
+            references: $h['references'],
+            to: $h['to'],
+            cc: $h['cc'],
             attachments: [],
         );
     }
 
     /**
-     * The message's whole RFC822 size (RFC822.SIZE), or 0 if the probe fails — a
-     * failed size probe must not become a poison point (leave-unread + re-fetch
-     * forever), so we degrade to «treat as small» and let the bounded parse proceed.
+     * The message's whole RFC822 size (RFC822.SIZE), or NULL if the probe fails. A
+     * failed probe must NOT be treated as small — that would send a possibly-giant
+     * message to parseBody() and OOM. The caller routes a header-only stub on null,
+     * so an unmeasurable message is never downloaded on faith.
      */
-    private function messageSize(Message $message): int
+    private function messageSize(Message $message): ?int
     {
         try {
             return (int) $message->getSize();
         } catch (Throwable $e) {
-            return 0;
+            return null;
         }
     }
 
