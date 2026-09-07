@@ -1478,6 +1478,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   v4.3 XML examples/XSDs, reference EppClient.java/PDF και HARICA TLS bundle (public — ελεγμένα,
   κανένα credential). Το §4.4 του design ξαναγράφτηκε πάνω σε αυτά· endpoints πλέον γνωστά.
   DNS mgmt/email-fwd: απόφαση ιδιοκτήτη — εμπορικές υπηρεσίες, αγνοούνται v1 (deferred ισχύει).
+- **Openprovider org χαρτογράφηση + απόφαση transport** (Domains design §4.3/Πηγές): δικός μας thin
+  HTTP client αντί για το επίσημο `rest-client-php` (beta, χωρίς δηλωμένη άδεια — reference only)·
+  WHMCS module = semantics reference μόνο (επίσης χωρίς ορατή άδεια, όχι copy κώδικα).
 
 ## [1.12.1] - 2026-07-13
 

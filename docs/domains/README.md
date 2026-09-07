@@ -272,6 +272,14 @@ domain → πραγματικό WHOIS = ξεχωριστή port-43/RDAP πηγή
 **Free upside vs WHMCS:** trade, restore, retry-last-op (`…/last-operation/restart`), approve-transfer,
 resend-FOA, NS/DNS templates, autorenew flag.
 
+**Υλοποίηση transport (απόφαση 2026-09-07):** δικός μας thin HTTP client (Laravel `Http`/Guzzle)
+πάνω στα ~15 endpoints του πίνακα — ΟΧΙ composer dependency στο επίσημο `openprovider/rest-client-php`:
+είναι **beta** («we may still make breaking changes», branch `dev-v1beta`) και **χωρίς δηλωμένη
+άδεια** (ούτε LICENSE file ούτε `license` στο composer.json — verify ξανά πριν τυχόν αναθεώρηση).
+Το χρησιμοποιούμε ΜΟΝΟ ως reference για request/response shapes, όπως και το WHMCS module
+(επίσης χωρίς ορατή άδεια → διαβάζουμε semantics, δεν αντιγράφουμε κώδικα). Τα issues του module
+(~28 ανοιχτά) = δωρεάν κατάλογος από real-world gotchas — κοίτα τα πριν το A3.
+
 ### 4.4 grEPP adapter (.gr direct EPP)
 **Πλήρης οδηγός υλοποίησης: `docs/domains/grepp/README.md`** (+ τα επίσημα v4.3 XML examples/XSDs,
 το reference `EppClient.java` του Μητρώου και το TLS bundle, δίπλα του). Κρίσιμα σημεία:
@@ -511,8 +519,18 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
   · `app/Services/EInvoice/ProviderTransportRegistry.php` · `app/Models/BillingConnection.php` ·
   `app/Support/Billing/SourceCapabilities.php` · `app/Actions/StageServiceRenewal.php` ·
   `app/Casts/MaybeEncrypted.php` · `app/Services/TenantRoleProvisioner.php` · `config/ekdosi.php`.
-- Openprovider: module `openprovider/Openprovider-WHMCS-domains`, swagger `openprovider/api-documentation`
-  (`domain/auth/dns/reseller-customer.swagger.json`).
+- Openprovider (org `github.com/openprovider`, χαρτογραφημένο 2026-09-07):
+  - `api-documentation` — το swagger/δημόσιο API reference (**η κύρια πηγή** του §4.3 mapping)·
+    ενεργό (upd. 2026-09).
+  - `Openprovider-WHMCS-domains` — το module που τρέχει η MyIP σήμερα· ενεργό (1141 commits)·
+    reference για real-world semantics (sync statuses, transfer completion→renewal, TLD pricing
+    sync μέσω WHMCS cron)· **χωρίς ορατή άδεια → όχι copy κώδικα**.
+  - `rest-client-php` — επίσημος PHP client (Guzzle ^7.4)· **beta + χωρίς άδεια → reference only**,
+    όχι dependency (βλ. §4.3 απόφαση transport).
+  - `openprovider-mcp` (MIT) — MCP server για το OP API· άχρηστο για την app, πιθανώς χρήσιμο
+    ως dev tooling σε AI sessions.
+  - Λοιπά (WHMCS SSL/PremiumDNS/Email/Plesk, Blesta, billmanager, το αρχαίο `op-whmcs` 2020) —
+    εκτός scope v1.
 - WHMCS registrar function index: developers.whmcs.com/domain-registrars (Function Index, Domain
   Syncing, TLD & Pricing Sync).
 - .gr/.ελ: EETT (regulator) + ICS-FORTH (registry) — 2yr term, no privacy, registry-emailed auth code, .ελ = xn--qxam.
