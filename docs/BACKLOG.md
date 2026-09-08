@@ -607,9 +607,10 @@ data model + phase gates: **`PLAN.md`**.
     A1a πίνακες + «TLDs & τιμές»· A1b «Domains» resource + «Ανάθεση σε πελάτη» (SC 1:1) +
     «Μεταφορά ιδιοκτησίας» + Customer tab. Εκκρεμεί από το αρχικό A1 σκοπό ΜΟΝΟ το import
     (μετακόμισε: registrar-first → A2· το .gr list από grweb export).
-  - **A2** Openprovider read-only — availability/WHOIS/`domains:sync` (expiry pull). Μαζί:
-    credential fields στη σύνδεση (write-only-secret idiom) + `domain_registrar_connections`
-    στο **sealed** export bucket (σήμερα INTENTIONALLY_EXCLUDED — A0 shells χωρίς creds).
+  - **A2** Openprovider read-only — ✅ **SHIPPED σε slices A2a/A2b/A2c** (βλ. `FEATURES.md §21`):
+    adapter+creds (A2a), sync+availability (A2b), pricing cost-sync + registrar-first/CSV import +
+    `domain_registrar_connections` στο **sealed** export bucket (A2c — ΟΧΙ πια INTENTIONALLY_EXCLUDED).
+    Εκκρεμεί από το A2 μόνο το live validation με production credentials.
     Επίσης (deferred P2, review r3 2026-09-07): **IDN/punycode validation στο sld** — το
     maxLength(63) μετρά unicode chars ενώ το DNS όριο είναι 63 octets του A-label, και το
     `\p{N}` δέχεται μη-ASCII ψηφία· ο σωστός έλεγχος (idn_to_ascii + strlen) μπαίνει μαζί

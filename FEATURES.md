@@ -930,8 +930,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   delimiter/στηλών, ελληνικές ημερομηνίες) → νέα domains **αδέσποτα** με γεμάτες επαφές (assign
   aid στο «Χωρίς πελάτη»)· υπάρχοντα rows μόνο registrar truth (ίδιο apply με το sync)· ποτέ
   customer_id/auto_renew· tombstones/διαγραμμένα TLD δεν ανασταίνονται· re-runnable.
-- **Επόμενα:** A2c-3 sealed export των connections · WHMCS linkage hint (προαιρετικό, §9) ·
-  margin engine (αν χρειαστεί) · A3 write · A4 grEPP · A5 reconciliation (βλ. `docs/BACKLOG.md`).
+- **Sealed export συνδέσεων registrar (A2c-3, SHIPPED):** τα `domain_registrar_connections`
+  ταξιδεύουν στο per-company bundle όπως τα payment gateways — μεταδεδομένα καθαρά, creds
+  **passphrase-sealed** (ποτέ raw APP_KEY ciphertext), re-encrypt στο target APP_KEY, idempotent
+  ανά (registrar, label), tombstones δεν ταξιδεύουν. Devbox → production χωρίς re-typing.
+- **Επόμενα:** WHMCS linkage hint (προαιρετικό, §9) · margin engine (αν χρειαστεί) · A3 write ·
+  A4 grEPP · A5 reconciliation · export/import των υπόλοιπων domain tables (βλ. `docs/BACKLOG.md`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

@@ -5,6 +5,7 @@ namespace Tests\Feature\Portability;
 use App\Models\BankAccount;
 use App\Models\Company;
 use App\Models\DistributionAim;
+use App\Models\DomainRegistrarConnection;
 use App\Models\InvoiceType;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentMethod;
@@ -143,6 +144,83 @@ class CompanyImportTest extends TestCase
         $manual = PaymentGatewayConnection::where('company_id', $target->id)->where('gateway', 'manual')->firstOrFail();
         // bank_account_ids rewired old→new (not the stale source id).
         $this->assertSame([$newBank->id], $manual->config['bank_account_ids']);
+    }
+
+    public function test_domain_registrar_connections_travel_with_sealed_secrets(): void
+    {
+        // Πυλώνας A / A2c-3: the registrar accounts (encrypted API creds) ride
+        // the SAME sealed machinery as the payment gateways — devbox →
+        // production lands them configured, nothing re-typed, and the secret
+        // never travels as raw APP_KEY ciphertext.
+        $company = $this->sourceCompany();
+        DomainRegistrarConnection::create([
+            'company_id' => $company->id, 'registrar' => 'openprovider', 'label' => 'OP MyIP',
+            'is_active' => true, 'mode' => 'production',
+            'config' => ['username' => 'myip', 'password' => 'OP-TOP-SECRET'],
+        ]);
+        DomainRegistrarConnection::create([
+            'company_id' => $company->id, 'registrar' => 'manual', 'label' => 'Χειροκίνητα',
+            'is_active' => true, 'mode' => 'off', 'config' => [],
+        ]);
+        // A trashed connection is a tombstone, not config — must NOT travel.
+        DomainRegistrarConnection::create([
+            'company_id' => $company->id, 'registrar' => 'openprovider', 'label' => 'Παλιό',
+            'is_active' => false, 'mode' => 'off', 'config' => ['username' => 'old', 'password' => 'x'],
+        ])->delete();
+
+        $bundle = $this->bundle($company);
+
+        $this->assertCount(2, $bundle['domain_connections']['rows']);
+        $this->assertSame('passphrase', $bundle['domain_connections']['secrets']['mode']);
+        $this->assertStringNotContainsString('OP-TOP-SECRET', json_encode($bundle['domain_connections']));
+        $this->assertSame(2, $bundle['manifest']['counts']['domain_registrar_connections']);
+
+        // Simulate the target VM.
+        Company::where('slug', 'src')->forceDelete();
+        app(CompanyImporter::class)->run($bundle, ['new' => true, 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $target = Company::where('slug', 'src')->firstOrFail();
+        $op = DomainRegistrarConnection::where('company_id', $target->id)
+            ->where('registrar', 'openprovider')->firstOrFail();
+        // The creds survived + decrypt under the TARGET's APP_KEY; mode carried.
+        $this->assertSame('myip', $op->config['username']);
+        $this->assertSame('OP-TOP-SECRET', $op->config['password']);
+        $this->assertSame('production', $op->mode);
+        $this->assertTrue((bool) $op->is_active);
+        $this->assertSame('OP MyIP', $op->label);
+
+        // Exactly the two live rows — the tombstone did not travel.
+        $this->assertSame(2, DomainRegistrarConnection::where('company_id', $target->id)->count());
+        $this->assertNull(DomainRegistrarConnection::where('company_id', $target->id)->where('label', 'Παλιό')->first());
+
+        // Idempotent: a re-import updates in place, never duplicates.
+        app(CompanyImporter::class)->run($bundle, ['execute' => true, 'passphrase' => 'p@ss']);
+        $this->assertSame(2, DomainRegistrarConnection::where('company_id', $target->id)->count());
+    }
+
+    public function test_two_domain_connections_sharing_registrar_and_label_both_survive(): void
+    {
+        // Two accounts at the SAME registrar with the same label — the
+        // consumed-tracking must land BOTH (the gateways' idiom).
+        $company = $this->sourceCompany();
+        DomainRegistrarConnection::create([
+            'company_id' => $company->id, 'registrar' => 'openprovider', 'label' => null,
+            'is_active' => true, 'mode' => 'production', 'config' => ['username' => 'a', 'password' => 'pw-a'],
+        ]);
+        DomainRegistrarConnection::create([
+            'company_id' => $company->id, 'registrar' => 'openprovider', 'label' => null,
+            'is_active' => false, 'mode' => 'sandbox', 'config' => ['username' => 'b', 'password' => 'pw-b'],
+        ]);
+
+        $bundle = $this->bundle($company);
+        Company::where('slug', 'src')->forceDelete();
+        app(CompanyImporter::class)->run($bundle, ['new' => true, 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $target = Company::where('slug', 'src')->firstOrFail();
+        $rows = DomainRegistrarConnection::where('company_id', $target->id)->orderBy('id')->get();
+        $this->assertCount(2, $rows);
+        $this->assertSame(['a', 'b'], $rows->map(fn ($r) => $r->config['username'])->all());
+        $this->assertSame(['pw-a', 'pw-b'], $rows->map(fn ($r) => $r->config['password'])->all());
     }
 
     public function test_two_connections_sharing_gateway_and_label_both_survive(): void

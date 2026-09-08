@@ -91,6 +91,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   διαγραμμένα TLD δεν ανασταίνονται ποτέ· TLD που λείπει auto-δημιουργείται (registrar import →
   δρομολογημένο στη σύνδεση, CSV → manual). Σπασμένο contact handle warn+continue· re-runnable
   upsert σε (company, fqdn)· ρητά no-op runs = exit FAILURE.
+- **Domains — A2c-3 sealed export συνδέσεων registrar.** Τα `domain_registrar_connections`
+  μπήκαν στο per-company portability bundle μέσω του sealed μηχανισμού των payment gateways
+  (νέο bundle key `domain_connections`): μεταδεδομένα (registrar/label/mode/active) καθαρά, τα
+  encrypted creds **passphrase-sealed** (ποτέ raw APP_KEY ciphertext), re-encrypt κάτω από το
+  APP_KEY του στόχου στο import. Idempotent ανά (company, registrar, label) με consumed-tracking
+  (διπλές ταυτότητες → διαφορετικά rows)· tombstones δεν ταξιδεύουν και δεν ανασταίνονται·
+  additive bundle schema (παλιά bundles εισάγονται κανονικά).
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):
