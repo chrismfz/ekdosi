@@ -122,6 +122,29 @@ class IssueCreditNoteTest extends TestCase
         $this->assertSame('category1_1', $creditLine->mydata_income_class_category);
     }
 
+    public function test_credit_note_copies_the_counterpart_branch(): void
+    {
+        // A credit against a branch-5 invoice reverses THAT establishment's document —
+        // the branch must ride the party snapshot into the credit note, not reset to έδρα.
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            'payment_method_id' => $this->credit->id, 'issued_at' => '2026-05-10 10:00:00',
+            'mydata_state' => 'VALID', 'counterpart_branch' => 5,
+        ]);
+        $line = InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 2, 'price_per_item' => 50, 'vat_percent' => 24, 'product_descr' => 'HW',
+        ]);
+        app(RecomputeInvoiceTotals::class)($inv);
+
+        $credit = app(IssueCreditNote::class)($inv->fresh(['lines']), $this->creditType, [
+            ['line_id' => $line->id, 'qty' => 2],
+        ]);
+
+        $this->assertSame(5, $credit->counterpart_branch);
+    }
+
     public function test_partial_credit_reduces_owed(): void
     {
         $original = $this->originalWithLine();        // gross 124, qty 2

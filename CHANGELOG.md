@@ -188,6 +188,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 - **Το Openprovider bearer token αποθηκεύεται ΚΡΥΠΤΟΓΡΑΦΗΜΕΝΟ στην cache** (με DB cache driver
   ένα plaintext token θα κατέληγε σε κάθε dump του πίνακα `cache`), με αυτόματο re-login σε
   stale/ξένο ciphertext.
+- **IMAP poller memory hardening (availability, Πυλώνας E).** Ο poller διατρέχει πλέον τα unseen **ένα-ένα**
+  (`chunked(…, 1)`, headers-only) — κάθε chunk φτιάχνει νέα single-message collection κι απελευθερώνει την
+  προηγούμενη, ώστε το webklex να μη κρατά ποτέ πάνω από **ένα** σώμα/attachments/raw structure τη φορά (πριν
+  φόρτωνε τα σώματα ΟΛΩΝ των έως 50 unseen μαζί — `content($uids)` — κι έπειτα συσσώρευε τα parsed bodies στη
+  collection). Ένα μήνυμα πάνω από hard cap (40MB RFC822, ελεγμένο με το φθηνό `RFC822.SIZE` **πριν**
+  κατεβεί το σώμα) δεν κατεβαίνει καθόλου — αντ' αυτού ανοίγει **stub ticket με μόνο τα headers** (αποστολέας/
+  θέμα/threading + placeholder σώμα, χωρίς συνημμένα), ώστε ο operator να το δει και να επικοινωνήσει, χωρίς
+  ούτε OOM ούτε σιωπηλή απώλεια αιτήματος πελάτη. Έτσι μια ριπή/ένα τεράστιο email δεν κάνει OOM ούτε
+  «κλειδώνει» τον poller σε poison loop. _(Deploy: το poll/worker process θέλει `memory_limit` ≥ 256M για το
+  parse ενός μηνύματος κοντά στο cap.)_
 - **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy
   C++Builder `.dfm`/`.cfg` files carried hardcoded MySQL/SMTP/CS-Cart passwords + an `EncryptedPassword`
   blob; kept in an offline backup), and scrubbed the Firebird `EKDOSI` password literal from every
@@ -196,6 +206,43 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Υποκατάστημα πελάτη ανά παραστατικό (myDATA counterpart branch) — «by the book» αντικατάσταση του legacy
+  duplicate-ΑΦΜ hack.** Νέα στήλη `invoices.counterpart_branch` (`unsignedSmallInteger`, default `0` = έδρα):
+  ο χειριστής δηλώνει ρητά ποια **εγκατάσταση** του πελάτη τιμολογείται, χωρίς να χρειάζεται δεύτερη εγγραφή
+  πελάτη με το ίδιο ΑΦΜ (που έσπαγε καρτέλα/dedupe/συμφωνία — τώρα απαγορεύεται από το `UNIQUE(company_id,
+  afm_key)`). Ένας πελάτης = ένα ΑΦΜ· ποια εγκατάσταση παρέλαβε είναι **attribute του εγγράφου**. Ο αριθμός
+  φτάνει στο filed myDATA `Counterpart->setBranch(...)` (πριν hardcoded `0`)· η διεύθυνση της εγκατάστασης
+  γράφεται στο ήδη επεξεργάσιμο address snapshot (το PDF τυπώνει από εκεί). Πεδίο στο draft form (κλειδώνει
+  μετά την υποβολή, reset σε 0 όταν αλλάζει πελάτης)· εμφανίζεται στο infolist μόνο όταν ≠ 0. Ο **issuer**
+  branch μένει `0` (χωριστός άξονας — MYD-010). Σπάνιο (1 ΑΦΜ σε όλο το legacy backup) → σκόπιμα χωρίς πίνακα
+  `customer_branches` (forward-compatible: μελλοντικό child table απλώς γεμίζει αυτή τη στήλη).
+- **Σύστημα υποστήριξης (tickets) — συνημμένα αρχεία μέσω email, inbound + outbound (Πυλώνας E, Phase 4 follow-up · PR B).**
+  (α) **inbound:** ο IMAP poller εξάγει πλέον τα πραγματικά (μη-inline) attachments ενός εισερχόμενου email και τα
+  δένει στο μήνυμα του ticket. (β) **outbound:** τα συνημμένα μιας απάντησης χειριστή επισυνάπτονται στο threaded
+  email προς τον πελάτη. **Security-first (ο inbound αποστολέας είναι πλήρως untrusted):** κάθε part περνά από
+  extension allowlist (όχι scripts/HTML/SVG/executables — απορρίπτεται πριν γραφτεί καν στον δίσκο), per-file cap
+  (20MB), count cap (5) και **per-email total budget** (25MB) ώστε ένα μήνυμα να μη γεμίζει τον δίσκο· ΔΕΝ
+  εμπιστευόμαστε το δηλωμένο Content-Type (η επικύρωση είναι στην επέκταση, το mime κρατιέται μόνο ως metadata)·
+  δεν αποσυμπιέζουμε ποτέ (zip-bomb μένει αδρανές εντός cap)· inline parts (logo υπογραφής) αγνοούνται. Το outbound
+  είναι all-or-nothing στο budget — αν το σύνολο δεν χωράει σε ένα email, στέλνεται η απάντηση **χωρίς** τα αρχεία
+  (με log) αντί για undeliverable giant. Νέα `TicketAttachments::storeInbound()` / `outboundPayload()`,
+  `InboundEmailAttachment` DTO.
+- **Σύστημα υποστήριξης (tickets) — συνημμένα αρχεία, portal + operator (Πυλώνας E, Phase 4 follow-up · PR A).**
+  Ο πελάτης ανεβάζει αρχεία στο άνοιγμα/απάντηση ενός ticket από την πύλη, κι ο χειριστής στην απάντηση/εσωτερική
+  σημείωση από το panel· και οι δύο πλευρές τα βλέπουν ως links λήψης μέσα στο νήμα. **Security-first:** ιδιωτικός
+  δίσκος, **μόνο λήψη** (`Content-Disposition: attachment`, ποτέ inline → κανένας ενεργός κώδικας δεν εκτελείται),
+  allowlist τύπων (έγγραφα/εικόνες/zip — όχι scripts/HTML/SVG/executables), τυχαίο όνομα αρχείου στον δίσκο,
+  escaped filename σε κάθε render. Κάθε λήψη είναι tenant/grant-scoped (ο χειριστής μόνο εντός της εταιρείας του,
+  ο πελάτης μόνο σε ticket που κατέχει), κι ένα συνημμένο **εσωτερικής σημείωσης δεν φτάνει ποτέ στην πύλη**
+  (`publicOnly`). Νέο `App\Support\TicketAttachments` (policy + storage + fail-closed lookup), routes/controllers
+  για operator + portal. (Τα συνημμένα **email** — inbound MIME ingestion + outbound attach — έρχονται σε
+  ξεχωριστό PR B.)
+- **Σύστημα υποστήριξης (tickets) — HTML-body strip + visible-CC (Πυλώνας E, Phase 4 follow-ups).**
+  (α) **HTML-only inbound:** ο poller μετατρέπει πλέον το HTML σε καθαρό κείμενο (`App\Support\HtmlToText`
+  — drop script/style, block tags → line breaks, decode entities) αντί να αποθηκεύει raw markup ως σώμα του
+  ticket. (β) **visible-CC:** στις outbound απαντήσεις, οι **cc-sourced** watchers (αυτοί που είχε βάλει
+  ΑΝΟΙΧΤΑ στο CC ο πελάτης) μπαίνουν πλέον σε **ορατό Cc** (ήταν ήδη στο αρχικό νήμα), ενώ οι **manual**
+  (operator-added) μένουν **κρυφά σε Bcc**.
 - **Σύστημα υποστήριξης (tickets) — reply-threading για watcher/CC (Πυλώνας E, Phase 4 follow-up).** Μια
   απάντηση από **watcher/CC** ενός ticket (π.χ. τον developer/agency που είχε βάλει ο πελάτης στο CC) κάνει
   πλέον **thread** στο ίδιο ticket αντί να ανοίγει νέο — ο `senderOwnsTicket` δέχεται και τους email-watchers

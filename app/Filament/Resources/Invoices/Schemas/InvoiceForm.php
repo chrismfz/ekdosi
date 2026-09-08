@@ -175,6 +175,10 @@ class InvoiceForm
                             $set('city', $customer->city);
                             $set('postcode', $customer->postcode);
                             $set('country', $customer->country ?: 'GR');
+                            // Picking a customer resets the whole snapshot to their
+                            // έδρα — so the counterpart branch resets to 0 too, never
+                            // carrying a branch number across a customer switch.
+                            $set('counterpart_branch', 0);
 
                             // Per-customer commercial defaults. The discount is the
                             // customer's standing rate → apply it to the header
@@ -486,6 +490,21 @@ class InvoiceForm
                     TextInput::make('city')->label('Πόλη'),
                     TextInput::make('postcode')->label('Τ.Κ.'),
                     TextInput::make('country')->label('Χώρα')->maxLength(60)->helperText('Κατά προτίμηση ISO alpha-2. Κανονικοποιείται κατά την υποβολή.'),
+                    // Υποκατάστημα του πελάτη (myDATA counterpart branch). 0 = έδρα,
+                    // η αλήθεια για σχεδόν κάθε παραστατικό — αλλάζει μόνο όταν
+                    // τιμολογείς ρητά άλλη εγκατάσταση του ίδιου ΑΦΜ. Γράψε και τη
+                    // διεύθυνση της εγκατάστασης στα πεδία διεύθυνσης παραπάνω.
+                    TextInput::make('counterpart_branch')->label('Εγκατάσταση πελάτη (myDATA)')
+                        // ->integer() adds the `integer` validation rule (rejects a
+                        // fractional entry outright instead of silently truncating a
+                        // legal-filing value) + numeric + step(1). The rule is skipped
+                        // for an empty field, so «clear it» still means έδρα.
+                        ->integer()->minValue(0)->maxValue(65535)->default(0)
+                        // NOT NULL column: an empty field (operator cleared it) means
+                        // «έδρα» = 0, never NULL. Also bounds it to the unsignedSmallInt
+                        // range so a fat-fingered value can't 500 on save.
+                        ->dehydrateStateUsing(fn ($state) => (int) ($state ?: 0))
+                        ->helperText('0 = έδρα. Άλλαξέ το μόνο για τιμολόγηση συγκεκριμένου υποκαταστήματος του ίδιου ΑΦΜ. Αγνοείται (φιλάρεται 0) σε λιανική ή ξένο μέρος.'),
                 ]),
 
             // ─── Παρατηρήσεις (εκτύπωσης) + τέλη/φόροι/παρακράτηση — collapsed ───

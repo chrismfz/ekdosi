@@ -37,8 +37,12 @@ class MergeTickets
                 ->update(['ticket_id' => $target->id]);
 
             // 2. Ticket-level attachments move; message attachments already followed
-            //    their (now re-parented) messages.
+            //    their (now re-parented) messages. Drop CompanyScope like the message
+            //    re-parent above, so this never silently no-ops under a mismatched
+            //    ambient tenant (source/target share a company — canMergeInto checks it).
             Attachment::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $source->company_id)
                 ->where('attachable_type', $source->getMorphClass())
                 ->where('attachable_id', $source->id)
                 ->update(['attachable_id' => $target->id]);

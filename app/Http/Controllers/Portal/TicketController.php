@@ -13,12 +13,14 @@ use App\Models\Ticket;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
 use App\Services\Portal\CustomerDocumentFeed;
+use App\Support\TicketAttachments;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Validation\Rule;
 use Illuminate\View\View;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
  * «Τα αιτήματά μου» — the customer-facing ticket surface (Πυλώνας E, Phase 2).
@@ -96,6 +98,8 @@ class TicketController extends Controller
             'subject' => ['required', 'string', 'max:191'],
             'priority' => ['required', Rule::in(['low', 'normal', 'high'])],
             'body' => ['required', 'string', 'max:5000'],
+            'attachments' => ['nullable', 'array', 'max:'.TicketAttachments::MAX_COUNT],
+            'attachments.*' => TicketAttachments::fileRules(),
         ]);
 
         [$customerId, $departmentId] = array_pad(explode('_', $data['target'], 2), 2, null);
@@ -123,6 +127,11 @@ class TicketController extends Controller
             'body' => $data['body'],
         ]);
 
+        // Attach any uploaded files to the opening message (customer = no uploader id).
+        if ($request->hasFile('attachments')) {
+            TicketAttachments::storeUploaded($ticket->messages()->first(), $request->file('attachments'));
+        }
+
         return redirect()
             ->route('portal.tickets.show', $ticket->id)
             ->with('status', 'Το αίτημα καταχωρήθηκε — θα ειδοποιηθείτε για την απάντηση.');
@@ -139,7 +148,7 @@ class TicketController extends Controller
             return redirect()->route('portal.tickets.show', $model->merged_into_id);
         }
 
-        $model->load(['department', 'publicMessages']);
+        $model->load(['department', 'publicMessages.attachments']);
 
         return view('portal.tickets.show', ['user' => $login, 'ticket' => $model]);
     }
@@ -151,15 +160,21 @@ class TicketController extends Controller
 
         $data = $request->validate([
             'body' => ['required', 'string', 'max:5000'],
+            'attachments' => ['nullable', 'array', 'max:'.TicketAttachments::MAX_COUNT],
+            'attachments.*' => TicketAttachments::fileRules(),
         ]);
 
-        $this->postMessage->handle($model, [
+        $message = $this->postMessage->handle($model, [
             'author_role' => TicketMessage::ROLE_CUSTOMER,
             'author_id' => $model->customer_id,
             'is_internal_note' => false,
             'via' => TicketMessage::VIA_PORTAL,
             'body' => $data['body'],
         ]);
+
+        if ($request->hasFile('attachments')) {
+            TicketAttachments::storeUploaded($message, $request->file('attachments'));
+        }
 
         return redirect()
             ->route('portal.tickets.show', $model->id)
@@ -186,6 +201,19 @@ class TicketController extends Controller
         return redirect()
             ->route('portal.tickets.show', $model->id)
             ->with('status', 'Ευχαριστούμε για την αξιολόγηση!');
+    }
+
+    public function attachment(int $ticket, int $attachment): StreamedResponse
+    {
+        $login = $this->login();
+        // Grant-scoped, fail-closed — 404 for a ticket the login doesn't own.
+        $model = $this->resolveTicket($login, $ticket);
+
+        // publicOnly: a customer must never reach an internal-note attachment.
+        $file = TicketAttachments::forTicket($model, $attachment, publicOnly: true);
+        abort_if($file === null, 404);
+
+        return TicketAttachments::download($file);
     }
 
     private function login(): CustomerUser

@@ -7,6 +7,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Models\TicketMessage;
 use App\Services\Support\Inbound\InboundTicketRouter;
 use App\Services\TenantMailerFactory;
+use App\Support\TicketAttachments;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -102,15 +103,37 @@ class SendTicketReplyEmail implements ShouldQueue
             ->all();
         $inReplyTo = $chain !== [] ? $chain[array_key_last($chain)] : null;
 
-        // Bcc the ticket's external watchers (Phase 4), minus the recipient and the
-        // From box themselves. Drop any malformed address defensively — one bad
+        // Copy the ticket's external watchers (Phase 4). CC-sourced ones (openly on
+        // the customer's original thread) go VISIBLE Cc; manual ones stay hidden Bcc.
+        // Both minus the recipient/From, and any malformed address dropped — one bad
         // watcher row must never abort the reply to the customer.
         $skip = [mb_strtolower($recipient), mb_strtolower($fromAddress)];
+        $keep = fn (string $address): bool => ! in_array($address, $skip, true)
+            && filter_var($address, FILTER_VALIDATE_EMAIL) !== false;
+
+        $split = $ticket->watcherEmailsForReply();
+        $cc = array_values(array_filter($split['cc'], $keep));
+        // Never Bcc an address already visible in Cc.
         $bcc = array_values(array_filter(
-            $ticket->watcherEmailAddresses(),
-            fn (string $address): bool => ! in_array($address, $skip, true)
-                && filter_var($address, FILTER_VALIDATE_EMAIL) !== false,
+            array_diff($split['bcc'], $cc),
+            $keep,
         ));
+
+        // The operator reply's own attachments (PR B), read from the private disk at
+        // send time. outboundPayload drops any file whose bytes are gone and, if the
+        // set exceeds the per-email budget, returns [] (all-or-nothing — a giant that
+        // bounces would deliver nothing). Whenever fewer files go out than are on the
+        // message, log it (missing-on-disk OR over budget) so the drop isn't silent.
+        $stored = $message->attachments;
+        $attachmentFiles = TicketAttachments::outboundPayload($stored);
+        if ($stored->isNotEmpty() && count($attachmentFiles) < $stored->count()) {
+            Log::warning('SendTicketReplyEmail: reply sent without some attachments (missing on disk or over the per-email size budget)', [
+                'ticket_id' => $ticket->id,
+                'ticket_message_id' => $message->id,
+                'stored' => $stored->count(),
+                'attached' => count($attachmentFiles),
+            ]);
+        }
 
         $mailerFactory->for($company)->to($recipient)->send(new TicketReplyMail(
             ticket: $ticket,
@@ -120,7 +143,9 @@ class SendTicketReplyEmail implements ShouldQueue
             messageId: $messageId,
             inReplyTo: $inReplyTo,
             references: $chain,
+            ccAddresses: $cc,
             bccAddresses: $bcc,
+            attachmentFiles: $attachmentFiles,
         ));
     }
 }

@@ -10,6 +10,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
+use App\Models\TicketWatcher;
 use App\Services\TenantMailerFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Mail;
@@ -95,6 +96,34 @@ class SendTicketReplyEmailTest extends TestCase
         $this->deliver($reply);
 
         Mail::assertSent(TicketReplyMail::class, fn (TicketReplyMail $mail) => $mail->hasTo('wrote-from@e.gr'));
+    }
+
+    public function test_a_cc_sourced_watcher_is_visible_cc_while_manual_stays_bcc(): void
+    {
+        Mail::fake();
+        $company = $this->company();
+        $dept = $this->department($company);
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελ', 'email' => 'c@e.gr']);
+
+        $ticket = app(OpenTicket::class)->handle([
+            'company_id' => $company->id, 'customer_id' => $customer->id, 'ticket_department_id' => $dept->id,
+            'subject' => 'X', 'body' => 'y', 'author_role' => TicketMessage::ROLE_CUSTOMER, 'via' => TicketMessage::VIA_EMAIL,
+        ]);
+        $ticket->addEmailWatcher('dev@agency.tld', TicketWatcher::SOURCE_CC); // openly CC'd
+        $ticket->addEmailWatcher('boss@internal.gr'); // manual (default source)
+
+        $reply = app(PostTicketMessage::class)->handle($ticket, [
+            'author_role' => TicketMessage::ROLE_OPERATOR, 'body' => 'απάντηση',
+        ]);
+        $this->deliver($reply);
+
+        Mail::assertSent(TicketReplyMail::class, function (TicketReplyMail $mail): bool {
+            $cc = collect($mail->envelope()->cc)->map(fn ($a) => $a->address)->all();
+            $bcc = collect($mail->envelope()->bcc)->map(fn ($a) => $a->address)->all();
+
+            return in_array('dev@agency.tld', $cc, true) && ! in_array('dev@agency.tld', $bcc, true)  // openly CC'd → visible
+                && in_array('boss@internal.gr', $bcc, true) && ! in_array('boss@internal.gr', $cc, true); // internal → hidden
+        });
     }
 
     public function test_external_watcher_is_bcc_d_on_the_reply(): void

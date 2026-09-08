@@ -11,6 +11,7 @@ use App\Models\TicketBlockedSender;
 use App\Models\TicketDepartment;
 use App\Models\TicketMessage;
 use App\Models\TicketWatcher;
+use App\Support\TicketAttachments;
 use App\Support\TicketReference;
 use EmailReplyParser\EmailReplyParser;
 use Illuminate\Database\Eloquent\Builder;
@@ -73,7 +74,14 @@ class InboundTicketRouter
 
         $messageId = $this->normaliseId($email->messageId);
 
-        // (0) Already processed this exact message? Return its ticket, don't duplicate.
+        // (0) Already processed this exact message? Return its ticket, don't
+        // duplicate. Company-wide on purpose: idempotency answers «have we ingested
+        // THIS message-id anywhere in the company?», and ownership/threading (below)
+        // decides placement. (Keying this by the message's current ticket-department
+        // would duplicate a redelivery whenever the message had threaded/merged into
+        // another department. The «same email to two departments → a ticket in each»
+        // idea needs department-scoped matchTicket+merge too — a design change tracked
+        // in docs/BACKLOG.md, not a dedup tweak.)
         if ($messageId !== null) {
             $seen = TicketMessage::query()
                 ->withoutGlobalScope(CompanyScope::class)
@@ -111,7 +119,7 @@ class InboundTicketRouter
                 ? $cleanBody
                 : '(από '.mb_strtolower(trim($email->fromEmail)).")\n\n".$cleanBody;
 
-            $this->postMessage->handle($existing, [
+            $posted = $this->postMessage->handle($existing, [
                 'author_role' => TicketMessage::ROLE_CUSTOMER,
                 'author_id' => $customer?->id,
                 'is_internal_note' => false,
@@ -121,6 +129,7 @@ class InboundTicketRouter
                 'email_message_id' => $messageId,
             ]);
             $this->captureCcWatchers($existing, $email, $department, $customer);
+            $this->storeAttachments($posted, $email);
 
             return $existing;
         }
@@ -142,8 +151,25 @@ class InboundTicketRouter
             'email_message_id' => $messageId,
         ]);
         $this->captureCcWatchers($ticket, $email, $department, $customer);
+        // The opening message is the oldest — messages() is ordered id ASC, so first().
+        $opening = $ticket->messages()->first();
+        if ($opening !== null) {
+            $this->storeAttachments($opening, $email);
+        }
 
         return $ticket;
+    }
+
+    /**
+     * Persist the email's (already-extracted, non-inline) attachments onto the just-
+     * stored ticket message. All type/size/count/total guards live in
+     * {@see TicketAttachments::storeInbound} — the sender is untrusted.
+     */
+    private function storeAttachments(TicketMessage $message, ParsedInboundEmail $email): void
+    {
+        if ($email->attachments !== []) {
+            TicketAttachments::storeInbound($message, $email->attachments);
+        }
     }
 
     /**

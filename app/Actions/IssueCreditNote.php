@@ -156,6 +156,9 @@ class IssueCreditNote
                 'city' => $original->city,
                 'postcode' => $original->postcode,
                 'country' => $original->country,
+                // Same counterpart establishment as the original — a credit note
+                // against a branch invoice reverses that branch's document.
+                'counterpart_branch' => $original->counterpart_branch,
             ]);
 
             $any = false;

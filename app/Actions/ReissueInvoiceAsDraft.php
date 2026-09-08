@@ -78,6 +78,7 @@ class ReissueInvoiceAsDraft
                 'city' => $original->city,
                 'postcode' => $original->postcode,
                 'country' => $original->country,
+                'counterpart_branch' => $original->counterpart_branch,
             ]);
 
             foreach ($original->lines as $line) {

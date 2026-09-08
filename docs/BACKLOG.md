@@ -190,7 +190,24 @@ domestic-services tenants**. Not deleted — parked with the trigger that reacti
   noise in every VAT picker); the codes/rates stay in `Codes::VAT_CATEGORY_RATES`, so an
   island tenant re-adds the category by hand (or restores the `[1,2,3]`→`[1,2,3,4,5,6]` loop
   in `vatCategorySeedRows`).
-- **Multi-branch** — **MYD-010** (WATCH). Both tenants single-establishment; `branch=0` is truth.
+- **Multi-branch** — **MYD-010** (WATCH). Refers to the **ISSUER** branch: both tenants
+  single-establishment, so `issuer.branch=0` is truth. The **COUNTERPART** (customer) branch is
+  now settable per invoice — `invoices.counterpart_branch` (default 0) reaches the filed myDATA
+  Counterpart (the "by the book" replacement for the legacy duplicate-ΑΦΜ branch hack; a customer
+  is one ΑΦΜ, the establishment is a per-document attribute). No `customer_branches` table yet —
+  1 ΑΦΜ in the whole legacy backup used it; a future child table would just populate that column.
+  (ΔΑ / DeliveryNote counterpart branch stays hardcoded 0 — out of this scope; revisit if a tenant
+  ever ships to a specific customer establishment on a delivery note.)
+  **Deferred P2s from the counterpart-branch review (consciously, low value for 1 rare ΑΦΜ):**
+  (i) **no in-form signal** that a branch typed for a retail (11.x) or foreign counterpart is
+  ignored (`filedCounterpartBranch()` files 0, the infolist hides it, and the helper text says so,
+  but there is no reactive warning/disable tied to the selected customer/type); (ii) **branch↔PDF
+  address can diverge** — the operator can set `counterpart_branch=5` and forget to change the
+  free-text address snapshot, so myDATA names branch 5 while the PDF prints the έδρα address (no
+  cross-field enforcement; inherent to the no-`customer_branches` design — the child table, which
+  would carry per-branch addresses and auto-fill both, is the real fix). Accepted-as-negligible:
+  the double `counterpartCountryForFiling()` resolve on a branch>0 filing (short-circuited to a
+  single column read for the branch=0 common case).
 - **B2G / POS scopes** — **PROV-012** (public contracts, All-in-one POS). Requirement is
   only that ekdosi not *claim* them — it doesn't.
 - **Offline / Transmission Failure** — **PROV-008**. «Design with InvoSign, do not
@@ -794,12 +811,63 @@ data model + phase gates: **`PLAN.md`**.
     email)» ώστε να μη μπερδεύεται με τον πελάτη· καθαρότερο θα ήταν sender/participant identity στο μήνυμα.
     (ii) το inbound εμπιστεύεται το From (χωρίς SPF/DKIM), οπότε το threading trust επεκτείνεται από τον owner
     στη (customer-controllable) watcher list — ίδια κλάση ρίσκου με το υπάρχον requester==From. (iii) απάντηση
-    watcher σε κλειστό ticket το ξ-ανοίγει (WHMCS-consistent). **Remaining refinements
-    (deferred):** (β) **visible CC αντί Bcc** για cc-sourced watchers (ήταν ήδη
-    ανοιχτά στο αρχικό thread), ενώ manual/internal μένουν Bcc. (γ) **perf:** το CC-capture καλεί
+    watcher σε κλειστό ticket το ξ-ανοίγει (WHMCS-consistent). **(β) visible CC αντί Bcc για cc-sourced =
+    SHIPPED** — οι cc-sourced watchers μπαίνουν σε ορατό Cc στις απαντήσεις, οι manual μένουν Bcc. **Επίσης
+    SHIPPED:** HTML-body strip στο inbound (`HtmlToText` για HTML-only emails). **Remaining refinements
+    (deferred):** (γ) **perf:** το CC-capture καλεί
     `isBlocked` ένα query ανά recipient — για μεγάλη CC-λίστα φόρτωσε το blocklist μία φορά in-memory
     (αμελητέο στα σημερινά μεγέθη). (δ) **catch-all alias:** εξαιρούμε `email` + `imap_username` του τμήματος·
     ένα τρίτο alias/catch-all address δεν εξαιρείται (self-loop churn)· θέλει ρητό πεδίο aliases αν εμφανιστεί.
+  - **Συνημμένα ticket — PR A (portal + operator) SHIPPED / PR B (email) deferred.** **PR A (SHIPPED):**
+    ο πελάτης ανεβάζει από την πύλη (open/reply), ο χειριστής από το panel (reply/note)· links λήψης στο νήμα.
+    Security: ιδιωτικός δίσκος, **download-only** (`Content-Disposition: attachment`, ποτέ inline), allowlist
+    τύπων (όχι scripts/HTML/SVG/exe), τυχαίο όνομα, escaped filename, tenant/grant-scoped, internal-note
+    attachment invisible στην πύλη (`publicOnly`). `App\Support\TicketAttachments` + routes/controllers.
+    **PR B (SHIPPED):** (α) **inbound** — ο IMAP poller εξάγει τα πραγματικά (μη-inline) attachments εισερχόμενου
+    email → `TicketAttachments::storeInbound` (extension allowlist, per-file 20MB, count 5, per-email total 25MB·
+    ΔΕΝ trust το Content-Type, ποτέ decompress, inline parts αγνοούνται· διπλή επέκταση πιάνεται από το
+    `pathinfo` extension check). (β) **outbound** — `TicketAttachments::outboundPayload` + `TicketReplyMail::
+    attachments()`, all-or-nothing στο 25MB budget (αλλιώς reply χωρίς αρχεία + log warning). **Remaining
+    (deferred):** (i) **AV-scanning** — δεν σκανάρουμε συνημμένα (ClamAV/`clamdscan` seam)· το μοντέλο μας είναι
+    download-only + allowlist (κανένα execution), αλλά ένα malicious έγγραφο μπορεί να κατέβει· χαμηλή προτεραιότητα.
+    (ii) **disk-DoS**: 50 msgs/poll × 25MB = ~1.25GB/poll worst-case από spam· φράγμα σήμερα = blocklist + clients_only
+    + `ops:health` disk monitor· per-tenant quota αν εμφανιστεί abuse. (iii) **operator UI feedback στο outbound
+    drop (P2, review PR B):** όταν τα συνημμένα μιας απάντησης δεν σταλούν όλα (πάνω από το 25MB budget → all-or-nothing,
+    ή κάποιο file λείπει από τον δίσκο → skip), η απάντηση φεύγει χωρίς αυτά με μόνο `Log::warning` (καταγράφει stored vs
+    attached) — ο χειριστής δεν ειδοποιείται στο UI (τα αρχεία μένουν ορατά/κατεβάσιμα στο thread, οπότε δεν χάνονται).
+    Full feedback θέλει async notification πίσω στον χειριστή (queued job → bell)· χαμηλή προτεραιότητα.
+    (iv) **webklex giant-part memory — SHIPPED (poller hardening).** Ο poller φέρνει πλέον headers-only και
+    κατεβάζει το σώμα ένα-ένα (`fetchBody(false)` + `parseBody()` per message → peak μνήμη = 1 μήνυμα αντί για ΟΛΑ
+    τα 50 unseen μαζί). Μήνυμα πάνω από 40MB RFC822 (`WebklexImapMailbox::isMessageTooLarge`, έλεγχος `RFC822.SIZE`
+    πριν το body download) → **δεν κατεβαίνει· ανοίγει stub ticket με μόνο headers** (placeholder body, χωρίς
+    συνημμένα) ώστε να μη χαθεί σιωπηλά το αίτημα ούτε να γίνει OOM/poison loop· failed size-probe → επίσης stub
+    (ποτέ parse ενός μη-μετρήσιμου μηνύματος «στα τυφλά»). **Deploy req:** το poll/worker process θέλει `memory_limit` ≥ 256M (parse μηνύματος ~cap peaks
+    σε few× wire size). Ο walk γίνεται `chunked(…,1)` (peak = 1 μήνυμα, verified), με `finally` disconnect ώστε να μη
+    διαρρέει socket αν σκάσει. **Remaining (χαμηλή προτ., review):** (α) **round-trips:** το chunk-size-1 κάνει
+    header fetch ανά μήνυμα (≤50 sequential) αντί για ένα batch — latency σε high-RTT mailbox (efficiency, όχι
+    correctness). (β) **poison message (pre-existing):** ένα μήνυμα που το webklex ΔΕΝ μπορεί να parse-άρει σε
+    fetch/make (π.χ. malformed Date header, `soft_fail=false`) πετά GetMessagesFailedException που σταματά το poll·
+    το μήνυμα μένει unseen → ξανα-μπλοκάρει το επόμενο poll (τα από πίσω δεν φτάνουν). Ίδιο και πριν με το παλιό
+    `->get()`. Fix = per-message fetch isolation ή `soft_fail=true` + iteration guard. (γ) **soft_fail infinite
+    loop:** αν κάποτε ενεργοποιηθεί `soft_fail`, το `chunked` do-while μπορεί να γίνει infinite (dropped message →
+    handled δεν φτάνει available)· μη-reachable στο σημερινό default (soft_fail=false)· θέλει per-poll iteration cap
+    αν ποτέ αλλάξει. (δ) dead-letter folder αντί για stub, per-tenant disk quota.
+  - **Holistic Support review (peace-of-mind, 2026-09-07) — NO P0/P1· P2 dispositions.** Ολόκληρο το
+    subsystem reviewed· τα core invariants (tenant isolation, blocklist→idempotency→match→ownership, attachment
+    gating, escaping) κρατάνε. **Fixed αμέσως:** removeWatcher action (stop replies σε ανεπιθύμητο CC — disclosure),
+    MergeTickets attachment re-parent `withoutGlobalScope`, honest oversized-stub placeholder. **Deferred
+    (P2):** (0) **«ticket ανά τμήμα» για email σε πολλά τμήματα:** σήμερα το idempotency είναι company-wide (σωστό
+    για το «seen this message-id;»), οπότε ένα email σε dept-A + dept-B ίδιας εταιρείας δίνει ΕΝΑ ticket. Το «ένα
+    ticket ανά τμήμα» ΔΕΝ είναι dedup tweak — θέλει department-scoped `matchTicket` + merge μαζί (αλλιώς reply-all
+    ξανα-collapse-άρει, και redelivery μηνύματος που threaded/merged σε άλλο τμήμα διπλασιάζεται)· design change, χαμηλή
+    προτ. (δοκιμάστηκε per-department dedup, έγινε revert γιατί εισήγαγε duplicate-on-redelivery). (α) **ambiguous customer match:** `matchCustomer()->first()` σε ΜΗ-μοναδικό email (2 πελάτες ίδιας
+    εταιρείας, ίδιο email) δένει αυθαίρετα → ο operator βλέπει λάθος οικονομικά· fix = «>1 match → guest/flag» (product
+    decision — τι σημαίνει shared email; · εντός ΙΔΙΑΣ εταιρείας, όχι cross-tenant). (β) **systematic `getSize()`
+    failure:** αν ένας server ΔΕΝ υποστηρίζει RFC822.SIZE σε headers-only fetch, ΟΛΑ γίνονται stubs· σπάνιο (RFC822.SIZE
+    ~universal) + retry καλύπτει transient· fix αν πονέσει = εναλλακτικό size path ή bounded body. (γ) **`$authorNameCache`
+    unbounded static** (TicketInfolist) — Octane-only memory growth + stale names· harmless σε FPM (locked). (δ)
+    **dead config:** `autoresponder`/`prevent_client_closure` toggles στο TicketDepartmentForm δεν enforced πουθενά —
+    wire ή hide. (ε) **`syntheticId` first-300-chars** για no-Message-ID mails (pre-existing, comment-acknowledged).
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη

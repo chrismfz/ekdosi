@@ -11,6 +11,7 @@ use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\Portal\TicketController as PortalTicketController;
 use App\Http\Controllers\PublicInvoicePdfController;
+use App\Http\Controllers\TicketAttachmentController;
 use App\Http\Controllers\TicketFeedbackController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use Illuminate\Support\Facades\Route;
@@ -67,6 +68,10 @@ Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
         ->where('ticket', '[0-9]+')->middleware('throttle:20,1')->name('portal.tickets.reply');
     Route::post('/user/tickets/{ticket}/rate', [PortalTicketController::class, 'rate'])
         ->where('ticket', '[0-9]+')->middleware('throttle:20,1')->name('portal.tickets.rate');
+    // Attachment download — grant-scoped (the ticket is fail-closed resolved), forced
+    // download, never public/inline.
+    Route::get('/user/tickets/{ticket}/attachments/{attachment}', [PortalTicketController::class, 'attachment'])
+        ->where(['ticket' => '[0-9]+', 'attachment' => '[0-9]+'])->name('portal.tickets.attachment');
     // «Πλήρωσε» (B0b) — start a payment against a granted company/customer, then
     // see where to pay. The browser never settles money (manual = operator
     // confirms; online webhook later). Store is throttled.
@@ -130,6 +135,14 @@ Route::post('/support/feedback/{ticket}', [TicketFeedbackController::class, 'sto
 Route::get('/company-backups/{run}/download', CompanyBackupDownloadController::class)
     ->middleware(['auth', 'signed'])
     ->name('company-backups.download');
+
+// Operator ticket-attachment download — AUTH + SIGNED + permission + tenant-checked
+// (see controller; same posture as the expense-document/backup links below). Forced
+// download from the private disk, never public/inline. The signed link is generated
+// server-side in the ticket infolist for users already viewing the ticket.
+Route::get('/support/tickets/{ticket}/attachments/{attachment}', TicketAttachmentController::class)
+    ->where(['ticket' => '[0-9]+', 'attachment' => '[0-9]+'])
+    ->middleware(['auth', 'signed'])->name('support.tickets.attachment');
 
 // Expense attachment — AUTH + SIGNED + tenant-checked (see controller). Streams
 // the private supplier-document scan from the local disk.

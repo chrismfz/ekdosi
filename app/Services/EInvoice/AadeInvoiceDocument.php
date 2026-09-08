@@ -745,10 +745,16 @@ class AadeInvoiceDocument
         // invoice type must be Greece / EU-not-Greece / non-EU") with a clear error.
         $this->assertCounterpartCountryMatchesType($invoice, $type, $country);
 
+        // The counterpart's AADE establishment (εγκατάσταση); 0 = its έδρα, the
+        // truth for almost every document. Operator-set on the invoice snapshot —
+        // the "by the book" replacement for the legacy duplicate-ΑΦΜ branch hack
+        // (one ΑΦΜ = one customer, the branch is a per-document attribute).
+        // filedCounterpartBranch() is the ONE definition of what actually files
+        // (0 for retail / foreign) — shared with every display so they can't drift.
         $counterpart = (new Counterpart)
             ->setVatNumber($afm)
             ->setCountry($country)
-            ->setBranch(0);
+            ->setBranch($invoice->filedCounterpartBranch());
 
         // AADE rule (vendor/firebed/aade-mydata/src/Models/Party.php
         // docblocks): `name` and `address` are FORBIDDEN for GR

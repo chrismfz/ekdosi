@@ -44,7 +44,7 @@ class TicketWatcherActionTest extends TestCase
 
     private function ticket(Company $company): Ticket
     {
-        $dept = TicketDepartment::create(['company_id' => $company->id, 'name' => 'Γ', 'is_active' => true]);
+        $dept = TicketDepartment::create(['company_id' => $company->id, 'name' => 'Γ '.uniqid(), 'is_active' => true]);
 
         return app(OpenTicket::class)->handle([
             'company_id' => $company->id, 'ticket_department_id' => $dept->id,
@@ -88,5 +88,45 @@ class TicketWatcherActionTest extends TestCase
             ->callAction('addWatcher', ['user_id' => $other->id]);
 
         $this->assertTrue($ticket->fresh()->isWatchedBy($other));
+    }
+
+    public function test_an_operator_can_remove_a_cc_watcher(): void
+    {
+        Gate::before(fn () => true);
+        $company = $this->company('a');
+        $operator = $this->user($company, 'OpA');
+        $ticket = $this->ticket($company);
+        // A third party the customer once CC'd — captured as a CC watcher.
+        $watcher = $ticket->addEmailWatcher('third-party@agency.tld', TicketWatcher::SOURCE_CC);
+
+        $this->actingAs($operator);
+        Filament::setTenant($company);
+
+        Livewire::test(ViewTicket::class, ['record' => $ticket->id, 'tenant' => $company->slug])
+            ->callAction('removeWatcher', ['watcher_id' => $watcher->id]);
+
+        $this->assertSame(0, TicketWatcher::withoutGlobalScope(CompanyScope::class)
+            ->where('ticket_id', $ticket->id)->count(), 'the CC watcher is removed → no more disclosure on replies');
+    }
+
+    public function test_remove_watcher_is_scoped_to_this_ticket(): void
+    {
+        Gate::before(fn () => true);
+        $company = $this->company('a');
+        $operator = $this->user($company, 'OpA');
+        $ticket = $this->ticket($company);
+        $ticket->addEmailWatcher('mine@agency.tld', TicketWatcher::SOURCE_CC); // so the action is visible
+        $other = $this->ticket($company);
+        // A watcher on ANOTHER ticket must not be deletable via this ticket's action.
+        $foreignWatcher = $other->addEmailWatcher('keep-me@agency.tld', TicketWatcher::SOURCE_CC);
+
+        $this->actingAs($operator);
+        Filament::setTenant($company);
+
+        Livewire::test(ViewTicket::class, ['record' => $ticket->id, 'tenant' => $company->slug])
+            ->callAction('removeWatcher', ['watcher_id' => $foreignWatcher->id]);
+
+        $this->assertSame(1, TicketWatcher::withoutGlobalScope(CompanyScope::class)
+            ->where('ticket_id', $other->id)->count(), "another ticket's watcher is untouched");
     }
 }

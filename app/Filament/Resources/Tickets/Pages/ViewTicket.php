@@ -12,18 +12,31 @@ use App\Models\CannedReply;
 use App\Models\Ticket;
 use App\Models\TicketBlockedSender;
 use App\Models\TicketMessage;
+use App\Models\TicketWatcher;
 use App\Models\User;
 use App\Support\CannedReplyExpander;
+use App\Support\TicketAttachments;
 use Filament\Actions\Action;
+use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Illuminate\Database\Eloquent\Model;
 
 class ViewTicket extends ViewRecord
 {
     protected static string $resource = TicketResource::class;
+
+    /**
+     * Eager-load the thread's attachments so the infolist's per-message download
+     * links (TicketInfolist::attachmentLinks) don't fire a query per message.
+     */
+    protected function resolveRecord(int|string $key): Model
+    {
+        return parent::resolveRecord($key)->load('messages.attachments');
+    }
 
     protected function getHeaderActions(): array
     {
@@ -65,6 +78,7 @@ class ViewTicket extends ViewRecord
                             }
                         }),
                     Textarea::make('body')->label('Απάντηση προς τον πελάτη')->required()->rows(6),
+                    self::attachmentsField(),
                 ])
                 ->action(function (array $data, Ticket $record): void {
                     $message = app(PostTicketMessage::class)->handle($record, [
@@ -73,6 +87,7 @@ class ViewTicket extends ViewRecord
                         'via' => TicketMessage::VIA_OPERATOR,
                         'body' => $data['body'],
                     ]);
+                    self::attachUploaded($message, $data);
                     // Email the reply to the customer (threaded, async), Phase 3b-ii.
                     SendTicketReplyEmail::dispatch($message->id);
                     Notification::make()->title('Η απάντηση καταχωρήθηκε — αποστέλλεται στον πελάτη με email')->success()->send();
@@ -86,15 +101,17 @@ class ViewTicket extends ViewRecord
                 ->visible($notMerged)
                 ->schema([
                     Textarea::make('body')->label('Σημείωση (μόνο για χειριστές)')->required()->rows(4),
+                    self::attachmentsField(),
                 ])
                 ->action(function (array $data, Ticket $record): void {
-                    app(PostTicketMessage::class)->handle($record, [
+                    $message = app(PostTicketMessage::class)->handle($record, [
                         'author_role' => TicketMessage::ROLE_OPERATOR,
                         'author_id' => auth()->id(),
                         'via' => TicketMessage::VIA_OPERATOR,
                         'is_internal_note' => true,
                         'body' => $data['body'],
                     ]);
+                    self::attachUploaded($message, $data);
                     Notification::make()->title('Η σημείωση καταχωρήθηκε')->success()->send();
                 }),
 
@@ -288,7 +305,67 @@ class ViewTicket extends ViewRecord
                     };
                     Notification::make()->title($title)->{$type}()->send();
                 }),
+
+            // Remove a watcher — so an operator can STOP replies going to an address
+            // the customer once CC'd (e.g. an unrelated/ex third party): our replies
+            // carry account/financial context, so leaving them on is a disclosure.
+            Action::make('removeWatcher')
+                ->label('Αφαίρεση watcher')
+                ->icon('heroicon-o-user-minus')
+                ->color('gray')
+                ->authorize($canUpdate)
+                ->visible(fn (Ticket $record): bool => ! $record->isMerged() && $record->watchers()->exists())
+                ->schema([
+                    Select::make('watcher_id')
+                        ->label('Watcher προς αφαίρεση')
+                        ->required()
+                        ->options(fn (Ticket $record): array => $record->watchers()->get()
+                            ->mapWithKeys(fn (TicketWatcher $w): array => [$w->id => $w->label().' · '.$w->sourceLabel()])
+                            ->all())
+                        ->placeholder('— επίλεξε ποιον να αφαιρέσεις —'),
+                ])
+                ->requiresConfirmation()
+                ->action(function (array $data, Ticket $record): void {
+                    // Scoped to THIS ticket's watchers — a tampered id from another
+                    // ticket simply matches nothing (tenant-safe).
+                    $deleted = $record->watchers()->whereKey($data['watcher_id'])->delete();
+                    Notification::make()
+                        ->title($deleted ? 'Ο watcher αφαιρέθηκε' : 'Δεν βρέθηκε ο watcher')
+                        ->{$deleted ? 'success' : 'warning'}()
+                        ->send();
+                }),
         ];
+    }
+
+    /** The shared «Συνημμένα» FileUpload (private disk, allowlisted types, capped). */
+    private static function attachmentsField(): FileUpload
+    {
+        return FileUpload::make('attachments')
+            ->label('Συνημμένα')
+            ->multiple()
+            ->disk(TicketAttachments::DISK)
+            ->directory(TicketAttachments::DIRECTORY)
+            ->visibility('private')
+            ->maxFiles(TicketAttachments::MAX_COUNT)
+            ->maxSize(TicketAttachments::MAX_SIZE_KB)
+            ->acceptedFileTypes(TicketAttachments::MIME_TYPES)
+            // Only files uploaded in THIS session are accepted as final paths — a
+            // tampered Livewire submit can't slip in an arbitrary private-disk path
+            // (TicketAttachments::fromStoredPaths re-checks the same, defence in depth).
+            ->preventFilePathTampering()
+            ->storeFileNamesIn('attachment_names')
+            ->columnSpanFull();
+    }
+
+    /** Persist the FileUpload's stored files as Attachment rows on the message. */
+    private static function attachUploaded(TicketMessage $message, array $data): void
+    {
+        TicketAttachments::fromStoredPaths(
+            $message,
+            array_values((array) ($data['attachments'] ?? [])),
+            (array) ($data['attachment_names'] ?? []),
+            auth()->id(),
+        );
     }
 
     /** Does the current operator watch this ticket? (null-user safe.) */

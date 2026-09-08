@@ -26,6 +26,11 @@
 ## 2. Παραστατικά / Τιμολόγηση
 - **VAT/εκπτώσεις/στρογγυλοποίηση** portαρισμένα ακριβώς (`RecomputeInvoiceTotals` +
   `InvoiceVatBreakdown`), per-VAT-rate breakdown.
+- **Υποκατάστημα πελάτη ανά παραστατικό** (`invoices.counterpart_branch`, 0=έδρα) — ο χειριστής
+  δηλώνει ρητά ποια **εγκατάσταση** του πελάτη τιμολογείται· ένας πελάτης = ένα ΑΦΜ (η «by the book»
+  αντικατάσταση του legacy duplicate-ΑΦΜ hack). Ο αριθμός φτάνει στο filed myDATA `Counterpart`
+  (`Invoice::filedCounterpartBranch()` = ο ένας ορισμός· 0 σε λιανική/ξένο μέρος)· η διεύθυνση της
+  εγκατάστασης γράφεται στο ήδη επεξεργάσιμο address snapshot. Πιστωτικά/επανεκδόσεις κρατούν το branch.
 - **Αρίθμηση** συνεχόμενη ανά τύπο, με **row-lock σε transaction** (`InvoiceNumberer`).
 - **QR + PDF** (Blade/dompdf) — **γλώσσα ανά παραστατικό** (Ελληνικά/Αγγλικά/**Δίγλωσσο
   GR-EN**), per-invoice/quote επιλογή με default από τη χώρα πελάτη (GR → Ελληνικά, ξένος
@@ -880,8 +885,22 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   (χωρίς login) — και όποιος δεν ξαναμπαίνει στην πύλη αξιολογεί.
 - **Reply-threading για watcher/CC (Phase 4 follow-up, SHIPPED):** απάντηση από watcher/CC ενός ticket κάνει
   thread εκεί (όχι νέο ticket)· ο anti-injection guard μένει (μόνο πραγματικοί watchers, όχι όποιος έχει το token).
-- **Επόμενα:** Phase-4 follow-ups: στήλη/φίλτρο αξιολόγησης, attachments (πύλη + email), HTML-body strip στο
-  inbound, per-department validate_cert toggle, visible-CC (αντί Bcc) για cc-sourced.
+- **HTML-body strip + visible-CC (Phase 4 follow-ups, SHIPPED):** HTML-only inbound → καθαρό κείμενο
+  (`HtmlToText`)· cc-sourced watchers σε ορατό **Cc** (manual μένουν Bcc).
+- **Συνημμένα αρχεία — portal + operator (Phase 4 follow-up, PR A, SHIPPED):** ο πελάτης ανεβάζει αρχεία στο
+  άνοιγμα/απάντηση από την πύλη, ο χειριστής στην απάντηση/σημείωση από το panel· links λήψης στο νήμα και
+  στις δύο πλευρές. **Security-first:** ιδιωτικός δίσκος, **μόνο λήψη** (`Content-Disposition: attachment`,
+  ποτέ inline), allowlist τύπων (όχι scripts/HTML/SVG/executables), τυχαίο όνομα στον δίσκο, escaped filename,
+  tenant/grant-scoped download (ο πελάτης μόνο σε δικό του ticket, ο χειριστής μόνο εντός εταιρείας), και
+  συνημμένο **εσωτερικής σημείωσης δεν φτάνει ποτέ στην πύλη** (`publicOnly`). `App\Support\TicketAttachments`.
+- **Συνημμένα αρχεία μέσω email — inbound + outbound (Phase 4 follow-up, PR B, SHIPPED):** ο IMAP poller εξάγει
+  τα πραγματικά (μη-inline) attachments εισερχόμενου email → στο μήνυμα του ticket· τα συνημμένα απάντησης χειριστή
+  επισυνάπτονται στο outbound threaded email. **Untrusted sender:** extension allowlist (όχι scripts/HTML/SVG/exe),
+  per-file (20MB) + count (5) + **per-email total (25MB)** caps, ΔΕΝ εμπιστευόμαστε το Content-Type, ποτέ
+  decompress (zip-bomb αδρανές), inline parts αγνοούνται· download-only όπως στο PR A. Outbound = all-or-nothing
+  στο budget (αλλιώς reply χωρίς αρχεία + log). `TicketAttachments::storeInbound()`/`outboundPayload()`.
+- **Επόμενα:** maybe: στήλη/φίλτρο αξιολόγησης, per-department validate_cert, structured sender identity,
+  AV-scanning συνημμένων (ClamAV) αν χρειαστεί.
   _(In-app KB DROPPED — το BookStack το καλύπτει· Announcements = maybe-later.)_
 
 ---
