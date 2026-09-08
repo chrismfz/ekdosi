@@ -182,6 +182,45 @@ class DomainCsvImportTest extends TestCase
         $this->assertSame('2099-12-31', $stale->expires_at->toDateString());
     }
 
+    public function test_a_name_only_csv_never_unexpires_an_operator_set_status(): void
+    {
+        $tld = DomainTld::create(['company_id' => $this->company->id, 'tld' => 'gr', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'sld' => 'manual', 'tld' => 'gr', 'fqdn' => 'manual.gr',
+            'expires_at' => '2099-06-01', 'status' => 'expired', // operator knows better than the stale date
+        ]);
+
+        // no expiry column: the file asserts NOTHING about expiry → no promotion
+        $path = $this->csv("domain\nmanual.gr");
+        $this->artisan('domains:import-csv', ['file' => $path, '--tenant' => $this->company->slug])->assertExitCode(0);
+        $this->assertSame(DomainStatus::Expired, Domain::where('fqdn', 'manual.gr')->sole()->status);
+
+        // fresh future evidence IN the file → un-expires (the round-2 fix)
+        $path2 = $this->csv("domain;λήξη\nmanual.gr;31/12/2099");
+        $this->artisan('domains:import-csv', ['file' => $path2, '--tenant' => $this->company->slug])->assertExitCode(0);
+        $this->assertSame(DomainStatus::Active, Domain::where('fqdn', 'manual.gr')->sole()->status);
+    }
+
+    public function test_expiry_refresh_on_a_status_the_deriver_does_not_own_warns(): void
+    {
+        $tld = DomainTld::create(['company_id' => $this->company->id, 'tld' => 'gr', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'sld' => 'redeem', 'tld' => 'gr', 'fqdn' => 'redeem.gr',
+            'expires_at' => today()->subMonth()->toDateString(), 'status' => 'redemption',
+        ]);
+
+        $path = $this->csv("domain,expiry\nredeem.gr,2099-12-31");
+        $this->artisan('domains:import-csv', ['file' => $path, '--tenant' => $this->company->slug])
+            ->expectsOutputToContain('δεν άλλαξε — ελέγξτε το χειροκίνητα')
+            ->assertExitCode(0);
+
+        $redeem = Domain::where('fqdn', 'redeem.gr')->sole();
+        $this->assertSame('2099-12-31', $redeem->expires_at->toDateString(), 'the expiry truth still lands');
+        $this->assertSame(DomainStatus::Redemption, $redeem->status, 'the deriver owns only Active↔Expired');
+    }
+
     public function test_operator_terminal_rows_are_frozen_for_the_csv_too(): void
     {
         $tld = DomainTld::create(['company_id' => $this->company->id, 'tld' => 'gr', 'is_active' => true]);
@@ -257,6 +296,15 @@ class DomainCsvImportTest extends TestCase
             ->assertExitCode(1);
         $this->artisan('domains:import-csv', ['file' => $ok, '--tenant' => $this->company->slug, '--domain-col' => 'nosuch'])
             ->assertExitCode(1);
+
+        // headerless + out-of-range explicit expires index: the width check
+        // can't see it, but «no value on any row» must still fail loudly
+        $ragged = $this->csv("y.gr;2027-01-01\nz.gr;2027-02-01");
+        $this->artisan('domains:import-csv', [
+            'file' => $ragged, '--tenant' => $this->company->slug,
+            '--no-header' => true, '--expires-col' => '5',
+        ])->assertExitCode(1);
         $this->assertNull(Domain::where('fqdn', 'x.gr')->first(), 'nothing imported under a mis-mapped file');
+        $this->assertNull(Domain::where('fqdn', 'y.gr')->first());
     }
 }

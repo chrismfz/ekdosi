@@ -99,4 +99,13 @@ enum DomainStatus: string implements HasColor, HasLabel
             default => false,
         };
     }
+
+    /**
+     * The operator-facing «frozen row skipped» line, single-sourced for every
+     * import path (two copy-pasted literals had already started to exist).
+     */
+    public function frozenSkipMessage(string $fqdn): string
+    {
+        return "Παράλειψη {$fqdn}: κατάσταση «{$this->getLabel()}» — παγωμένο (ιστορικό record).";
+    }
 }

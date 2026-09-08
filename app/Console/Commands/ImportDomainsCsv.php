@@ -150,6 +150,17 @@ class ImportDomainsCsv extends Command
                 $rows[] = $this->row($line, $domainIdx, $expiresIdx);
             }
 
+            // An EXPLICIT --expires-col that produced NO value on ANY row is an
+            // out-of-range index on a headerless/ragged file (the width check
+            // above can't see those) — error, never silently import a whole
+            // file without the expiry column the operator named.
+            if ($expiresOpt !== '' && $rows !== []
+                && array_all($rows, fn (array $r) => ($r['expires_at'] ?? null) === null || trim((string) $r['expires_at']) === '')) {
+                $this->error("Η στήλη --expires-col={$expiresOpt} δεν έδωσε καμία τιμή σε καμία γραμμή — ελέγξτε τον δείκτη/όνομα στήλης.");
+
+                return null;
+            }
+
             return $rows;
         } finally {
             fclose($handle);

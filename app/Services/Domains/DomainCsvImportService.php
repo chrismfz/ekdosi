@@ -128,7 +128,7 @@ class DomainCsvImportService
             // parity: the recorded expiry is historical record).
             if ($domain->status instanceof DomainStatus && $domain->status->blocksSync()) {
                 $counts['skipped']++;
-                $warn("Παράλειψη {$fqdn}: κατάσταση «{$domain->status->getLabel()}» — παγωμένο (ιστορικό record).");
+                $warn($domain->status->frozenSkipMessage($fqdn));
 
                 continue;
             }
@@ -151,9 +151,20 @@ class DomainCsvImportService
             if ($effective !== null) {
                 $lapsed = Carbon::parse($effective)->lt(Carbon::today());
                 if ($lapsed && $domain->status === DomainStatus::Active) {
+                    // Lapse: the stored past date alone is evidence enough.
                     $updates['status'] = DomainStatus::Expired;
-                } elseif (! $lapsed && $domain->status === DomainStatus::Expired) {
+                } elseif (! $lapsed && $expiresAt !== null && $domain->status === DomainStatus::Expired) {
+                    // Un-expire ONLY on FRESH evidence (a future date in THIS
+                    // file — a name-only CSV asserts nothing about expiry and
+                    // must not override an operator-set «Ληγμένο»).
                     $updates['status'] = DomainStatus::Active;
+                } elseif (isset($updates['expires_at'])
+                    && ! in_array($domain->status, [DomainStatus::Active, DomainStatus::Expired], true)) {
+                    // The deriver owns only Active↔Expired: an expiry refresh
+                    // on Grace/Redemption/Deleted/pending lands, but the
+                    // status needs the operator's eye — say so, never a
+                    // silent half-applied truth.
+                    $warn("Το {$fqdn} πήρε νέα λήξη {$expiresAt} αλλά η κατάσταση «{$domain->status->getLabel()}» δεν άλλαξε — ελέγξτε το χειροκίνητα.");
                 }
             }
             if ($updates !== []) {

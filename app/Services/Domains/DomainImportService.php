@@ -169,7 +169,7 @@ class DomainImportService
             // sync refuses to touch these and so does the import — the frozen
             // expiry/NS snapshot is historical record (blocksSync parity).
             $counts['skipped']++;
-            $warn("Παράλειψη {$fqdn}: κατάσταση «{$domain->status->getLabel()}» — παγωμένο (ιστορικό record).");
+            $warn($domain->status->frozenSkipMessage($fqdn));
 
             return;
         }
