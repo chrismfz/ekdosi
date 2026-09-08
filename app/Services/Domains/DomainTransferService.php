@@ -5,6 +5,7 @@ namespace App\Services\Domains;
 use App\Enums\DomainStatus;
 use App\Models\Domain;
 use App\Models\DomainRegistrarLog;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
@@ -74,6 +75,21 @@ class DomainTransferService
         if ($registrant === null || trim((string) $registrant->email) === '') {
             $refuse("Το {$domain->fqdn} χρειάζεται επαφή registrant με email πριν τη μεταφορά (καρτέλα «Επαφές»).");
         }
+        // Shared reseller creds serve ΟΛΕΣ τις εταιρείες: a name another
+        // TENANT tracks at a registrar must never be transferred/adopted onto
+        // this tenant's row (the DomainRegistrationService guard, same P0
+        // class). Deliberate all-tenant sweep (CLAUDE.md CLI rule, option c).
+        $claimedElsewhere = Domain::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->withTrashed()
+            ->where('fqdn', $domain->fqdn)
+            ->where('company_id', '!=', $domain->company_id)
+            ->whereNotNull('registrar_domain_id')
+            ->where('registrar_domain_id', '!=', '')
+            ->exists();
+        if ($claimedElsewhere) {
+            $refuse("Το {$domain->fqdn} είναι ήδη καταχωρημένο από ΑΛΛΗ εταιρεία στον ίδιο λογαριασμό registrar — δεν μεταφέρεται/υιοθετείται από εδώ.");
+        }
 
         $lock = Cache::lock('domains:transfer:'.$domain->id, 300);
         if (! $lock->get()) {
@@ -87,46 +103,45 @@ class DomainTransferService
         try {
             $credentials = $this->factory->credentialsFor($connection);
 
-            // Adopt-on-retry: a prior attempt that reached the registrar (an
-            // id, or ANY earlier transfer log — a timed-out POST that charged
-            // leaves only a 'failed' row) probes the account FIRST. A live
-            // record = the transfer is in progress or done → adopt its truth,
-            // never a second charged request. A tombstone/not-found = proceed.
-            $reached = ($domain->registrar_domain_id !== null && trim($domain->registrar_domain_id) !== '')
-                || DomainRegistrarLog::query()
-                    ->where('company_id', $domain->company_id)
-                    ->where('domain_id', $domain->id)
-                    ->where('action', 'transfer_in')
-                    ->exists();
-            if ($reached) {
-                try {
-                    $probe = $adapter->syncDomain($domain, $credentials);
-                    if (! $probe->deadRecord && $probe->status !== DomainStatus::Deleted) {
-                        $this->sync->apply($domain, $probe);
+            // Adopt-on-retry, UNCONDITIONAL: probe the account FIRST, always —
+            // a transfer may have been started outside ekdosi (the registrar
+            // panel) or by a timed-out POST that charged. A live record = the
+            // transfer is in progress or done → adopt its truth, never a
+            // second charged request. A tombstone/not-found = proceed (one
+            // cheap GET buys an airtight guard).
+            try {
+                $probe = $adapter->syncDomain($domain, $credentials);
+                if (! $probe->deadRecord && $probe->status !== DomainStatus::Deleted) {
+                    $this->sync->apply($domain, $probe);
+                    $this->sync->persistHandles($domain, $probe->contactHandles);
 
-                        return $log(DomainRegistrarLog::STATUS_ADOPTED, [
-                            'registrar_expiry' => $probe->expiresAt,
-                            'raw_status' => $probe->rawStatus,
-                        ], null);
-                    }
-                    // tombstone → the earlier request died; start fresh below
-                } catch (DomainNotFoundAtRegistrar) {
-                    // not in the account yet — start (or restart) the transfer
-                } catch (\Throwable $e) {
-                    $log(DomainRegistrarLog::STATUS_FAILED, null, 'Έλεγχος λογαριασμού (probe) απέτυχε: '.$e->getMessage());
-
-                    throw new RuntimeException("Η μεταφορά του {$domain->fqdn} ΔΕΝ ξεκίνησε — ο έλεγχος του λογαριασμού απέτυχε: ".$e->getMessage());
+                    return $log(DomainRegistrarLog::STATUS_ADOPTED, [
+                        'registrar_expiry' => $probe->expiresAt,
+                        'raw_status' => $probe->rawStatus,
+                    ], null);
                 }
+                // tombstone → the earlier request died; start fresh below
+            } catch (DomainNotFoundAtRegistrar) {
+                // not in the account yet — start (or restart) the transfer
+            } catch (\Throwable $e) {
+                $log(DomainRegistrarLog::STATUS_FAILED, null, 'Έλεγχος λογαριασμού (probe) απέτυχε: '.$e->getMessage());
+
+                throw new RuntimeException("Η μεταφορά του {$domain->fqdn} ΔΕΝ ξεκίνησε — ο έλεγχος του λογαριασμού απέτυχε: ".$e->getMessage());
             }
 
             try {
                 $result = $adapter->transferIn($domain, $authCode, $credentials);
             } catch (\Throwable $e) {
-                $log(DomainRegistrarLog::STATUS_FAILED, null, $e->getMessage());
+                // The auth code is a bearer credential — SCRUB it from any
+                // registrar echo before the message reaches a log row, the
+                // operator notification, or an exception trace.
+                $message = str_replace($authCode, '«κωδικός EPP»', $e->getMessage());
+                $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
 
-                throw $e;
+                throw new RuntimeException($message, previous: null);
             }
             $this->sync->apply($domain, $result);
+            $this->sync->persistHandles($domain, $result->contactHandles);
 
             return $log(DomainRegistrarLog::STATUS_OK, [
                 'registrar_domain_id' => $result->registrarDomainId,
@@ -172,6 +187,15 @@ class DomainTransferService
             throw $e;
         }
         if ($code === null) {
+            // The retrieval DID reach the registrar — it must leave an audit
+            // row like every other leg, even though no code came back.
+            DomainRegistrarLog::create([
+                'company_id' => $domain->company_id, 'domain_id' => $domain->id,
+                'registrar_connection_id' => $connection->id,
+                'action' => 'epp_code', 'status' => DomainRegistrarLog::STATUS_FAILED,
+                'request' => ['fqdn' => $domain->fqdn], 'error' => 'Ο registrar δεν επέστρεψε κωδικό.',
+            ]);
+
             throw new RuntimeException("Ο registrar δεν επέστρεψε κωδικό EPP για το {$domain->fqdn}.");
         }
         DomainRegistrarLog::create([

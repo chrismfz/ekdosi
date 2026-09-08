@@ -180,7 +180,7 @@ class DomainRegistrationService
                 throw $e;
             }
             $this->sync->apply($domain, $result);
-            $this->persistHandles($domain, $result->contactHandles);
+            $this->sync->persistHandles($domain, $result->contactHandles);
             $updates = [];
             if ($domain->registered_at === null) {
                 $updates['registered_at'] = Carbon::today()->toDateString();
@@ -242,7 +242,7 @@ class DomainRegistrationService
             throw new RuntimeException("Η καταχώρηση του {$domain->fqdn} ΔΕΝ ολοκληρώθηκε — ο έλεγχος του λογαριασμού απέτυχε: ".$e->getMessage());
         }
         $this->sync->apply($domain, $result);
-        $this->persistHandles($domain, $result->contactHandles);
+        $this->sync->persistHandles($domain, $result->contactHandles);
         if ($domain->refresh()->registered_at === null) {
             // Best-known date: the retry-after-charge case registered just now.
             $domain->forceFill(['registered_at' => Carbon::today()->toDateString()])->save();
@@ -273,24 +273,5 @@ class DomainRegistrationService
         $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
 
         throw new RuntimeException($message);
-    }
-
-    /**
-     * Persist the ensured registrar handles onto the domain's contact rows —
-     * the next register/setContacts must reuse them, never re-create.
-     *
-     * @param  array<string, string>  $handles
-     */
-    private function persistHandles(Domain $domain, array $handles): void
-    {
-        if ($handles === []) {
-            return;
-        }
-        foreach ($domain->contacts as $contact) {
-            $handle = $handles[$contact->type] ?? null;
-            if ($handle !== null && $contact->registrar_contact_handle !== $handle) {
-                $contact->forceFill(['registrar_contact_handle' => $handle])->save();
-            }
-        }
     }
 }

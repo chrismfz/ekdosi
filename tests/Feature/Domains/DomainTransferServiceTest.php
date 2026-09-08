@@ -82,6 +82,7 @@ class DomainTransferServiceTest extends TestCase
     {
         Http::fake([
             self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=moving.eu' => Http::response(['data' => ['results' => []]]), // unconditional probe: not ours yet
             self::SANDBOX.'/v1beta/domains/transfer' => Http::response(['data' => [
                 'id' => 700, 'status' => 'REQ',
             ]]),
@@ -133,6 +134,70 @@ class DomainTransferServiceTest extends TestCase
         $this->assertSame('700', $domain->refresh()->registrar_domain_id);
     }
 
+    public function test_a_panel_started_transfer_is_adopted_on_the_first_click(): void
+    {
+        // r1 finding 4: the probe is UNCONDITIONAL — a transfer started at
+        // the registrar panel (no local id, no logs) must be adopted on the
+        // very first click, never re-POSTed.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=moving.eu' => Http::response(['data' => ['results' => [[
+                'id' => 700, 'status' => 'REQ', 'owner_handle' => 'PANEL1-EU',
+            ]]]]),
+        ]);
+        $domain = $this->pendingTransferDomain();
+
+        $log = app(DomainTransferService::class)->transferIn($domain, 'X');
+
+        $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/v1beta/domains/transfer'));
+        // the adopted record's handles persist (no duplicate OP customers later)
+        $this->assertSame('PANEL1-EU', $domain->contacts()->where('type', 'registrant')->sole()->refresh()->registrar_contact_handle);
+    }
+
+    public function test_a_name_claimed_by_another_tenant_refuses(): void
+    {
+        $other = Company::create([
+            'name' => 'Other', 'slug' => 'o-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'enable_domain_management' => true,
+        ]);
+        $otherTld = DomainTld::create(['company_id' => $other->id, 'tld' => 'eu', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $other->id, 'domain_tld_id' => $otherTld->id,
+            'sld' => 'moving', 'tld' => 'eu', 'fqdn' => 'moving.eu',
+            'status' => 'active', 'registrar_domain_id' => '700',
+        ]);
+        $domain = $this->pendingTransferDomain();
+
+        Http::fake();
+        try {
+            app(DomainTransferService::class)->transferIn($domain, 'X');
+            $this->fail('cross-tenant claim must refuse');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ΑΛΛΗ εταιρεία', $e->getMessage());
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_a_registrar_error_echoing_the_auth_code_is_scrubbed(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=moving.eu' => Http::response(['data' => ['results' => []]]),
+            self::SANDBOX.'/v1beta/domains/transfer' => Http::response(['desc' => 'invalid auth code SECRET-EPP-123 rejected'], 400),
+        ]);
+        $domain = $this->pendingTransferDomain();
+
+        try {
+            app(DomainTransferService::class)->transferIn($domain, 'SECRET-EPP-123');
+            $this->fail('the transfer failed');
+        } catch (RuntimeException $e) {
+            $this->assertStringNotContainsString('SECRET-EPP-123', $e->getMessage(), 'scrubbed from the operator-facing message too');
+        }
+        $this->assertStringNotContainsString('SECRET-EPP-123', json_encode(DomainRegistrarLog::all()->toArray()));
+    }
+
     public function test_a_dead_prior_request_restarts_the_transfer_fresh(): void
     {
         // The earlier request FAI-ed at the registry — the probe sees the
@@ -153,12 +218,20 @@ class DomainTransferServiceTest extends TestCase
     public function test_the_nightly_sync_flags_a_failed_pending_transfer(): void
     {
         // §6.3 'failed' leg: the record turned FAI — sync_error ⚠ lands on
-        // the row, the status stays pending for the operator's decision.
+        // the row, the status stays pending for the operator's decision. The
+        // flag is GATED on an actual request in the API history (a lingering
+        // tombstone from the name's previous life must not fake it).
         Http::fake([
             self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
             self::SANDBOX.'/v1beta/domains/700' => Http::response(['data' => ['id' => 700, 'status' => 'FAI']]),
         ]);
         $domain = $this->pendingTransferDomain(['registrar_domain_id' => '700']);
+        DomainRegistrarLog::create([ // the transfer WAS requested from ekdosi
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id,
+            'action' => 'transfer_in', 'status' => DomainRegistrarLog::STATUS_OK,
+            'request' => ['fqdn' => 'moving.eu'],
+        ]);
 
         app(DomainSyncService::class)->sync($domain);
 

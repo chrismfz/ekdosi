@@ -5,6 +5,7 @@ namespace App\Services\Domains;
 use App\Enums\DomainStatus;
 use App\Models\Domain;
 use App\Models\DomainRegistrarConnection;
+use App\Models\DomainRegistrarLog;
 use App\Support\Domains\DomainSyncResult;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -49,6 +50,27 @@ class DomainSyncService
     }
 
     /**
+     * Persist registrar contact handles onto the domain's contact rows — ONE
+     * home (register/transfer/import all reuse it): a handle we know must
+     * never be re-created as a duplicate OP customer (orphan personal data).
+     *
+     * @param  array<string, string>  $handles  contact type → handle
+     */
+    public function persistHandles(Domain $domain, array $handles): void
+    {
+        if ($handles === []) {
+            return;
+        }
+        $domain->loadMissing('contacts');
+        foreach ($domain->contacts as $contact) {
+            $handle = $handles[$contact->type] ?? null;
+            if ($handle !== null && $contact->registrar_contact_handle !== $handle) {
+                $contact->forceFill(['registrar_contact_handle' => $handle])->save();
+            }
+        }
+    }
+
+    /**
      * Pull + apply. Throws on failure AFTER stamping sync_error on the row.
      */
     public function sync(Domain $domain): DomainSyncResult
@@ -90,9 +112,17 @@ class DomainSyncService
         // §6.3: a PENDING request whose registrar record turned tombstone
         // (e.g. Openprovider FAI) means the transfer/registration FAILED at
         // the registry — surface it on the row (the ⚠ in the View); the
-        // status stays pending for the operator's next move.
+        // status stays pending for the operator's next move. Gated on an
+        // ACTUAL request attempt in the API history: a lingering tombstone
+        // from the name's previous life must not stamp «η αίτηση απέτυχε»
+        // on a pending row that never asked anything.
         if ($result->deadRecord
-            && in_array($domain->status, [DomainStatus::PendingTransfer, DomainStatus::PendingRegister], true)) {
+            && in_array($domain->status, [DomainStatus::PendingTransfer, DomainStatus::PendingRegister], true)
+            && DomainRegistrarLog::query()
+                ->where('company_id', $domain->company_id)
+                ->where('domain_id', $domain->id)
+                ->whereIn('action', ['register', 'transfer_in'])
+                ->exists()) {
             $updates['sync_error'] = 'Η αίτηση (μεταφορά/καταχώρηση) απέτυχε στον registrar'
                 .($result->rawStatus !== null ? ' (κατάσταση '.$result->rawStatus.')' : '')
                 .' — χειριστείτε το από το domain.';
@@ -120,6 +150,14 @@ class DomainSyncService
         // TRANSFER row must never be demoted to «Εκκρεμεί καταχώρηση»: the
         // in-flight request IS the transfer (§6.3).
         if ($newStatus === DomainStatus::PendingRegister && $domain->status === DomainStatus::PendingTransfer) {
+            $newStatus = null;
+        }
+        // Nor may a TOMBSTONE (DEL/FAI of the name's previous life) flip a
+        // pending row to Deleted — that would hide the register/transfer
+        // buttons and re-wedge every night; the sync_error above (when a
+        // request was actually made) is the operator's signal instead.
+        if ($newStatus === DomainStatus::Deleted
+            && in_array($domain->status, [DomainStatus::PendingTransfer, DomainStatus::PendingRegister], true)) {
             $newStatus = null;
         }
         // Openprovider keeps reporting ACT past the expiry date — derive the
