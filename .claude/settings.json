@@ -63,7 +63,7 @@
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "laravel-boost"
-  ]
+  ],
   "attribution": {
     "commit": "",
     "pr": ""

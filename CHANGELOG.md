@@ -22,7 +22,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
 - Documentation housekeeping.
 
 ### Fixed
-- Malformed JSON in `.claude/settings.local.json` (missing comma before `attribution`).
+- Malformed JSON in `.claude/settings.json` and `.claude/settings.local.json` (missing comma before `attribution`).
 
 ## [2.0.0] - 2026-09-08
 
