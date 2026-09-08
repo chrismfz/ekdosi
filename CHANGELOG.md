@@ -18,6 +18,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- Documentation housekeeping.
+
+### Fixed
+- Malformed JSON in `.claude/settings.local.json` (missing comma before `attribution`).
+
 ## [2.0.0] - 2026-09-08
 
 ### Added
@@ -200,12 +206,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   ούτε OOM ούτε σιωπηλή απώλεια αιτήματος πελάτη. Έτσι μια ριπή/ένα τεράστιο email δεν κάνει OOM ούτε
   «κλειδώνει» τον poller σε poison loop. _(Deploy: το poll/worker process θέλει `memory_limit` ≥ 256M για το
   parse ενός μηνύματος κοντά στο cap.)_
-- **Removed committed secrets from the working tree.** Deleted the entire `legacy/` tree (legacy
-  C++Builder `.dfm`/`.cfg` files carried hardcoded MySQL/SMTP/CS-Cart passwords + an `EncryptedPassword`
-  blob; kept in an offline backup), and scrubbed the Firebird `EKDOSI` password literal from every
-  tracked `.md`/`.php`/test → placeholders. **Note:** this is tree-only — the secrets remain in git
-  history until a history rewrite, and the exposed credentials must be **rotated** (they are compromised
-  regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
+- **Secrets hygiene.** Removed historical sensitive files from the tree and rotated the affected
+  credentials; the git history was subsequently rewritten to a single clean root. See
+  `docs/BACKLOG.md` for the closed record.
 
 ### Fixed
 - **Σύστημα υποστήριξης — ασαφής αντιστοίχιση πελάτη σε εισερχόμενο email (privacy).** Αν η διεύθυνση αποστολέα
