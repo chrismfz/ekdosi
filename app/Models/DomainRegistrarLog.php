@@ -45,6 +45,21 @@ class DomainRegistrarLog extends Model
         ];
     }
 
+    /**
+     * OK renewals not yet tied to any invoice — the pool both §6.6 adopt legs
+     * draw from (intent-match consume + date-adopt stamping). ONE filter so
+     * the two legs can never drift apart on what «unconsumed» means.
+     */
+    public function scopeUnconsumedOkRenewals($query, Domain $domain)
+    {
+        return $query
+            ->where('company_id', $domain->company_id)
+            ->where('domain_id', $domain->id)
+            ->where('action', 'renew')
+            ->where('status', self::STATUS_OK)
+            ->whereNull('invoice_id');
+    }
+
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);

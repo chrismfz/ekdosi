@@ -256,7 +256,15 @@ class DomainRenewalServiceTest extends TestCase
         ]);
         [$domain, $contract] = $this->assignedDomain('2026-01-01');
         $contract->forceFill(['billing_cycle' => 'biennial'])->save();
-        $buttonLog = DomainRegistrarLog::create([
+        // TWO 1yr button renewals fed the 2yr coverage — BOTH must be consumed
+        // (a leftover would satisfy a later intent-match with no year behind it).
+        $logA = DomainRegistrarLog::create([
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id, 'invoice_id' => null,
+            'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_OK,
+            'request' => ['fqdn' => 'example.gr', 'years' => 1],
+        ]);
+        $logB = DomainRegistrarLog::create([
             'company_id' => $this->company->id, 'domain_id' => $domain->id,
             'registrar_connection_id' => $this->connection->id, 'invoice_id' => null,
             'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_OK,
@@ -272,8 +280,88 @@ class DomainRenewalServiceTest extends TestCase
         $log = app(DomainRenewalService::class)->renewForInvoice($invoice);
 
         $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
-        $this->assertSame($invoice->id, $buttonLog->refresh()->invoice_id, 'the button year is consumed by the date adopt');
+        $this->assertSame($invoice->id, $logA->refresh()->invoice_id, 'first button year consumed');
+        $this->assertSame($invoice->id, $logB->refresh()->invoice_id, 'second button year consumed too');
+        $this->assertCount(2, $log->response['consumed_log_ids']);
         Http::assertNotSent(fn ($req) => str_contains($req->url(), '/renew'));
+    }
+
+    public function test_a_stale_orphan_button_log_cannot_satisfy_todays_invoice(): void
+    {
+        // A 2-years-old unconsumed OK log (its registrar year long spent) must
+        // NOT intent-match today's invoice — stale logs fall through to the
+        // sync-backed date check, which renews for real (r3 finding 2).
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/77' => Http::sequence()
+                ->push(['data' => $this->opDomain('2026-01-01')])
+                ->push(['data' => $this->opDomain('2027-01-01')]),
+            self::SANDBOX.'/v1beta/domains/77/renew' => Http::response(['code' => 0]),
+        ]);
+        [$domain, $contract] = $this->assignedDomain('2026-01-01');
+        $stale = DomainRegistrarLog::create([
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id, 'invoice_id' => null,
+            'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_OK,
+            'request' => ['fqdn' => 'example.gr', 'years' => 1],
+        ]);
+        DomainRegistrarLog::whereKey($stale->id)->update(['created_at' => now()->subYears(2)]);
+
+        $type = InvoiceType::create(['company_id' => $this->company->id, 'code' => 'TDA', 'name' => 'ΤΔΑ', 'invcount' => 0, 'mydata_type' => '2.1']);
+        $invoice = Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $contract->id,
+            'code' => 14, 'invcode' => 'TDA14', 'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+
+        $log = app(DomainRenewalService::class)->renewForInvoice($invoice);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_OK, $log->status, 'a REAL renew ran');
+        Http::assertSent(fn ($req) => str_contains($req->url(), '/renew'));
+        $this->assertNull($stale->refresh()->invoice_id, 'the stale orphan stays for the A5 reconciler');
+    }
+
+    public function test_reissue_recovers_the_billed_period_from_its_own_prior_log(): void
+    {
+        // The interleaved-invoice hole (r3 finding 1): A fails (cursor moves),
+        // panel covers A's period, B issues+renews (cursor moves again, the
+        // last_renewal step-back no longer matches A) — A's re-issue must
+        // recover ITS period from its own failed log, not the cursor.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/77' => Http::sequence()
+                ->push(['desc' => 'down'], 500)                    // A issue #1 pre-check → failed
+                ->push(['data' => $this->opDomain('2027-01-01')])  // B pre-check (panel covered A's year)
+                ->push(['data' => $this->opDomain('2028-01-01')])  // B post-renew re-fetch
+                ->push(['data' => $this->opDomain('2028-01-01')]), // A re-issue pre-check
+            self::SANDBOX.'/v1beta/domains/77/renew' => Http::response(['code' => 0]),
+        ]);
+        [$domain, $contract] = $this->assignedDomain('2026-01-01');
+        $type = InvoiceType::create(['company_id' => $this->company->id, 'code' => 'TDA', 'name' => 'ΤΔΑ', 'invcount' => 0, 'mydata_type' => '2.1']);
+        $invoiceA = Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $contract->id,
+            'code' => 15, 'invcode' => 'TDA15', 'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+
+        $invoiceA->update(['local_status' => 'active']); // fails at registrar; cursor 2026→2027
+        $invoiceA->update(['local_status' => 'draft']);  // Επαναφορά
+
+        $invoiceB = Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $contract->id,
+            'code' => 16, 'invcode' => 'TDA16', 'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+        $invoiceB->update(['local_status' => 'active']); // renews 2027→2028; cursor → 2028
+
+        $invoiceA->update(['local_status' => 'active']); // A re-issues
+
+        $adopted = DomainRegistrarLog::where('invoice_id', $invoiceA->id)
+            ->where('status', DomainRegistrarLog::STATUS_ADOPTED)->sole();
+        $this->assertSame('2027-01-01', $adopted->request['target_expiry'], 'A period recovered from its OWN failed log');
+        // exactly ONE real renew in the whole story — B's
+        $this->assertSame(1, DomainRegistrarLog::where('status', DomainRegistrarLog::STATUS_OK)->count());
+        $this->assertSame('2028-01-01', $domain->refresh()->expires_at->toDateString());
     }
 
     public function test_a_locked_domain_on_issue_warns_do_not_renew_again(): void

@@ -88,8 +88,10 @@ class InvoiceObserver
             && $contract !== null
             && (int) $contract->last_renewal_invoice_id === (int) $invoice->id) {
             $months = $contract->billing_cycle?->months();
+            // NoOverflow: the inverse of BillingCycle::advance's
+            // addMonthsNoOverflow — Feb-29 cursors must round-trip.
             $periodStart = $months !== null
-                ? Carbon::parse($periodStart)->subMonths($months)->toDateString()
+                ? Carbon::parse($periodStart)->subMonthsNoOverflow($months)->toDateString()
                 : $periodStart;
         }
         $invoiceId = $invoice->id;

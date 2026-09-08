@@ -85,27 +85,36 @@ class DomainRenewalService
             );
         }
 
-        // The period the INVOICE covers starts at the SC cursor — the observer
-        // captures it BEFORE advanceServiceContractOnIssue moves it and passes
-        // it in (the hook itself runs after-commit, when the cursor has
-        // already advanced). Using the domain's CURRENT expiry here would
-        // re-create the war-story bug: an operator who already hit «Ανανέωση»
-        // moved the expiry, so a current-expiry baseline would target one
-        // period FURTHER and renew AGAIN instead of adopting.
-        $periodStart ??= $contract->next_due_date?->toDateString();
+        // THE BILLED PERIOD WAS FIXED AT THE FIRST ISSUE — recover it from
+        // this invoice's own earlier attempt (a failed log carries
+        // baseline/target). Immune to cursor movement by interleaved invoices
+        // between a revert and the re-issue (r3 finding: the cursor heuristic
+        // alone re-opened the war story when another invoice issued in
+        // between). Fallbacks: the caller-captured cursor, then the live one.
+        $prior = DomainRegistrarLog::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('invoice_id', $invoice->id)
+            ->where('action', 'renew')
+            ->orderByDesc('id')
+            ->first();
+        $fromPrior = is_string($prior?->request['baseline_expiry'] ?? null) ? $prior->request['baseline_expiry'] : null;
+        $periodStart = $fromPrior ?? $periodStart ?? $contract->next_due_date?->toDateString();
 
         // INTENT-MATCH adopt (date-drift-proof, the second §6.6 leg): an OK
         // button renewal not yet tied to any invoice IS this invoice's renewal
         // — consume it, no date comparison needed. Covers the operator who
         // renewed early while the SC cursor had drifted from the expiry
         // (billing grace edits), where the cursor+years date check would
-        // wrongly renew again.
+        // wrongly renew again. BOUNDED to the current billing window: a
+        // years-old orphan log must NOT satisfy today's invoice (its registrar
+        // year may have lapsed long ago) — stale logs fall through to the
+        // sync-backed date check, which renews if truly needed.
+        $cutoff = $periodStart !== null
+            ? Carbon::parse($periodStart)->subYears($years)
+            : Carbon::today()->subYears($years);
         $consumable = DomainRegistrarLog::query()
-            ->where('company_id', $invoice->company_id)
-            ->where('domain_id', $domain->id)
-            ->where('action', 'renew')
-            ->where('status', DomainRegistrarLog::STATUS_OK)
-            ->whereNull('invoice_id')
+            ->unconsumedOkRenewals($domain)
+            ->where('created_at', '>=', $cutoff)
             ->orderByDesc('id')
             ->get()
             ->first(fn (DomainRegistrarLog $row) => (int) ($row->request['years'] ?? 0) >= $years);
@@ -167,7 +176,9 @@ class DomainRenewalService
         if ($baseline === null) {
             throw new RuntimeException("Το {$domain->fqdn} δεν έχει γνωστή λήξη — κάντε πρώτα «Συγχρονισμό από registrar».");
         }
-        $target = Carbon::parse($baseline)->addYears($years)->toDateString();
+        // NoOverflow: consistent with BillingCycle::advance (a Feb-29 baseline
+        // must compute the SAME target on first issue and re-issue).
+        $target = Carbon::parse($baseline)->addYearsNoOverflow($years)->toDateString();
 
         $log = fn (string $status, ?array $response, ?string $error) => DomainRegistrarLog::create([
             'company_id' => $domain->company_id,
@@ -212,24 +223,34 @@ class DomainRenewalService
             }
             $domain->refresh();
             if ($domain->expires_at !== null && $domain->expires_at->toDateString() >= $target) {
-                // The registrar year that covers this adopt may have come from
-                // an (unconsumed) button renewal — stamp the newest one so the
-                // SAME year can't also satisfy a later intent-match (a
-                // double-count would let billed years exceed registrar years).
+                // The registrar year(s) covering this adopt may have come from
+                // (unconsumed) button renewals — stamp newest-first until the
+                // stamped years cover the billed term, so NO leftover log can
+                // also satisfy a later intent-match (a double-count would let
+                // billed years exceed registrar years — e.g. two 1yr button
+                // logs behind one biennial adopt must BOTH be consumed).
+                $consumedIds = [];
                 if ($invoice !== null) {
-                    DomainRegistrarLog::query()
-                        ->where('company_id', $domain->company_id)
-                        ->where('domain_id', $domain->id)
-                        ->where('action', 'renew')
-                        ->where('status', DomainRegistrarLog::STATUS_OK)
-                        ->whereNull('invoice_id')
+                    $covered = 0;
+                    $pool = DomainRegistrarLog::query()
+                        ->unconsumedOkRenewals($domain)
                         ->orderByDesc('id')
-                        ->limit(1)
-                        ->update(['invoice_id' => $invoice->id]);
+                        ->get();
+                    foreach ($pool as $row) {
+                        if ($covered >= $years) {
+                            break;
+                        }
+                        if (DomainRegistrarLog::query()->whereKey($row->id)->whereNull('invoice_id')
+                            ->update(['invoice_id' => $invoice->id]) === 1) {
+                            $consumedIds[] = $row->id;
+                            $covered += max(1, (int) ($row->request['years'] ?? 1));
+                        }
+                    }
                 }
 
                 return $log(DomainRegistrarLog::STATUS_ADOPTED, [
                     'registrar_expiry' => $domain->expires_at->toDateString(),
+                    'consumed_log_ids' => $consumedIds,
                 ], null);
             }
             // Re-check renewability on the FRESH status: the sync may have just
