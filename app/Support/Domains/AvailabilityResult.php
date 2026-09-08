@@ -16,5 +16,7 @@ final class AvailabilityResult
         public readonly string $fqdn,
         public readonly bool $available,
         public readonly ?string $reason = null,
+        /** Premium/priced name — a register must NOT proceed on the standard price assumption. */
+        public readonly bool $premium = false,
     ) {}
 }

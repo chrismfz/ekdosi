@@ -5,6 +5,7 @@ namespace App\Services\Domains;
 use App\Enums\DomainStatus;
 use App\Models\Domain;
 use App\Models\DomainRegistrarLog;
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
@@ -82,8 +83,28 @@ class DomainRegistrationService
         if ($registrant === null || trim((string) $registrant->email) === '') {
             $refuse("Το {$domain->fqdn} χρειάζεται επαφή registrant με email πριν την καταχώρηση (καρτέλα «Επαφές»).");
         }
-        if ($domain->nameservers->count() < 2) {
-            $refuse("Το {$domain->fqdn} χρειάζεται τουλάχιστον 2 nameservers πριν την καταχώρηση (καρτέλα «Nameservers»).");
+        // Same «valid host» predicate as the adapter payload (trimmed,
+        // non-empty) — a blank row must not slip a 1-NS payload past the guard.
+        $validNs = $domain->nameservers
+            ->map(fn ($ns) => trim((string) $ns->host))
+            ->filter(fn ($h) => $h !== '');
+        if ($validNs->count() < 2) {
+            $refuse("Το {$domain->fqdn} χρειάζεται τουλάχιστον 2 συμπληρωμένους nameservers πριν την καταχώρηση (καρτέλα «Nameservers»).");
+        }
+        // ONE registrar account often serves ΟΛΕΣ τις εταιρείες (shared
+        // reseller creds): a name another TENANT already tracks at a registrar
+        // must never be adopted onto this tenant's row (cross-tenant leak of
+        // expiry/handles + future renew would charge for the other's domain).
+        // Deliberate all-tenant sweep (CLAUDE.md CLI rule, option c).
+        $claimedElsewhere = Domain::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->withTrashed()
+            ->where('fqdn', $domain->fqdn)
+            ->where('company_id', '!=', $domain->company_id)
+            ->whereNotNull('registrar_domain_id')
+            ->exists();
+        if ($claimedElsewhere) {
+            $refuse("Το {$domain->fqdn} είναι ήδη καταχωρημένο από ΑΛΛΗ εταιρεία στον ίδιο λογαριασμό registrar — δεν καταχωρείται/υιοθετείται από εδώ.");
         }
 
         $lock = Cache::lock('domains:register:'.$domain->id, 300);
@@ -98,6 +119,22 @@ class DomainRegistrationService
         try {
             $credentials = $this->factory->credentialsFor($connection);
 
+            // 0. ALREADY OURS? A prior attempt that reached the registrar (an
+            // id on the row, or an ok/adopted register log — async REQ flows
+            // keep the row pending while the registry processes) must never
+            // POST again: the availability answer alone can't be trusted for
+            // in-flight registrations (async registries may still say 'free').
+            $alreadyOurs = ($domain->registrar_domain_id !== null && $domain->registrar_domain_id !== '')
+                || DomainRegistrarLog::query()
+                    ->where('company_id', $domain->company_id)
+                    ->where('domain_id', $domain->id)
+                    ->where('action', 'register')
+                    ->whereIn('status', [DomainRegistrarLog::STATUS_OK, DomainRegistrarLog::STATUS_ADOPTED])
+                    ->exists();
+            if ($alreadyOurs) {
+                return $this->adopt($domain, $credentials, $adapter, $log);
+            }
+
             // 1. Availability FIRST — the read the whole guard rests on.
             try {
                 $availability = $adapter->checkAvailability($domain->fqdn, $credentials);
@@ -106,21 +143,16 @@ class DomainRegistrationService
 
                 throw new RuntimeException("Η καταχώρηση του {$domain->fqdn} ΔΕΝ εκτελέστηκε — ο προ-έλεγχος διαθεσιμότητας απέτυχε: ".$e->getMessage());
             }
+            // Premium = a NON-standard (possibly very large) price the confirm
+            // modal never promised — refuse; the operator handles premium
+            // inventory at the registrar panel deliberately.
+            if ($availability->premium) {
+                $refuse("Το {$domain->fqdn} είναι PREMIUM όνομα (ειδική τιμολόγηση) — δεν καταχωρείται από εδώ· χειριστείτε το συνειδητά στο panel του registrar.");
+            }
 
             // 2. Taken: ours (retry-after-charge / panel) → ADOPT; else refuse.
             if (! $availability->available) {
-                try {
-                    $result = $adapter->syncDomain($domain, $credentials);
-                } catch (\Throwable) {
-                    $refuse("Το {$domain->fqdn} είναι κατειλημμένο από τρίτο — δεν καταχωρείται. (Δείτε διαθεσιμότητα/WHOIS.)");
-                }
-                $this->sync->apply($domain, $result);
-                $this->persistHandles($domain, $result->contactHandles);
-
-                return $log(DomainRegistrarLog::STATUS_ADOPTED, [
-                    'registrar_expiry' => $result->expiresAt,
-                    'raw_status' => $result->rawStatus,
-                ], null);
+                return $this->adopt($domain, $credentials, $adapter, $log);
             }
 
             // 3. Free → register.
@@ -158,6 +190,39 @@ class DomainRegistrationService
                 ]);
             }
         }
+    }
+
+    /**
+     * The adopt leg: the name is (or should be) in OUR account — read it and
+     * take its truth; not found = a third party's; a failed READ aborts (the
+     * real error logged verbatim, never dressed up as «κατειλημμένο» — the
+     * operator must not abandon a name that may be theirs).
+     */
+    private function adopt(Domain $domain, $credentials, $adapter, callable $log): DomainRegistrarLog
+    {
+        try {
+            $result = $adapter->syncDomain($domain, $credentials);
+        } catch (DomainNotFoundAtRegistrar) {
+            $message = "Το {$domain->fqdn} είναι κατειλημμένο από τρίτο — δεν καταχωρείται. (Δείτε διαθεσιμότητα/WHOIS.)";
+            $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
+
+            throw new RuntimeException($message);
+        } catch (\Throwable $e) {
+            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Έλεγχος λογαριασμού (sync) απέτυχε: '.$e->getMessage());
+
+            throw new RuntimeException("Η καταχώρηση του {$domain->fqdn} ΔΕΝ ολοκληρώθηκε — ο έλεγχος του λογαριασμού απέτυχε: ".$e->getMessage());
+        }
+        $this->sync->apply($domain, $result);
+        $this->persistHandles($domain, $result->contactHandles);
+        if ($domain->refresh()->registered_at === null) {
+            // Best-known date: the retry-after-charge case registered just now.
+            $domain->forceFill(['registered_at' => Carbon::today()->toDateString()])->save();
+        }
+
+        return $log(DomainRegistrarLog::STATUS_ADOPTED, [
+            'registrar_expiry' => $result->expiresAt,
+            'raw_status' => $result->rawStatus,
+        ], null);
     }
 
     /**

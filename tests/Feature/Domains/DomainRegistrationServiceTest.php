@@ -159,6 +159,117 @@ class DomainRegistrationServiceTest extends TestCase
         $domain->refresh();
         $this->assertSame(DomainStatus::Active, $domain->status);
         $this->assertSame('2027-09-08', $domain->expires_at->toDateString());
+        $this->assertSame(today()->toDateString(), $domain->registered_at->toDateString(), 'best-known date stamped on adopt too');
+    }
+
+    public function test_an_inflight_async_registration_never_posts_again_even_if_check_says_free(): void
+    {
+        // r1 finding 1: async registries (REQ) may still answer 'free' while
+        // processing — a row that already reached the registrar (id present)
+        // must go straight to adopt, availability NEVER consulted.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/9' => Http::response(['data' => [
+                'id' => 9, 'status' => 'REQ', 'expiration_date' => '2027-09-08 00:00:00',
+            ]]),
+        ]);
+        $domain = $this->pendingDomain(['registrar_domain_id' => '9']);
+
+        $log = app(DomainRegistrationService::class)->register($domain, 1);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/v1beta/domains/check'));
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/v1beta/domains') && $req->method() === 'POST');
+        $this->assertSame(DomainStatus::PendingRegister, $domain->refresh()->status, 'REQ keeps pending until the registry answers');
+    }
+
+    public function test_a_failed_account_read_is_never_dressed_up_as_taken_by_third_party(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/check' => Http::response(['data' => ['results' => [['status' => 'active']]]]),
+            self::SANDBOX.'/v1beta/domains?full_name=fresh.eu' => Http::response(['desc' => 'boom'], 502),
+        ]);
+        $domain = $this->pendingDomain();
+
+        try {
+            app(DomainRegistrationService::class)->register($domain, 1);
+            $this->fail('a failed read must abort, not lie');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('έλεγχος του λογαριασμού απέτυχε', $e->getMessage());
+            $this->assertStringNotContainsString('κατειλημμένο', $e->getMessage());
+        }
+    }
+
+    public function test_a_premium_name_refuses_instead_of_charging_an_unknown_price(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/check' => Http::response(['data' => ['results' => [[
+                'status' => 'free', 'premium' => ['price' => ['create' => 950]],
+            ]]]]),
+        ]);
+        $domain = $this->pendingDomain();
+
+        try {
+            app(DomainRegistrationService::class)->register($domain, 1);
+            $this->fail('premium must refuse');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('PREMIUM', $e->getMessage());
+        }
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/v1beta/domains') && $req->method() === 'POST');
+    }
+
+    public function test_a_name_claimed_by_another_tenant_on_the_shared_account_refuses(): void
+    {
+        // Shared reseller creds across the owner's companies: another tenant's
+        // registered name must never be adopted here (cross-tenant leak).
+        $other = Company::create([
+            'name' => 'Other', 'slug' => 'o-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'enable_domain_management' => true,
+        ]);
+        $otherTld = DomainTld::create(['company_id' => $other->id, 'tld' => 'eu', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $other->id, 'domain_tld_id' => $otherTld->id,
+            'sld' => 'fresh', 'tld' => 'eu', 'fqdn' => 'fresh.eu',
+            'status' => 'active', 'registrar_domain_id' => '555',
+        ]);
+        $domain = $this->pendingDomain();
+
+        Http::fake();
+        try {
+            app(DomainRegistrationService::class)->register($domain, 1);
+            $this->fail('cross-tenant claim must refuse');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ΑΛΛΗ εταιρεία', $e->getMessage());
+        }
+        Http::assertNothingSent();
+    }
+
+    public function test_handles_created_before_a_failed_register_survive_for_the_retry(): void
+    {
+        // r1 finding 3: the handle persists AS ensured — a register failure
+        // must not orphan the OP customer and re-create it on retry.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/check' => Http::response(['data' => ['results' => [['status' => 'free']]]]),
+            self::SANDBOX.'/v1beta/customers' => Http::response(['data' => ['handle' => 'NP1-EU']]),
+            self::SANDBOX.'/v1beta/domains' => Http::response(['desc' => 'not enough balance'], 400),
+        ]);
+        $domain = $this->pendingDomain();
+
+        try {
+            app(DomainRegistrationService::class)->register($domain, 1);
+            $this->fail('the register failed');
+        } catch (RuntimeException) {
+        }
+
+        $this->assertSame('NP1-EU', $domain->contacts()->sole()->registrar_contact_handle, 'the handle survived the failure');
+        // phone was split correctly for the OP customer (ICANN WHOIS data)
+        Http::assertSent(fn ($req) => str_ends_with($req->url(), '/v1beta/customers')
+            && $req['phone']['country_code'] === '+30'
+            && $req['phone']['subscriber_number'] === '2101234567');
     }
 
     public function test_a_name_taken_by_a_third_party_refuses_loudly(): void

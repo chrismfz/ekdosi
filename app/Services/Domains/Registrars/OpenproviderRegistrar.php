@@ -5,6 +5,7 @@ namespace App\Services\Domains\Registrars;
 use App\Contracts\DomainRegistrar;
 use App\Enums\DomainStatus;
 use App\Models\Domain;
+use App\Services\Domains\DomainNotFoundAtRegistrar;
 use App\Services\Domains\DomainRegistrarNotConfigured;
 use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
@@ -103,6 +104,9 @@ class OpenproviderRegistrar implements DomainRegistrar
             fqdn: $fqdn,
             available: $status === 'free',
             reason: $status === 'free' ? null : ($reason ?? ($status !== '' ? $status : null)),
+            // Any premium payload = a NON-standard price — the register path
+            // must refuse rather than charge an unknown amount (§6.1).
+            premium: ! empty($result['premium']) || ! empty($result['is_premium']),
         );
     }
 
@@ -188,8 +192,9 @@ class OpenproviderRegistrar implements DomainRegistrar
         }
 
         $nameservers = $domain->nameservers->pluck('host')
-            ->filter(fn ($h) => is_string($h) && $h !== '')
-            ->map(fn ($h) => ['name' => mb_strtolower($h)])
+            ->map(fn ($h) => mb_strtolower(trim((string) $h)))
+            ->filter(fn ($h) => $h !== '')
+            ->map(fn ($h) => ['name' => $h])
             ->values()
             ->all();
 
@@ -247,14 +252,27 @@ class OpenproviderRegistrar implements DomainRegistrar
             if (preg_match('/^(.*?)\s+(\S*\d\S*)$/u', $street, $m) === 1) {
                 [, $street, $number] = $m;
             }
-            $phone = trim((string) $contact->phone);
+            // Registrant phone is ICANN-relevant WHOIS data — split carefully:
+            // exact '+30' first (the tenant's world), then a 2-digit CC (the
+            // EU norm) for other '+' numbers; a LOCAL number keeps ALL its
+            // digits (never strip an area code) under the +30 default.
+            $digits = str_replace([' ', '-', '(', ')'], '', trim((string) $contact->phone));
             $phonePayload = null;
-            if ($phone !== '') {
-                $cc = preg_match('/^\+\d{1,3}/', $phone, $pm) === 1 ? $pm[0] : '+30';
+            if ($digits !== '') {
+                if (str_starts_with($digits, '+30')) {
+                    $cc = '+30';
+                    $subscriber = substr($digits, 3);
+                } elseif (str_starts_with($digits, '+')) {
+                    $cc = substr($digits, 0, 3); // '+' + 2-digit CC
+                    $subscriber = substr($digits, 3);
+                } else {
+                    $cc = '+30';
+                    $subscriber = $digits;
+                }
                 $phonePayload = [
                     'country_code' => $cc,
                     'area_code' => '',
-                    'subscriber_number' => ltrim(str_replace([' ', '-'], '', mb_substr($phone, mb_strlen($cc)))),
+                    'subscriber_number' => $subscriber,
                 ];
             }
 
@@ -279,6 +297,10 @@ class OpenproviderRegistrar implements DomainRegistrar
             if (! is_string($handle) || $handle === '') {
                 throw new RuntimeException("Το Openprovider δεν επέστρεψε handle για την επαφή «{$contact->name}» ({$contact->type}).");
             }
+            // Persist IMMEDIATELY — a later register failure must not lose the
+            // handle, else every retry creates a duplicate OP customer record
+            // (orphan personal data at the registrar).
+            $contact->forceFill(['registrar_contact_handle' => $handle])->save();
             $handles[$contact->type] = $handle;
         }
 
@@ -523,7 +545,10 @@ class OpenproviderRegistrar implements DomainRegistrar
             ->json('data.results');
         $first = is_array($results) ? ($results[0] ?? null) : null;
         if (! is_array($first)) {
-            throw new RuntimeException('Το '.$domain->fqdn.' δεν βρέθηκε στον λογαριασμό Openprovider.');
+            // TYPED: «not in the account» must be distinguishable from a
+            // transport failure — the register adopt-guard acts on the
+            // difference (third party vs could-not-read).
+            throw new DomainNotFoundAtRegistrar('Το '.$domain->fqdn.' δεν βρέθηκε στον λογαριασμό Openprovider.');
         }
 
         return $first;
