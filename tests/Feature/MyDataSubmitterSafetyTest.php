@@ -311,6 +311,34 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringNotContainsString('<counterpart', $xml);
     }
 
+    public function test_counterpart_branch_defaults_to_zero_head_office(): void
+    {
+        // A plain B2B invoice names the customer's έδρα: the counterpart branch is
+        // 0 unless the operator files a specific establishment. This is the truth
+        // for the overwhelming majority of documents.
+        $inv = $this->makeInvoice();
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertMatchesRegularExpression('#<counterpart>.*?<branch>0</branch>.*?</counterpart>#s', $xml);
+    }
+
+    public function test_counterpart_branch_files_the_customer_establishment_number(): void
+    {
+        // The "by the book" replacement for the legacy duplicate-ΑΦΜ branch hack:
+        // one ΑΦΜ = one customer, and WHICH establishment received the goods is a
+        // per-document attribute. A non-zero counterpart_branch must reach the
+        // filed myDATA Counterpart, not the hardcoded 0 it used to.
+        $inv = $this->makeInvoice();
+        $inv->update(['counterpart_branch' => 5]);
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertMatchesRegularExpression('#<counterpart>.*?<branch>5</branch>.*?</counterpart>#s', $xml);
+    }
+
     public function test_b2b_invoice_type_without_customer_afm_throws(): void
     {
         // Symmetric: non-retail types REQUIRE Counterpart, which

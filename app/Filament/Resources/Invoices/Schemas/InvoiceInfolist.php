@@ -118,6 +118,12 @@ class InvoiceInfolist
                         TextEntry::make('country')
                             ->label('Country')
                             ->placeholder('—'),
+
+                        // Only shown when it names a real branch — 0 (έδρα) is the
+                        // silent default and would just be noise on every document.
+                        TextEntry::make('counterpart_branch')
+                            ->label('Εγκατάσταση πελάτη (myDATA)')
+                            ->visible(fn ($record) => (int) ($record->counterpart_branch ?? 0) > 0),
                     ])
                     ->columns(3),
 

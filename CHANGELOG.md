@@ -37,6 +37,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
 ### Added
+- **Υποκατάστημα πελάτη ανά παραστατικό (myDATA counterpart branch) — «by the book» αντικατάσταση του legacy
+  duplicate-ΑΦΜ hack.** Νέα στήλη `invoices.counterpart_branch` (`unsignedSmallInteger`, default `0` = έδρα):
+  ο χειριστής δηλώνει ρητά ποια **εγκατάσταση** του πελάτη τιμολογείται, χωρίς να χρειάζεται δεύτερη εγγραφή
+  πελάτη με το ίδιο ΑΦΜ (που έσπαγε καρτέλα/dedupe/συμφωνία — τώρα απαγορεύεται από το `UNIQUE(company_id,
+  afm_key)`). Ένας πελάτης = ένα ΑΦΜ· ποια εγκατάσταση παρέλαβε είναι **attribute του εγγράφου**. Ο αριθμός
+  φτάνει στο filed myDATA `Counterpart->setBranch(...)` (πριν hardcoded `0`)· η διεύθυνση της εγκατάστασης
+  γράφεται στο ήδη επεξεργάσιμο address snapshot (το PDF τυπώνει από εκεί). Πεδίο στο draft form (κλειδώνει
+  μετά την υποβολή, reset σε 0 όταν αλλάζει πελάτης)· εμφανίζεται στο infolist μόνο όταν ≠ 0. Ο **issuer**
+  branch μένει `0` (χωριστός άξονας — MYD-010). Σπάνιο (1 ΑΦΜ σε όλο το legacy backup) → σκόπιμα χωρίς πίνακα
+  `customer_branches` (forward-compatible: μελλοντικό child table απλώς γεμίζει αυτή τη στήλη).
 - **Σύστημα υποστήριξης (tickets) — συνημμένα αρχεία μέσω email, inbound + outbound (Πυλώνας E, Phase 4 follow-up · PR B).**
   (α) **inbound:** ο IMAP poller εξάγει πλέον τα πραγματικά (μη-inline) attachments ενός εισερχόμενου email και τα
   δένει στο μήνυμα του ticket. (β) **outbound:** τα συνημμένα μιας απάντησης χειριστή επισυνάπτονται στο threaded

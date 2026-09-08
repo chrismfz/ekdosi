@@ -190,7 +190,14 @@ domestic-services tenants**. Not deleted — parked with the trigger that reacti
   noise in every VAT picker); the codes/rates stay in `Codes::VAT_CATEGORY_RATES`, so an
   island tenant re-adds the category by hand (or restores the `[1,2,3]`→`[1,2,3,4,5,6]` loop
   in `vatCategorySeedRows`).
-- **Multi-branch** — **MYD-010** (WATCH). Both tenants single-establishment; `branch=0` is truth.
+- **Multi-branch** — **MYD-010** (WATCH). Refers to the **ISSUER** branch: both tenants
+  single-establishment, so `issuer.branch=0` is truth. The **COUNTERPART** (customer) branch is
+  now settable per invoice — `invoices.counterpart_branch` (default 0) reaches the filed myDATA
+  Counterpart (the "by the book" replacement for the legacy duplicate-ΑΦΜ branch hack; a customer
+  is one ΑΦΜ, the establishment is a per-document attribute). No `customer_branches` table yet —
+  1 ΑΦΜ in the whole legacy backup used it; a future child table would just populate that column.
+  (ΔΑ / DeliveryNote counterpart branch stays hardcoded 0 — out of this scope; revisit if a tenant
+  ever ships to a specific customer establishment on a delivery note.)
 - **B2G / POS scopes** — **PROV-012** (public contracts, All-in-one POS). Requirement is
   only that ekdosi not *claim* them — it doesn't.
 - **Offline / Transmission Failure** — **PROV-008**. «Design with InvoSign, do not

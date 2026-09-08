@@ -163,6 +163,11 @@ class Invoice extends Model
         'city',
         'postcode',
         'country',
+        // AADE establishment (εγκατάσταση) of the counterpart this document was
+        // issued to; 0 = the party's έδρα. The per-document replacement for the
+        // legacy duplicate-ΑΦΜ branch hack (see the migration). Part of the party
+        // snapshot: operator-set on the draft, then frozen by living on the row.
+        'counterpart_branch',
         'company_name',
         'vat_no',
         'vies_vat',
@@ -185,6 +190,7 @@ class Invoice extends Model
             'issued_at' => 'datetime',
             'delivery_date' => 'date',
             'header_discount_percent' => 'decimal:2',
+            'counterpart_branch' => 'integer',
             'net_total' => 'decimal:2',
             'gross_total' => 'decimal:2',
             'payable_total' => 'decimal:2',

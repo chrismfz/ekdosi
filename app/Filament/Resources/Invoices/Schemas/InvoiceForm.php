@@ -175,6 +175,10 @@ class InvoiceForm
                             $set('city', $customer->city);
                             $set('postcode', $customer->postcode);
                             $set('country', $customer->country ?: 'GR');
+                            // Picking a customer resets the whole snapshot to their
+                            // έδρα — so the counterpart branch resets to 0 too, never
+                            // carrying a branch number across a customer switch.
+                            $set('counterpart_branch', 0);
 
                             // Per-customer commercial defaults. The discount is the
                             // customer's standing rate → apply it to the header
@@ -486,6 +490,13 @@ class InvoiceForm
                     TextInput::make('city')->label('Πόλη'),
                     TextInput::make('postcode')->label('Τ.Κ.'),
                     TextInput::make('country')->label('Χώρα')->maxLength(60)->helperText('Κατά προτίμηση ISO alpha-2. Κανονικοποιείται κατά την υποβολή.'),
+                    // Υποκατάστημα του πελάτη (myDATA counterpart branch). 0 = έδρα,
+                    // η αλήθεια για σχεδόν κάθε παραστατικό — αλλάζει μόνο όταν
+                    // τιμολογείς ρητά άλλη εγκατάσταση του ίδιου ΑΦΜ. Γράψε και τη
+                    // διεύθυνση της εγκατάστασης στα πεδία διεύθυνσης παραπάνω.
+                    TextInput::make('counterpart_branch')->label('Εγκατάσταση πελάτη (myDATA)')
+                        ->numeric()->minValue(0)->step(1)->default(0)
+                        ->helperText('0 = έδρα. Άλλαξέ το μόνο για τιμολόγηση συγκεκριμένου υποκαταστήματος του ίδιου ΑΦΜ.'),
                 ]),
 
             // ─── Παρατηρήσεις (εκτύπωσης) + τέλη/φόροι/παρακράτηση — collapsed ───
