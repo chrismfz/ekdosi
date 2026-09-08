@@ -212,7 +212,12 @@ class CompanyExportTest extends TestCase
         // Connections (payment methods) survive the zip, sealed — no plaintext secret.
         $this->assertSame('eurobank', $read['connections']['rows'][0]['gateway']);
         $this->assertSame('passphrase', $read['connections']['secrets']['mode']);
-        $this->assertStringNotContainsString('ZIP-SECRET', file_get_contents($path));
+        // Check the DECOMPRESSED entry — deflate hides literals, so a raw-bytes
+        // str_contains on the archive would pass even with a broken seal.
+        $zip = new \ZipArchive;
+        $zip->open($path);
+        $this->assertStringNotContainsString('ZIP-SECRET', (string) $zip->getFromName('connections.json'));
+        $zip->close();
 
         @unlink($path);
     }

@@ -104,13 +104,13 @@ class BundleArchive
             $zip->close();
             throw new RuntimeException('Μη έγκυρο αρχείο: λείπει manifest/company/secrets.');
         }
-        // Optional (absent in older bundles) → default to no assigned operators.
-        $users = $this->readJsonEntry($zip, 'users.json') ?? [];
-        // Optional (absent in older bundles) → default to no connections. The
-        // importer no-ops on empty rows, so a pre-connections bundle round-trips.
-        $connections = $this->readJsonEntry($zip, 'connections.json') ?? [];
-        // Optional (absent in pre-A2c bundles) → same no-op rule.
-        $domain_connections = $this->readJsonEntry($zip, 'domain_connections.json') ?? [];
+        // Optional keys: ABSENT (an older bundle) defaults to empty, but a
+        // present-but-corrupt entry must THROW — «?? []» alone would conflate
+        // the two and a restore would complete green with the credentials
+        // silently dropped (the requireJsonEntry rationale applies here too).
+        $users = $this->optionalJsonEntry($zip, 'users.json');
+        $connections = $this->optionalJsonEntry($zip, 'connections.json');
+        $domain_connections = $this->optionalJsonEntry($zip, 'domain_connections.json');
 
         $setup = [];
         $data = [];
@@ -159,6 +159,21 @@ class BundleArchive
         $decoded = json_decode($raw, true);
 
         return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * Optional bundle entry: absent = a legitimate older bundle (empty), but
+     * present-but-corrupt throws like every other entry — never silent loss.
+     *
+     * @return array<mixed>
+     */
+    private function optionalJsonEntry(ZipArchive $zip, string $name): array
+    {
+        if ($zip->locateName($name) === false) {
+            return [];
+        }
+
+        return $this->requireJsonEntry($zip, $name);
     }
 
     /**

@@ -183,7 +183,15 @@ class CompanyImportTest extends TestCase
         $path = sys_get_temp_dir().'/ekdosi-domain-conn-'.uniqid().'.zip';
         try {
             app(BundleArchive::class)->write($path, $bundle);
-            $this->assertStringNotContainsString('OP-TOP-SECRET', (string) file_get_contents($path));
+            // Assert on the DECOMPRESSED entry — deflate hides literals, so a
+            // raw-bytes str_contains on the archive is vacuously green even
+            // when the seal is broken (verified empirically at review).
+            $zip = new \ZipArchive;
+            $zip->open($path);
+            $entry = (string) $zip->getFromName('domain_connections.json');
+            $zip->close();
+            $this->assertNotSame('', $entry, 'the zip must carry domain_connections.json');
+            $this->assertStringNotContainsString('OP-TOP-SECRET', $entry);
             $bundle = app(BundleArchive::class)->read($path);
         } finally {
             @unlink($path);
@@ -211,6 +219,31 @@ class CompanyImportTest extends TestCase
         // Idempotent: a re-import updates in place, never duplicates.
         app(CompanyImporter::class)->run($bundle, ['execute' => true, 'passphrase' => 'p@ss']);
         $this->assertSame(2, DomainRegistrarConnection::where('company_id', $target->id)->count());
+    }
+
+    public function test_a_corrupt_optional_entry_fails_the_read_instead_of_silent_loss(): void
+    {
+        // A truncated domain_connections.json inside an otherwise-valid backup
+        // must THROW — «?? []» would restore green with the creds dropped.
+        $company = $this->sourceCompany();
+        DomainRegistrarConnection::create([
+            'company_id' => $company->id, 'registrar' => 'openprovider', 'label' => 'OP',
+            'is_active' => true, 'mode' => 'production', 'config' => ['username' => 'u', 'password' => 'p'],
+        ]);
+
+        $path = sys_get_temp_dir().'/ekdosi-corrupt-'.uniqid().'.zip';
+        try {
+            app(BundleArchive::class)->write($path, $this->bundle($company));
+            $zip = new \ZipArchive;
+            $zip->open($path);
+            $zip->addFromString('domain_connections.json', '{"rows": [truncat'); // bit-rot
+            $zip->close();
+
+            $this->expectException(RuntimeException::class);
+            app(BundleArchive::class)->read($path);
+        } finally {
+            @unlink($path);
+        }
     }
 
     public function test_two_domain_connections_sharing_registrar_and_label_both_survive(): void

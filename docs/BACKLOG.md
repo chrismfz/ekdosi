@@ -884,6 +884,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   ίδιο πέρασμα (super-admin-only, mutations `false`) όταν ακουμπήσουμε ξανά τα δικαιώματα.
 
 ## 🔒 Backup / DR / Portability
+- **Installer pre-migrate passphrase gate validates only company secrets** _(P2, pre-existing,
+  surfaced στο A2c-3 review)._ Το `readHeader()` gate του web installer ελέγχει το passphrase
+  μόνο πάνω στα sealed secrets της εταιρείας· tenant με ΟΛΑ τα encrypted company columns null
+  (π.χ. Εσθονικός `einvoice_provider=none`) αλλά με sealed gateway/registrar connections περνά
+  το gate με ΛΑΘΟΣ passphrase, τρέχει migrate, και σκάει DecryptException μέσα στο import
+  transaction → migrated-but-empty DB (ακριβώς ό,τι το gate υπάρχει να αποτρέψει). Fix = το
+  gate να δοκιμάζει open() και στα connections/domain_connections secrets blobs όταν τα company
+  values είναι όλα null. Σπάνιο (όλοι οι τωρινοί tenants έχουν myDATA/GSIS secrets).
 - **Operator export/import role queries are N+1** _(P2, from the operators-in-bundle review)._
   `CompanyExporter::exportUsers()` reuses `TenantRoleProvisioner::roleInCompany()` (up to 3 `userHoldsRole`
   queries per user); `planUsers`/`importUsers` add ~1 query per user each. A 40-operator tenant is ~120+ tiny
