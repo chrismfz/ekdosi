@@ -227,6 +227,11 @@ class DomainRenewalService
         if ($baseline === null) {
             $this->refuseWrite($log, "Το {$domain->fqdn} δεν έχει γνωστή λήξη — κάντε πρώτα «Συγχρονισμό από registrar».");
         }
+        // Shared reseller account (r1 P1 of the A3d gate): a renew here would
+        // sync-adopt ANOTHER tenant's registrar id/expiry and then extend (or
+        // intent-satisfy from) THEIR registration — the exact class every
+        // other write already refuses.
+        $this->assertNotClaimedElsewhere($domain, $log, "Το {$domain->fqdn} είναι καταχωρημένο από ΑΛΛΗ εταιρεία στον ίδιο λογαριασμό registrar — δεν ανανεώνεται από εδώ.");
 
         // ONE renewal at a time per domain: the check→write sequence must not
         // race (View button vs on-issue hook vs auto-issue — both would pass

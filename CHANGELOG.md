@@ -149,7 +149,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   του registrar. **«Επαναφορά από redemption»** (Redemption/Deleted μόνο, danger confirm):
   sync-first — ήδη-ζωντανό record = **adopt χωρίς χρέωση**· αλλιώς `POST /{id}/restore`
   (πραγματική, συνήθως μεγάλη χρέωση)· χρέωση πελάτη χειροκίνητη v1. DNSSEC key-management
-  σκόπιμα εκτός v1 (BACKLOG).
+  σκόπιμα εκτός v1 (BACKLOG). Gate fixes (r1): το renew πήρε επιτέλους και αυτό το cross-tenant
+  sweep (η ανανέωση σε όνομα ΑΛΛΟΥ tenant στο κοινό reseller account αρνείται — ήταν το μόνο
+  write χωρίς το guard)· τα `transfer_lock`/`whois_privacy` είναι πλέον και **sync truth**
+  (`is_locked`/`is_private_whois_enabled` → mirrors διορθώνονται από τον registrar, όχι μόνο
+  από το δικό μας PUT)· το restore adopt-άρει ΜΟΝΟ σε καθαρό ACT (ενδιάμεση/άγνωστη κατάσταση
+  → ηχηρή άρνηση, ποτέ ψεύτικο «επανήλθε»)· και τα config-refusals του «Κωδικός EPP» γράφουν
+  πλέον audit row.
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

@@ -37,5 +37,12 @@ final class DomainSyncResult
          * the nightly sync ignores it (its own status rules apply).
          */
         public readonly bool $deadRecord = false,
+        /**
+         * Registrar-reported transfer lock / WHOIS privacy (A3d) — null =
+         * not reported. Lets the sync CORRECT the local mirrors (a toggle at
+         * the registrar panel must not leave the flags wrong forever).
+         */
+        public readonly ?bool $transferLock = null,
+        public readonly ?bool $whoisPrivacy = null,
     ) {}
 }

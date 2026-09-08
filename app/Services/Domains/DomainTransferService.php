@@ -114,14 +114,13 @@ class DomainTransferService
     public function eppCode(Domain $domain): string
     {
         $connection = $domain->effectiveRegistrarConnection();
-        if ($domain->trashed() || $connection === null || ! $connection->isUsable()) {
-            throw new DomainRegistrarNotConfigured('Το domain δεν δρομολογείται σε ενεργή σύνδεση registrar.');
-        }
-        $adapter = $this->factory->for($connection);
-        if ($adapter->key() === 'manual') {
-            throw new DomainRegistrarNotConfigured('Ο registrar είναι «manual» — πάρτε τον κωδικό EPP από το portal του.');
-        }
+        // The log comes FIRST — even a config-shaped refusal on the most
+        // credential-shaped read leaves its audit row (A3d gate r1).
         $log = $this->writeLogger($domain, $connection, 'epp_code', ['fqdn' => $domain->fqdn]);
+        if ($domain->trashed()) {
+            $this->refuseWrite($log, 'Το domain είναι διαγραμμένο — δεν ανακτάται κωδικός EPP.');
+        }
+        $adapter = $this->resolveWriteAdapter($connection, $log, 'Ο registrar είναι «manual» — πάρτε τον κωδικό EPP από το portal του.');
 
         // The EPP code is the credential that transfers the name AWAY — the
         // cross-tenant guard here matters MORE than anywhere (worst flavor of

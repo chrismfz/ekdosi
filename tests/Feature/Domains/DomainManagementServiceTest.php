@@ -337,6 +337,81 @@ class DomainManagementServiceTest extends TestCase
         $this->assertSame(DomainRegistrarLog::STATUS_FAILED, DomainRegistrarLog::where('action', 'restore')->sole()->status);
     }
 
+    public function test_an_accepted_put_with_a_failed_refetch_still_logs_ok_and_mirrors(): void
+    {
+        // The PUT was accepted = the registrar state DID change; a re-fetch
+        // hiccup must never surface it as a failure (the requested value
+        // stands until the nightly sync confirms).
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/900' => Http::sequence()
+                ->push(['data' => ['id' => 900]]) // the PUT: accepted
+                ->push(['desc' => 'boom'], 500), // the re-fetch: down
+        ]);
+        $domain = $this->activeDomain(['transfer_lock' => false]);
+
+        $log = app(DomainManagementService::class)->setTransferLock($domain, true);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_OK, $log->status);
+        $this->assertTrue($domain->refresh()->transfer_lock);
+    }
+
+    public function test_a_charged_restore_with_a_failed_refetch_still_logs_ok(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/900' => Http::sequence()
+                ->push(['data' => ['id' => 900, 'status' => 'DEL']]) // probe: dead
+                ->push(['desc' => 'boom'], 500), // post-restore re-fetch: down
+            self::SANDBOX.'/v1beta/domains/900/restore' => Http::response(['data' => []]),
+        ]);
+        $domain = $this->activeDomain(['status' => DomainStatus::Redemption]);
+
+        $log = app(DomainManagementService::class)->restore($domain);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_OK, $log->status, 'the registrar HAS charged — never a failed log');
+        $this->assertSame(DomainStatus::Redemption, $domain->refresh()->status, 'the nightly sync lands the promoted status');
+    }
+
+    public function test_the_registrar_truth_corrects_the_mirror_over_the_requested_value(): void
+    {
+        // The PUT is accepted but the re-fetched truth says the flag did NOT
+        // take (e.g. a TLD without registry lock) — the registrar's answer
+        // wins over the requested value, and the sync keeps correcting it.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/900' => Http::sequence()
+                ->push(['data' => ['id' => 900]])
+                ->push(['data' => ['id' => 900, 'status' => 'ACT', 'is_locked' => false]]),
+        ]);
+        $domain = $this->activeDomain(['transfer_lock' => false]);
+
+        app(DomainManagementService::class)->setTransferLock($domain, true);
+
+        $this->assertFalse($domain->refresh()->transfer_lock, 'registrar truth wins over the requested value');
+    }
+
+    public function test_restore_refuses_an_in_between_registrar_state(): void
+    {
+        // Neither adopt («επανήλθε» would be a lie) nor a restore fee on top
+        // of an in-flight/unmapped record — refuse loudly, one audit row.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/900' => Http::response(['data' => ['id' => 900, 'status' => 'REQ']]),
+        ]);
+        $domain = $this->activeDomain(['status' => DomainStatus::Redemption]);
+
+        try {
+            app(DomainManagementService::class)->restore($domain);
+            $this->fail('an in-between state must refuse');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ενδιάμεση κατάσταση', $e->getMessage());
+        }
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/restore'));
+        $this->assertSame(DomainStatus::Redemption, $domain->refresh()->status, 'the probe never rewrites the row');
+        $this->assertSame(DomainRegistrarLog::STATUS_FAILED, DomainRegistrarLog::where('action', 'restore')->sole()->status);
+    }
+
     public function test_restore_refuses_when_the_name_left_the_account(): void
     {
         Http::fake([

@@ -674,6 +674,40 @@ class DomainRenewalServiceTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_renew_refuses_a_name_claimed_by_another_tenant(): void
+    {
+        // A3d gate r1 P1: the shared reseller account serves ALL tenants — a
+        // renew here would sync-adopt the OTHER tenant's registrar id/expiry
+        // and then extend (or intent-satisfy from) THEIR registration.
+        $other = Company::create([
+            'name' => 'Other', 'slug' => 'o-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'enable_domain_management' => true,
+        ]);
+        $otherTld = DomainTld::create(['company_id' => $other->id, 'tld' => 'gr', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $other->id, 'domain_tld_id' => $otherTld->id,
+            'sld' => 'claimed', 'tld' => 'gr', 'fqdn' => 'claimed.gr',
+            'status' => 'active', 'registrar_domain_id' => '123',
+        ]);
+        $mine = Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $this->tld->id,
+            'sld' => 'claimed', 'tld' => 'gr', 'fqdn' => 'claimed.gr',
+            'expires_at' => '2026-01-01', 'status' => 'active',
+        ]);
+
+        Http::fake();
+        try {
+            app(DomainRenewalService::class)->renew($mine, 1);
+            $this->fail('cross-tenant claim must refuse');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ΑΛΛΗ εταιρεία', $e->getMessage());
+        }
+        Http::assertNothingSent();
+        $this->assertSame(DomainRegistrarLog::STATUS_FAILED, DomainRegistrarLog::where('action', 'renew')->sole()->status);
+        $this->assertNull($mine->refresh()->registrar_domain_id, 'the other tenant\'s id was never adopted');
+    }
+
     public function test_renew_for_invoice_skips_non_domain_contracts_and_is_idempotent(): void
     {
         [$domain, $contract] = $this->assignedDomain();

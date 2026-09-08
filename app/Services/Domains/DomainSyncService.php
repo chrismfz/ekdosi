@@ -130,6 +130,15 @@ class DomainSyncService
         if ($result->expiresAt !== null) {
             $updates['expires_at'] = $result->expiresAt;
         }
+        // A3d mirrors follow REGISTRAR truth wherever it's reported — a lock/
+        // privacy toggle at the registrar panel must not leave the local
+        // flags wrong forever (null = not reported → keep the local value).
+        if ($result->transferLock !== null) {
+            $updates['transfer_lock'] = $result->transferLock;
+        }
+        if ($result->whoisPrivacy !== null) {
+            $updates['whois_privacy'] = $result->whoisPrivacy;
+        }
         // The by-name resolve is authoritative for THIS fqdn — adopt the id it
         // reported even over a stale stored one (else every future run repeats
         // the failing by-id call); keep the old value in module_meta for audit.

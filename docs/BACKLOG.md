@@ -649,7 +649,13 @@ data model + phase gates: **`PLAN.md`**.
     σχεδιασμό: add/remove DS/DNSKEY, validation, ρίσκο να σπάσει resolution με λάθος digest)·
     **restore billing** (η επαναφορά χρεώνει τον πελάτη ΧΕΙΡΟΚΙΝΗΤΑ v1 — δεν κόβει invoice
     μόνη της· αν φανεί συχνό, hook στο invoice flow όπως το renew)· approve-transfer/
-    resend-FOA (αν φανούν χρήσιμα live). P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
+    resend-FOA (αν φανούν χρήσιμα live). **P2 από το A3d gate r1 (deferred με λόγο):** αν το
+    `sync->apply()` (τοπικό DB transaction) σκάσει ΜΕΤΑ από αποδεκτό/χρεωμένο registrar write,
+    δεν γράφεται ΚΑΝΕΝΑ audit row (ούτε ok ούτε failed) — ισχύει ομοιόμορφα και στα τέσσερα
+    write services (προϋπήρχε σε renew/register/transfer)· recovery ασφαλές (retry → sync-first
+    adopt, μηδενική χρέωση), οπότε είναι κενό ΙΧΝΟΥΣ, όχι χρήματος. Fix μαζί για και τα 4
+    (ok-row πριν το τοπικό apply, ή wrap του apply ώστε αποτυχία τοπικής εγγραφής να λογκάρει
+    το αποδεκτό write) — μαζί με τον A5 reconciler που έτσι κι αλλιώς ξαναδιαβάζει τα ok-logs. P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
     pre-flight refusals ως «αίτηση» (false ⚠ σε previous-life tombstone + ένα refused click·
     αντίστροφα panel-started FAI χωρίς κανένα log δεν φλαγκάρεται)· (σ) το claimedElsewhere
     over-blocks (αγνοεί ΠΟΙΟ registrar account + withTrashed ξένα rows μπλοκάρουν «πελάτης

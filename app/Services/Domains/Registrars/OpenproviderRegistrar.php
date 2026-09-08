@@ -260,6 +260,8 @@ class OpenproviderRegistrar implements DomainRegistrar
             rawStatus: $base->rawStatus,
             contactHandles: $handles + $base->contactHandles,
             deadRecord: $base->deadRecord,
+            transferLock: $base->transferLock,
+            whoisPrivacy: $base->whoisPrivacy,
         );
     }
 
@@ -369,6 +371,8 @@ class OpenproviderRegistrar implements DomainRegistrar
             rawStatus: $base->rawStatus,
             contactHandles: $handles + $base->contactHandles,
             deadRecord: $base->deadRecord,
+            transferLock: $base->transferLock,
+            whoisPrivacy: $base->whoisPrivacy,
         );
     }
 
@@ -470,6 +474,10 @@ class OpenproviderRegistrar implements DomainRegistrar
             contactHandles: $this->extractHandles($data),
             // DEL = deleted, FAI = failed request — tombstones, not ownership.
             deadRecord: in_array($rawStatus, self::DEAD_STATUSES, true),
+            // Only an EXPLICIT boolean counts — an absent key must never
+            // overwrite the local mirror with a guessed false.
+            transferLock: is_bool($data['is_locked'] ?? null) ? $data['is_locked'] : null,
+            whoisPrivacy: is_bool($data['is_private_whois_enabled'] ?? null) ? $data['is_private_whois_enabled'] : null,
         );
     }
 

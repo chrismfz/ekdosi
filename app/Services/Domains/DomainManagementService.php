@@ -148,20 +148,15 @@ class DomainManagementService
             function () use ($domain, $connection, $adapter, $log): DomainRegistrarLog {
                 $credentials = $this->factory->credentialsFor($connection);
 
-                // Sync-first (§6.6 discipline on the priciest write): a LIVE
-                // record = already restored somewhere → adopt, zero charge.
+                // Sync-first (§6.6 discipline on the priciest write): an
+                // ACTIVE record = already restored somewhere → adopt, zero
+                // charge. Only a confident ACT adopts — an in-between/unmapped
+                // registrar state (e.g. an in-flight request record) must
+                // neither claim «επανήλθε» nor fire a restore on top of it
+                // (r1 P2: PEN/REQ would even flip the row to «Εκκρεμεί
+                // καταχώρηση» and hide this button).
                 try {
                     $probe = $adapter->syncDomain($domain, $credentials);
-                    if (! $probe->deadRecord && $probe->status !== DomainStatus::Deleted) {
-                        $this->sync->apply($domain, $probe);
-                        $this->sync->persistHandles($domain, $probe->contactHandles);
-
-                        return $log(DomainRegistrarLog::STATUS_ADOPTED, [
-                            'registrar_expiry' => $probe->expiresAt,
-                            'raw_status' => $probe->rawStatus,
-                        ], null);
-                    }
-                    // tombstone → genuinely restorable, proceed
                 } catch (DomainNotFoundAtRegistrar) {
                     // Gone from the account entirely: nothing to restore — the
                     // name is (or is becoming) publicly re-registrable.
@@ -171,6 +166,22 @@ class DomainManagementService
 
                     throw new RuntimeException("Η επαναφορά του {$domain->fqdn} ΔΕΝ εκτελέστηκε — ο προ-έλεγχος στον registrar απέτυχε: ".$e->getMessage());
                 }
+                if (! $probe->deadRecord && $probe->status === DomainStatus::Active) {
+                    $this->sync->apply($domain, $probe);
+                    $this->sync->persistHandles($domain, $probe->contactHandles);
+
+                    return $log(DomainRegistrarLog::STATUS_ADOPTED, [
+                        'registrar_expiry' => $probe->expiresAt,
+                        'raw_status' => $probe->rawStatus,
+                    ], null);
+                }
+                if (! $probe->deadRecord && $probe->status !== DomainStatus::Deleted) {
+                    // In-between/unmapped registrar state (e.g. an in-flight
+                    // request record) — neither «επανήλθε» nor a restore fee
+                    // on top of it; the operator re-checks after a sync.
+                    $this->refuseWrite($log, 'Ο registrar αναφέρει ενδιάμεση κατάσταση «'.($probe->rawStatus ?? '—')."» για το {$domain->fqdn} — η επαναφορά δεν εκτελέστηκε· κάντε «Συγχρονισμό» και ξαναδείτε το σε λίγο.");
+                }
+                // tombstone → genuinely restorable, proceed
 
                 try {
                     $result = $adapter->restore($domain, $credentials);
@@ -228,11 +239,15 @@ class DomainManagementService
 
                     throw $e;
                 }
-                $this->sync->apply($domain, $result);
-                $this->sync->persistHandles($domain, $result->contactHandles);
+                // Mirror FIRST with the requested value, then apply the
+                // re-fetched truth — when the registrar reports the flag,
+                // ITS value wins (apply overwrites); when the re-fetch fell
+                // back to the minimal result, the accepted request stands.
                 if ($onSuccess !== null) {
                     $onSuccess($domain);
                 }
+                $this->sync->apply($domain, $result);
+                $this->sync->persistHandles($domain, $result->contactHandles);
 
                 return $log(DomainRegistrarLog::STATUS_OK, [
                     'raw_status' => $result->rawStatus,
