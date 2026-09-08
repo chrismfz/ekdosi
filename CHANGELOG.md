@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-09-08
+
 ### Changed
 - Refreshed Composer dependencies to latest compatible versions (Filament 5.8, Laravel 13.31).
 
