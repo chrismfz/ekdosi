@@ -131,6 +131,18 @@ class StornoAndReissueTest extends TestCase
         $this->assertGreaterThan(0, (float) $reissue->withhold_amount);
     }
 
+    public function test_reissue_carries_the_counterpart_branch(): void
+    {
+        // The reissue draft replaces the SAME establishment's document — the branch
+        // rides the party snapshot from the original into the fresh draft (not έδρα).
+        $original = $this->originalWithLines();
+        $original->forceFill(['counterpart_branch' => 3])->save();
+
+        $reissue = app(StornoAndReissue::class)($original->fresh(), $this->creditType)['reissue'];
+
+        $this->assertSame(3, $reissue->counterpart_branch);
+    }
+
     public function test_storno_on_an_already_fully_credited_invoice_throws(): void
     {
         $original = $this->originalWithLines();

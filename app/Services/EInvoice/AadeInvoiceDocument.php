@@ -748,16 +748,13 @@ class AadeInvoiceDocument
         // The counterpart's AADE establishment (εγκατάσταση); 0 = its έδρα, the
         // truth for almost every document. Operator-set on the invoice snapshot —
         // the "by the book" replacement for the legacy duplicate-ΑΦΜ branch hack
-        // (one ΑΦΜ = one customer, the branch is a per-document attribute). A branch
-        // is a Greek Μητρώο concept, so it only applies to a GR counterpart: a
-        // foreign party has no Greek establishment → keep 0 (the always-validated
-        // prior behaviour). `?? 0` is belt-and-braces for a model built without the
-        // DB default (e.g. tests).
-        $branch = $country === 'GR' ? (int) ($invoice->counterpart_branch ?? 0) : 0;
+        // (one ΑΦΜ = one customer, the branch is a per-document attribute).
+        // filedCounterpartBranch() is the ONE definition of what actually files
+        // (0 for retail / foreign) — shared with every display so they can't drift.
         $counterpart = (new Counterpart)
             ->setVatNumber($afm)
             ->setCountry($country)
-            ->setBranch($branch);
+            ->setBranch($invoice->filedCounterpartBranch());
 
         // AADE rule (vendor/firebed/aade-mydata/src/Models/Party.php
         // docblocks): `name` and `address` are FORBIDDEN for GR

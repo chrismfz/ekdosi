@@ -663,6 +663,31 @@ class Invoice extends Model
         return str_starts_with($type, '11.');
     }
 
+    /**
+     * The counterpart establishment (εγκατάσταση) that ACTUALLY reaches AADE —
+     * the ONE definition shared by the filing (AadeInvoiceDocument) and every
+     * display, so the two can't drift and show a branch that was never filed.
+     *
+     * `counterpart_branch` is what the operator typed; this is what survives the
+     * filing rules: 0 when the document files no counterpart at all (retail 11.x),
+     * and 0 for a foreign party — a branch is a Greek Μητρώο concept, so a non-GR
+     * counterpart has none. Defensive on the country resolve (a document about to
+     * be refused throws there): treat an unresolvable country as "not GR" → 0.
+     */
+    public function filedCounterpartBranch(): int
+    {
+        $branch = (int) ($this->counterpart_branch ?? 0);
+        if ($branch === 0 || $this->filesNoCounterpart()) {
+            return 0;
+        }
+
+        try {
+            return $this->counterpartCountryForFiling() === 'GR' ? $branch : 0;
+        } catch (RuntimeException) {
+            return 0;
+        }
+    }
+
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class);

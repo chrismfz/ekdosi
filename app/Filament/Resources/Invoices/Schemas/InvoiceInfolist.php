@@ -119,14 +119,13 @@ class InvoiceInfolist
                             ->label('Country')
                             ->placeholder('—'),
 
-                        // Only shown when it names a real branch — 0 (έδρα) is the
-                        // silent default and would just be noise on every document.
-                        // Hidden on retail (11.x): those file NO counterpart, so a
-                        // branch there never reaches AADE and would mislead on a legal view.
+                        // Show the branch that ACTUALLY files (filedCounterpartBranch) —
+                        // 0/hidden for retail (11.x, no counterpart) AND for a foreign
+                        // party (branch forced to 0), so a legal view never shows an
+                        // establishment number that AADE never received.
                         TextEntry::make('counterpart_branch')
                             ->label('Εγκατάσταση πελάτη (myDATA)')
-                            ->visible(fn ($record) => (int) ($record->counterpart_branch ?? 0) > 0
-                                && ! $record->filesNoCounterpart()),
+                            ->visible(fn ($record) => $record->filedCounterpartBranch() > 0),
                     ])
                     ->columns(3),
 
