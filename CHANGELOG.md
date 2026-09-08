@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-08
+
 ### Added
 - **Domains πυλώνας (Πυλώνας A) — A0 θεμέλιο.** Νέο per-tenant knob `enable_domain_management`
   (default OFF, Tab «Domains» στη φόρμα εταιρείας, super_admin) που εμφανίζει το gated cluster
