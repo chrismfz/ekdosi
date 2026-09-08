@@ -640,8 +640,12 @@ data model + phase gates: **`PLAN.md`**.
     προτιμήθηκε από one-shot warning που χάνεται. (3) Το extra exists() ανά operation
     (αντί για ένα in-memory fetch ανά TLD) — declined, ~8 μικρά queries/TLD σε
     χειροκίνητο run δεν αξίζουν το refactor.
-  - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
-    billing (reuse `StageServiceRenewal`) + grace/redemption.
+  - **A3** Openprovider write — **A3a (renew + adopt guard) ✅ SHIPPED** (βλ. `FEATURES.md §21`)·
+    μένουν A3b register (post-pay), A3c transfer in/out + Get EPP code, A3d NS/contacts/DNSSEC/
+    lock writes + grace/redemption χρεώσεις. Για τον A5 reconciler (μαζί με τα υπόλοιπα A3):
+    (α) re-evaluate των renew logs με `short_of_target=null` (το post-renew re-fetch απέτυχε —
+    η πραγματική λήξη ήρθε από το nightly sync μετά) και όσων `ok` έμειναν κάτω από το
+    `target_expiry` τους· (β) orphan unconsumed button-renewals που δεν τιμολογήθηκαν ποτέ.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).

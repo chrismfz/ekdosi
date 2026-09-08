@@ -5,6 +5,7 @@ namespace App\Observers;
 use App\Models\Invoice;
 use App\Models\ServiceContract;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
+use App\Services\Domains\DomainRenewalInProgress;
 use App\Services\Domains\DomainRenewalService;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeReturnedQuantities;
@@ -72,11 +73,25 @@ class InvoiceObserver
             return;
         }
 
-        $periodStart = ServiceContract::query()
+        $contract = ServiceContract::query()
             ->where('company_id', $invoice->company_id)
             ->whereKey($invoice->service_contract_id)
-            ->value('next_due_date');
-        $periodStart = $periodStart !== null ? Carbon::parse($periodStart)->toDateString() : null;
+            ->first();
+        $periodStart = $contract?->next_due_date !== null ? Carbon::parse($contract->next_due_date)->toDateString() : null;
+        // Re-issue after «Επαναφορά σε πρόχειρο»: the cursor already advanced
+        // FOR this invoice on its first issue (and won't advance again — the
+        // last_renewal_invoice_id guard), so the CURRENT cursor is one period
+        // ahead of what this invoice bills. Step back one cycle, else the
+        // renew targets the wrong period (the war story through the revert
+        // door) and the short-flag misfires.
+        if ($periodStart !== null
+            && $contract !== null
+            && (int) $contract->last_renewal_invoice_id === (int) $invoice->id) {
+            $months = $contract->billing_cycle?->months();
+            $periodStart = $months !== null
+                ? Carbon::parse($periodStart)->subMonths($months)->toDateString()
+                : $periodStart;
+        }
         $invoiceId = $invoice->id;
 
         DB::afterCommit(function () use ($invoiceId, $periodStart): void {
@@ -94,6 +109,18 @@ class InvoiceObserver
                         'Η ανανέωση εκτελέστηκε αλλά η νέα λήξη ('.($log->response['registrar_expiry'] ?? '—').') ΔΕΝ φτάνει την περίοδο που χρεώθηκε ('.($log->request['target_expiry'] ?? '—').') — ελέγξτε το domain.'
                     );
                 }
+            } catch (DomainRenewalInProgress $e) {
+                // A concurrent renewal (the View button, most likely) holds the
+                // lock — it IS this period's renewal. «Try again» advice here
+                // would cause the double charge: the button's baseline is the
+                // (by then extended) current expiry, which can never adopt.
+                Log::info('Domain renewal on issue skipped — another renewal in progress', [
+                    'invoice_id' => $invoice->id, 'error' => $e->getMessage(),
+                ]);
+                $this->notifyDomainRenewalProblem(
+                    $invoice,
+                    'Το παραστατικό '.($invoice->code ?: '#'.$invoice->id).' εκδόθηκε ενώ έτρεχε ήδη άλλη ανανέωση του domain. ΜΗΝ ξαναζητήσετε ανανέωση — ελέγξτε το ιστορικό API του domain σε λίγο.'
+                );
             } catch (Throwable $e) {
                 Log::warning('Domain renewal on invoice issue failed (the issue succeeded)', [
                     'invoice_id' => $invoice->id,

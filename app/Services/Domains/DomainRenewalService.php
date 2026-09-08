@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\ServiceContract;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -108,8 +109,14 @@ class DomainRenewalService
             ->orderByDesc('id')
             ->get()
             ->first(fn (DomainRegistrarLog $row) => (int) ($row->request['years'] ?? 0) >= $years);
-        if ($consumable !== null) {
-            $consumable->update(['invoice_id' => $invoice->id]);
+        // Compare-and-swap claim: two concurrent invoices must not both adopt
+        // the SAME button renewal — only the one whose UPDATE actually flips
+        // the NULL wins; the loser falls through to renew() (whose lock +
+        // sync-first guard then do the right thing).
+        if ($consumable !== null && DomainRegistrarLog::query()
+            ->whereKey($consumable->id)
+            ->whereNull('invoice_id')
+            ->update(['invoice_id' => $invoice->id]) === 1) {
 
             return DomainRegistrarLog::create([
                 'company_id' => $domain->company_id,
@@ -186,7 +193,9 @@ class DomainRenewalService
         // withoutOverlapping, CLAUDE.md Env-prep).
         $lock = Cache::lock('domains:renew:'.$domain->id, 300);
         if (! $lock->get()) {
-            throw new RuntimeException("Άλλη ανανέωση του {$domain->fqdn} είναι ήδη σε εξέλιξη — δοκιμάστε ξανά σε λίγο.");
+            throw new DomainRenewalInProgress(
+                "Άλλη ανανέωση του {$domain->fqdn} είναι ήδη σε εξέλιξη — ΜΗΝ ξαναζητήσετε ανανέωση· δείτε το ιστορικό API του domain σε λίγο."
+            );
         }
 
         try {
@@ -203,6 +212,22 @@ class DomainRenewalService
             }
             $domain->refresh();
             if ($domain->expires_at !== null && $domain->expires_at->toDateString() >= $target) {
+                // The registrar year that covers this adopt may have come from
+                // an (unconsumed) button renewal — stamp the newest one so the
+                // SAME year can't also satisfy a later intent-match (a
+                // double-count would let billed years exceed registrar years).
+                if ($invoice !== null) {
+                    DomainRegistrarLog::query()
+                        ->where('company_id', $domain->company_id)
+                        ->where('domain_id', $domain->id)
+                        ->where('action', 'renew')
+                        ->where('status', DomainRegistrarLog::STATUS_OK)
+                        ->whereNull('invoice_id')
+                        ->orderByDesc('id')
+                        ->limit(1)
+                        ->update(['invoice_id' => $invoice->id]);
+                }
+
                 return $log(DomainRegistrarLog::STATUS_ADOPTED, [
                     'registrar_expiry' => $domain->expires_at->toDateString(),
                 ], null);
@@ -228,8 +253,10 @@ class DomainRenewalService
             // A renew that landed SHORT of the billed target (the registrar
             // extended from ITS OWN expiry, which lagged the cursor — e.g. a
             // prior failed renewal never retried) is a real charge, so it logs
-            // 'ok' — but flagged, so the caller can alert the operator.
-            $short = $result->expiresAt !== null && $result->expiresAt < $target;
+            // 'ok' — but flagged, so the caller can alert the operator. NULL =
+            // unknown (the post-renew re-fetch fell back; the A5 reconciler
+            // re-evaluates ok-logs whose landed expiry misses their target).
+            $short = $result->expiresAt === null ? null : $result->expiresAt < $target;
 
             return $log(DomainRegistrarLog::STATUS_OK, [
                 'registrar_expiry' => $result->expiresAt,
@@ -237,7 +264,16 @@ class DomainRenewalService
                 'short_of_target' => $short,
             ], null);
         } finally {
-            $lock->release();
+            try {
+                $lock->release();
+            } catch (\Throwable $e) {
+                // NEVER let a lock-release hiccup replace the method's real
+                // outcome (a charged, ok-logged renewal would surface as a
+                // failure). The 300s TTL bounds a stuck lock.
+                Log::warning('domains.renew.lock_release_failed', [
+                    'domain_id' => $domain->id, 'error' => $e->getMessage(),
+                ]);
+            }
         }
     }
 
