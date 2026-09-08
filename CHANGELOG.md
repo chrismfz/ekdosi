@@ -104,6 +104,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
   ανάθεση οι επαφές είναι χώρος του operator). Αποτυχία επαφής = warning, δεν ρίχνει το sync.
   Στο design μπήκαν ρητά για A3/A4 τα **Get EPP/auth code** και το **Recall** (.gr ανάκληση
   διαγραφής εντός 5 ημερών) — owner-confirmed χρήσιμα από τη WHMCS χρήση.
+- **Domains — A3a: το πρώτο registrar WRITE (renew) με το adopt-on-already-renewed guard.**
+  `DomainRenewalService` = ο ΜΟΝΟΣ δρόμος προς `DomainRegistrar::renew()` (§6.6 ΔΕΣΜΕΥΤΙΚΟ —
+  το WHMCS double-renew/relid war story): **sync-first** πριν από κάθε renew· αν η λήξη του
+  registrar ήδη καλύπτει την περίοδο → **ΥΙΟΘΕΤΕΙ** (log `adopted`, καμία κλήση)· η περίοδος
+  του on-issue flow υπολογίζεται από το **SC cursor**, όχι την τρέχουσα λήξη (αλλιώς το κουμπί
+  «Ανανέωση» πριν την έκδοση θα ξανα-δημιουργούσε το bug). Νέο on-issue hook στο
+  `InvoiceObserver` (πριν το cursor advance, best-effort — αποτυχία registrar δεν αγγίζει ποτέ
+  την έκδοση: log + καμπανάκι + το κουμπί ως retry). Κουμπί **«Ανανέωση στον registrar»** στο
+  View (confirm modal με λήξη/έτη/προειδοποίηση χρέωσης — ΔΕΝ προωθεί το billing cursor, η
+  χρέωση μένει οφειλόμενη). Νέος πίνακας **`domain_registrar_logs`** (API history §9): κάθε
+  write ok/adopted/failed με sanitized request/response — κανένα state-changing call άγραφο.
+  Adapter: `POST /v1beta/domains/{id}/renew` + post-renew re-fetch· το read-only guard test
+  έγινε «write surface = ακριβώς ό,τι έχει προσγειώσει slice» (μόνο renew).
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

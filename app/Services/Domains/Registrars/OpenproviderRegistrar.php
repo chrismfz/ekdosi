@@ -113,14 +113,49 @@ class OpenproviderRegistrar implements DomainRegistrar
      */
     public function syncDomain(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
     {
-        $data = $this->fetchDomainData($domain, $credentials);
+        return $this->syncResultFrom($this->fetchDomainData($domain, $credentials));
+    }
 
-        $rawStatus = isset($data['status']) ? (string) $data['status'] : null;
-        $expiresAt = null;
-        if (is_string($data['expiration_date'] ?? null) && $data['expiration_date'] !== '') {
-            // OP returns "YYYY-MM-DD HH:MM:SS" — the date part is our clock.
-            $expiresAt = substr($data['expiration_date'], 0, 10);
+    /**
+     * WRITE (A3): renew at Openprovider — POST /v1beta/domains/{id}/renew.
+     * ONLY DomainRenewalService calls this (it owns the §6.6 adopt guard +
+     * the audit log). Resolves the OP id first (stale-id fallback included),
+     * fires the renewal, then RE-FETCHES the domain so the caller applies the
+     * post-renewal truth through the one apply path.
+     */
+    public function renew(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        if ($years < 1) {
+            throw new RuntimeException('Μη έγκυρη διάρκεια ανανέωσης: '.$years);
         }
+
+        $data = $this->fetchDomainData($domain, $credentials);
+        $id = isset($data['id']) && (string) $data['id'] !== '' ? (string) $data['id'] : null;
+        if ($id === null) {
+            throw new RuntimeException('Το Openprovider δεν επέστρεψε id για το '.$domain->fqdn.' — αδύνατη η ανανέωση.');
+        }
+
+        $this->request($credentials, 'POST', '/v1beta/domains/'.rawurlencode($id).'/renew', [
+            'id' => (int) $id,
+            'period' => $years,
+        ]);
+
+        // The renew envelope doesn't reliably carry the new expiry — re-fetch
+        // so the caller gets (and applies) the registrar's OWN post-renew truth.
+        $fresh = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id))->json('data');
+        if (! is_array($fresh)) {
+            // The renewal itself succeeded — never mask that as a failure; the
+            // nightly sync will land the new expiry.
+            return new DomainSyncResult(registrarDomainId: $id);
+        }
+
+        return $this->syncResultFrom($fresh);
+    }
+
+    /** One OP domain payload → our truth DTO (sync + post-renew share it). */
+    private function syncResultFrom(array $data): DomainSyncResult
+    {
+        $rawStatus = isset($data['status']) ? (string) $data['status'] : null;
 
         $nameservers = [];
         foreach ((array) ($data['name_servers'] ?? []) as $ns) {
@@ -131,7 +166,7 @@ class OpenproviderRegistrar implements DomainRegistrar
         }
 
         return new DomainSyncResult(
-            expiresAt: $expiresAt,
+            expiresAt: $this->datePart($data['expiration_date'] ?? null),
             nameservers: $nameservers,
             registrarDomainId: isset($data['id']) ? (string) $data['id'] : null,
             status: $this->mapStatus($rawStatus),

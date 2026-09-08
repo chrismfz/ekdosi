@@ -934,8 +934,16 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   ταξιδεύουν στο per-company bundle όπως τα payment gateways — μεταδεδομένα καθαρά, creds
   **passphrase-sealed** (ποτέ raw APP_KEY ciphertext), re-encrypt στο target APP_KEY, idempotent
   ανά (registrar, label), tombstones δεν ταξιδεύουν. Devbox → production χωρίς re-typing.
-- **Επόμενα:** WHMCS linkage hint (προαιρετικό, §9) · margin engine (αν χρειαστεί) · A3 write ·
-  A4 grEPP · A5 reconciliation · export/import των υπόλοιπων domain tables (βλ. `docs/BACKLOG.md`).
+- **Registrar renew + adopt guard (A3a, SHIPPED):** το πρώτο WRITE. `DomainRenewalService`
+  (μοναδικός δρόμος): sync-first πριν από κάθε renew, ήδη-καλυμμένη περίοδος → **adopt** (καμία
+  κλήση — το WHMCS double-renew war story λυμένο by construction)· on-issue hook (§6.1 «renew =
+  on-issue», best-effort, περίοδος από το SC cursor)· κουμπί «Ανανέωση στον registrar» στο View
+  (confirm modal, δεν αγγίζει billing cursor)· **`domain_registrar_logs`** API history (κάθε
+  write ok/adopted/failed)· αποτυχίες → καμπανάκι operators.
+- **Επόμενα:** A3b register (post-pay) · A3c transfer in/out + Get EPP code · A3d NS/contacts/
+  DNSSEC/lock writes · WHMCS linkage hint (προαιρετικό, §9) · margin engine (αν χρειαστεί) ·
+  A4 grEPP (+ Recall 5 ημερών .gr) · A5 reconciliation · export/import των υπόλοιπων domain
+  tables (βλ. `docs/BACKLOG.md`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

@@ -145,4 +145,9 @@ class FakeDomainRegistrar implements DomainRegistrar
     {
         return null;
     }
+
+    public function renew(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        return new DomainSyncResult(expiresAt: '2028-01-01');
+    }
 }

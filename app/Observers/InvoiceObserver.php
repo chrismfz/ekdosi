@@ -5,9 +5,11 @@ namespace App\Observers;
 use App\Models\Invoice;
 use App\Models\ServiceContract;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
+use App\Services\Domains\DomainRenewalService;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeReturnedQuantities;
 use App\Services\Stock\StockService;
+use Filament\Notifications\Notification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -33,8 +35,53 @@ class InvoiceObserver
     {
         $this->recomputeOriginal($invoice);
         $this->applyStockSaleIfActivated($invoice);
+        // BEFORE the cursor advance: the renewal service reads the SC's
+        // next_due_date as the period the invoice covers (§6.6 adopt guard).
+        $this->renewDomainOnIssue($invoice);
         $this->advanceServiceContractOnIssue($invoice);
         $this->captureCustomerBalanceSnapshot($invoice);
+    }
+
+    /**
+     * Domains (Πυλώνας A / A3a, §6.1 «renew = on-issue»): when a renewal
+     * invoice for a DOMAIN-linked contract is issued, drive the registrar
+     * renewal through DomainRenewalService (which syncs first and ADOPTS if
+     * someone already renewed — the §6.6 war-story guard). Best-effort like
+     * its siblings: the issue already persisted, so a registrar failure must
+     * never look like a failed issue — it logs, lands in the API history and
+     * rings the operators' bell instead.
+     */
+    private function renewDomainOnIssue(Invoice $invoice): void
+    {
+        if (! $invoice->wasChanged('local_status') || $invoice->local_status !== 'active') {
+            return;
+        }
+        if ($invoice->service_contract_id === null) {
+            return;
+        }
+
+        try {
+            app(DomainRenewalService::class)->renewForInvoice($invoice);
+        } catch (Throwable $e) {
+            Log::warning('Domain renewal on invoice issue failed (the issue succeeded)', [
+                'invoice_id' => $invoice->id,
+                'service_contract_id' => $invoice->service_contract_id,
+                'error' => $e->getMessage(),
+            ]);
+            try {
+                $recipients = $invoice->company?->users;
+                if ($recipients !== null && $recipients->isNotEmpty()) {
+                    Notification::make()
+                        ->title('Αποτυχία ανανέωσης domain στον registrar')
+                        ->body('Το παραστατικό '.($invoice->code ?: '#'.$invoice->id).' εκδόθηκε, αλλά η ανανέωση στον registrar απέτυχε: '.$e->getMessage().' Δοκιμάστε «Ανανέωση στον registrar» από το domain.')
+                        ->icon('heroicon-o-globe-alt')
+                        ->danger()
+                        ->sendToDatabase($recipients);
+                }
+            } catch (Throwable $notify) {
+                Log::warning('Domain renewal failure notification failed', ['error' => $notify->getMessage()]);
+            }
+        }
     }
 
     /**

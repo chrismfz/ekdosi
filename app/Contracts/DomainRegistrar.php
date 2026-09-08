@@ -77,4 +77,16 @@ interface DomainRegistrar
      * contact must never kill a domain import).
      */
     public function getContact(string $handle, DomainRegistrarCredentials $credentials): ?RegistrarContact;
+
+    /**
+     * WRITE (A3): renew the domain for N years at the registrar — REAL MONEY
+     * at the registrar side. Callers go through DomainRenewalService ONLY
+     * (it owns the §6.6 adopt-on-already-renewed guard + the audit log);
+     * never call this directly from UI/observer code. Returns the FRESH
+     * registrar truth after the renewal (same shape as syncDomain, so the
+     * caller applies it through the one truth-apply path). Throws
+     * DomainRegistrarNotConfigured on an API-less registrar; RuntimeException
+     * on transport/API failure.
+     */
+    public function renew(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult;
 }

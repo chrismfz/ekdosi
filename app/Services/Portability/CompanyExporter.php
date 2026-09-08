@@ -135,6 +135,10 @@ class CompanyExporter
         'domains',
         'domain_nameservers',
         'domain_contacts',
+        // Registrar API history (A3 write log) — runtime diagnostics bound to
+        // THIS deployment's traffic, the payment_gateway_events rule: never
+        // travels, re-accrues on the target as commands run.
+        'domain_registrar_logs',
     ];
 
     /**

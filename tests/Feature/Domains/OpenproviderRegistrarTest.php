@@ -54,13 +54,16 @@ class OpenproviderRegistrarTest extends TestCase
         );
     }
 
-    public function test_the_adapter_exposes_no_mutating_methods_yet(): void
+    public function test_the_write_surface_is_exactly_what_the_a3_slices_have_landed(): void
     {
-        // READ-ONLY by construction (owner runs production creds at A2): the
-        // write surface must not exist before A3 lands its idempotency layer.
+        // Write-by-slice discipline (owner runs production creds): A3a landed
+        // renew() ONLY — every other mutating method must not exist before its
+        // own slice arrives with its guards. renew() itself is reachable only
+        // through DomainRenewalService (§6.6 adopt guard + audit log).
         $methods = array_map('strtolower', get_class_methods(OpenproviderRegistrar::class));
-        foreach (['register', 'renew', 'transfer', 'requestdelete', 'setnameservers', 'setcontacts', 'setlock', 'setdnssec'] as $forbidden) {
-            $this->assertNotContains($forbidden, $methods, "A2 adapter must not expose {$forbidden}()");
+        $this->assertContains('renew', $methods, 'A3a: renew() is the landed write surface');
+        foreach (['register', 'transfer', 'requestdelete', 'setnameservers', 'setcontacts', 'setlock', 'setdnssec'] as $forbidden) {
+            $this->assertNotContains($forbidden, $methods, "adapter must not expose {$forbidden}() before its A3 slice");
         }
     }
 
