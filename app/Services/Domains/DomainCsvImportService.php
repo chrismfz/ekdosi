@@ -55,11 +55,12 @@ class DomainCsvImportService
             $tld = mb_substr($fqdn, $dot + 1);
 
             $expiresAt = $this->parseDate($row['expires_at'] ?? null);
-            if ($expiresAt === null && ($row['expires_at'] ?? null) !== null && trim((string) $row['expires_at']) !== '') {
-                // Unparseable date: import the name anyway (unbillable — the
-                // assign guard requires expires_at) but say so.
-                $warn("Το {$fqdn} έχει μη αναγνωρίσιμη ημερομηνία λήξης «{$row['expires_at']}» — εισήχθη χωρίς λήξη.");
-            }
+            // Unparseable date: the name still imports (unbillable — the assign
+            // guard requires expires_at) — but warn ONLY if the row actually
+            // lands (the skip guards below may drop it entirely).
+            $badDate = $expiresAt === null && trim((string) ($row['expires_at'] ?? '')) !== ''
+                ? (string) $row['expires_at']
+                : null;
 
             if (! array_key_exists($tld, $tldCache)) {
                 $tldRule = DomainTld::withTrashed()
@@ -98,6 +99,9 @@ class DomainCsvImportService
             }
 
             if ($domain === null) {
+                if ($badDate !== null) {
+                    $warn("Το {$fqdn} έχει μη αναγνωρίσιμη ημερομηνία λήξης «{$badDate}» — εισήχθη χωρίς λήξη.");
+                }
                 // A lapsed expiry lands as Expired straight away — for .gr the
                 // CSV is the ONLY truth source until grEPP (A4), so no sync
                 // will ever derive it later (the API path derives via apply).
@@ -124,19 +128,35 @@ class DomainCsvImportService
             // parity: the recorded expiry is historical record).
             if ($domain->status instanceof DomainStatus && $domain->status->blocksSync()) {
                 $counts['skipped']++;
+                $warn("Παράλειψη {$fqdn}: κατάσταση «{$domain->status->getLabel()}» — παγωμένο (ιστορικό record).");
 
                 continue;
             }
 
+            if ($badDate !== null) {
+                $warn("Το {$fqdn} έχει μη αναγνωρίσιμη ημερομηνία λήξης «{$badDate}» — η λήξη δεν άλλαξε.");
+            }
+
             // Existing live row: the CSV may only fill/refresh the expiry —
-            // never customer_id, auto_renew, routing or overrides. Status
-            // moves ONLY on the derived Active→Expired lapse (sync parity).
+            // never customer_id, auto_renew, routing or overrides. Status is
+            // derived from the EFFECTIVE expiry (new ?? stored) on EVERY pass,
+            // both directions — a re-import with the same past date must not
+            // leave «Ενεργό» standing, and a grweb renewal must un-expire
+            // (for .gr the CSV is the only truth source until grEPP/A4).
+            $updates = [];
             if ($expiresAt !== null && $expiresAt !== $domain->expires_at?->toDateString()) {
-                $updates = ['expires_at' => $expiresAt];
-                if ($domain->status === DomainStatus::Active
-                    && Carbon::parse($expiresAt)->lt(Carbon::today())) {
+                $updates['expires_at'] = $expiresAt;
+            }
+            $effective = $expiresAt ?? $domain->expires_at?->toDateString();
+            if ($effective !== null) {
+                $lapsed = Carbon::parse($effective)->lt(Carbon::today());
+                if ($lapsed && $domain->status === DomainStatus::Active) {
                     $updates['status'] = DomainStatus::Expired;
+                } elseif (! $lapsed && $domain->status === DomainStatus::Expired) {
+                    $updates['status'] = DomainStatus::Active;
                 }
+            }
+            if ($updates !== []) {
                 $domain->forceFill($updates)->save();
                 $counts['updated']++;
             } else {

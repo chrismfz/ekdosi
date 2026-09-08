@@ -94,7 +94,7 @@ class DomainCsvImportTest extends TestCase
 
         $path2 = $this->csv("domain,expiry\nmysite.gr,2029-12-31\nother.gr,2027-01-01");
         $this->artisan('domains:import-csv', ['file' => $path2, '--tenant' => $this->company->slug])
-            ->expectsOutputToContain('0 νέα (αδέσποτα), 1 ενημερώσεις λήξης, 1 αμετάβλητα')
+            ->expectsOutputToContain('0 νέα (αδέσποτα), 1 ενημερώσεις, 1 αμετάβλητα')
             ->assertExitCode(0);
 
         $mysite = Domain::where('fqdn', 'mysite.gr')->sole();
@@ -157,6 +157,29 @@ class DomainCsvImportTest extends TestCase
         $path2 = $this->csv("domain;λήξη\nalive.gr;".today()->subDays(3)->format('d/m/Y'));
         $this->artisan('domains:import-csv', ['file' => $path2, '--tenant' => $this->company->slug])->assertExitCode(0);
         $this->assertSame(DomainStatus::Expired, Domain::where('fqdn', 'alive.gr')->sole()->status);
+    }
+
+    public function test_reimport_with_the_same_past_date_still_lapses_and_a_renewal_unexpires(): void
+    {
+        // Direction 1: imported while still valid, lapses later, re-imported
+        // with the SAME (unrenewed) date — must not stay «Ενεργό» forever.
+        $tld = DomainTld::create(['company_id' => $this->company->id, 'tld' => 'gr', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'sld' => 'stale', 'tld' => 'gr', 'fqdn' => 'stale.gr',
+            'expires_at' => today()->subMonth()->toDateString(), 'status' => 'active',
+        ]);
+        $path = $this->csv("domain;λήξη\nstale.gr;".today()->subMonth()->format('d/m/Y'));
+        $this->artisan('domains:import-csv', ['file' => $path, '--tenant' => $this->company->slug])->assertExitCode(0);
+        $this->assertSame(DomainStatus::Expired, Domain::where('fqdn', 'stale.gr')->sole()->status);
+
+        // Direction 2: an Expired row renewed at grweb (future expiry in the
+        // fresh export) un-expires — nothing else will ever promote a .gr row.
+        $path2 = $this->csv("domain;λήξη\nstale.gr;31/12/2099");
+        $this->artisan('domains:import-csv', ['file' => $path2, '--tenant' => $this->company->slug])->assertExitCode(0);
+        $stale = Domain::where('fqdn', 'stale.gr')->sole();
+        $this->assertSame(DomainStatus::Active, $stale->status);
+        $this->assertSame('2099-12-31', $stale->expires_at->toDateString());
     }
 
     public function test_operator_terminal_rows_are_frozen_for_the_csv_too(): void

@@ -64,8 +64,8 @@ class ImportDomainsCsv extends Command
         $counts = $import->import($company, $rows, fn (string $m) => $this->warn('  ⚠ '.$m));
 
         $this->info(
-            "{$company->slug}: {$counts['created']} νέα (αδέσποτα), {$counts['updated']} ενημερώσεις λήξης, ".
-            "{$counts['unchanged']} αμετάβλητα, {$counts['skipped']} παραλείφθηκαν (tombstones/διαγραμμένα TLD), ".
+            "{$company->slug}: {$counts['created']} νέα (αδέσποτα), {$counts['updated']} ενημερώσεις, ".
+            "{$counts['unchanged']} αμετάβλητα, {$counts['skipped']} παραλείφθηκαν (tombstones/διαγραμμένα TLD/παγωμένα), ".
             "{$counts['invalid']} μη έγκυρες γραμμές."
         );
 
@@ -115,11 +115,13 @@ class ImportDomainsCsv extends Command
             $expiresIdx = $this->resolveColumn($expiresOpt, $hasHeader ? $header : null, '/λήξη|ληξη|expir|renewal|due/iu');
 
             // An EXPLICIT column that resolves to nothing (unknown header name
-            // or an index past the file's width) is a typo — error out, never
-            // silently import the whole file without the column it named.
+            // or an index past the header's width) is a typo — error out, never
+            // silently import the whole file without the column it named. The
+            // width check applies only WITH a header: a headerless file may be
+            // ragged, and line 1's values are data, not column names.
             foreach ([['--domain-col', $domainOpt, $domainIdx], ['--expires-col', $expiresOpt, $expiresIdx]] as [$flag, $opt, $idx]) {
-                if ($opt !== '' && ($idx === null || $idx >= count($header))) {
-                    $this->error("Η στήλη {$flag}={$opt} δεν υπάρχει στο αρχείο (βρέθηκαν ".count($header).' στήλες: '.implode(', ', $header).').');
+                if ($opt !== '' && ($idx === null || ($hasHeader && $idx >= count($header)))) {
+                    $this->error("Η στήλη {$flag}={$opt} δεν υπάρχει στο αρχείο".($hasHeader ? ' (headers: '.implode(', ', $header).')' : '').'.');
 
                     return null;
                 }

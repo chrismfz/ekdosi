@@ -95,8 +95,10 @@ class DomainImportService
             // Advance by the PAGE size and stop on the RAW row count — rows
             // the adapter couldn't shape were still consumed server-side, so
             // stopping on count($records) would silently truncate the account.
+            // max() guards an adapter that forgot to pass rawCount (its
+            // default 0 would otherwise stop the pager after a FULL page).
             $offset += self::PAGE_SIZE;
-            if ($result->rawCount < self::PAGE_SIZE) {
+            if (max($result->rawCount, count($result->records)) < self::PAGE_SIZE) {
                 break;
             }
             if ($result->total !== null && $offset >= $result->total) {
@@ -167,6 +169,7 @@ class DomainImportService
             // sync refuses to touch these and so does the import — the frozen
             // expiry/NS snapshot is historical record (blocksSync parity).
             $counts['skipped']++;
+            $warn("Παράλειψη {$fqdn}: κατάσταση «{$domain->status->getLabel()}» — παγωμένο (ιστορικό record).");
 
             return;
         }

@@ -58,7 +58,7 @@ class ImportRegistrarDomains extends Command
                 $ran++;
                 try {
                     $counts = $import->import($company, $connection, fn (string $m) => $this->warn('  ⚠ '.$m));
-                    $this->info("{$company->slug} · «{$connection->label}»: {$counts['created']} νέα (αδέσποτα), {$counts['updated']} υπάρχοντα ενημερώθηκαν, {$counts['skipped']} παραλείφθηκαν (tombstones/διαγραμμένα TLD), {$counts['contacts']} επαφές.");
+                    $this->info("{$company->slug} · «{$connection->label}»: {$counts['created']} νέα (αδέσποτα), {$counts['updated']} υπάρχοντα ενημερώθηκαν, {$counts['skipped']} παραλείφθηκαν (tombstones/διαγραμμένα TLD/παγωμένα), {$counts['contacts']} επαφές.");
                 } catch (\Throwable $e) {
                     // One broken connection must not stall the rest of the run.
                     $failures++;
