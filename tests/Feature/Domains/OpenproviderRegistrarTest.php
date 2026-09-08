@@ -63,7 +63,9 @@ class OpenproviderRegistrarTest extends TestCase
         $methods = array_map('strtolower', get_class_methods(OpenproviderRegistrar::class));
         $this->assertContains('renew', $methods, 'A3a: renew() is a landed write surface');
         $this->assertContains('register', $methods, 'A3b: register() is a landed write surface');
-        foreach (['transfer', 'requestdelete', 'setnameservers', 'setcontacts', 'setlock', 'setdnssec'] as $forbidden) {
+        $this->assertContains('transferin', $methods, 'A3c: transferIn() is a landed write surface');
+        $this->assertContains('geteppcode', $methods, 'A3c: getEppCode() (read, transfer-out aid) landed');
+        foreach (['requestdelete', 'setnameservers', 'setcontacts', 'setlock', 'setdnssec'] as $forbidden) {
             $this->assertNotContains($forbidden, $methods, "adapter must not expose {$forbidden}() before its A3 slice");
         }
     }

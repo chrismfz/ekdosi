@@ -87,6 +87,16 @@ class DomainSyncService
             'last_synced_at' => Carbon::now(),
             'sync_error' => null,
         ];
+        // §6.3: a PENDING request whose registrar record turned tombstone
+        // (e.g. Openprovider FAI) means the transfer/registration FAILED at
+        // the registry — surface it on the row (the ⚠ in the View); the
+        // status stays pending for the operator's next move.
+        if ($result->deadRecord
+            && in_array($domain->status, [DomainStatus::PendingTransfer, DomainStatus::PendingRegister], true)) {
+            $updates['sync_error'] = 'Η αίτηση (μεταφορά/καταχώρηση) απέτυχε στον registrar'
+                .($result->rawStatus !== null ? ' (κατάσταση '.$result->rawStatus.')' : '')
+                .' — χειριστείτε το από το domain.';
+        }
         if ($result->expiresAt !== null) {
             $updates['expires_at'] = $result->expiresAt;
         }
@@ -106,6 +116,12 @@ class DomainSyncService
         // Deleted may be promoted back, e.g. redemption restore → ACT).
         $frozen = $domain->status instanceof DomainStatus && $domain->status->blocksSync();
         $newStatus = $result->status;
+        // OP's REQ/PEN covers BOTH create and transfer requests — a pending
+        // TRANSFER row must never be demoted to «Εκκρεμεί καταχώρηση»: the
+        // in-flight request IS the transfer (§6.3).
+        if ($newStatus === DomainStatus::PendingRegister && $domain->status === DomainStatus::PendingTransfer) {
+            $newStatus = null;
+        }
         // Openprovider keeps reporting ACT past the expiry date — derive the
         // documented active→expired transition from the REGISTRAR expiry so a
         // lapsed domain never sits in the «Ενεργά» tab (docs §6.5; the full

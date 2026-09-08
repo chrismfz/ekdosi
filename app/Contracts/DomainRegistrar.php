@@ -102,4 +102,22 @@ interface DomainRegistrar
      * RuntimeException on transport/API failure.
      */
     public function register(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult;
+
+    /**
+     * WRITE (A3c): start an INBOUND transfer (auth code from the losing
+     * registrar) — REAL MONEY (gTLD transfers charge one renewal year).
+     * Callers go through DomainTransferService ONLY. Async by nature: the
+     * result usually carries a pending status; the nightly sync drives the
+     * §6.3 state machine to completion. Throws DomainRegistrarNotConfigured
+     * on an API-less registrar; RuntimeException on transport/API failure.
+     */
+    public function transferIn(Domain $domain, string $authCode, DomainRegistrarCredentials $credentials): DomainSyncResult;
+
+    /**
+     * READ (A3c): the domain's EPP/auth code — the transfer-OUT aid (§6.3:
+     * outgoing is operator-gated v1). Sensitive: callers must never persist
+     * it; the audit row records only THAT it was retrieved. Null when the
+     * registrar has none for this domain.
+     */
+    public function getEppCode(Domain $domain, DomainRegistrarCredentials $credentials): ?string;
 }

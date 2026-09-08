@@ -127,6 +127,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (ok/adopted/failed, refusals included) στο API history. Adapter: ensure reusable contact
   handles (`POST /v1beta/customers`, τα υπάρχοντα δεν ξανα-δημιουργούνται ποτέ — persist στο
   contact) → `POST /v1beta/domains` με **autorenew πάντα off** (το billing ρολόι είναι δικό μας).
+- **Domains — A3c: εισερχόμενες μεταφορές + κωδικός EPP.** Κουμπί **«Μεταφορά στον registrar»**
+  σε domains «Εκκρεμεί μεταφορά» (§6.3): auth code στο modal (password field), `POST
+  /v1beta/domains/transfer` (period 1, autorenew off), **ασύγχρονο** — το row μένει «Εκκρεμεί
+  μεταφορά» και το nightly sync ολοκληρώνει (ACT → Active+λήξη) ή **⚠-φλαγκάρει** την αποτυχία
+  (FAI → sync_error, το status μένει για τον operator). Adopt-on-retry όπως στο register (probe
+  πρώτα — in-flight/ολοκληρωμένη μεταφορά υιοθετείται, ποτέ δεύτερη χρέωση· FAI tombstone →
+  fresh restart). **Ο auth code δεν γράφεται ΠΟΤΕ σε log.** Κουμπί **«Κωδικός EPP»**
+  (transfer-out aid, operator-gated §6.3): ανάκτηση με audit log ΧΩΡΙΣ τον κωδικό (persistent
+  notification στον operator). Sync fix: το OP `REQ` δεν υποβιβάζει πλέον «Εκκρεμεί μεταφορά»
+  σε «Εκκρεμεί καταχώρηση» (κάλυπτε και τα δύο). Κοινό `createDomainObject` για register+transfer.
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

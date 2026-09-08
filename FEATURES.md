@@ -944,9 +944,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   operator-gated (post-payment πρακτική), availability-first, **adopt-on-retry** (κατειλημμένο
   αλλά δικό μας = υιοθέτηση, όχι δεύτερη χρέωση), guards (registrant contact, ≥2 NS, lock),
   handles reusable (ensure → persist), autorenew πάντα off στον registrar, όλα στο API history.
-- **Επόμενα:** A3c transfer in/out + Get EPP code · A3d NS/contacts/DNSSEC/lock writes · WHMCS
-  linkage hint (προαιρετικό, §9) · margin engine (αν χρειαστεί) · A4 grEPP (+ Recall 5 ημερών
-  .gr) · A5 reconciliation · export/import των υπόλοιπων domain tables (βλ. `docs/BACKLOG.md`).
+- **Μεταφορές + κωδικός EPP (A3c, SHIPPED):** «Μεταφορά στον registrar» σε pending-transfer
+  domains — async §6.3 (nightly sync ολοκληρώνει ή ⚠-φλαγκάρει το FAI), adopt-on-retry, ο auth
+  code δεν λογκάρεται ποτέ· «Κωδικός EPP» (transfer-out aid) με audit ΧΩΡΙΣ τον κωδικό.
+- **Επόμενα:** A3d NS/contacts/DNSSEC/lock writes · WHMCS linkage hint (προαιρετικό, §9) ·
+  margin engine (αν χρειαστεί) · A4 grEPP (+ Recall 5 ημερών .gr) · A5 reconciliation ·
+  export/import των υπόλοιπων domain tables (βλ. `docs/BACKLOG.md`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

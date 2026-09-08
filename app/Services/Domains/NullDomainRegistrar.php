@@ -85,4 +85,18 @@ class NullDomainRegistrar implements DomainRegistrar
             'Ο registrar «manual» δεν έχει API — η καταχώρηση γίνεται χειροκίνητα στο portal του registrar (ενημερώστε μετά λήξη/στοιχεία στο domain).'
         );
     }
+
+    public function transferIn(Domain $domain, string $authCode, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — η μεταφορά γίνεται χειροκίνητα στο portal του registrar (ενημερώστε μετά το domain).'
+        );
+    }
+
+    public function getEppCode(Domain $domain, DomainRegistrarCredentials $credentials): ?string
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — πάρτε τον κωδικό EPP από το portal του registrar.'
+        );
+    }
 }

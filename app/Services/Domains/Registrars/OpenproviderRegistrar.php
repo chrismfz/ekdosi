@@ -187,11 +187,66 @@ class OpenproviderRegistrar implements DomainRegistrar
         if ($years < 1) {
             throw new RuntimeException('Μη έγκυρη διάρκεια καταχώρησης: '.$years);
         }
+
+        return $this->createDomainObject($domain, $credentials, '/v1beta/domains', ['period' => $years]);
+    }
+
+    /**
+     * WRITE (A3c): start an INBOUND transfer — POST /v1beta/domains/transfer
+     * with the losing registrar's auth code. Same money discipline as
+     * register (gTLD transfers charge a renewal year): ONLY
+     * DomainTransferService calls this. Async: the response usually carries a
+     * pending status — the nightly sync drives §6.3 to completion.
+     */
+    public function transferIn(Domain $domain, string $authCode, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        if (trim($authCode) === '') {
+            throw new RuntimeException('Ο κωδικός EPP/auth είναι κενός — απαιτείται για τη μεταφορά.');
+        }
+
+        return $this->createDomainObject($domain, $credentials, '/v1beta/domains/transfer', [
+            'auth_code' => trim($authCode),
+            'period' => 1, // gTLD transfers extend one year — never more from this path
+        ]);
+    }
+
+    /**
+     * READ (A3c): the EPP/auth code — the transfer-out aid. NEVER persisted
+     * by callers; the audit row records only the retrieval.
+     */
+    public function getEppCode(Domain $domain, DomainRegistrarCredentials $credentials): ?string
+    {
+        $id = $domain->registrar_domain_id !== null && trim($domain->registrar_domain_id) !== ''
+            ? $domain->registrar_domain_id
+            : null;
+        if ($id === null) {
+            $data = $this->fetchDomainData($domain, $credentials);
+            $id = isset($data['id']) && (string) $data['id'] !== '' ? (string) $data['id'] : null;
+        }
+        if ($id === null) {
+            throw new RuntimeException('Το Openprovider δεν επέστρεψε id για το '.$domain->fqdn.' — αδύνατη η ανάκτηση κωδικού EPP.');
+        }
+
+        $code = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id).'/authcode')->json('data.auth_code');
+
+        return is_string($code) && $code !== '' ? $code : null;
+    }
+
+    /**
+     * Shared create-shaped write (register + transfer-in): ensure handles,
+     * collect valid nameservers, POST, shape the post-charge truth. From the
+     * POST on the registrar HAS charged — a malformed body must never surface
+     * as a failure (the nightly sync lands the rest).
+     *
+     * @param  array<string, mixed>  $extra  operation-specific payload fields
+     */
+    private function createDomainObject(Domain $domain, DomainRegistrarCredentials $credentials, string $path, array $extra): DomainSyncResult
+    {
         [$name, $extension] = $this->splitFqdn($domain->fqdn);
 
         $handles = $this->ensureHandles($domain, $credentials);
         if (! isset($handles['registrant'])) {
-            throw new RuntimeException("Το {$domain->fqdn} δεν έχει επαφή registrant — απαιτείται για την καταχώρηση.");
+            throw new RuntimeException("Το {$domain->fqdn} δεν έχει επαφή registrant — απαιτείται για την ενέργεια στον registrar.");
         }
 
         $nameservers = $domain->nameservers->pluck('host')
@@ -201,20 +256,21 @@ class OpenproviderRegistrar implements DomainRegistrar
             ->values()
             ->all();
 
-        $data = $this->request($credentials, 'POST', '/v1beta/domains', [
+        $payload = array_merge([
             'domain' => ['name' => $name, 'extension' => $extension],
-            'period' => $years,
             'owner_handle' => $handles['registrant'],
             'admin_handle' => $handles['admin'] ?? $handles['registrant'],
             'tech_handle' => $handles['tech'] ?? $handles['registrant'],
             'billing_handle' => $handles['billing'] ?? $handles['registrant'],
             'autorenew' => 'off',
-            'name_servers' => $nameservers,
-        ])->json('data');
+        ], $extra);
+        if ($nameservers !== []) {
+            // A transfer may deliberately keep the current delegation — send
+            // nameservers only when the row carries them.
+            $payload['name_servers'] = $nameservers;
+        }
 
-        // From here on the registrar HAS charged — shape whatever truth the
-        // response carries; a malformed body must never surface as a failed
-        // registration (the nightly sync lands the rest).
+        $data = $this->request($credentials, 'POST', $path, $payload)->json('data');
         $base = is_array($data) ? $this->syncResultFrom($data) : new DomainSyncResult;
 
         return new DomainSyncResult(
@@ -224,6 +280,7 @@ class OpenproviderRegistrar implements DomainRegistrar
             status: $base->status,
             rawStatus: $base->rawStatus,
             contactHandles: $handles + $base->contactHandles,
+            deadRecord: $base->deadRecord,
         );
     }
 

@@ -10,8 +10,10 @@ use App\Services\Domains\DomainImportService;
 use App\Services\Domains\DomainRegistrationService;
 use App\Services\Domains\DomainRenewalService;
 use App\Services\Domains\DomainSyncService;
+use App\Services\Domains\DomainTransferService;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 
@@ -67,6 +69,74 @@ class ViewDomain extends ViewRecord
                         ->body('Λήξη: '.($this->record->expires_at?->format('d/m/Y') ?? 'θα έρθει με το επόμενο sync').'.')
                         ->success()->send();
                     $this->refreshFormData(['expires_at', 'status', 'registrar_domain_id', 'registered_at', 'last_synced_at', 'sync_error']);
+                }),
+            // A3c: inbound transfer — REAL charge (gTLD transfers add a
+            // renewal year). Async (§6.3): the row stays «Εκκρεμεί μεταφορά»
+            // and the nightly sync completes/flags it.
+            Action::make('transferInAtRegistrar')
+                ->label('Μεταφορά στον registrar')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('warning')
+                ->authorize('update')
+                ->visible(fn (): bool => ! $this->record->trashed()
+                    && $this->record->status === DomainStatus::PendingTransfer
+                    && app(DomainSyncService::class)->isSyncable($this->record))
+                ->schema([
+                    TextInput::make('auth_code')
+                        ->label('Κωδικός EPP/auth (από τον τρέχοντα registrar)')
+                        ->required()
+                        ->password()
+                        ->revealable(),
+                ])
+                ->modalHeading('Έναρξη εισερχόμενης μεταφοράς;')
+                ->modalDescription(fn (): string => "Θα ζητηθεί μεταφορά του {$this->record->fqdn} στον λογαριασμό σας."
+                    .' ΧΡΕΩΝΕΙ τον registrar (οι gTLD μεταφορές προσθέτουν 1 έτος). Η ολοκλήρωση είναι ασύγχρονη —'
+                    .' το nightly sync θα ενημερώσει την κατάσταση. Αν έχει ήδη ξεκινήσει (retry), θα υιοθετηθεί χωρίς δεύτερη χρέωση.')
+                ->action(function (array $data): void {
+                    try {
+                        $log = app(DomainTransferService::class)->transferIn($this->record, (string) $data['auth_code']);
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('Η μεταφορά δεν ξεκίνησε.')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
+                    $this->record->refresh();
+                    Notification::make()
+                        ->title($log->status === DomainRegistrarLog::STATUS_ADOPTED
+                            ? 'Η μεταφορά ήταν ήδη σε εξέλιξη/ολοκληρωμένη — υιοθετήθηκε η κατάσταση.'
+                            : 'Η μεταφορά ξεκίνησε.')
+                        ->body('Το nightly sync θα παρακολουθεί την πορεία της (ή πατήστε «Συγχρονισμός»).')
+                        ->success()->send();
+                    $this->refreshFormData(['expires_at', 'status', 'registrar_domain_id', 'last_synced_at', 'sync_error']);
+                }),
+            // A3c: the transfer-OUT aid (§6.3 — outgoing stays operator-gated
+            // v1): retrieve the EPP code, audit-logged WITHOUT the code.
+            Action::make('eppCode')
+                ->label('Κωδικός EPP')
+                ->icon('heroicon-o-key')
+                ->color('gray')
+                ->authorize('update')
+                ->visible(fn (): bool => ! $this->record->trashed()
+                    && $this->record->status !== DomainStatus::PendingRegister
+                    && $this->record->status !== DomainStatus::PendingTransfer
+                    && app(DomainSyncService::class)->isSyncable($this->record))
+                ->requiresConfirmation()
+                ->modalHeading('Ανάκτηση κωδικού EPP;')
+                ->modalDescription('Ο κωδικός EPP επιτρέπει τη ΜΕΤΑΦΟΡΑ του domain σε άλλον registrar. Η ανάκτηση καταγράφεται στο ιστορικό API (χωρίς τον κωδικό).')
+                ->action(function (): void {
+                    try {
+                        $code = app(DomainTransferService::class)->eppCode($this->record);
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('Αποτυχία ανάκτησης κωδικού EPP.')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
+                    Notification::make()
+                        ->title("Κωδικός EPP — {$this->record->fqdn}")
+                        ->body($code)
+                        ->info()
+                        ->persistent()
+                        ->send();
                 }),
             // A3a: the registrar-side renew (REAL charge at the registrar) —
             // goes through DomainRenewalService (§6.6 sync-first adopt guard,

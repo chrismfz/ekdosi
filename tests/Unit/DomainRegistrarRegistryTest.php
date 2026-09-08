@@ -155,4 +155,14 @@ class FakeDomainRegistrar implements DomainRegistrar
     {
         return new DomainSyncResult(expiresAt: '2028-01-01', registrarDomainId: '1');
     }
+
+    public function transferIn(Domain $domain, string $authCode, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        return new DomainSyncResult(registrarDomainId: '1', rawStatus: 'REQ');
+    }
+
+    public function getEppCode(Domain $domain, DomainRegistrarCredentials $credentials): ?string
+    {
+        return 'fake-code';
+    }
 }
