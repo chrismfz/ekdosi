@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\ServiceContract;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -85,7 +86,12 @@ class DomainRenewalService
                 'company_id' => $domain->company_id, 'domain_id' => $domain->id,
                 'registrar_connection_id' => $connection->id, 'invoice_id' => $invoice->id,
                 'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_FAILED,
-                'request' => ['fqdn' => $domain->fqdn], 'error' => $message,
+                'request' => [
+                    'fqdn' => $domain->fqdn,
+                    // Period-carrying even here — the re-issue recovery must
+                    // never find a period-less newest row (r5 finding 2).
+                    'baseline_expiry' => $periodStart ?? $contract?->next_due_date?->toDateString(),
+                ], 'error' => $message,
             ]);
 
             throw new RuntimeException($message);
@@ -97,13 +103,16 @@ class DomainRenewalService
         // between a revert and the re-issue (r3 finding: the cursor heuristic
         // alone re-opened the war story when another invoice issued in
         // between). Fallbacks: the caller-captured cursor, then the live one.
-        $prior = DomainRegistrarLog::query()
+        // Newest row that ACTUALLY carries a period — a period-less row (e.g.
+        // a legacy refusal) must not shadow an older period-carrying one.
+        $fromPrior = DomainRegistrarLog::query()
             ->where('company_id', $invoice->company_id)
             ->where('invoice_id', $invoice->id)
             ->where('action', 'renew')
             ->orderByDesc('id')
-            ->first();
-        $fromPrior = is_string($prior?->request['baseline_expiry'] ?? null) ? $prior->request['baseline_expiry'] : null;
+            ->get()
+            ->map(fn (DomainRegistrarLog $r) => $r->request['baseline_expiry'] ?? null)
+            ->first(fn ($baseline) => is_string($baseline) && $baseline !== '');
         $periodStart = $fromPrior ?? $periodStart ?? $contract->next_due_date?->toDateString();
 
         // INTENT-MATCH adopt (date-drift-proof, the second §6.6 leg): an OK
@@ -131,29 +140,47 @@ class DomainRenewalService
         // current expiry) and falls through to renew(), whose sync-backed
         // date check is the ground truth.
         if ($candidates->sum(fn (DomainRegistrarLog $r) => max(0, (int) ($r->request['years'] ?? 0))) >= $years) {
-            $covered = 0;
-            $consumedIds = [];
-            foreach ($candidates as $row) {
-                if ($covered >= $years) {
-                    break;
-                }
-                if (DomainRegistrarLog::query()->whereKey($row->id)->whereNull('invoice_id')
-                    ->update(['invoice_id' => $invoice->id]) === 1) {
-                    $consumedIds[] = $row->id;
-                    $covered += max(1, (int) ($row->request['years'] ?? 1));
-                }
-            }
-            if ($covered >= $years) {
-                return DomainRegistrarLog::create([
-                    'company_id' => $domain->company_id,
-                    'domain_id' => $domain->id,
-                    'registrar_connection_id' => $connection->id,
-                    'invoice_id' => $invoice->id,
-                    'action' => 'renew',
-                    'status' => DomainRegistrarLog::STATUS_ADOPTED,
-                    'request' => ['fqdn' => $domain->fqdn, 'years' => $years],
-                    'response' => ['consumed_log_ids' => $consumedIds],
-                ]);
+            // ATOMIC claim: claims + the ADOPTED summary commit (or vanish)
+            // together. A partial claim must NEVER persist — a claimed-but-
+            // uncovered invoice would satisfy the $already idempotency guard
+            // forever while having fewer registrar years than it billed
+            // (r5 finding 1: the regression the plain loop introduced). On
+            // insufficient coverage (a race stole rows) the rollback releases
+            // every claim back to the pool and we fall through to renew().
+            try {
+                return DB::transaction(function () use ($candidates, $years, $domain, $connection, $invoice): DomainRegistrarLog {
+                    $covered = 0;
+                    $consumedIds = [];
+                    foreach ($candidates as $row) {
+                        if ($covered >= $years) {
+                            break;
+                        }
+                        if (DomainRegistrarLog::query()->whereKey($row->id)->whereNull('invoice_id')
+                            ->update(['invoice_id' => $invoice->id]) === 1) {
+                            $consumedIds[] = $row->id;
+                            // max(0): a years-less row contributes NOTHING —
+                            // same arithmetic as the gate sum above.
+                            $covered += max(0, (int) ($row->request['years'] ?? 0));
+                        }
+                    }
+                    if ($covered < $years) {
+                        // rollback releases the claims atomically — nothing sticks
+                        throw new InsufficientAdoptCoverage;
+                    }
+
+                    return DomainRegistrarLog::create([
+                        'company_id' => $domain->company_id,
+                        'domain_id' => $domain->id,
+                        'registrar_connection_id' => $connection->id,
+                        'invoice_id' => $invoice->id,
+                        'action' => 'renew',
+                        'status' => DomainRegistrarLog::STATUS_ADOPTED,
+                        'request' => ['fqdn' => $domain->fqdn, 'years' => $years],
+                        'response' => ['consumed_log_ids' => $consumedIds],
+                    ]);
+                });
+            } catch (InsufficientAdoptCoverage) {
+                // a race stole rows — the date check below is the ground truth
             }
         }
 

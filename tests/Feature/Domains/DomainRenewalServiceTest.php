@@ -381,6 +381,44 @@ class DomainRenewalServiceTest extends TestCase
         $this->assertNull($stale->refresh()->invoice_id, 'the stale orphan stays for the A5 reconciler');
     }
 
+    public function test_period_recovery_skips_period_less_rows_and_finds_the_carrying_one(): void
+    {
+        // r5: a newest FAILED row without baseline (e.g. a yearsFor refusal
+        // from a mis-cycled era) must not shadow the older period-carrying
+        // row — recovery reads the newest row that ACTUALLY carries a period.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/77' => Http::response(['data' => $this->opDomain('2027-01-01')]),
+        ]);
+        [$domain, $contract] = $this->assignedDomain('2026-01-01');
+        $contract->forceFill(['next_due_date' => '2028-01-01'])->save(); // drifted way ahead
+        $type = InvoiceType::create(['company_id' => $this->company->id, 'code' => 'TDA', 'name' => 'ΤΔΑ', 'invcount' => 0, 'mydata_type' => '2.1']);
+        $invoice = Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $contract->id,
+            'code' => 19, 'invcode' => 'TDA19', 'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+        DomainRegistrarLog::create([ // older, period-carrying
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id, 'invoice_id' => $invoice->id,
+            'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_FAILED,
+            'request' => ['fqdn' => 'example.gr', 'years' => 1, 'baseline_expiry' => '2026-01-01', 'target_expiry' => '2027-01-01'],
+        ]);
+        DomainRegistrarLog::create([ // newest, period-less
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id, 'invoice_id' => $invoice->id,
+            'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_FAILED,
+            'request' => ['fqdn' => 'example.gr'],
+        ]);
+
+        $log = app(DomainRenewalService::class)->renewForInvoice($invoice);
+
+        // recovered baseline 2026 → target 2027 → registrar 2027 → ADOPT
+        // (the drifted cursor 2028 would have renewed for real)
+        $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
+        Http::assertNotSent(fn ($req) => str_contains($req->url(), '/renew'));
+    }
+
     public function test_reissue_recovers_the_billed_period_from_its_own_prior_log(): void
     {
         // The interleaved-invoice hole (r3 finding 1): A fails (cursor moves),

@@ -646,6 +646,13 @@ data model + phase gates: **`PLAN.md`**.
     (α) re-evaluate των renew logs με `short_of_target=null` (το post-renew re-fetch απέτυχε —
     η πραγματική λήξη ήρθε από το nightly sync μετά) και όσων `ok` έμειναν κάτω από το
     `target_expiry` τους· (β) orphan unconsumed button-renewals που δεν τιμολογήθηκαν ποτέ.
+    Επίσης P2 από το A3a gate r5 (wholesale): (γ) στο periodStart-null branch το stamping
+    window (baseline=expires_at) ανοίγει νωρίτερα από το intent window (today) σε ληγμένα
+    domains — ευθυγράμμιση σε έναν υπολογισμό· (δ) overshoot claim (3yr log σε biennial
+    invoice) δεν καταγράφει το πλεόνασμα πουθενά — ο reconciler να το εμφανίζει· (ε) τα
+    repeated refusal FAILED rows (spam του κουμπιού σε locked domain) είναι θόρυβος στο §9
+    history + ένα INSERT-throw στο refusal path αντικαθιστά το typed exception (το
+    DomainRenewalInProgress handling παρακάμπτεται) — wrap σε try/catch.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).
