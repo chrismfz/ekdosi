@@ -136,6 +136,7 @@ class OpenproviderRegistrar implements DomainRegistrar
             registrarDomainId: isset($data['id']) ? (string) $data['id'] : null,
             status: $this->mapStatus($rawStatus),
             rawStatus: $rawStatus,
+            contactHandles: $this->extractHandles($data),
         );
     }
 
@@ -279,12 +280,7 @@ class OpenproviderRegistrar implements DomainRegistrar
             }
         }
 
-        $handles = [];
-        foreach (['owner_handle' => 'registrant', 'admin_handle' => 'admin', 'tech_handle' => 'tech', 'billing_handle' => 'billing'] as $key => $type) {
-            if (is_string($result[$key] ?? null) && trim($result[$key]) !== '') {
-                $handles[$type] = trim($result[$key]);
-            }
-        }
+        $handles = $this->extractHandles($result);
 
         // OP autorenew is 'on'/'off'/'default' — only the explicit values map.
         $autoRenew = match ($result['autorenew'] ?? null) {
@@ -305,6 +301,24 @@ class OpenproviderRegistrar implements DomainRegistrar
             autoRenew: $autoRenew,
             contactHandles: $handles,
         );
+    }
+
+    /**
+     * The reusable contact handles a domain record carries — shared by the
+     * list mapper AND syncDomain (same payload shape both ways).
+     *
+     * @return array<string, string> contact type → handle
+     */
+    private function extractHandles(array $result): array
+    {
+        $handles = [];
+        foreach (['owner_handle' => 'registrant', 'admin_handle' => 'admin', 'tech_handle' => 'tech', 'billing_handle' => 'billing'] as $key => $type) {
+            if (is_string($result[$key] ?? null) && trim($result[$key]) !== '') {
+                $handles[$type] = trim($result[$key]);
+            }
+        }
+
+        return $handles;
     }
 
     /** OP returns "YYYY-MM-DD HH:MM:SS" — the date part is our clock. */

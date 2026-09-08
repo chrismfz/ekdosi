@@ -530,6 +530,11 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
   - Ό,τι δεν γίνεται assign δεν μπλοκάρει τίποτα — μένει **αδέσποτο** (`customer_id=null`, §3.4),
     εκτός billing, ορατό στο worklist.
   - Manual entry (A1) = ο τρόπος να δουλέψει το σύστημα ΠΡΙΝ καν συνδεθεί registrar.
+  - **Per-domain flow (το WHMCS idiom «γράφεις domain → φέρνει στοιχεία»):** δημιουργείς το
+    row (ή υπάρχει ήδη) → «Συγχρονισμός από registrar» στο View τραβά λήξη/NS/status/id ΚΑΙ
+    τις επαφές του (ίδιο pull, χωρίς δεύτερο fetch — `DomainSyncResult.contactHandles` →
+    `DomainImportService::refreshContacts`). Επαφές ΜΟΝΟ σε αδέσποτα (μετά την ανάθεση =
+    χώρος operator, §3.7). Τα κουμπιά Register/Transfer/Renew/EPP-code/Recall = A3/A4.
 
 ---
 
@@ -540,8 +545,8 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 | **A0** Θεμέλιο | `enable_domain_management` flag + nav-gating trait + `DomainRegistrar` contract/registry/creds/Null + `ekdosi.domains.registrars` + `domain_registrar_connections` (super_admin creds) | Ενεργοποιείς tenant → βλέπεις **κενή, gated** περιοχή «Domains» |
 | **A1** Data model + manual CRUD | Όλοι οι πίνακες + `DomainResource` (rich View) + link σε `ServiceContract` + **import** (`tbldomains`) + αδέσποτα/«Ανάθεση σε πελάτη» + Customer tab «Domains» | Το υπάρχον portfolio φορτώνεται/καταχωρείται, expiry+renewals ορατά, **μηδέν registrar API** |
 | **A2** Openprovider read-only | `checkAvailability` + WHOIS (`WhoisLookup`) + `syncDomain`/`syncTransfer` + `getTldPricing` (sandbox) | Nightly `domains:sync` + pricing-sync «ανάβουν»· καμία state-changing εγγραφή |
-| **A3** Openprovider write | register(post-pay)/renew(on-issue)/transfer(in+out, state machine)/NS/glue/contacts(handles+trade/IRTP)/DNSSEC/privacy/lock + renewal billing + grace/redemption + **idempotency + reconciler** | Πλήρης κύκλος end-to-end (sandbox→prod), operator-gated invoices |
-| **A4** grEPP (.gr) | 2ος adapter (EPP), .gr validation rules (2ετία/no-privacy/no-lock/registry-auth-code/homograph) | .gr/.ελ end-to-end· το abstraction αποδεδειγμένο (2ος registrar = adapter, όχι rewrite) |
+| **A3** Openprovider write | register(post-pay)/renew(on-issue)/transfer(in+out, state machine)/NS/glue/contacts(handles+trade/IRTP)/DNSSEC/privacy/lock + **Get EPP/auth code** (το «Get EPP Code» της WHMCS — transfer-out aid) + renewal billing + grace/redemption + **idempotency + reconciler + adopt-on-already-renewed (§6.6 BINDING)** | Πλήρης κύκλος end-to-end (sandbox→prod), operator-gated invoices |
+| **A4** grEPP (.gr) | 2ος adapter (EPP), .gr validation rules (2ετία/no-privacy/no-lock/registry-auth-code/homograph) + **Recall** (ανάκληση διαγραφής εντός **5 ημερών** — δουλεύει στο .gr, το 'Recall (5 days)' κουμπί της WHMCS/grEPP· owner-confirmed χρήσιμο) + **auth code (πληροφοριακό)** για transfer-out | .gr/.ελ end-to-end· το abstraction αποδεδειγμένο (2ος registrar = adapter, όχι rewrite) |
 | **A5** Polish | bulk availability search, portfolio dashboard, **registrar↔local reconciliation** (mirror myDATA reconcile), «Μεταφορά ιδιοκτησίας», reminders polish | Δύο clocks reconciled· worklist ασυμφωνιών |
 
 ---

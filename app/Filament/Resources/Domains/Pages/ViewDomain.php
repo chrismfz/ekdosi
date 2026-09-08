@@ -4,6 +4,7 @@ namespace App\Filament\Resources\Domains\Pages;
 
 use App\Filament\Resources\Domains\DomainResource;
 use App\Filament\Support\StageRenewalNowAction;
+use App\Services\Domains\DomainImportService;
 use App\Services\Domains\DomainSyncService;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
@@ -31,13 +32,25 @@ class ViewDomain extends ViewRecord
                 ->visible(fn (): bool => app(DomainSyncService::class)->isSyncable($this->record))
                 ->action(function (): void {
                     try {
-                        app(DomainSyncService::class)->sync($this->record);
+                        $result = app(DomainSyncService::class)->sync($this->record);
                     } catch (\Throwable $e) {
                         Notification::make()->title('Ο συγχρονισμός απέτυχε.')->body($e->getMessage())->danger()->send();
 
                         return;
                     }
-                    Notification::make()->title('Συγχρονίστηκε από τον registrar.')->success()->send();
+                    // The WHMCS per-domain flow: the same pull also refreshes
+                    // the contacts on an ΑΔΕΣΠΟΤΟ row (assign-aid) — the
+                    // service skips assigned rows (operator territory, §3.7)
+                    // and contact failures warn without failing the sync.
+                    $contacts = app(DomainImportService::class)->refreshContacts(
+                        $this->record,
+                        $result->contactHandles,
+                        fn (string $m) => Notification::make()->title($m)->warning()->send(),
+                    );
+                    Notification::make()
+                        ->title('Συγχρονίστηκε από τον registrar.')
+                        ->body($contacts > 0 ? "Ενημερώθηκαν και {$contacts} επαφές." : null)
+                        ->success()->send();
                     $this->refreshFormData(['expires_at', 'status', 'registrar_domain_id', 'last_synced_at', 'sync_error']);
                 }),
             EditAction::make(),

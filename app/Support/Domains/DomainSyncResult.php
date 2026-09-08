@@ -18,6 +18,10 @@ final class DomainSyncResult
     /**
      * @param  ?string  $expiresAt  Y-m-d, null when the registrar did not report one.
      * @param  list<string>  $nameservers
+     * @param  array<string, string>  $contactHandles  contact type → reusable registrar
+     *                                                 handle, when the same pull carried them (Openprovider does) — lets the
+     *                                                 per-domain «Συγχρονισμός» also refresh contacts on unassigned rows
+     *                                                 without a second domain fetch. [] = not reported.
      */
     public function __construct(
         public readonly ?string $expiresAt = null,
@@ -25,5 +29,6 @@ final class DomainSyncResult
         public readonly ?string $registrarDomainId = null,
         public readonly ?DomainStatus $status = null,
         public readonly ?string $rawStatus = null,
+        public readonly array $contactHandles = [],
     ) {}
 }

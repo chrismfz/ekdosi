@@ -209,12 +209,56 @@ class DomainImportService
             rawStatus: $record->rawStatus,
         ));
 
-        // Contacts: assign-aid — only while the domain is unassigned (after
-        // assignment the rows are operator territory and may diverge, §3.7).
-        if ($domain->customer_id !== null || $record->contactHandles === []) {
-            return;
+        $counts['contacts'] += $this->applyContacts($domain, $record->contactHandles, $adapter, $credentials, $contactCache, $warn);
+    }
+
+    /**
+     * Per-domain convenience (the View «Συγχρονισμός» flow): resolve the
+     * domain's own routing and pull the given handles. Same rules as the bulk
+     * import — unassigned rows only, failures warn and never throw.
+     *
+     * @param  array<string, string>  $handles  contact type → handle
+     */
+    public function refreshContacts(Domain $domain, array $handles, ?callable $warn = null): int
+    {
+        $connection = $domain->effectiveRegistrarConnection();
+        if ($connection === null || ! $this->isImportable($connection)) {
+            return 0;
         }
-        foreach ($record->contactHandles as $type => $handle) {
+        $cache = [];
+
+        return $this->applyContacts(
+            $domain,
+            $handles,
+            $this->factory->for($connection),
+            $this->factory->credentialsFor($connection),
+            $cache,
+            $warn ?? static function (string $message): void {},
+        );
+    }
+
+    /**
+     * Resolve handles → upsert domain_contacts. Assign-aid ONLY while the
+     * domain is unassigned (after assignment the rows are operator territory
+     * and may diverge, §3.7). Returns the contact rows written.
+     *
+     * @param  array<string, string>  $handles
+     * @param  array<string, RegistrarContact|false>  $contactCache
+     */
+    private function applyContacts(
+        Domain $domain,
+        array $handles,
+        DomainRegistrar $adapter,
+        DomainRegistrarCredentials $credentials,
+        array &$contactCache,
+        callable $warn,
+    ): int {
+        if ($domain->customer_id !== null || $handles === []) {
+            return 0;
+        }
+
+        $written = 0;
+        foreach ($handles as $type => $handle) {
             if (! in_array($type, DomainContact::TYPES, true)) {
                 continue;
             }
@@ -223,7 +267,7 @@ class DomainImportService
                     $contactCache[$handle] = $adapter->getContact($handle, $credentials) ?? false;
                 } catch (\RuntimeException $e) {
                     $contactCache[$handle] = false; // don't re-hit a broken handle this run
-                    $warn("Επαφή {$handle} ({$fqdn}): ".$e->getMessage());
+                    $warn("Επαφή {$handle} ({$domain->fqdn}): ".$e->getMessage());
                 }
             }
             $contact = $contactCache[$handle];
@@ -233,7 +277,7 @@ class DomainImportService
             DomainContact::updateOrCreate(
                 ['domain_id' => $domain->id, 'type' => $type],
                 [
-                    'company_id' => $company->id,
+                    'company_id' => $domain->company_id,
                     'name' => $contact->name,
                     'org' => $contact->org,
                     'email' => $contact->email,
@@ -246,7 +290,9 @@ class DomainImportService
                     'registrar_contact_handle' => $contact->handle,
                 ],
             );
-            $counts['contacts']++;
+            $written++;
         }
+
+        return $written;
     }
 }

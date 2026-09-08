@@ -239,6 +239,39 @@ class DomainRegistrarImportTest extends TestCase
         $this->assertStringContainsString('BROKEN-1', $warnings[0]);
     }
 
+    public function test_refresh_contacts_serves_the_per_domain_view_flow(): void
+    {
+        // The WHMCS-style per-domain flow: «Συγχρονισμός» on an ΑΔΕΣΠΟΤΟ row
+        // also pulls its contacts; an assigned row is operator territory.
+        $tld = DomainTld::create([
+            'company_id' => $this->company->id, 'tld' => 'gr',
+            'registrar_connection_id' => $this->connection->id, 'is_active' => true,
+        ]);
+        $unassigned = Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'sld' => 'stray', 'tld' => 'gr', 'fqdn' => 'stray.gr', 'expires_at' => '2027-01-01',
+        ]);
+        $customer = Customer::create(['company_id' => $this->company->id, 'name' => 'Πελάτης']);
+        $assigned = Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id, 'customer_id' => $customer->id,
+            'sld' => 'owned', 'tld' => 'gr', 'fqdn' => 'owned.gr', 'expires_at' => '2027-01-01',
+        ]);
+
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/customers/AB1-GR' => Http::response(['data' => [
+                'name' => ['first_name' => 'Νίκος', 'last_name' => 'Π.'], 'email' => 'n@x.gr',
+            ]]),
+        ]);
+
+        $import = app(DomainImportService::class);
+        $this->assertSame(1, $import->refreshContacts($unassigned, ['registrant' => 'AB1-GR']));
+        $this->assertSame('Νίκος Π.', $unassigned->contacts()->where('type', 'registrant')->sole()->name);
+
+        $this->assertSame(0, $import->refreshContacts($assigned, ['registrant' => 'AB1-GR']), 'assigned = operator territory');
+        $this->assertSame(0, $assigned->contacts()->count());
+    }
+
     public function test_an_operator_terminal_row_is_never_rewritten_by_import(): void
     {
         $tld = DomainTld::create([

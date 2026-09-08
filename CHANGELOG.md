@@ -98,6 +98,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   APP_KEY του στόχου στο import. Idempotent ανά (company, registrar, label) με consumed-tracking
   (διπλές ταυτότητες → διαφορετικά rows)· tombstones δεν ταξιδεύουν και δεν ανασταίνονται·
   additive bundle schema (παλιά bundles εισάγονται κανονικά).
+- **Domains — «Συγχρονισμός» με επαφές (το WHMCS per-domain flow).** Το κουμπί «Συγχρονισμός
+  από registrar» στο View τραβά πλέον ΚΑΙ τις registrant/admin/tech/billing επαφές του domain
+  (ίδιο pull — τα handles έρχονται με το ίδιο payload), μόνο σε **αδέσποτα** rows (μετά την
+  ανάθεση οι επαφές είναι χώρος του operator). Αποτυχία επαφής = warning, δεν ρίχνει το sync.
+  Στο design μπήκαν ρητά για A3/A4 τα **Get EPP/auth code** και το **Recall** (.gr ανάκληση
+  διαγραφής εντός 5 ημερών) — owner-confirmed χρήσιμα από τη WHMCS χρήση.
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

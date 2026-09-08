@@ -78,11 +78,16 @@ class DomainSyncTest extends TestCase
                 'status' => 'ACT',
                 'expiration_date' => '2027-06-15 00:00:00',
                 'name_servers' => [['name' => 'NS1.Myip.GR'], ['name' => 'ns2.myip.gr']],
+                'owner_handle' => 'AB1-GR',
+                'tech_handle' => 'CD2-GR',
             ]]]]),
         ]);
 
         $domain = $this->domain(['status' => 'pending_register']);
-        app(DomainSyncService::class)->sync($domain);
+        $result = app(DomainSyncService::class)->sync($domain);
+        // The same pull carries the contact handles (feeds the per-domain
+        // contacts refresh on the View action — no second domain fetch).
+        $this->assertSame(['registrant' => 'AB1-GR', 'tech' => 'CD2-GR'], $result->contactHandles);
         $domain->refresh();
 
         $this->assertSame('2027-06-15', $domain->expires_at->toDateString());
