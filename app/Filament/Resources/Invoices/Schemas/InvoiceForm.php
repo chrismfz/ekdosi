@@ -495,7 +495,11 @@ class InvoiceForm
                     // τιμολογείς ρητά άλλη εγκατάσταση του ίδιου ΑΦΜ. Γράψε και τη
                     // διεύθυνση της εγκατάστασης στα πεδία διεύθυνσης παραπάνω.
                     TextInput::make('counterpart_branch')->label('Εγκατάσταση πελάτη (myDATA)')
-                        ->numeric()->minValue(0)->step(1)->default(0)
+                        ->numeric()->minValue(0)->maxValue(65535)->step(1)->default(0)
+                        // NOT NULL column: an empty field (operator cleared it) means
+                        // «έδρα» = 0, never NULL. Also bounds it to the unsignedSmallInt
+                        // range so a fat-fingered value can't 500 on save.
+                        ->dehydrateStateUsing(fn ($state) => (int) ($state ?: 0))
                         ->helperText('0 = έδρα. Άλλαξέ το μόνο για τιμολόγηση συγκεκριμένου υποκαταστήματος του ίδιου ΑΦΜ.'),
                 ]),
 

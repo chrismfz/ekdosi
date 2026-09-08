@@ -996,6 +996,25 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->assertStringNotContainsString('00000', $xml);
     }
 
+    public function test_counterpart_branch_is_forced_to_zero_for_a_foreign_counterpart(): void
+    {
+        // A branch is a Greek Μητρώο establishment; a foreign party has none. Even
+        // if an operator set one, the filed foreign Counterpart must carry branch 0,
+        // not the Greek-only establishment number.
+        $this->invoiceType->forceFill(['mydata_type' => '1.2'])->save();
+        $this->customer->forceFill([
+            'country' => 'DE', 'address1' => 'Hauptstrasse 1', 'city' => 'Berlin', 'postcode' => '10115',
+        ])->save();
+        $inv = $this->makeInvoice();
+        $inv->update(['counterpart_branch' => 7]);
+        $this->standardLine($inv);
+
+        $xml = (new MyDataSubmitter($this->tenant))->previewXml($inv->fresh('lines'))->request;
+
+        $this->assertMatchesRegularExpression('#<counterpart>.*?<branch>0</branch>.*?</counterpart>#s', $xml);
+        $this->assertDoesNotMatchRegularExpression('#<counterpart>.*?<branch>7</branch>.*?</counterpart>#s', $xml);
+    }
+
     public function test_no_header_discount_keeps_raw_line_values(): void
     {
         // Regression for the sandbox-validated shape: with no header discount

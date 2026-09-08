@@ -121,9 +121,12 @@ class InvoiceInfolist
 
                         // Only shown when it names a real branch — 0 (έδρα) is the
                         // silent default and would just be noise on every document.
+                        // Hidden on retail (11.x): those file NO counterpart, so a
+                        // branch there never reaches AADE and would mislead on a legal view.
                         TextEntry::make('counterpart_branch')
                             ->label('Εγκατάσταση πελάτη (myDATA)')
-                            ->visible(fn ($record) => (int) ($record->counterpart_branch ?? 0) > 0),
+                            ->visible(fn ($record) => (int) ($record->counterpart_branch ?? 0) > 0
+                                && ! $record->filesNoCounterpart()),
                     ])
                     ->columns(3),
 

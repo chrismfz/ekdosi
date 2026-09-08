@@ -96,6 +96,10 @@ class Invoice extends Model
             'code', 'customer_id', 'invoice_type_id', 'issued_at', 'local_status',
             'cancel_reason', 'header_discount_percent', 'net_total', 'gross_total',
             'withhold_amount', 'withhold_category', 'payment_method_id',
+            // Operator intent on the filed legal party (which customer establishment) —
+            // audit-worthy like header_discount_percent; logOnlyDirty means it only
+            // records a row on a real change, never for the default-0 no-op.
+            'counterpart_branch',
             'mydata_state', 'mydata_mark',
         ];
     }
