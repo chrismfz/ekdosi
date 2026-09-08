@@ -198,6 +198,16 @@ domestic-services tenants**. Not deleted — parked with the trigger that reacti
   1 ΑΦΜ in the whole legacy backup used it; a future child table would just populate that column.
   (ΔΑ / DeliveryNote counterpart branch stays hardcoded 0 — out of this scope; revisit if a tenant
   ever ships to a specific customer establishment on a delivery note.)
+  **Deferred P2s from the counterpart-branch review (consciously, low value for 1 rare ΑΦΜ):**
+  (i) **no in-form signal** that a branch typed for a retail (11.x) or foreign counterpart is
+  ignored (`filedCounterpartBranch()` files 0, the infolist hides it, and the helper text says so,
+  but there is no reactive warning/disable tied to the selected customer/type); (ii) **branch↔PDF
+  address can diverge** — the operator can set `counterpart_branch=5` and forget to change the
+  free-text address snapshot, so myDATA names branch 5 while the PDF prints the έδρα address (no
+  cross-field enforcement; inherent to the no-`customer_branches` design — the child table, which
+  would carry per-branch addresses and auto-fill both, is the real fix). Accepted-as-negligible:
+  the double `counterpartCountryForFiling()` resolve on a branch>0 filing (short-circuited to a
+  single column read for the branch=0 common case).
 - **B2G / POS scopes** — **PROV-012** (public contracts, All-in-one POS). Requirement is
   only that ekdosi not *claim* them — it doesn't.
 - **Offline / Transmission Failure** — **PROV-008**. «Design with InvoSign, do not
