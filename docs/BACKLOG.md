@@ -670,7 +670,11 @@ data model + phase gates: **`PLAN.md`**.
     είναι single slot που overwrite-άρεται (ίδιο pattern και στο DomainSyncService)· (ν)
     residual race δευτερολέπτων: instant retry ενώ ο OP ακόμα επεξεργάζεται >30s timed-out
     POST (χωρίς idempotency key στο OP API — cool-down μετά από timeout-flavored failure
-    θα το στένευε)· (ξ) trim-vs-'' predicate consistency στα id checks.
+    θα το στένευε)· (ξ) trim-vs-'' predicate consistency στα id checks. Από r5 (GREEN):
+    (ο) shared-account edge: no-id row του οποίου το ληγμένο όνομα ξανα-καταχωρήθηκε από
+    ΑΛΛΟΝ reseller-client στον ίδιο OP λογαριασμό → το by-name πιάνει το ξένο ACT (πάντα
+    account-scoped ambiguity· το nightly sync παγώνει Deleted πριν το rebuy στην πράξη)·
+    (π) το register() re-wrap πετά το $base->deadRecord (αδρανές — μόνο το adopt το διαβάζει).
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).

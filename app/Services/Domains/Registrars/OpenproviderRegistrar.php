@@ -45,6 +45,9 @@ class OpenproviderRegistrar implements DomainRegistrar
 
     private const TOKEN_TTL_SECONDS = 6 * 3600;
 
+    /** Tombstone statuses — a record in these represents NO ownership claim. */
+    private const DEAD_STATUSES = ['DEL', 'FAI'];
+
     /** Openprovider price block → OUR DomainTldPrice operation. */
     private const PRICE_KEYS = [
         'create_price' => 'register',
@@ -321,7 +324,7 @@ class OpenproviderRegistrar implements DomainRegistrar
             rawStatus: $rawStatus,
             contactHandles: $this->extractHandles($data),
             // DEL = deleted, FAI = failed request — tombstones, not ownership.
-            deadRecord: in_array($rawStatus, ['DEL', 'FAI'], true),
+            deadRecord: in_array($rawStatus, self::DEAD_STATUSES, true),
         );
     }
 
@@ -570,7 +573,7 @@ class OpenproviderRegistrar implements DomainRegistrar
         $candidates = is_array($results) ? array_values(array_filter($results, 'is_array')) : [];
         $first = null;
         foreach ($candidates as $candidate) {
-            if (! in_array((string) ($candidate['status'] ?? ''), ['DEL', 'FAI'], true)) {
+            if (! in_array((string) ($candidate['status'] ?? ''), self::DEAD_STATUSES, true)) {
                 $first = $candidate;
                 break;
             }
