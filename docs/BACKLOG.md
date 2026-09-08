@@ -621,6 +621,15 @@ data model + phase gates: **`PLAN.md`**.
     min_years>1 παίρνει μισό κόστος. Δεν δαγκώνει σήμερα (τα OP-routed TLDs του tenant
     είναι όλα min_years=1 — τα .gr πάνε grEPP/manual), αλλά τσεκάρεται στο go-live του
     A2 με πραγματικά credentials πριν εμπιστευτούμε κόστη πολυετών TLDs.
+    Επίσης (review A2c-1 r3, ρητές αποφάσεις — ΟΧΙ bugs): (1) TLD που ο registrar
+    επίμονα δεν κοστολογεί (κανένα reseller quote) βγάζει FAILURE σε κάθε run —
+    ΣΚΟΠΙΜΑ loud· αν εμφανιστεί στην πράξη, το silencing είναι per-TLD «skip pricing
+    sync» flag (μικρό migration). (2) Το currency-mismatch warning φωνάζει σε κάθε
+    run και για το δικό του disabled artifact row (π.χ. quote USD→EUR και πίσω) —
+    ο operator σβήνει το αχρησιμοποίητο row από τα «TLDs & τιμές» και σωπαίνει·
+    προτιμήθηκε από one-shot warning που χάνεται. (3) Το extra exists() ανά operation
+    (αντί για ένα in-memory fetch ανά TLD) — declined, ~8 μικρά queries/TLD σε
+    χειροκίνητο run δεν αξίζουν το refactor.
   - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
     billing (reuse `StageServiceRenewal`) + grace/redemption.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
