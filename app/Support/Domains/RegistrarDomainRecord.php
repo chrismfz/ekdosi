@@ -31,6 +31,9 @@ final class RegistrarDomainRecord
         public readonly ?bool $autoRenew = null,
         /** @var array<string, string> contact type (registrant|admin|tech|billing) → handle. */
         public readonly array $contactHandles = [],
+        /** Registrar-reported transfer lock / WHOIS privacy (null = not reported). */
+        public readonly ?bool $transferLock = null,
+        public readonly ?bool $whoisPrivacy = null,
     ) {}
 
     public function fqdn(): string

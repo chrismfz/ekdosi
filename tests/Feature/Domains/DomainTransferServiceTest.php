@@ -351,6 +351,26 @@ class DomainTransferServiceTest extends TestCase
         $this->assertNull($domain->sync_error, 'no request was ever made — no false «απέτυχε» flag');
     }
 
+    public function test_epp_code_config_refusals_are_audited_too(): void
+    {
+        // A3d gate r1: even the config-shaped refusals on the most
+        // credential-shaped read leave their audit row.
+        Http::fake();
+        $manual = DomainRegistrarConnection::create([
+            'company_id' => $this->company->id, 'registrar' => 'manual',
+            'is_active' => true, 'mode' => 'production', 'config' => [],
+        ]);
+        $domain = $this->pendingTransferDomain(['sld' => 'man', 'fqdn' => 'man.eu', 'status' => 'active', 'registrar_connection_id' => $manual->id]);
+
+        try {
+            app(DomainTransferService::class)->eppCode($domain);
+            $this->fail('manual routing refuses');
+        } catch (DomainRegistrarNotConfigured) {
+        }
+        Http::assertNothingSent();
+        $this->assertSame(DomainRegistrarLog::STATUS_FAILED, DomainRegistrarLog::where('action', 'epp_code')->sole()->status);
+    }
+
     public function test_epp_code_failures_are_audited_too(): void
     {
         Http::fake([

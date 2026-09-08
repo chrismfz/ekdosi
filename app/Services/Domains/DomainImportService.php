@@ -207,6 +207,8 @@ class DomainImportService
             registrarDomainId: $record->registrarDomainId,
             status: $record->status,
             rawStatus: $record->rawStatus,
+            transferLock: $record->transferLock,
+            whoisPrivacy: $record->whoisPrivacy,
         ));
 
         $counts['contacts'] += $this->applyContacts($domain, $record->contactHandles, $adapter, $credentials, $contactCache, $warn);

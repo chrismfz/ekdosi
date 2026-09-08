@@ -99,6 +99,28 @@ class DomainSyncTest extends TestCase
         $this->assertSame(['ns1.myip.gr', 'ns2.myip.gr'], $domain->nameservers()->pluck('host')->all());
     }
 
+    public function test_sync_corrects_the_lock_privacy_mirrors_from_registrar_truth(): void
+    {
+        // A3d gate r1/r2: a toggle at the registrar PANEL must not leave the
+        // local mirrors wrong forever — the sync corrects them. Explicit
+        // booleans ONLY: a non-boolean echo (string/int) never overwrites.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=example.gr' => Http::response(['data' => ['results' => [[
+                'id' => 5, 'status' => 'ACT', 'expiration_date' => '2027-06-15 00:00:00',
+                'is_locked' => true,                  // panel-toggled ON → corrects our false
+                'is_private_whois_enabled' => 'false', // NON-boolean → ignored, mirror keeps its value
+            ]]]]),
+        ]);
+
+        $domain = $this->domain(['status' => 'active', 'transfer_lock' => false, 'whois_privacy' => true]);
+        app(DomainSyncService::class)->sync($domain);
+
+        $domain->refresh();
+        $this->assertTrue($domain->transfer_lock, 'registrar truth corrected the stale mirror');
+        $this->assertTrue($domain->whois_privacy, 'a non-boolean echo must never overwrite the mirror');
+    }
+
     public function test_a_lapsed_expiry_derives_expired_even_when_op_still_reports_act(): void
     {
         // OP keeps ACT past the expiry date — the documented active→expired

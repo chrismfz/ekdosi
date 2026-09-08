@@ -655,7 +655,13 @@ data model + phase gates: **`PLAN.md`**.
     write services (προϋπήρχε σε renew/register/transfer)· recovery ασφαλές (retry → sync-first
     adopt, μηδενική χρέωση), οπότε είναι κενό ΙΧΝΟΥΣ, όχι χρήματος. Fix μαζί για και τα 4
     (ok-row πριν το τοπικό apply, ή wrap του apply ώστε αποτυχία τοπικής εγγραφής να λογκάρει
-    το αποδεκτό write) — μαζί με τον A5 reconciler που έτσι κι αλλιώς ξαναδιαβάζει τα ok-logs. P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
+    το αποδεκτό write) — μαζί με τον A5 reconciler που έτσι κι αλλιώς ξαναδιαβάζει τα ok-logs.
+    **P2 από το A3d gate r2 (pre-existing A2, deferred):** το READ path (`DomainSyncService::sync`
+    → by-name resolve) ΔΕΝ έχει cross-tenant guard — ένα sync σε fqdn που άλλος tenant έχει
+    claimed στο κοινό reseller account υιοθετεί id/λήξη/NS/contact handles του άλλου tenant στο
+    δικό μας row (truth/handle leak, ΟΧΙ χρήματα — κάθε write μετά αρνείται με το δικό του
+    sweep). Συγγενές με το υπάρχον «claimedElsewhere over-blocks» item (σ) — λύσιμο μαζί:
+    ποιο registrar account + guard και στο read-adopt. P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
     pre-flight refusals ως «αίτηση» (false ⚠ σε previous-life tombstone + ένα refused click·
     αντίστροφα panel-started FAI χωρίς κανένα log δεν φλαγκάρεται)· (σ) το claimedElsewhere
     over-blocks (αγνοεί ΠΟΙΟ registrar account + withTrashed ξένα rows μπλοκάρουν «πελάτης

@@ -641,6 +641,8 @@ class OpenproviderRegistrar implements DomainRegistrar
             nameservers: $nameservers,
             autoRenew: $autoRenew,
             contactHandles: $handles,
+            transferLock: is_bool($result['is_locked'] ?? null) ? $result['is_locked'] : null,
+            whoisPrivacy: is_bool($result['is_private_whois_enabled'] ?? null) ? $result['is_private_whois_enabled'] : null,
         );
     }
 

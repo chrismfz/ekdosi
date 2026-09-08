@@ -116,6 +116,16 @@ class DomainRenewalService
             ->first(fn ($baseline) => is_string($baseline) && $baseline !== '');
         $periodStart = $fromPrior ?? $periodStart ?? $contract->next_due_date?->toDateString();
 
+        // The cross-tenant sweep must gate the intent-match leg TOO (gate r2):
+        // it never touches the registrar, but silently marking a claimed-
+        // elsewhere name «covered» by pre-claim button years would hide from
+        // the operator exactly what every other leg refuses loudly. The
+        // refusal row carries the period (r5 lesson) and the invoice id.
+        $claimLog = $this->writeLogger($domain, $connection, 'renew', [
+            'fqdn' => $domain->fqdn, 'years' => $years, 'baseline_expiry' => $periodStart,
+        ], $invoice->id);
+        $this->assertNotClaimedElsewhere($domain, $claimLog, "Το {$domain->fqdn} είναι καταχωρημένο από ΑΛΛΗ εταιρεία στον ίδιο λογαριασμό registrar — δεν ανανεώνεται από εδώ.");
+
         // INTENT-MATCH adopt (date-drift-proof, the second §6.6 leg): an OK
         // button renewal not yet tied to any invoice IS this invoice's renewal
         // — consume it, no date comparison needed. Covers the operator who

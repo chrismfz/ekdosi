@@ -174,6 +174,51 @@ class DomainRenewalServiceTest extends TestCase
         Http::assertNothingSent();
     }
 
+    public function test_the_intent_match_leg_also_refuses_a_name_claimed_by_another_tenant(): void
+    {
+        // A3d gate r2: the consume leg makes no registrar call, but silently
+        // marking a claimed-elsewhere name «covered» by pre-claim button years
+        // would hide what every other leg refuses loudly. The refusal row
+        // carries the invoice id + period (the re-issue recovery contract).
+        [$domain, $contract] = $this->assignedDomain('2026-05-01');
+        $buttonLog = DomainRegistrarLog::create([
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id, 'invoice_id' => null,
+            'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_OK,
+            'request' => ['fqdn' => 'example.gr', 'years' => 1],
+        ]);
+        $other = Company::create([
+            'name' => 'Other', 'slug' => 'o-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'enable_domain_management' => true,
+        ]);
+        $otherTld = DomainTld::create(['company_id' => $other->id, 'tld' => 'gr', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $other->id, 'domain_tld_id' => $otherTld->id,
+            'sld' => 'example', 'tld' => 'gr', 'fqdn' => 'example.gr',
+            'status' => 'active', 'registrar_domain_id' => '999',
+        ]);
+        $type = InvoiceType::create(['company_id' => $this->company->id, 'code' => 'TDA', 'name' => 'ΤΔΑ', 'invcount' => 0, 'mydata_type' => '2.1']);
+        $invoice = Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $contract->id,
+            'code' => 3, 'invcode' => 'TDA3', 'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+
+        Http::fake();
+        try {
+            app(DomainRenewalService::class)->renewForInvoice($invoice);
+            $this->fail('the intent-match leg must refuse a claimed-elsewhere name');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ΑΛΛΗ εταιρεία', $e->getMessage());
+        }
+        Http::assertNothingSent();
+        $this->assertNull($buttonLog->refresh()->invoice_id, 'the button log was NOT consumed');
+        $failed = DomainRegistrarLog::where('status', DomainRegistrarLog::STATUS_FAILED)->sole();
+        $this->assertSame($invoice->id, $failed->invoice_id);
+        $this->assertSame('2026-05-01', $failed->request['baseline_expiry'], 'period-carrying refusal (re-issue recovery)');
+    }
+
     public function test_reissue_after_revert_steps_the_period_back_and_adopts_a_panel_renewal(): void
     {
         // The revert door (review r2): issue #1 fails at the registrar but the
