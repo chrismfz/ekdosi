@@ -1,0 +1,200 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Company;
+use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
+use App\Models\VatCategory;
+use App\Services\MyData\MyDataConfigAudit;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+/**
+ * The shared config audit behind `mydata:preflight`, the «Έλεγχος ρυθμίσεων»
+ * console tab, and the Invoice Types readiness badge.
+ */
+class MyDataConfigAuditTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function tenant(): Company
+    {
+        return Company::create([
+            'name' => 'Audit OE',
+            'slug' => 'audit-'.uniqid(),
+            'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata',
+            'mydata_mode' => 'sandbox',
+            'afm' => '800561849',
+            'mydata_aade_id_sandbox' => 'TESTUSER',
+            'mydata_subscription_key_sandbox' => 'TESTKEY',
+        ]);
+    }
+
+    private function type(Company $c, array $attrs = []): InvoiceType
+    {
+        return InvoiceType::create(array_merge([
+            'company_id' => $c->id,
+            'code' => 'TPY'.uniqid(),
+            'name' => 'Τιμολόγιο',
+            'invcount' => 1,
+            'mydata_type' => '11.2',
+            'mydata_income_class' => 'E3_561_003',
+            'mydata_income_class_category' => 'category1_3',
+        ], $attrs));
+    }
+
+    public function test_good_invoice_type_is_ok(): void
+    {
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType($this->type($c));
+
+        $this->assertSame('ok', $row->status());
+        $this->assertSame([], $row->messages());
+        $this->assertSame('11.2', $row->detail);
+    }
+
+    public function test_goods_type_without_quantity_flag_warns(): void
+    {
+        // MYD-9: a goods type (1.1) must carry the per-line quantity flag, or the
+        // first filing is rejected [204].
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType(
+            $this->type($c, ['mydata_type' => '1.1', 'mydata_requires_quantity' => false])
+        );
+
+        $this->assertSame('warn', $row->status());
+        $this->assertStringContainsString('[204]', implode(' ', $row->messages()));
+    }
+
+    public function test_services_type_with_quantity_flag_warns(): void
+    {
+        // MYD-9: a services type (11.2) must NOT require per-line quantity ([205]).
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType(
+            $this->type($c, ['mydata_type' => '11.2', 'mydata_requires_quantity' => true])
+        );
+
+        $this->assertSame('warn', $row->status());
+        $this->assertStringContainsString('[205]', implode(' ', $row->messages()));
+    }
+
+    public function test_invalid_mydata_type_is_error_with_code(): void
+    {
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType($this->type($c, ['mydata_type' => '99.9']));
+
+        $this->assertSame('error', $row->status());
+        $this->assertTrue($row->hasError());
+        $this->assertStringContainsString('[223]', $row->messages()[0]);
+    }
+
+    public function test_blank_mydata_type_is_a_warning_not_error(): void
+    {
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType($this->type($c, [
+            'mydata_type' => null, 'mydata_income_class' => null, 'mydata_income_class_category' => null,
+        ]));
+
+        $this->assertSame('warn', $row->status());
+        $this->assertFalse($row->hasError());
+    }
+
+    public function test_missing_income_classification_is_error(): void
+    {
+        $c = $this->tenant();
+        $row = app(MyDataConfigAudit::class)->auditInvoiceType($this->type($c, [
+            'mydata_income_class' => null, 'mydata_income_class_category' => null,
+        ]));
+
+        $this->assertSame('error', $row->status());
+        $this->assertCount(2, $row->messages()); // missing type + missing category
+    }
+
+    public function test_zero_without_reason_is_error_with_reason_is_ok(): void
+    {
+        $c = $this->tenant();
+        $audit = app(MyDataConfigAudit::class);
+
+        // MYD-007 / MYD-004: a 0% category with NO §8.3 reason is now a BLOCKING
+        // error (AADE rejects [217]) — not a warning that let preflight pass.
+        $zeroNoReason = $audit->auditVatCategory(VatCategory::create([
+            'company_id' => $c->id, 'description' => 'Άνευ', 'rate' => 0, 'is_default' => false,
+        ]));
+        $this->assertSame('error', $zeroNoReason->status());
+        $this->assertStringContainsString('[217]', $zeroNoReason->messages()[0]);
+
+        // …with a valid §8.3 reason it is clean.
+        $zeroWithReason = $audit->auditVatCategory(VatCategory::create([
+            'company_id' => $c->id, 'description' => '0% ενδοκοιν.', 'rate' => 0,
+            'vat_exemption_category' => 4, 'is_default' => false,
+        ]));
+        $this->assertSame('ok', $zeroWithReason->status());
+
+        $four = $audit->auditVatCategory(VatCategory::create([
+            'company_id' => $c->id, 'description' => 'Νησιά', 'rate' => 4, 'is_default' => false,
+        ]));
+        $std = $audit->auditVatCategory(VatCategory::create([
+            'company_id' => $c->id, 'description' => 'Καν.', 'rate' => 24, 'is_default' => true,
+        ]));
+        $this->assertSame('warn', $four->status()); // 4% is ambiguous (codes 6/10)
+        $this->assertSame('ok', $std->status());
+    }
+
+    public function test_empty_config_warns_on_the_readiness_row(): void
+    {
+        // A freshly-provisioned tenant with no invoice types / VAT categories must
+        // still warn (the preflight behaviour, folded into the readiness row).
+        $c = $this->tenant();
+        $result = app(MyDataConfigAudit::class)->audit($c);
+
+        $this->assertSame([], $result->invoiceTypes);
+        $this->assertSame([], $result->vatCategories);
+        $messages = $result->tenant->messages();
+        $this->assertContains('Δεν έχουν οριστεί τύποι παραστατικών.', $messages);
+        $this->assertContains('Δεν έχουν οριστεί κατηγορίες ΦΠΑ.', $messages);
+        $this->assertFalse($result->isClean());
+    }
+
+    public function test_unmapped_payment_method_warns_on_the_readiness_row(): void
+    {
+        // MYD-4: a payment method with no §8.12 type would be filed as cash — warn.
+        $c = $this->tenant();
+        PaymentMethod::create(['company_id' => $c->id, 'description' => 'Κάρτα', 'due_days' => 0]); // unmapped
+        PaymentMethod::create(['company_id' => $c->id, 'description' => 'Μετρητά', 'due_days' => 0, 'mydata_payment_type' => 3]); // mapped
+
+        $paymentWarning = collect(app(MyDataConfigAudit::class)->audit($c)->tenant->messages())
+            ->first(fn ($m) => str_contains($m, 'χωρίς αντιστοίχιση myDATA'));
+
+        $this->assertNotNull($paymentWarning);
+        // The UNMAPPED method is named in the listing; the mapped one is not.
+        $this->assertStringContainsString('«Κάρτα»', $paymentWarning);
+    }
+
+    public function test_all_payment_methods_mapped_gives_no_payment_warning(): void
+    {
+        $c = $this->tenant();
+        PaymentMethod::create(['company_id' => $c->id, 'description' => 'Μετρητά', 'due_days' => 0, 'mydata_payment_type' => 3]);
+
+        $messages = implode(' | ', app(MyDataConfigAudit::class)->audit($c)->tenant->messages());
+
+        $this->assertStringNotContainsString('Τρόποι πληρωμής χωρίς αντιστοίχιση', $messages);
+    }
+
+    public function test_full_audit_rolls_up_counts(): void
+    {
+        $c = $this->tenant();
+        $this->type($c);                                   // ok
+        $this->type($c, ['mydata_type' => '99.9']);        // 1 error
+        VatCategory::create(['company_id' => $c->id, 'description' => '0%', 'rate' => 0, 'is_default' => false]); // MYD-007: now 1 error (no §8.3 reason)
+        VatCategory::create(['company_id' => $c->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]); // ok
+
+        $result = app(MyDataConfigAudit::class)->audit($c);
+
+        $this->assertSame(2, $result->errorCount()); // MYD-007: 99.9 type + reason-less 0%
+        $this->assertFalse($result->isClean());
+        $this->assertCount(2, $result->invoiceTypes);
+        $this->assertCount(2, $result->vatCategories);
+    }
+}

@@ -1,0 +1,321 @@
+<?php
+
+namespace App\Models;
+
+use App\Enums\TicketPriority;
+use App\Enums\TicketStatus;
+use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\HasAttachments;
+use App\Models\Concerns\HasTags;
+use App\Models\Concerns\TracksActivity;
+use App\Models\Scopes\CompanyScope;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Collection;
+
+/**
+ * A support ticket (Πυλώνας E). Belongs to a department and — when the requester
+ * matches a registered account — a Customer (null = GUEST, with `requester_email`
+ * always kept). Status/priority are enums; the status is driven by who posts
+ * (App\Actions\Support\PostTicketMessage), never typed by hand. Attachments +
+ * tags reuse the existing polymorphic morphs; «Ιστορικό» via TracksActivity.
+ */
+class Ticket extends Model
+{
+    use BelongsToCompany;
+    use HasAttachments;
+    use HasFactory, HasTags, SoftDeletes, TracksActivity;
+
+    protected $fillable = [
+        'company_id',
+        'reference',
+        'ticket_department_id',
+        'customer_id',
+        'requester_email',
+        'requester_name',
+        'subject',
+        'status',
+        'priority',
+        'assigned_to',
+        'opened_via',
+        'last_reply_at',
+        'last_reply_role',
+        'closed_at',
+        // rating/rating_comment/rated_at are intentionally NOT fillable — they are
+        // written only through recordRating() (forceFill), after the canBeRated()
+        // gate, so a customer can never mass-assign a rating.
+    ];
+
+    protected function casts(): array
+    {
+        return [
+            'status' => TicketStatus::class,
+            'priority' => TicketPriority::class,
+            'last_reply_at' => 'datetime',
+            'closed_at' => 'datetime',
+            'rating' => 'integer',
+            'rated_at' => 'datetime',
+        ];
+    }
+
+    /**
+     * Audited business columns (never a cache column). See TracksActivity.
+     *
+     * @return list<string>
+     */
+    protected function loggedAttributes(): array
+    {
+        return ['status', 'priority', 'ticket_department_id', 'assigned_to', 'customer_id', 'subject'];
+    }
+
+    protected static function booted(): void
+    {
+        // Leaving «Κλειστό» (a reopen) invalidates any rating — it belonged to the
+        // previous closure. Every reopen path today goes through Eloquent save()
+        // (portal/operator reply via PostTicketMessage, the «Επαναφορά» action), so
+        // this fires. NOTE: a raw query-builder bulk update (Ticket::…->update())
+        // bypasses model events — add the clear there too if such a path is ever added.
+        static::updating(function (Ticket $ticket): void {
+            $was = $ticket->getOriginal('status');
+            $wasClosed = $was === TicketStatus::Closed || $was === TicketStatus::Closed->value;
+
+            if ($ticket->isDirty('status') && $wasClosed && $ticket->status !== TicketStatus::Closed) {
+                $ticket->rating = null;
+                $ticket->rating_comment = null;
+                $ticket->rated_at = null;
+            }
+        });
+    }
+
+    public function company(): BelongsTo
+    {
+        return $this->belongsTo(Company::class);
+    }
+
+    public function department(): BelongsTo
+    {
+        return $this->belongsTo(TicketDepartment::class, 'ticket_department_id');
+    }
+
+    public function customer(): BelongsTo
+    {
+        return $this->belongsTo(Customer::class);
+    }
+
+    /** The operator this ticket is assigned to (nullable). */
+    public function assignee(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'assigned_to');
+    }
+
+    /** The surviving ticket this one was merged into (null unless merged). */
+    public function mergedInto(): BelongsTo
+    {
+        return $this->belongsTo(Ticket::class, 'merged_into_id');
+    }
+
+    /** Tickets that were merged into this one. */
+    public function mergedTickets(): HasMany
+    {
+        return $this->hasMany(Ticket::class, 'merged_into_id');
+    }
+
+    public function isMerged(): bool
+    {
+        return $this->merged_into_id !== null;
+    }
+
+    /**
+     * May this ticket be merged INTO $target? Same tenant, not itself, neither
+     * already merged, and — critically — the SAME owner: same customer, or (for
+     * guests) the same requester email. A cross-owner merge would leak one party's
+     * thread into the other's portal, so it is forbidden.
+     */
+    public function canMergeInto(Ticket $target): bool
+    {
+        if ((int) $this->company_id !== (int) $target->company_id
+            || (int) $this->id === (int) $target->id
+            || $this->isMerged() || $target->isMerged()) {
+            return false;
+        }
+
+        // Same registered customer.
+        if ($this->customer_id !== null && $target->customer_id !== null) {
+            return (int) $this->customer_id === (int) $target->customer_id;
+        }
+
+        // Both guests → same requester email (case-insensitive, non-blank).
+        if ($this->customer_id === null && $target->customer_id === null) {
+            $a = mb_strtolower(trim((string) $this->requester_email));
+            $b = mb_strtolower(trim((string) $target->requester_email));
+
+            return $a !== '' && $a === $b;
+        }
+
+        return false; // one guest, one registered → different owners
+    }
+
+    public function messages(): HasMany
+    {
+        return $this->hasMany(TicketMessage::class)->orderBy('id');
+    }
+
+    /** Watchers / CC for this ticket (operators AND external emails). */
+    public function watchers(): HasMany
+    {
+        return $this->hasMany(TicketWatcher::class);
+    }
+
+    /**
+     * Add (idempotently) an operator watcher. Returns the row (existing or new).
+     * `source` is only set on creation — a manual watch never gets downgraded to
+     * a participant one by a later reply.
+     */
+    public function watch(User $user, string $source = TicketWatcher::SOURCE_MANUAL): TicketWatcher
+    {
+        return $this->watchers()->firstOrCreate(
+            ['user_id' => $user->id],
+            ['company_id' => $this->company_id, 'source' => $source],
+        );
+    }
+
+    public function unwatch(User $user): void
+    {
+        $this->watchers()->where('user_id', $user->id)->delete();
+    }
+
+    public function isWatchedBy(User $user): bool
+    {
+        return $this->watchers()->where('user_id', $user->id)->exists();
+    }
+
+    /**
+     * Add (idempotently) an external email watcher (Bcc'd on outbound replies).
+     * Blank emails are ignored; the address is stored lowercased so the unique
+     * index and the Cc de-dup are case-insensitive. Returns null for a blank.
+     */
+    public function addEmailWatcher(?string $email, string $source = TicketWatcher::SOURCE_MANUAL): ?TicketWatcher
+    {
+        $email = mb_strtolower(trim((string) $email));
+        if ($email === '') {
+            return null;
+        }
+
+        return $this->watchers()->firstOrCreate(
+            ['email' => $email],
+            ['company_id' => $this->company_id, 'source' => $source],
+        );
+    }
+
+    /**
+     * The User models watching this ticket (operator watchers only). The read is
+     * already constrained by ticket_id, so it bypasses CompanyScope — it must
+     * return the same set whether it runs in the panel (ambient tenant) or in the
+     * poller/queue (no context), never filtered by a stale ambient company.
+     *
+     * @return Collection<int, User>
+     */
+    public function operatorWatcherUsers(): Collection
+    {
+        return $this->watchers()->withoutGlobalScope(CompanyScope::class)
+            ->whereNotNull('user_id')->with('user')->get()
+            ->pluck('user')->filter()->values();
+    }
+
+    /**
+     * Lowercased external watcher email addresses (for the reply Bcc). Bypasses
+     * CompanyScope for the same reason as {@see operatorWatcherUsers} — the reply
+     * job may run with no/other ambient context.
+     *
+     * @return list<string>
+     */
+    public function watcherEmailAddresses(): array
+    {
+        return $this->watchers()->withoutGlobalScope(CompanyScope::class)
+            ->whereNotNull('email')->pluck('email')
+            ->map(fn ($e): string => mb_strtolower(trim((string) $e)))
+            ->filter()->unique()->values()->all();
+    }
+
+    /**
+     * External watcher emails split for an outbound reply: CC-sourced watchers were
+     * openly on the customer's original thread, so they go in a VISIBLE Cc; the rest
+     * (an operator manually added them) stay hidden in Bcc. Bypasses CompanyScope
+     * like the other ticket-constrained watcher reads.
+     *
+     * @return array{cc: list<string>, bcc: list<string>}
+     */
+    public function watcherEmailsForReply(): array
+    {
+        $cc = [];
+        $bcc = [];
+
+        foreach ($this->watchers()->withoutGlobalScope(CompanyScope::class)->whereNotNull('email')->get(['email', 'source']) as $watcher) {
+            $email = mb_strtolower(trim((string) $watcher->email));
+            if ($email === '') {
+                continue;
+            }
+            if ($watcher->source === TicketWatcher::SOURCE_CC) {
+                $cc[] = $email;
+            } else {
+                $bcc[] = $email;
+            }
+        }
+
+        return ['cc' => array_values(array_unique($cc)), 'bcc' => array_values(array_unique($bcc))];
+    }
+
+    /** Messages a customer may see (excludes operator-only internal notes). */
+    public function publicMessages(): HasMany
+    {
+        return $this->messages()->where('is_internal_note', false);
+    }
+
+    /** The requester's display name — the linked customer, else the raw email name. */
+    public function requesterLabel(): string
+    {
+        return $this->customer?->name
+            ?: ($this->requester_name ?: (string) $this->requester_email);
+    }
+
+    /** GUEST = no linked customer account. */
+    public function isGuest(): bool
+    {
+        return $this->customer_id === null;
+    }
+
+    /**
+     * The customer may rate iff the ticket is Closed AND its department invites
+     * feedback (`feedback_on_close`). Re-rating while still closed is allowed (a
+     * misclick fix); reopening the ticket makes this false again.
+     */
+    public function canBeRated(): bool
+    {
+        return $this->status === TicketStatus::Closed
+            && ! $this->isMerged() // a merged duplicate is not a real closure to rate
+            && (bool) ($this->department?->feedback_on_close);
+    }
+
+    public function isRated(): bool
+    {
+        return $this->rating !== null;
+    }
+
+    /**
+     * Store a customer satisfaction rating (1–5, clamped) + an optional comment.
+     * Callers gate on {@see canBeRated} + ownership first — this only writes.
+     */
+    public function recordRating(int $rating, ?string $comment = null): void
+    {
+        $comment = trim((string) $comment);
+
+        $this->forceFill([
+            'rating' => max(1, min(5, $rating)),
+            'rating_comment' => $comment !== '' ? $comment : null,
+            'rated_at' => now(),
+        ])->save();
+    }
+}

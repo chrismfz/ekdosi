@@ -1,0 +1,162 @@
+<?php
+
+use App\Models\CustomerUser;
+use App\Models\User;
+
+return [
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication Defaults
+    |--------------------------------------------------------------------------
+    |
+    | This option defines the default authentication "guard" and password
+    | reset "broker" for your application. You may change these values
+    | as required, but they're a perfect start for most applications.
+    |
+    */
+
+    'defaults' => [
+        'guard' => env('AUTH_GUARD', 'web'),
+        'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication Guards
+    |--------------------------------------------------------------------------
+    |
+    | Next, you may define every authentication guard for your application.
+    | Of course, a great default configuration has been defined for you
+    | which utilizes session storage plus the Eloquent user provider.
+    |
+    | All authentication guards have a user provider, which defines how the
+    | users are actually retrieved out of your database or other storage
+    | system used by the application. Typically, Eloquent is utilized.
+    |
+    | Supported: "session"
+    |
+    */
+
+    'guards' => [
+        'web' => [
+            'driver' => 'session',
+            'provider' => 'users',
+        ],
+
+        // OAuth 2.1 guard for the ekdosi MCP server (routes/ai.php), backed by
+        // Laravel Passport. The 'passport' driver is only registered once
+        // laravel/passport is installed; until then nothing resolves this guard
+        // (the MCP route stays Sanctum-only, gated by class_exists in ai.php),
+        // so this entry is inert. Only needed for the claude.ai remote connector,
+        // which speaks OAuth + Dynamic Client Registration and cannot take a
+        // static bearer. See MCP.md §6.
+        'api' => [
+            'driver' => 'passport',
+            'provider' => 'users',
+        ],
+
+        // Customer portal (Slice 0) — session guard for CustomerUser, wholly
+        // separate from the operator 'web' guard/Filament panel. A portal login
+        // never reaches /admin; an operator never authenticates here. LOGIN state
+        // coexists: the two guards use distinct, namespaced session keys and
+        // recaller cookies, so both can be logged in in one browser at once. Note
+        // they share ONE session record, so an explicit LOGOUT (which destroys the
+        // session server-side for security) tears down the whole browser session —
+        // a co-logged-in operator is logged out of /admin too. That is the correct
+        // trade-off: server-side session termination on logout beats preserving a
+        // rare operator+customer same-browser combo.
+        'portal' => [
+            'driver' => 'session',
+            'provider' => 'customer_users',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | User Providers
+    |--------------------------------------------------------------------------
+    |
+    | All authentication guards have a user provider, which defines how the
+    | users are actually retrieved out of your database or other storage
+    | system used by the application. Typically, Eloquent is utilized.
+    |
+    | If you have multiple user tables or models you may configure multiple
+    | providers to represent the model / table. These providers may then
+    | be assigned to any extra authentication guards you have defined.
+    |
+    | Supported: "database", "eloquent"
+    |
+    */
+
+    'providers' => [
+        'users' => [
+            'driver' => 'eloquent',
+            'model' => env('AUTH_MODEL', User::class),
+        ],
+
+        'customer_users' => [
+            'driver' => 'eloquent',
+            'model' => CustomerUser::class,
+        ],
+
+        // 'users' => [
+        //     'driver' => 'database',
+        //     'table' => 'users',
+        // ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Resetting Passwords
+    |--------------------------------------------------------------------------
+    |
+    | These configuration options specify the behavior of Laravel's password
+    | reset functionality, including the table utilized for token storage
+    | and the user provider that is invoked to actually retrieve users.
+    |
+    | The expiry time is the number of minutes that each reset token will be
+    | considered valid. This security feature keeps tokens short-lived so
+    | they have less time to be guessed. You may change this as needed.
+    |
+    | The throttle setting is the number of seconds a user must wait before
+    | generating more password reset tokens. This prevents the user from
+    | quickly generating a very large amount of password reset tokens.
+    |
+    */
+
+    'passwords' => [
+        'users' => [
+            'provider' => 'users',
+            'table' => env('AUTH_PASSWORD_RESET_TOKEN_TABLE', 'password_reset_tokens'),
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+
+        // Portal password-reset broker (wired when the reset flow ships). Its
+        // token table is SEPARATE from the operator broker's: both are keyed by
+        // email alone, so a shared table would collide for an address that is
+        // both an operator (`users`) and a customer (`customer_users`) — a token
+        // for one guard could then be redeemed against the other.
+        'customer_users' => [
+            'provider' => 'customer_users',
+            'table' => env('PORTAL_PASSWORD_RESET_TOKEN_TABLE', 'customer_users_password_reset_tokens'),
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Password Confirmation Timeout
+    |--------------------------------------------------------------------------
+    |
+    | Here you may define the number of seconds before a password confirmation
+    | window expires and users are asked to re-enter their password via the
+    | confirmation screen. By default, the timeout lasts for three hours.
+    |
+    */
+
+    'password_timeout' => env('AUTH_PASSWORD_TIMEOUT', 10800),
+
+];

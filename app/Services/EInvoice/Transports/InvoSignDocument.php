@@ -1,0 +1,474 @@
+<?php
+
+namespace App\Services\EInvoice\Transports;
+
+use App\Models\Company;
+use App\Models\DeliveryNote;
+use App\Models\Invoice;
+use App\Support\MyData\DeliveryCodes;
+use DOMDocument;
+use DOMElement;
+use RuntimeException;
+
+/**
+ * Builds InvoSign's `xml_arxeio` payload. InvoSign is NOT a bespoke schema: it
+ * accepts the FULL, unmodified AADE `InvoicesDoc` XML and merely APPENDS its own
+ * extension (docs/paroxos/research/invosign-api-reference.md §0/§2). So we take the
+ * canonical AADE XML (AadeInvoiceDocument::toXml — already validated against AADE)
+ * and DOM-inject, per line, the `api_*` printout twins + an invoice-level
+ * `<API_InvoiceDetails>` block (issuer / counterpart / additionals). The AADE core
+ * is never touched — only added to.
+ *
+ * ⚠ The precise per-line price/discount semantics (NetPriceBeforeDiscount vs
+ * UnitPrice vs DiscountValue) are best-effort from the documented sample and MUST
+ * be confirmed against the InvoSign sandbox before go-live (P5 validation).
+ */
+class InvoSignDocument
+{
+    private const AADE_NS = 'http://www.aade.gr/myDATA/invoice/v1.0';
+
+    public static function augment(string $aadeXml, Invoice $invoice): string
+    {
+        $invoice->loadMissing(['lines.product', 'invoiceType', 'customer', 'company', 'paymentMethod']);
+
+        $dom = new DOMDocument('1.0', 'utf-8');
+        $dom->preserveWhiteSpace = false;
+        if (! @$dom->loadXML($aadeXml, LIBXML_NONET)) {
+            throw new RuntimeException('InvoSign: could not parse the AADE InvoicesDoc XML to augment.');
+        }
+
+        $invoiceNode = $dom->getElementsByTagNameNS(self::AADE_NS, 'invoice')->item(0);
+        if (! $invoiceNode instanceof DOMElement) {
+            throw new RuntimeException('InvoSign: <invoice> element not found in the AADE XML.');
+        }
+
+        // 1) Per-line api_* twins — matched to <invoiceDetails> in document order.
+        $details = $invoiceNode->getElementsByTagNameNS(self::AADE_NS, 'invoiceDetails');
+        $lines = $invoice->lines->values();
+        for ($i = 0; $i < $details->length; $i++) {
+            $node = $details->item($i);
+            $line = $lines[$i] ?? null;
+            if ($node instanceof DOMElement && $line !== null) {
+                self::appendLineFields($dom, $node, $line);
+            }
+        }
+
+        // 2) Invoice-level <API_InvoiceDetails> block, after <invoiceSummary>.
+        $invoiceNode->appendChild(self::buildApiInvoiceDetails(
+            $dom,
+            self::issuerFields($invoice->company),
+            self::invoiceCounterpartFields($invoice),
+            [
+                'DocumentLabel' => (string) ($invoice->invoiceType?->name ?? ''),
+                'DocumentComments' => (string) ($invoice->notes ?? ''),
+                'DocumentPaymentMethodLabel' => (string) ($invoice->paymentMethod?->description ?? ''),
+            ],
+        ));
+
+        return self::normaliseClassificationPrefixes($dom->saveXML() ?: $aadeXml);
+    }
+
+    /**
+     * Delivery-note twin of augment(): InvoSign treats the invoice-level
+     * <API_InvoiceDetails> (issuer + counterpart) as MANDATORY even for 9.x
+     * delivery notes and rejects its absence with "[88-006] Λείπει το
+     * υποχρεωτικό node: API_InvoiceDetails". Sandbox-confirmed (2026-06-09) that
+     * it ALSO requires the per-line api_* printout twins for delivery notes —
+     * an absent `api_lineDescription` is rejected with "[88-001]" — so we append
+     * BOTH, just like augment(). Delivery lines carry no prices/VAT, so the
+     * monetary api_* fields go out as 0.00.
+     */
+    public static function augmentDelivery(string $aadeXml, DeliveryNote $note): string
+    {
+        $note->loadMissing(['company', 'customer', 'deliveryType', 'lines.product']);
+
+        $dom = new DOMDocument('1.0', 'utf-8');
+        $dom->preserveWhiteSpace = false;
+        if (! @$dom->loadXML($aadeXml, LIBXML_NONET)) {
+            throw new RuntimeException('InvoSign: could not parse the AADE delivery-note XML to augment.');
+        }
+
+        $invoiceNode = $dom->getElementsByTagNameNS(self::AADE_NS, 'invoice')->item(0);
+        if (! $invoiceNode instanceof DOMElement) {
+            throw new RuntimeException('InvoSign: <invoice> element not found in the delivery-note XML.');
+        }
+
+        // 1) Per-line api_* twins — matched to <invoiceDetails> in document order.
+        $details = $invoiceNode->getElementsByTagNameNS(self::AADE_NS, 'invoiceDetails');
+        $lines = $note->lines->values();
+        for ($i = 0; $i < $details->length; $i++) {
+            $node = $details->item($i);
+            $line = $lines[$i] ?? null;
+            if ($node instanceof DOMElement && $line !== null) {
+                self::appendDeliveryLineFields($dom, $node, $line);
+            }
+        }
+
+        // 2) Invoice-level <API_InvoiceDetails> block, after <invoiceSummary>.
+        $invoiceNode->appendChild(self::buildApiInvoiceDetails(
+            $dom,
+            self::issuerFields($note->company),
+            self::deliveryCounterpartFields($note),
+            // Field order + names mirror InvoSign's own delivery-note example
+            // (incl. the `DocumentMovePursposeLabel` typo, which IS their schema
+            // field name, and DispatchFrom/To = the loading/delivery addresses).
+            [
+                'DocumentLabel' => (string) ($note->deliveryType?->name ?? ''),
+                'DocumentMovePursposeLabel' => (string) (DeliveryCodes::movePurposeLabel($note->move_purpose) ?? ''),
+                'DocumentDispatchFrom' => self::addressLine($note->loading_street, $note->loading_number, $note->loading_city, $note->loading_postcode),
+                'DocumentDispatchTo' => self::addressLine($note->delivery_street, $note->delivery_number, $note->delivery_city, $note->delivery_postcode),
+                'DocumentComments' => (string) ($note->notes ?? ''),
+                'DocumentPaymentMethodLabel' => '',
+            ],
+        ));
+
+        return self::normaliseClassificationPrefixes($dom->saveXML() ?: $aadeXml);
+    }
+
+    /** "street number, city, postcode" — InvoSign's DocumentDispatchFrom/To shape, empties dropped. */
+    private static function addressLine(?string $street, ?string $number, ?string $city, ?string $postcode): string
+    {
+        $streetPart = trim((string) $street.' '.(string) $number);
+
+        return implode(', ', array_filter([$streetPart, (string) $city, (string) $postcode], static fn ($p) => trim((string) $p) !== ''));
+    }
+
+    /**
+     * InvoSign's parser is namespace-PREFIX-strict: it requires the income/expense
+     * classification namespaces to use the prefixes n1/n2 (as in its API sample),
+     * whereas firebed's InvoicesDocWriter emits icls/ecls. AADE itself matches by
+     * URI (so the DIRECT myDATA path via firebed is unaffected), but InvoSign
+     * rejects with "[88-004] Missing or wrong xmlns:n1". Rename the prefixes
+     * (the namespace URIs are unchanged) for the InvoSign payload only. icls/ecls
+     * are distinctive tokens that appear ONLY as the xmlns declaration + element
+     * prefixes (never in values), so a string rename is safe.
+     */
+    private static function normaliseClassificationPrefixes(string $xml): string
+    {
+        return strtr($xml, [
+            'xmlns:icls=' => 'xmlns:n1=',
+            'xmlns:ecls=' => 'xmlns:n2=',
+            '<icls:' => '<n1:',
+            '</icls:' => '</n1:',
+            '<ecls:' => '<n2:',
+            '</ecls:' => '</n2:',
+        ]);
+    }
+
+    private static function appendLineFields(DOMDocument $dom, DOMElement $detail, $line): void
+    {
+        $qty = (float) $line->qty;
+        $unit = (float) $line->price_per_item;
+        $discountPct = (float) ($line->discount ?? 0);
+        $unitAfter = round($unit * (1 - $discountPct / 100), 2);
+        $gross = $unit * $qty;
+        $net = (float) $line->net_price;
+        $discountValue = round($gross - $net, 2);
+
+        $fields = [
+            'api_serial' => (string) ($line->product?->code ?? ''),
+            'api_lineDescription' => (string) ($line->product_descr ?? ''),
+            'api_NetPriceBeforeDiscount' => self::money($unit),
+            'api_UnitPrice' => self::money($unitAfter),
+            'api_DiscountValue' => self::money($discountValue),
+            'api_vatCategoryPercent' => self::money((float) $line->vat_percent),
+            // 4 decimals to match InvoSign's documented sample (<api_quantity>1.0000).
+            'api_quantity' => number_format($qty, 4, '.', ''),
+            'api_mm' => (string) ($line->metric_unit ?: 'Τμχ'),
+        ];
+
+        foreach ($fields as $name => $value) {
+            $detail->appendChild(self::el($dom, $name, $value));
+        }
+    }
+
+    /**
+     * Per-line api_* twins for a DELIVERY-note line. Same field set/order as
+     * appendLineFields (InvoSign marks them all mandatory) but a delivery line
+     * carries no monetary values, so prices/discount/VAT-percent go out as 0.00.
+     */
+    private static function appendDeliveryLineFields(DOMDocument $dom, DOMElement $detail, $line): void
+    {
+        $qty = (float) $line->qty;
+
+        $fields = [
+            'api_serial' => (string) ($line->product?->code ?? ''),
+            'api_lineDescription' => (string) ($line->product_descr ?? ''),
+            'api_NetPriceBeforeDiscount' => self::money(0),
+            'api_UnitPrice' => self::money(0),
+            'api_DiscountValue' => self::money(0),
+            'api_vatCategoryPercent' => self::money(0),
+            // 4 decimals to match InvoSign's documented sample (<api_quantity>1.0000).
+            'api_quantity' => number_format($qty, 4, '.', ''),
+            'api_mm' => (string) ($line->metric_unit ?: 'Τμχ'),
+        ];
+
+        foreach ($fields as $name => $value) {
+            $detail->appendChild(self::el($dom, $name, $value));
+        }
+    }
+
+    /**
+     * Build the shared <API_InvoiceDetails> wrapper (API_Issuer / API_Counterpart
+     * / API_Additionals) from already-prepared field maps — so the invoice and
+     * delivery-note paths emit an IDENTICAL block shape and only differ in how the
+     * field maps are sourced.
+     *
+     * @param  array<string, string>  $issuer
+     * @param  array<string, string>  $counterpart
+     * @param  array<string, string>  $additionals
+     */
+    private static function buildApiInvoiceDetails(DOMDocument $dom, array $issuer, array $counterpart, array $additionals): DOMElement
+    {
+        $wrap = $dom->createElementNS(self::AADE_NS, 'API_InvoiceDetails');
+
+        $issuerEl = $dom->createElementNS(self::AADE_NS, 'API_Issuer');
+        self::appendAll($dom, $issuerEl, $issuer);
+        $wrap->appendChild($issuerEl);
+
+        $cpEl = $dom->createElementNS(self::AADE_NS, 'API_Counterpart');
+        self::appendAll($dom, $cpEl, $counterpart);
+        $wrap->appendChild($cpEl);
+
+        $addEl = $dom->createElementNS(self::AADE_NS, 'API_Additionals');
+        self::appendAll($dom, $addEl, $additionals);
+        $wrap->appendChild($addEl);
+
+        return $wrap;
+    }
+
+    /**
+     * The issuer identity fields InvoSign's <API_Issuer> extension carries, keyed by
+     * the Company column each reads from — the SINGLE source for both what the
+     * payload SENDS (issuerFields) and what the readiness checks REQUIRE
+     * (ProviderPreflight + go-live, PROV-005), so a check can never drift from what
+     * actually goes on the wire. Order matters (kept == the emitted XML order).
+     *   field    → the InvoSign element name
+     *   label    → operator-facing Greek label for the preflight
+     *   required → InvoSign REJECTS the filing without it (fail); false = advisory
+     *              (warn — the provider likely uses email/phone to deliver the
+     *              document to the customer, but does not require them to accept it).
+     *
+     * @var array<string, array{field: string, label: string, required: bool}>
+     */
+    public const ISSUER_FIELDS = [
+        'name' => ['field' => 'IssuerName', 'label' => 'Επωνυμία', 'required' => true],
+        'kad_primary' => ['field' => 'IssuerProfession', 'label' => 'ΚΑΔ/δραστηριότητα', 'required' => true],
+        'tax_office' => ['field' => 'IssuerTaxOffice', 'label' => 'ΔΟΥ', 'required' => true],
+        'address' => ['field' => 'IssuerAddressStreet', 'label' => 'Οδός/διεύθυνση', 'required' => true],
+        'postcode' => ['field' => 'IssuerAddressPostalCode', 'label' => 'Τ.Κ.', 'required' => true],
+        'city' => ['field' => 'IssuerAddressCity', 'label' => 'Πόλη', 'required' => true],
+        'phone' => ['field' => 'IssuerPhone', 'label' => 'Τηλέφωνο', 'required' => false],
+        'email' => ['field' => 'IssuerEmail', 'label' => 'Email', 'required' => false],
+    ];
+
+    /** @return array<string, string> */
+    private static function issuerFields(?Company $company): array
+    {
+        $out = [];
+        foreach (self::ISSUER_FIELDS as $column => $meta) {
+            $out[$meta['field']] = (string) ($company?->{$column} ?? '');
+        }
+
+        return $out;
+    }
+
+    /**
+     * PROV-005: which mandatory / advisory issuer fields this tenant has NOT filled,
+     * as operator-facing Greek labels — the single source both ProviderPreflight and
+     * the go-live gate consume, so the readiness check matches exactly what
+     * <API_Issuer> would carry. `blank()` catches null and empty/whitespace strings.
+     *
+     * @return array{required: list<string>, recommended: list<string>}
+     */
+    public static function missingIssuerLabels(?Company $company): array
+    {
+        $required = [];
+        $recommended = [];
+
+        foreach (self::ISSUER_FIELDS as $column => $meta) {
+            if (! blank($company?->{$column})) {
+                continue;
+            }
+            if ($meta['required']) {
+                $required[] = $meta['label'];
+            } else {
+                $recommended[] = $meta['label'];
+            }
+        }
+
+        return ['required' => $required, 'recommended' => $recommended];
+    }
+
+    /** @return array<string, string> */
+    private static function invoiceCounterpartFields(Invoice $invoice): array
+    {
+        // MYD-009 — TWO KINDS OF FIELD, deliberately resolved from different places:
+        //
+        //  * LEGAL IDENTITY (name / ΑΦΜ / profession / address) is the reported
+        //    counterpart. It comes from the invoice's FROZEN snapshot through the
+        //    same Invoice helpers the AADE <counterpart> uses, so the direct and
+        //    provider representations of one document can never name different
+        //    parties. The old chain fell through to the live customer per field,
+        //    which meant a customer edit rewrote the provider identity of an
+        //    already-filed invoice — and could assemble one party out of two.
+        //
+        //  * CONTACT DETAILS (tax office, phone, email) are NOT part of the legal
+        //    identity and are absent from the AADE payload entirely; InvoSign uses
+        //    them for delivery and printing. They stay LIVE on purpose — reaching
+        //    today's customer to email today's copy is correct — and that is the
+        //    distinction, stated rather than left as an accident of the fallback
+        //    chain. If they ever need to be reproducible, they need snapshot
+        //    columns of their own, not a silent freeze here.
+        $legalFallback = $invoice->mayFallBackToLiveCustomer() ? $invoice->customer : null;
+
+        // A GR counterpart carries no name in the AADE payload, so an empty one gets
+        // that far — but InvoSign hard-rejects it with «[88-001] Λείπει το
+        // υποχρεωτικό πεδίο: CounterpartName». Refuse here with the field to fill
+        // instead of shipping "" and reading an opaque provider error. (Falling back
+        // to the live customer is what MYD-009 removed: it is the wrong party.)
+        // RETAIL (11.x) has no legal counterpart to protect — AADE files none — but
+        // InvoSign still needs a printable name, and shipping "" for every ΑΛΠ/ΑΠΥ
+        // would have every one of them rejected. Keep the pre-MYD-009 chain there;
+        // the snapshot rule applies where there IS a legal party to get wrong.
+        if ($invoice->filesNoCounterpart()) {
+            $name = (string) ($invoice->company_name ?: $invoice->customer?->name ?? '');
+
+            return self::counterpartFields(
+                $name,
+                (string) ($invoice->vat_no ?: $invoice->customer?->afm ?? ''),
+                (string) ($invoice->occupation ?: $invoice->customer?->occupation ?? ''),
+                (string) ($invoice->address1 ?: $invoice->customer?->address1 ?? ''),
+                (string) ($invoice->postcode ?: $invoice->customer?->postcode ?? ''),
+                (string) ($invoice->city ?: $invoice->customer?->city ?? ''),
+                $invoice,
+            );
+        }
+
+        $name = $invoice->counterpartName() ?? '';
+        if ($name === '') {
+            throw new RuntimeException(
+                "InvoSign requires a counterpart name on invoice {$invoice->invcode}, but the "
+                .'document records none'
+                .($invoice->hasBeenFiled() ? ' and is already filed.' : '.')
+                .' Fill «Επωνυμία» on the invoice.'
+            );
+        }
+
+        return self::counterpartFields(
+            $name,
+            (string) ($invoice->counterpartAfm() ?? ''),
+            (string) ($invoice->occupation ?: $legalFallback?->occupation ?? ''),
+            (string) ($invoice->address1 ?: $legalFallback?->address1 ?? ''),
+            (string) ($invoice->postcode ?: $legalFallback?->postcode ?? ''),
+            (string) ($invoice->city ?: $legalFallback?->city ?? ''),
+            $invoice,
+        );
+    }
+
+    /**
+     * Assemble API_Counterpart in InvoSign's own field ORDER (vendor reference §2c,
+     * and the same order deliveryCounterpartFields() emits): name, vat, profession,
+     * tax office, address, phone, email.
+     *
+     * Order matters here — this file already documents InvoSign as a
+     * namespace-prefix-strict parser — and splitting the block into two array_merge
+     * branches had quietly moved the contact fields to the front.
+     *
+     * The three CONTACT values are not part of the legal identity: they are absent
+     * from the AADE payload and InvoSign uses them for delivery and printing, so they
+     * read the LIVE customer on purpose — sending today's copy to today's address is
+     * correct. The legal values are passed in by the caller from the frozen snapshot.
+     *
+     * @return array<string, string>
+     */
+    private static function counterpartFields(
+        string $name,
+        string $vat,
+        string $profession,
+        string $street,
+        string $postalCode,
+        string $city,
+        Invoice $invoice,
+    ): array {
+        $contact = $invoice->customer;
+
+        return [
+            'CounterpartName' => $name,
+            'CounterpartVat' => $vat,
+            'CounterpartProfession' => $profession,
+            'CounterpartTaxOffice' => (string) ($contact?->tax_office ?? ''),
+            'CounterpartAddressStreet' => $street,
+            'CounterpartAddressPostalCode' => $postalCode,
+            'CounterpartAddressCity' => $city,
+            'CounterpartPhone' => (string) ($contact?->phone ?? ''),
+            'CounterpartEmail' => self::customerEmail($invoice->company, $contact?->email),
+        ];
+    }
+
+    /** @return array<string, string> */
+    private static function deliveryCounterpartFields(DeliveryNote $note): array
+    {
+        $customer = $note->customer;
+
+        // Mirror DeliveryNoteSubmitter::buildCounterpart's fallback chain so the
+        // InvoSign API_Counterpart matches the AADE <counterpart> exactly: for an
+        // ενδοδιακίνηση (no external recipient) the name falls back to the issuer
+        // (it IS the recipient) and the ΑΦΜ to nine zeros — otherwise InvoSign
+        // rejects the empty CounterpartName with "[88-001] Λείπει το υποχρεωτικό
+        // πεδίο: CounterpartName".
+        return [
+            'CounterpartName' => (string) ($note->recipient_name ?: $customer?->name ?: $note->company?->name ?? ''),
+            // Same resolution as the AADE <counterpart> in this very document
+            // (DeliveryNote::externalRecipientAfm), rather than a second hand-rolled
+            // copy of the chain. The old pair agreed on the common shapes and diverged
+            // only on a whitespace-padded ΑΦΜ (' 000000000 ' read as an external
+            // party); sharing the helper removes the chance of drifting further.
+            'CounterpartVat' => (string) ($note->externalRecipientAfm() ?: DeliveryNote::INTERNAL_MOVEMENT_AFM),
+            'CounterpartProfession' => (string) ($customer?->occupation ?? ''),
+            'CounterpartTaxOffice' => (string) ($customer?->tax_office ?? ''),
+            'CounterpartAddressStreet' => (string) ($note->delivery_street ?: $customer?->address1 ?? ''),
+            'CounterpartAddressPostalCode' => (string) ($note->delivery_postcode ?: $customer?->postcode ?? ''),
+            'CounterpartAddressCity' => (string) ($note->delivery_city ?: $customer?->city ?? ''),
+            'CounterpartPhone' => (string) ($customer?->phone ?? ''),
+            'CounterpartEmail' => self::customerEmail($note->company, $customer?->email),
+        ];
+    }
+
+    /**
+     * <CounterpartEmail> is what the provider uses to DELIVER (email) the document
+     * to the customer. It ships only when the tenant opts in via the per-company knob
+     * companies.einvoice_include_customer_email (default OFF) — otherwise EMPTY, the
+     * same shape as a customer with no email on file, so the provider never emails a
+     * customer from ekdosi's XML by accident (the dev-environment footgun this closes).
+     * ekdosi's own SendInvoiceEmail flow is unaffected — this is provider-side delivery
+     * only, and only on the gr-provider channel (the AADE payload carries no email).
+     */
+    private static function customerEmail(?Company $company, ?string $email): string
+    {
+        return $company?->einvoice_include_customer_email
+            ? (string) ($email ?? '')
+            : '';
+    }
+
+    /** @param  array<string, string>  $fields */
+    private static function appendAll(DOMDocument $dom, DOMElement $parent, array $fields): void
+    {
+        foreach ($fields as $name => $value) {
+            $parent->appendChild(self::el($dom, $name, $value));
+        }
+    }
+
+    private static function el(DOMDocument $dom, string $name, string $value): DOMElement
+    {
+        $el = $dom->createElementNS(self::AADE_NS, $name);
+        $el->textContent = $value; // textContent escapes &, <, > correctly
+
+        return $el;
+    }
+
+    private static function money(float $v): string
+    {
+        return number_format($v, 2, '.', '');
+    }
+}

@@ -1,0 +1,179 @@
+<x-filament-panels::page>
+    @if (! $ran)
+        <x-filament::section>
+            <x-slot name="heading">Ζωντανός έλεγχος myDATA — Έξοδα</x-slot>
+            <x-slot name="description">
+                Ένα κουμπί «Έλεγχος» δείχνει και τις δύο κατευθύνσεις πάνω στα παραστατικά που μας υπέβαλαν προμηθευτές (RequestDocs).
+            </x-slot>
+            <ul class="space-y-2 text-sm text-gray-600 dark:text-gray-300">
+                <li class="flex items-start gap-2">
+                    <x-filament::icon icon="heroicon-o-clipboard-document-check" class="mt-0.5 h-5 w-5 text-primary-500" />
+                    <span><strong>Έλεγχος δικών μας εξόδων</strong> — όσα έξοδα έχουμε καταχωρίσει τοπικά υπάρχουν και συμφωνούν στο myDATA;</span>
+                </li>
+                <li class="flex items-start gap-2">
+                    <x-filament::icon icon="heroicon-o-cloud-arrow-down" class="mt-0.5 h-5 w-5 text-warning-500" />
+                    <span><strong>Αδέσποτα έξοδα από myDATA</strong> — παραστατικά που μας υπέβαλαν προμηθευτές αλλά <em>δεν</em> έχουμε καταχωρίσει· καταχωρίστε τα με ένα κλικ.</span>
+                </li>
+            </ul>
+        </x-filament::section>
+    @endif
+
+    @if ($error)
+        <x-filament::section>
+            <div class="text-danger-600 dark:text-danger-400 font-medium">{{ $error }}</div>
+        </x-filament::section>
+    @endif
+
+    @if ($ran && $result)
+        @php $orphans = $result['missingLocally']; @endphp
+
+        @if ($fetchedAtHuman)
+            <div class="text-xs text-gray-400 dark:text-gray-500">
+                Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — πατήστε ξανά «Έλεγχος myDATA — Έξοδα» για ανανέωση.
+            </div>
+        @endif
+
+        {{-- Unified summary cards (both directions) --}}
+        <div class="grid grid-cols-2 gap-4 md:grid-cols-5">
+            <x-filament::section>
+                <div class="text-sm text-gray-500 dark:text-gray-400">Διάστημα</div>
+                <div class="text-base font-semibold">{{ $result['from'] }} – {{ $result['to'] }}</div>
+            </x-filament::section>
+            <x-filament::section>
+                <div class="text-sm text-gray-500 dark:text-gray-400">Στο myDATA</div>
+                <div class="text-2xl font-bold">{{ $result['aadeTotal'] }}</div>
+            </x-filament::section>
+            <x-filament::section>
+                <div class="text-sm text-gray-500 dark:text-gray-400">Τοπικά (με ΜΑΡΚ)</div>
+                <div class="text-2xl font-bold">{{ $result['localTotal'] }}</div>
+            </x-filament::section>
+            <x-filament::section>
+                <div class="text-sm text-gray-500 dark:text-gray-400">Ασυμφωνίες</div>
+                <div @class([
+                    'text-2xl font-bold',
+                    'text-success-600 dark:text-success-400' => $result['discrepancyCount'] === 0,
+                    'text-warning-600 dark:text-warning-400' => $result['discrepancyCount'] > 0,
+                ])>{{ $result['discrepancyCount'] }}</div>
+            </x-filament::section>
+            <x-filament::section>
+                <div class="text-sm text-gray-500 dark:text-gray-400">Αδέσποτα έξοδα</div>
+                <div @class([
+                    'text-2xl font-bold',
+                    'text-success-600 dark:text-success-400' => count($orphans) === 0,
+                    'text-warning-600 dark:text-warning-400' => count($orphans) > 0,
+                ])>{{ count($orphans) }}</div>
+            </x-filament::section>
+        </div>
+
+        {{-- ============================================================
+             Direction 1 — ΤΑ ΔΙΚΑ ΜΑΣ ΕΞΟΔΑ → myDATA: συμφωνούν;
+             ============================================================ --}}
+        <div class="flex items-center gap-2 pt-2 text-sm font-semibold text-gray-700 dark:text-gray-200">
+            <x-filament::icon icon="heroicon-o-clipboard-document-check" class="h-5 w-5 text-primary-500" />
+            Τα δικά μας έξοδα στο myDATA
+        </div>
+
+        @if ($result['discrepancyCount'] === 0)
+            <x-filament::section>
+                <div class="flex items-center gap-2 text-success-600 dark:text-success-400">
+                    <x-filament::icon icon="heroicon-o-check-circle" class="h-6 w-6" />
+                    <span class="font-medium">Όλα τα τοπικά έξοδα συμφωνούν με το AADE.</span>
+                </div>
+            </x-filament::section>
+        @endif
+
+        @foreach ([
+            ['key' => 'stateMismatch', 'title' => 'Ασυμφωνία κατάστασης', 'color' => 'warning', 'icon' => 'heroicon-o-exclamation-triangle'],
+            ['key' => 'contentMismatch', 'title' => 'Διαφορά περιεχομένου (ίδιο ΜΑΡΚ)', 'color' => 'danger', 'icon' => 'heroicon-o-exclamation-circle'],
+            ['key' => 'contentIncomplete', 'title' => 'Ελλιπή τοπικά στοιχεία (ίδιο ΜΑΡΚ)', 'color' => 'warning', 'icon' => 'heroicon-o-question-mark-circle'],
+            ['key' => 'missingAtAade', 'title' => 'Λείπουν από το AADE', 'color' => 'danger', 'icon' => 'heroicon-o-x-circle'],
+            ['key' => 'duplicateLocal', 'title' => 'Διπλά ΜΑΡΚ τοπικά', 'color' => 'danger', 'icon' => 'heroicon-o-document-duplicate'],
+        ] as $bucket)
+            {{-- Default a missing key to []: a cache payload written before a new
+                 bucket shipped (e.g. contentMismatch) must not break the render. --}}
+            @php($bucketRows = $result[$bucket['key']] ?? [])
+            @if (count($bucketRows) > 0)
+                <x-filament::section :collapsible="true">
+                    <x-slot name="heading">
+                        <span class="flex items-center gap-2">
+                            <x-filament::icon :icon="$bucket['icon']" @class([
+                                'h-5 w-5',
+                                'text-warning-500' => $bucket['color'] === 'warning',
+                                'text-danger-500' => $bucket['color'] === 'danger',
+                            ]) />
+                            {{ $bucket['title'] }}
+                            <x-filament::badge :color="$bucket['color']">{{ count($bucketRows) }}</x-filament::badge>
+                        </span>
+                    </x-slot>
+
+                    @include('filament.pages.partials.reconciliation-table', [
+                        'rows' => $bucketRows,
+                        'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'afm', 'gross', 'localState', 'aadeState', 'problem', 'open'],
+                    ])
+                </x-filament::section>
+            @endif
+        @endforeach
+
+        @if (count($result['matched']) > 0)
+            <x-filament::section :collapsible="true" :collapsed="true">
+                <x-slot name="heading">
+                    <span class="flex items-center gap-2">
+                        <x-filament::icon icon="heroicon-o-check-circle" class="h-5 w-5 text-success-500" />
+                        Συμφωνούν
+                        <x-filament::badge color="success">{{ count($result['matched']) }}</x-filament::badge>
+                    </span>
+                </x-slot>
+
+                @include('filament.pages.partials.reconciliation-table', [
+                    'rows' => $result['matched'],
+                    'columns' => ['invcode', 'mark', 'issuedAt', 'supplier', 'afm', 'gross', 'state', 'open'],
+                ])
+            </x-filament::section>
+        @endif
+
+        {{-- ============================================================
+             Direction 2 — myDATA → ΕΜΑΣ: αδέσποτα έξοδα (μας υπέβαλε
+             προμηθευτής αλλά δεν τα έχουμε καταχωρίσει).
+             ============================================================ --}}
+        <div class="flex items-center gap-2 pt-4 text-sm font-semibold text-gray-700 dark:text-gray-200">
+            <x-filament::icon icon="heroicon-o-cloud-arrow-down" class="h-5 w-5 text-warning-500" />
+            Αδέσποτα έξοδα από myDATA
+        </div>
+
+        @if ($result['aadeTotal'] === 0)
+            <x-filament::section>
+                <div class="flex items-center gap-2 text-gray-500 dark:text-gray-400">
+                    <x-filament::icon icon="heroicon-o-inbox" class="h-6 w-6" />
+                    <span>Το myDATA δεν επέστρεψε έξοδα για το διάστημα.</span>
+                </div>
+            </x-filament::section>
+        @elseif (count($orphans) === 0)
+            <x-filament::section>
+                <div class="flex items-center gap-2 text-success-600 dark:text-success-400">
+                    <x-filament::icon icon="heroicon-o-check-circle" class="h-6 w-6" />
+                    <span class="font-medium">Δεν βρέθηκαν αδέσποτα — όλα τα έξοδα του myDATA είναι καταχωρημένα.</span>
+                </div>
+            </x-filament::section>
+        @endif
+
+        @if (count($orphans) > 0)
+            <x-filament::section>
+                <x-slot name="heading">
+                    <span class="flex items-center gap-2">
+                        <x-filament::icon icon="heroicon-o-cloud-arrow-down" class="h-5 w-5 text-warning-500" />
+                        Αδέσποτα έξοδα (στο myDATA, όχι στο ekdosi)
+                        <x-filament::badge color="warning">{{ count($orphans) }}</x-filament::badge>
+                    </span>
+                </x-slot>
+                <x-slot name="description">
+                    Παραστατικά που μας υπέβαλαν προμηθευτές χωρίς τοπική εγγραφή. Χρησιμοποιήστε «Καταχώριση αδέσποτων εξόδων» στην κορυφή.
+                </x-slot>
+
+                @include('filament.pages.partials.reconciliation-table', [
+                    'rows' => $orphans,
+                    'columns' => ['mark', 'issuedAt', 'supplier', 'afm', 'gross', 'mydataState'],
+                ])
+            </x-filament::section>
+        @endif
+    @endif
+</x-filament-panels::page>

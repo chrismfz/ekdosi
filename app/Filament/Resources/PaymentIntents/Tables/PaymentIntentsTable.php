@@ -1,0 +1,133 @@
+<?php
+
+namespace App\Filament\Resources\PaymentIntents\Tables;
+
+use App\Filament\Resources\Customers\CustomerResource;
+use App\Models\Payment;
+use App\Models\PaymentIntent;
+use App\Models\PaymentMethod;
+use App\Services\Payments\PaymentGatewayRegistry;
+use App\Services\Payments\PaymentIntentService;
+use App\Support\Money;
+use Filament\Actions\Action;
+use Filament\Forms\Components\Select;
+use Filament\Forms\Components\TextInput;
+use Filament\Notifications\Notification;
+use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\SelectFilter;
+use Filament\Tables\Table;
+use Illuminate\Support\Facades\Gate;
+
+class PaymentIntentsTable
+{
+    public static function configure(Table $table): Table
+    {
+        $registry = app(PaymentGatewayRegistry::class);
+
+        return $table
+            ->defaultSort('created_at', 'desc')
+            ->columns([
+                // The intent id IS the acquirer's orderid for redirect gateways
+                // (redirectForm: orderid = intent->id, orderDesc = «Ekdosi #{id}»), so
+                // it's what the Eurobank/Worldline notification shows as «Κωδικός
+                // Παραγγελίας»/«Ekdosi #N» — surface it to match a payment to its row.
+                TextColumn::make('id')->label('ID')->sortable()->copyable()
+                    ->tooltip('Κωδικός παραγγελίας (orderid) στο vPOS — «Ekdosi #ID» στην ειδοποίηση της τράπεζας.'),
+                TextColumn::make('created_at')->label('Ημ/νία')->dateTime('d/m/Y H:i')->sortable(),
+                TextColumn::make('reference')->label('Αναφορά')->searchable()->copyable(),
+                TextColumn::make('customer.name')->label('Πελάτης')->searchable(),
+                TextColumn::make('gateway')->label('Τρόπος')->badge()
+                    ->formatStateUsing(fn (string $state): string => $registry->label($state)),
+                TextColumn::make('amount')->label('Ποσό')->alignRight()
+                    ->formatStateUsing(fn ($state): string => Money::eur($state)),
+                TextColumn::make('status')->label('Κατάσταση')->badge()
+                    ->formatStateUsing(fn (string $state): string => match ($state) {
+                        PaymentIntent::STATUS_PENDING => 'Εκκρεμεί',
+                        PaymentIntent::STATUS_SETTLED => 'Καταχωρίστηκε',
+                        PaymentIntent::STATUS_CANCELLED => 'Ακυρώθηκε',
+                        PaymentIntent::STATUS_EXPIRED => 'Έληξε',
+                        default => $state,
+                    })
+                    ->color(fn (string $state): string => match ($state) {
+                        PaymentIntent::STATUS_SETTLED => 'success',
+                        PaymentIntent::STATUS_PENDING => 'warning',
+                        default => 'gray',
+                    }),
+                // The money trail: how many Payment rows this intent produced, linked
+                // to the customer's Καρτέλα where they show («πλήρωσα, πού μπήκε;»).
+                TextColumn::make('payments_count')
+                    ->label('Πληρωμές')
+                    ->counts('payments')
+                    ->badge()
+                    ->formatStateUsing(fn (int $state): string => $state > 0 ? "{$state} ✓" : '—')
+                    ->color(fn (int $state): string => $state > 0 ? 'success' : 'gray')
+                    ->url(fn (PaymentIntent $record): ?string => $record->payments_count > 0
+                        ? CustomerResource::getUrl('ledger', ['record' => $record->customer_id])
+                        : null),
+            ])
+            ->filters([
+                SelectFilter::make('status')->label('Κατάσταση')->options([
+                    PaymentIntent::STATUS_PENDING => 'Εκκρεμεί',
+                    PaymentIntent::STATUS_SETTLED => 'Καταχωρίστηκε',
+                    PaymentIntent::STATUS_CANCELLED => 'Ακυρώθηκε',
+                    PaymentIntent::STATUS_EXPIRED => 'Έληξε',
+                ])->default(PaymentIntent::STATUS_PENDING),
+            ])
+            ->recordActions([
+                Action::make('settle')
+                    ->label('Καταχώριση πληρωμής')
+                    ->icon('heroicon-o-check-circle')
+                    ->color('success')
+                    // Writing money requires the payment-create right — not just
+                    // read access to this list. Hard-guarded in the body too
+                    // (mountAction does NOT re-check visible()).
+                    ->visible(fn (PaymentIntent $record): bool => $record->isPending() && Gate::allows('create', Payment::class))
+                    ->schema([
+                        TextInput::make('actual_amount')
+                            ->label('Ποσό που εισπράχθηκε (€)')
+                            ->numeric()
+                            ->minValue(0.01)
+                            ->required()
+                            ->default(fn (PaymentIntent $record) => (float) $record->amount)
+                            ->helperText('Το πραγματικό ποσό που έφτασε — μπορεί να διαφέρει από το ζητούμενο.'),
+                        Select::make('payment_method_id')
+                            ->label('Τρόπος πληρωμής (myDATA)')
+                            ->options(fn () => PaymentMethod::query()->pluck('description', 'id'))
+                            ->native(false)
+                            ->placeholder('— προαιρετικό —'),
+                    ])
+                    ->action(function (array $data, PaymentIntent $record): void {
+                        abort_unless(Gate::allows('create', Payment::class), 403);
+                        app(PaymentIntentService::class)->settle(
+                            $record,
+                            settledBy: (string) (auth()->user()?->email ?? 'operator'),
+                            actualAmount: (float) $data['actual_amount'],
+                            paymentMethodId: filled($data['payment_method_id'] ?? null) ? (int) $data['payment_method_id'] : null,
+                        );
+                        // Honest even on a race: settle() is a no-op if the intent
+                        // was concurrently cancelled/settled — report the real state.
+                        if ($record->fresh()?->status === PaymentIntent::STATUS_SETTLED) {
+                            Notification::make()->title("Καταχωρίστηκε η πληρωμή {$record->reference}")->success()->send();
+                        } else {
+                            Notification::make()->title('Η κατάσταση άλλαξε — δεν καταχωρίστηκε.')->warning()->send();
+                        }
+                    }),
+                Action::make('cancel')
+                    ->label('Ακύρωση')
+                    ->icon('heroicon-o-x-circle')
+                    ->color('danger')
+                    ->visible(fn (PaymentIntent $record): bool => $record->isPending() && Gate::allows('create', Payment::class))
+                    ->requiresConfirmation()
+                    ->action(function (PaymentIntent $record): void {
+                        abort_unless(Gate::allows('create', Payment::class), 403);
+                        // Guarded pending→cancelled (locked) so it can't race/overwrite a settle.
+                        app(PaymentIntentService::class)->cancel($record);
+                        if ($record->fresh()?->status === PaymentIntent::STATUS_CANCELLED) {
+                            Notification::make()->title("Ακυρώθηκε η εκκρεμότητα {$record->reference}")->success()->send();
+                        } else {
+                            Notification::make()->title('Δεν ακυρώθηκε — η πληρωμή είχε ήδη καταχωριστεί.')->warning()->send();
+                        }
+                    }),
+            ]);
+    }
+}

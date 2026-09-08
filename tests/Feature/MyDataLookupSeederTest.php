@@ -1,0 +1,340 @@
+<?php
+
+namespace Tests\Feature;
+
+use App\Models\Company;
+use App\Models\DeliveryMethod;
+use App\Models\DistributionAim;
+use App\Models\InvoiceType;
+use App\Models\MetricUnit;
+use App\Models\PaymentMethod;
+use App\Models\ProductCategory;
+use App\Models\VatCategory;
+use App\Services\MyData\MyDataLookupSeeder;
+use App\Support\MyData\Codes;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
+
+class MyDataLookupSeederTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private function svc(): MyDataLookupSeeder
+    {
+        return app(MyDataLookupSeeder::class);
+    }
+
+    private function tenant(): Company
+    {
+        return Company::create([
+            'name' => 'T', 'slug' => 't-'.uniqid(),
+            'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
+        ]);
+    }
+
+    public function test_seeds_standard_vat_categories_with_24_as_default(): void
+    {
+        $tenant = $this->tenant();
+
+        $r = $this->svc()->seedVatCategories($tenant);
+
+        // MYD-007: 3 MAINLAND positive rates (24/13/6) + ONE correctly-reasoned 0% row
+        // (§8.3 4). The island rates (17/9/4) are deliberately not seeded — mainland
+        // tenants. A single 0% category keeps the invariant ReverseCharge / WHMCS / the
+        // PDF fallback rely on; the operator adds more via the guided form when needed.
+        $this->assertSame(4, $r['created']);
+        $this->assertSame(0, $r['skipped']);
+
+        $cats = VatCategory::where('company_id', $tenant->id)->get();
+        $this->assertEqualsCanonicalizing(
+            [0.0, 6.0, 13.0, 24.0],
+            $cats->pluck('rate')->map(fn ($r) => (float) $r)->all()
+        );
+        // The 0% row carries a valid §8.3 reason (no reason-less landmine).
+        $zero = $cats->firstWhere('rate', 0.0);
+        $this->assertSame(4, (int) $zero->vat_exemption_category);
+        // 24% is the auto-default on first seed.
+        $default = $cats->firstWhere('is_default', true);
+        $this->assertNotNull($default);
+        $this->assertSame(24.0, (float) $default->rate);
+    }
+
+    public function test_vat_seed_is_idempotent_and_keeps_existing(): void
+    {
+        $tenant = $this->tenant();
+        // Pre-existing 24% with a custom description + default.
+        VatCategory::create(['company_id' => $tenant->id, 'description' => 'Δικό μου 24', 'rate' => 24, 'is_default' => true]);
+
+        $r1 = $this->svc()->seedVatCategories($tenant);
+        $this->assertSame(3, $r1['created']);   // 4 seed rows minus the existing 24%
+        $this->assertSame(1, $r1['skipped']);
+
+        // Existing 24% kept verbatim (not overwritten), still the only default.
+        $this->assertSame('Δικό μου 24', VatCategory::where('company_id', $tenant->id)->where('rate', 24)->value('description'));
+        $this->assertSame(1, VatCategory::where('company_id', $tenant->id)->where('is_default', true)->count());
+
+        // Second run is a full no-op.
+        $r2 = $this->svc()->seedVatCategories($tenant);
+        $this->assertSame(0, $r2['created']);
+        $this->assertSame(4, $r2['skipped']);
+    }
+
+    public function test_seeds_starter_invoice_types_including_goods_sale(): void
+    {
+        $tenant = $this->tenant();
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+        $this->assertSame(14, $r['created']);   // ΤΔΑ dropped (MYD-002)
+
+        // Cross-border SERVICES twins exist (2.2/2.3) — not just the goods ones.
+        $eny = InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '2.2')->first();
+        $this->assertNotNull($eny);
+        $this->assertSame('E3_561_005', $eny->mydata_income_class);
+        $this->assertSame('category1_3', $eny->mydata_income_class_category);
+        // Correlated + aggregate delivery notes exist (9.1/9.2), no income class.
+        $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '9.1')->first());
+        $this->assertNull(InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '9.2')->value('mydata_income_class'));
+
+        // The "κόψε εμπόρευμα" case exists now: 1.1 Τιμολόγιο Πώλησης, goods.
+        $goods = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
+        $this->assertNotNull($goods);
+        $this->assertTrue((bool) $goods->mydata_requires_quantity);
+
+        // Credit type flagged; service type present.
+        $this->assertTrue((bool) InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '5.1')->value('is_credit'));
+        $this->assertNotNull(InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->first());
+    }
+
+    public function test_seeded_rows_match_the_canonical_type_defaults(): void
+    {
+        // Guards the single-source wiring: every seeded series' classification
+        // must equal Codes::typeDefaults() for its §8.1 type, so the seeder and
+        // the suggester's one-click apply can never drift.
+        $tenant = $this->tenant();
+        $this->svc()->seedInvoiceTypes($tenant);
+
+        foreach (InvoiceType::where('company_id', $tenant->id)->get() as $it) {
+            $d = Codes::typeDefaults((string) $it->mydata_type);
+            $this->assertSame($d['income'], $it->mydata_income_class, "income for {$it->code} ({$it->mydata_type})");
+            $this->assertSame($d['category'], $it->mydata_income_class_category, "category for {$it->code}");
+            $this->assertSame($d['goods'], (bool) $it->mydata_requires_quantity, "goods flag for {$it->code}");
+        }
+    }
+
+    public function test_seeds_invoice_types_pre_classified_by_the_book(): void
+    {
+        $tenant = $this->tenant();
+        $this->svc()->seedInvoiceTypes($tenant);
+
+        $by = fn (string $code) => InvoiceType::where('company_id', $tenant->id)->where('code', $code)->first();
+
+        // Services B2B (ΤΠΥ): 2.1 → E3_561_001 / category1_3 (παροχή υπηρεσιών).
+        $tpy = $by('ΤΠΥ');
+        $this->assertSame('2.1', $tpy->mydata_type);
+        $this->assertSame('E3_561_001', $tpy->mydata_income_class);
+        $this->assertSame('category1_3', $tpy->mydata_income_class_category);
+
+        // Goods B2B (ΤΙΜ): 1.1 → E3_561_001 / category1_1 (εμπορεύματα).
+        $tim = $by('ΤΙΜ');
+        $this->assertSame('1.1', $tim->mydata_type);
+        $this->assertSame('E3_561_001', $tim->mydata_income_class);
+        $this->assertSame('category1_1', $tim->mydata_income_class_category);
+
+        // Retail services (ΑΠΥ): 11.2 → E3_561_003 (λιανικές) / category1_3.
+        $apy = $by('ΑΠΥ');
+        $this->assertSame('E3_561_003', $apy->mydata_income_class);
+        $this->assertSame('category1_3', $apy->mydata_income_class_category);
+
+        // Intra-community (ΕΝΔ): 1.2 → E3_561_005.
+        $this->assertSame('E3_561_005', $by('ΕΝΔ')->mydata_income_class);
+        // Intra-community services (ΕΝΥ): 2.2 → E3_561_005 too.
+        $this->assertSame('E3_561_005', $by('ΕΝΥ')->mydata_income_class);
+
+        // Third-country goods (ΕΞΑ): 1.3 → E3_561_006, NOT the intra-EU 561_005 (MYD-001).
+        $this->assertSame('E3_561_006', $by('ΕΞΑ')->mydata_income_class);
+        $this->assertSame('category1_1', $by('ΕΞΑ')->mydata_income_class_category);
+        // Third-country services (ΥΤΧ): 2.3 → E3_561_006, NOT 561_005 (MYD-001).
+        $this->assertSame('E3_561_006', $by('ΥΤΧ')->mydata_income_class);
+        $this->assertSame('category1_3', $by('ΥΤΧ')->mydata_income_class_category);
+
+        // Delivery note (ΔΑΠ, 9.3): NO income classification.
+        $dap = $by('ΔΑΠ');
+        $this->assertNull($dap->mydata_income_class);
+        $this->assertNull($dap->mydata_income_class_category);
+    }
+
+    public function test_vat_code_10_label_is_not_islands_specific(): void
+    {
+        // MYD-004 (label): §8.2 code 10 is «ΦΠΑ συντελεστής 4% (αρ.31 ν.5057/2023)»,
+        // NOT an islands rate — the official table carries no «νήσων». Codes 4/5/6
+        // ARE the genuine island reduced rates, so they keep it.
+        $this->assertStringNotContainsString('νήσ', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('4%', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('5057', Codes::VAT_CATEGORY_LABELS[10]);
+        $this->assertStringContainsString('νήσων', Codes::VAT_CATEGORY_LABELS[6]);
+    }
+
+    public function test_cross_border_e3_codes_distinguish_intra_eu_from_third_country(): void
+    {
+        // MYD-001: 1.2/2.2 (intra-community) use E3_561_005; 1.3/2.3
+        // (third countries) use E3_561_006. A numeric-rate shortcut cannot
+        // tell them apart, so the canonical defaults must be exact.
+        $this->assertSame('E3_561_005', Codes::typeDefaults('1.2')['income']);
+        $this->assertSame('E3_561_005', Codes::typeDefaults('2.2')['income']);
+        $this->assertSame('E3_561_006', Codes::typeDefaults('1.3')['income']);
+        $this->assertSame('E3_561_006', Codes::typeDefaults('2.3')['income']);
+    }
+
+    public function test_invoice_type_seed_completes_income_chain_on_matching_type(): void
+    {
+        $tenant = $this->tenant();
+        // Imported ΤΠΥ has the doc type but NO income classification.
+        InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΠΥ', 'name' => 'Δικό μου', 'invcount' => 50, 'mydata_type' => '2.1']);
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+        $this->assertSame(13, $r['created']);    // all but the existing ΤΠΥ (14 total − ΤΠΥ)
+        $this->assertSame(1, $r['filled']);     // ΤΠΥ income chain back-filled (type matches)
+        $this->assertSame(0, $r['skipped']);
+
+        // Existing ΤΠΥ kept (invcount + name + type untouched); income completed.
+        $row = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΠΥ')->first();
+        $this->assertSame(50, (int) $row->invcount);
+        $this->assertSame('Δικό μου', $row->name);
+        $this->assertSame('2.1', $row->mydata_type);
+        $this->assertSame('E3_561_001', $row->mydata_income_class);
+        $this->assertSame('category1_3', $row->mydata_income_class_category);
+    }
+
+    public function test_seeds_payment_methods_with_mydata_types_and_zero_due_days(): void
+    {
+        $tenant = $this->tenant();
+
+        $r = $this->svc()->seedPaymentMethods($tenant);
+        $this->assertSame(8, $r['created']);
+
+        $cash = PaymentMethod::where('company_id', $tenant->id)->where('description', 'Μετρητά')->first();
+        $this->assertSame(3, (int) $cash->mydata_payment_type);   // §8.12 code 3 = Μετρητά
+        $this->assertSame(0, (int) $cash->due_days);
+
+        // Idempotent.
+        $this->assertSame(0, $this->svc()->seedPaymentMethods($tenant)['created']);
+    }
+
+    public function test_seeds_distribution_aims_with_polisi_first(): void
+    {
+        $tenant = $this->tenant();
+
+        $r = $this->svc()->seedDistributionAims($tenant);
+        $this->assertSame(7, $r['created']);
+        $this->assertNotNull(DistributionAim::where('company_id', $tenant->id)->where('description', 'Πώληση')->first());
+    }
+
+    public function test_seeds_metric_units_and_delivery_methods_and_product_categories(): void
+    {
+        $tenant = $this->tenant();
+
+        $this->assertSame(10, $this->svc()->seedMetricUnits($tenant)['created']);
+        $this->assertNotNull(MetricUnit::where('company_id', $tenant->id)->where('name', 'ΥΠΗΡΕΣΙΑ')->first());
+
+        $this->assertSame(6, $this->svc()->seedDeliveryMethods($tenant)['created']);
+        $this->assertNotNull(DeliveryMethod::where('company_id', $tenant->id)->where('description', 'Courier')->first());
+
+        $this->assertSame(3, $this->svc()->seedProductCategories($tenant)['created']);
+        $this->assertNotNull(ProductCategory::where('company_id', $tenant->id)->where('description_short', 'Υπηρεσίες')->first());
+
+        // All three are idempotent on a second run.
+        $this->assertSame(0, $this->svc()->seedMetricUnits($tenant)['created']);
+        $this->assertSame(0, $this->svc()->seedDeliveryMethods($tenant)['created']);
+        $this->assertSame(0, $this->svc()->seedProductCategories($tenant)['created']);
+    }
+
+    public function test_seeds_product_categories_with_income_buckets(): void
+    {
+        $tenant = $this->tenant();
+        $this->svc()->seedProductCategories($tenant);
+
+        $by = fn (string $d) => ProductCategory::where('company_id', $tenant->id)->where('description_short', $d)->first();
+
+        // Each category carries its §8.6 BUCKET (resale vs own-manufactured vs services)…
+        $this->assertSame('category1_3', $by('Υπηρεσίες')->mydata_income_class_category);
+        $this->assertSame('category1_1', $by('Εμπορεύματα')->mydata_income_class_category);
+        $this->assertSame('category1_2', $by('Προϊόντα')->mydata_income_class_category);
+
+        // …but NOT the E3 income TYPE — that stays channel-driven on the invoice type.
+        $this->assertNull($by('Υπηρεσίες')->mydata_income_class);
+        $this->assertNull($by('Εμπορεύματα')->mydata_income_class);
+    }
+
+    public function test_product_category_seed_is_new_rows_only_and_never_touches_existing(): void
+    {
+        // NEW-ROWS-ONLY: back-filling a bucket onto an existing category would
+        // silently change §8.6 classification of already-filed goods (MYD-006), so
+        // an existing «Εμπορεύματα» — bucket set OR null — is left exactly as it was.
+        $tenant = $this->tenant();
+        // «Υπηρεσίες» pre-exists with NO bucket → must STAY null (policy/type governs).
+        ProductCategory::create(['company_id' => $tenant->id, 'description_short' => 'Υπηρεσίες', 'markup' => 0]);
+        // «Εμπορεύματα» pre-exists with an operator bucket → must survive verbatim.
+        ProductCategory::create(['company_id' => $tenant->id, 'description_short' => 'Εμπορεύματα', 'markup' => 0, 'mydata_income_class_category' => 'category1_2']);
+
+        $r = $this->svc()->seedProductCategories($tenant);
+
+        $this->assertSame(1, $r['created']);  // only «Προϊόντα» is new
+        $this->assertSame(2, $r['skipped']);  // both existing categories untouched
+
+        $by = fn (string $d) => ProductCategory::where('company_id', $tenant->id)->where('description_short', $d)->value('mydata_income_class_category');
+        $this->assertNull($by('Υπηρεσίες'), 'existing null bucket is NOT silently back-filled');
+        $this->assertSame('category1_2', $by('Εμπορεύματα'), 'existing operator bucket preserved');
+        $this->assertSame('category1_2', $by('Προϊόντα'), 'a NEW category is created with its seed bucket');
+    }
+
+    public function test_seed_does_not_impose_income_chain_when_operator_reclassified_the_type(): void
+    {
+        $tenant = $this->tenant();
+        // Operator reclassified ΤΙΜ (seed = 1.1 goods) to 1.2 intra-community,
+        // leaving income blank. The seed's 1.1 income chain must NOT be imposed
+        // — it belongs to a different document kind.
+        InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΙΜ', 'name' => 'ΤΙΜ', 'invcount' => 1, 'mydata_type' => '1.2']);
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+        $this->assertSame(0, $r['filled']);
+        $this->assertSame(1, $r['skipped']);
+
+        $tim = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
+        $this->assertSame('1.2', $tim->mydata_type);
+        $this->assertNull($tim->mydata_income_class, 'seed must not impose its 1.1 income class on a 1.2 row');
+    }
+
+    public function test_seed_backfills_mydata_type_on_existing_row_without_one(): void
+    {
+        $tenant = $this->tenant();
+        // Mirrors a legacy-imported ΤΙΜ with NO myDATA classification + a custom
+        // series counter the operator must keep.
+        InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο πώλησης', 'invcount' => 3, 'mydata_type' => null]);
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+
+        // ΤΙΜ was filled (not skipped); the other 13 are created.
+        $this->assertSame(13, $r['created']);
+        $this->assertSame(1, $r['filled']);
+        $this->assertSame(0, $r['skipped']);
+
+        $tim = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->first();
+        $this->assertSame('1.1', $tim->mydata_type, 'goods sale class back-filled');
+        $this->assertTrue((bool) $tim->mydata_requires_quantity, 'goods → quantity required');
+        $this->assertSame(3, (int) $tim->invcount, 'operator counter preserved');
+        $this->assertSame('Τιμολόγιο πώλησης', $tim->name, 'operator name preserved');
+    }
+
+    public function test_seed_never_overwrites_an_operator_set_mydata_type(): void
+    {
+        $tenant = $this->tenant();
+        // Operator deliberately classified ΤΙΜ as something else — must survive.
+        InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΙΜ', 'name' => 'ΤΙΜ', 'invcount' => 1, 'mydata_type' => '1.2']);
+
+        $r = $this->svc()->seedInvoiceTypes($tenant);
+
+        $this->assertSame(0, $r['filled']);
+        $this->assertSame(1, $r['skipped']);
+        $this->assertSame('1.2', InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->value('mydata_type'));
+    }
+}

@@ -1,0 +1,299 @@
+<?php
+
+namespace App\Filament\Resources\Tickets\Schemas;
+
+use App\Enums\PaymentStatus;
+use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Resources\Tickets\TicketResource;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\Ticket;
+use App\Models\TicketMessage;
+use App\Models\TicketWatcher;
+use App\Models\User;
+use App\Support\InvoiceScope;
+use Filament\Actions\Action;
+use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\TextEntry;
+use Filament\Schemas\Components\Section;
+use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\URL;
+
+/**
+ * The read-only ticket view: a header (status/priority/who/department) + the
+ * message thread rendered with a RepeatableEntry (the repo's pattern for a
+ * child-record list in an infolist). Internal notes are flagged and coloured so
+ * an operator never mistakes one for a customer-visible reply. Replying and
+ * status changes are the header actions on ViewTicket.
+ */
+class TicketInfolist
+{
+    public static function configure(Schema $schema): Schema
+    {
+        return $schema
+            ->components([
+                Section::make('Αίτημα')
+                    ->columns(3)
+                    ->schema([
+                        TextEntry::make('reference')->label('Κωδικός')->copyable()->weight('bold'),
+                        TextEntry::make('status')->label('Κατάσταση')->badge(),
+                        TextEntry::make('priority')->label('Προτεραιότητα')->badge(),
+                        TextEntry::make('subject')->label('Θέμα')->columnSpanFull(),
+                        TextEntry::make('requester')
+                            ->label('Αιτών')
+                            ->state(fn (Ticket $record): string => $record->requesterLabel().($record->isGuest() ? ' (GUEST)' : ''))
+                            ->badge(fn (Ticket $record): bool => $record->isGuest())
+                            ->color(fn (Ticket $record): string => $record->isGuest() ? 'gray' : 'info'),
+                        TextEntry::make('department.name')->label('Τμήμα')->placeholder('—'),
+                        TextEntry::make('assignee.name')->label('Χειριστής')->placeholder('— χωρίς ανάθεση —'),
+                        TextEntry::make('created_at')->label('Ανοίχτηκε')->dateTime('d/m/Y H:i'),
+                        TextEntry::make('last_reply_at')->label('Τελευταία απάντηση')->since()->placeholder('—'),
+                        // Merged duplicate → point to the survivor (messages live there now).
+                        TextEntry::make('merged_into')
+                            ->label('Συγχωνεύθηκε στο')
+                            ->badge()
+                            ->color('gray')
+                            ->icon('heroicon-o-arrows-pointing-in')
+                            ->visible(fn (Ticket $record): bool => $record->isMerged())
+                            ->state(fn (Ticket $record): ?string => $record->mergedInto?->reference)
+                            ->url(fn (Ticket $record): ?string => $record->merged_into_id
+                                ? TicketResource::getUrl('view', ['record' => $record->merged_into_id])
+                                : null)
+                            ->columnSpanFull(),
+                        // Customer feedback (feedback-on-close) — only once the customer has rated.
+                        TextEntry::make('rating')
+                            ->label('Αξιολόγηση πελάτη')
+                            ->badge()
+                            ->visible(fn (Ticket $record): bool => $record->isRated())
+                            ->state(fn (Ticket $record): string => str_repeat('★', (int) $record->rating).' '.$record->rating.'/5')
+                            ->color(fn (Ticket $record): string => match (true) {
+                                (int) $record->rating >= 4 => 'success',
+                                (int) $record->rating === 3 => 'warning',
+                                default => 'danger',
+                            })
+                            ->tooltip(fn (Ticket $record): ?string => $record->rating_comment)
+                            ->columnSpanFull(),
+                    ]),
+
+                Section::make('Πελάτης')
+                    ->description('Στοιχεία λογαριασμού του αιτούντα — για να απαντάς με την εικόνα του μπροστά σου.')
+                    ->columnSpanFull()
+                    ->columns(3)
+                    ->visible(fn (Ticket $record): bool => $record->customer_id !== null)
+                    ->headerActions([
+                        Action::make('kartela')
+                            ->label('Άνοιγμα Καρτέλας')
+                            ->icon('heroicon-o-arrow-top-right-on-square')
+                            ->color('gray')
+                            ->url(fn (Ticket $record): ?string => $record->customer_id
+                                ? CustomerResource::getUrl('ledger', ['record' => $record->customer_id])
+                                : null)
+                            ->openUrlInNewTab(),
+                    ])
+                    ->schema([
+                        TextEntry::make('customer.name')->label('Επωνυμία'),
+                        TextEntry::make('customer.afm')->label('ΑΦΜ')->placeholder('—'),
+                        TextEntry::make('customer.email')->label('Email')->placeholder('—'),
+                        TextEntry::make('customer_balance')
+                            ->label('Υπόλοιπο (οφειλή)')
+                            ->state(fn (Ticket $record): float => self::customerBalance($record))
+                            ->money('EUR')
+                            ->weight('bold')
+                            // Colour reads the already-computed $state — no second balance query.
+                            ->color(fn ($state): string => (float) $state > 0.005 ? 'danger' : 'gray'),
+                        RepeatableEntry::make('recent_invoices')
+                            ->label('Πρόσφατα παραστατικά (ζωντανά)')
+                            ->columnSpanFull()
+                            ->columns(4)
+                            ->state(fn (Ticket $record): array => self::recentInvoices($record))
+                            ->schema([
+                                TextEntry::make('code')->hiddenLabel()->weight('bold'),
+                                TextEntry::make('issued_at')->hiddenLabel()->color('gray'),
+                                TextEntry::make('gross')->hiddenLabel()->money('EUR'),
+                                TextEntry::make('status')
+                                    ->hiddenLabel()
+                                    ->badge()
+                                    // tryFrom (not from): an unexpected cache value degrades to «—», never a 500.
+                                    ->formatStateUsing(fn (?string $state): string => PaymentStatus::tryFrom((string) $state)?->label() ?? '—')
+                                    ->color(fn (?string $state): string => PaymentStatus::tryFrom((string) $state)?->color() ?? 'gray'),
+                            ]),
+                    ]),
+
+                Section::make('Παρακολούθηση (watchers / CC)')
+                    ->description('Χειριστές που ειδοποιούνται με καμπανάκι + emails που κοινοποιούνται (κρυφό Bcc) στις απαντήσεις.')
+                    ->columnSpanFull()
+                    ->collapsed()
+                    ->visible(fn (Ticket $record): bool => $record->watchers()->exists())
+                    ->schema([
+                        RepeatableEntry::make('watchers')
+                            ->hiddenLabel()
+                            ->columns(2)
+                            ->schema([
+                                TextEntry::make('label')
+                                    ->hiddenLabel()
+                                    ->state(fn (TicketWatcher $record): string => $record->label())
+                                    ->badge()
+                                    ->icon(fn (TicketWatcher $record): string => $record->user_id !== null
+                                        ? 'heroicon-o-user'
+                                        : 'heroicon-o-envelope')
+                                    ->color(fn (TicketWatcher $record): string => $record->user_id !== null ? 'success' : 'info'),
+                                TextEntry::make('source')
+                                    ->hiddenLabel()
+                                    ->state(fn (TicketWatcher $record): string => $record->sourceLabel())
+                                    ->color('gray')
+                                    ->alignEnd(),
+                            ]),
+                    ]),
+
+                Section::make('Συνομιλία')
+                    ->schema([
+                        RepeatableEntry::make('messages')
+                            ->hiddenLabel()
+                            ->columns(2)
+                            ->schema([
+                                TextEntry::make('author')
+                                    ->hiddenLabel()
+                                    ->badge()
+                                    ->state(fn (TicketMessage $record): string => self::authorLabel($record))
+                                    ->color(fn (TicketMessage $record): string => $record->is_internal_note
+                                        ? 'warning'
+                                        : ($record->isFromOperator() ? 'success' : 'info')),
+                                TextEntry::make('created_at')
+                                    ->hiddenLabel()
+                                    ->since()
+                                    ->color('gray')
+                                    ->alignEnd(),
+                                TextEntry::make('note_flag')
+                                    ->hiddenLabel()
+                                    ->state(fn (TicketMessage $record): ?string => $record->is_internal_note
+                                        ? '🔒 Εσωτερική σημείωση — δεν τη βλέπει ο πελάτης'
+                                        : null)
+                                    ->color('warning')
+                                    ->visible(fn (TicketMessage $record): bool => $record->is_internal_note)
+                                    ->columnSpanFull(),
+                                TextEntry::make('body')->hiddenLabel()->columnSpanFull(),
+                                TextEntry::make('attachments_links')
+                                    ->hiddenLabel()
+                                    ->html()
+                                    ->state(fn (TicketMessage $record): ?string => self::attachmentLinks($record))
+                                    // Cheap gate on the loaded relation — don't rebuild/re-sign the
+                                    // whole HTML just to test emptiness (->state does that once).
+                                    ->visible(fn (TicketMessage $record): bool => $record->attachments->isNotEmpty())
+                                    ->columnSpanFull(),
+                            ]),
+                    ]),
+            ]);
+    }
+
+    /**
+     * Download links for a message's attachments as safe HTML (filename escaped —
+     * it is untrusted uploader input). Null when the message has none.
+     *
+     * Reads the LOADED `attachments` relation (the property, not a fresh
+     * `->attachments()->get()`), so no query fires per message. Each URL is a signed
+     * link (the operator download route is `signed`), generated only here for a user
+     * already viewing the ticket. The TTL is generous (a ticket tab can stay open a
+     * while) but bounded — a leaked link still needs auth + View:Ticket + tenant
+     * membership to resolve, so the expiry is defence-in-depth, not the gate.
+     */
+    private static function attachmentLinks(TicketMessage $message): ?string
+    {
+        $rows = $message->attachments;
+        if ($rows->isEmpty()) {
+            return null;
+        }
+
+        return $rows->map(function ($att) use ($message): string {
+            $url = URL::temporarySignedRoute('support.tickets.attachment', now()->addHours(6), [
+                'ticket' => $message->ticket_id,
+                'attachment' => $att->id,
+            ]);
+
+            return '<a href="'.e($url).'" target="_blank" rel="noopener" class="fi-link">📎 '
+                .e($att->original_name).' <span style="color:#71717a">('.e($att->humanSize()).')</span></a>';
+        })->implode('<br>');
+    }
+
+    /**
+     * The customer's outstanding balance from the CANONICAL source
+     * (Customer::withOutstandingBalance — reconciles with the dashboard/Καρτέλα).
+     * Never hand-rolled. Called once per render (the colour reads the entry's
+     * $state), so no static cache — that would go stale under a persistent worker.
+     */
+    private static function customerBalance(Ticket $ticket): float
+    {
+        if ($ticket->customer_id === null) {
+            return 0.0;
+        }
+
+        return (float) Customer::query()
+            ->whereKey($ticket->customer_id)
+            ->withOutstandingBalance((int) $ticket->company_id)
+            ->value('outstanding_balance');
+    }
+
+    /**
+     * The customer's most recent LIVE invoices (InvoiceScope::live), reading the
+     * canonical per-invoice fields (gross_total + the payment_status cache written
+     * only by InvoiceBalance). Read-only, capped — the «Καρτέλα» link has the rest.
+     *
+     * @return list<array{code:string, issued_at:?string, gross:float, status:?string}>
+     */
+    private static function recentInvoices(Ticket $ticket): array
+    {
+        $customer = $ticket->customer;
+        if ($customer === null) {
+            return [];
+        }
+
+        return $customer->invoices()
+            ->tap(fn ($query) => InvoiceScope::live($query))
+            // Only ISSUED invoices — exclude unissued drafts, so the list matches what
+            // the outstanding-balance figure above it counts (which excludes drafts).
+            ->where('local_status', '!=', 'draft')
+            ->with('invoiceType')
+            ->latest('issued_at')
+            ->limit(5)
+            ->get(['id', 'invoice_type_id', 'code', 'issued_at', 'gross_total', 'payment_status'])
+            ->map(fn (Invoice $invoice): array => [
+                'code' => trim(($invoice->invoiceType?->code ?? '').($invoice->code ?? '')),
+                'issued_at' => $invoice->issued_at?->format('d/m/Y'),
+                'gross' => (float) $invoice->gross_total,
+                'status' => $invoice->payment_status,
+            ])
+            ->all();
+    }
+
+    private static function authorLabel(TicketMessage $message): string
+    {
+        return match ($message->author_role) {
+            TicketMessage::ROLE_OPERATOR => self::authorName(TicketMessage::ROLE_OPERATOR, $message->author_id) ?? 'Χειριστής',
+            TicketMessage::ROLE_CUSTOMER => self::authorName(TicketMessage::ROLE_CUSTOMER, $message->author_id) ?? 'Πελάτης',
+            default => 'Σύστημα',
+        };
+    }
+
+    /**
+     * Resolve an author's name, memoised per (role, id) so a thread where the
+     * same operator posts many replies costs one query, not one per message
+     * (author is role-typed, not an eager-loadable relation).
+     *
+     * @var array<string, string|null>
+     */
+    private static array $authorNameCache = [];
+
+    private static function authorName(string $role, ?int $id): ?string
+    {
+        if ($id === null) {
+            return null;
+        }
+
+        $key = $role.':'.$id;
+        if (! array_key_exists($key, self::$authorNameCache)) {
+            $model = $role === TicketMessage::ROLE_OPERATOR ? User::find($id) : Customer::find($id);
+            self::$authorNameCache[$key] = $model?->name;
+        }
+
+        return self::$authorNameCache[$key];
+    }
+}

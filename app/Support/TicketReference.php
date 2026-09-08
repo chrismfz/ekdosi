@@ -1,0 +1,66 @@
+<?php
+
+namespace App\Support;
+
+use App\Models\Scopes\CompanyScope;
+use App\Models\Ticket;
+use Illuminate\Support\Carbon;
+
+/**
+ * Generates a ticket reference `TK-YYYY-MM-DD-xxxxxx` (Πυλώνας E): the open date
+ * (readable at a glance) + a 6-char random tail from an unambiguous alphabet. The
+ * random tail is what makes the reference — which doubles as the email subject
+ * token `[TK-…]` and the threading key — unguessable, so a crafted reply can't
+ * land on someone else's ticket. Unique per company (retries on collision;
+ * withTrashed so a soft-deleted ref is never reused).
+ */
+class TicketReference
+{
+    /** Unambiguous 31-char alphabet (no 0/1/I/O/L). */
+    private const ALPHABET = '23456789ABCDEFGHJKMNPQRSTUVWXYZ';
+
+    private const TAIL_LENGTH = 6;
+
+    /**
+     * The reference regex fragment (no delimiters), DERIVED from the alphabet +
+     * tail length so inbound email parsing shares one source of truth: change
+     * ALPHABET/TAIL_LENGTH and the inbound matcher follows automatically.
+     */
+    public static function pattern(string $delimiter = '/'): string
+    {
+        return 'TK-\d{4}-\d{2}-\d{2}-['.preg_quote(self::ALPHABET, $delimiter).']{'.self::TAIL_LENGTH.'}';
+    }
+
+    public static function generate(int $companyId, ?Carbon $on = null): string
+    {
+        $date = ($on ?? Carbon::now())->format('Y-m-d');
+
+        do {
+            $reference = 'TK-'.$date.'-'.self::tail();
+        } while (
+            // withoutGlobalScope: the explicit company_id is authoritative even if an
+            // ambient CompanyContext is set to a DIFFERENT tenant (a super-admin/queue
+            // path opening a ticket for another company) — otherwise CompanyScope would
+            // append its own company_id, neutralise the check, and let a dup slip to the
+            // unique-index error instead of being retried here.
+            Ticket::withoutGlobalScope(CompanyScope::class)
+                ->withTrashed()
+                ->where('company_id', $companyId)
+                ->where('reference', $reference)
+                ->exists()
+        );
+
+        return $reference;
+    }
+
+    private static function tail(): string
+    {
+        $max = strlen(self::ALPHABET) - 1;
+        $out = '';
+        for ($i = 0; $i < self::TAIL_LENGTH; $i++) {
+            $out .= self::ALPHABET[random_int(0, $max)];
+        }
+
+        return $out;
+    }
+}

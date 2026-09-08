@@ -1,0 +1,560 @@
+<?php
+
+namespace Tests\Feature\Delivery;
+
+use App\Enums\MyDataMode;
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\DeliveryMark;
+use App\Models\DeliveryNote;
+use App\Models\InvoiceType;
+use App\Services\Delivery\DeliveryNoteSubmitter;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response as GuzzleResponse;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
+use Tests\TestCase;
+
+/**
+ * MYD-021 — a δελτίο αποστολής must be filed at most once.
+ *
+ * A 9.x δελτίο goes through the same AADE channel and is just as legally binding
+ * as an invoice, but this path had NONE of the invoice path's protections: no
+ * lock, no in-doubt marker, no adopt-or-file recovery, and no service-level guard
+ * against a locally cancelled note. Two concurrent requests — a double click, two
+ * tabs, an overlapping worker — could each POST and create TWO AADE documents;
+ * AADE does not dedup, and the local database would keep only one of them.
+ *
+ * The MockHandler is the assertion throughout: it is a strict queue, so an
+ * attempted POST that should not happen finds no queued response and fails loudly.
+ */
+class DeliveryNoteExactlyOnceTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private Company $tenant;
+
+    private InvoiceType $type;
+
+    private DeliveryNote $note;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->tenant = Company::create([
+            'name' => 'ΔΑ test', 'slug' => 'da-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '800561849',
+            'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
+        ]);
+        $this->type = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΔΑ', 'name' => 'Δελτίο Αποστολής',
+            'invcount' => 2, 'mydata_type' => '9.3',
+        ]);
+        $customer = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Παραλήπτης ΑΕ', 'afm' => '123456789',
+        ]);
+
+        $this->note = DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'delivery_type_id' => $this->type->id,
+            'customer_id' => $customer->id, 'invcode' => 'ΔΑ1', 'code' => 1,
+            'issued_at' => now(), 'mydata_type' => '9.3', 'move_purpose' => 1,
+            'local_status' => 'active', 'dispatch_at' => now()->addHour(),
+            'vehicle_number' => 'ΙΑΒ1234', 'recipient_name' => 'Παραλήπτης ΑΕ',
+            'recipient_afm' => '123456789', 'recipient_country' => 'GR',
+            'loading_street' => 'Φόρτωσης', 'loading_number' => '10',
+            'loading_postcode' => '11111', 'loading_city' => 'Αθήνα', 'start_shipping_branch' => 0,
+            'delivery_street' => 'Παράδοσης', 'delivery_number' => '20',
+            'delivery_postcode' => '22222', 'delivery_city' => 'Θεσσαλονίκη', 'complete_shipping_branch' => 0,
+        ]);
+        $this->note->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Server', 'qty' => 2,
+            // §8.13 coded unit — without it the payload build refuses the note
+            // BEFORE any POST, which would silently hollow out the tests below.
+            'measurement_unit' => 1,
+        ]);
+        $this->note = $this->note->fresh('lines');
+    }
+
+    /** A RequestTransmittedDocs response carrying one live 9.3 doc for (series, ΑΑ). */
+    private function transmittedDocsMock(string $series, string $aa, string $mark): GuzzleResponse
+    {
+        $xml = <<<XML
+        <?xml version="1.0" encoding="utf-8"?>
+        <RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+          <invoicesDoc>
+            <invoice>
+              <mark>{$mark}</mark>
+              <qrCodeUrl>https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted</qrCodeUrl>
+              <issuer><vatNumber>800561849</vatNumber><country>GR</country><branch>0</branch></issuer>
+              <invoiceHeader>
+                <series>{$series}</series>
+                <aa>{$aa}</aa>
+                <issueDate>2026-09-02</issueDate>
+                <invoiceType>9.3</invoiceType>
+                <currency>EUR</currency>
+              </invoiceHeader>
+              <invoiceSummary>
+                <totalNetValue>0</totalNetValue><totalVatAmount>0</totalVatAmount>
+                <totalWithheldAmount>0</totalWithheldAmount><totalFeesAmount>0</totalFeesAmount>
+                <totalStampDutyAmount>0</totalStampDutyAmount><totalOtherTaxesAmount>0</totalOtherTaxesAmount>
+                <totalDeductionsAmount>0</totalDeductionsAmount><totalGrossValue>0</totalGrossValue>
+              </invoiceSummary>
+            </invoice>
+          </invoicesDoc>
+        </RequestedDoc>
+        XML;
+
+        return new GuzzleResponse(200, [], $xml);
+    }
+
+    private function emptyTransmittedDocsMock(): GuzzleResponse
+    {
+        return new GuzzleResponse(200, [], '<?xml version="1.0" encoding="utf-8"?>'
+            .'<RequestedDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"></RequestedDoc>');
+    }
+
+    // ─────────────────────────── concurrency ──────────────────────────────
+
+    public function test_a_second_concurrent_submit_is_refused_not_queued_behind_the_first(): void
+    {
+        // Simulate the other worker by holding the same lock. An empty MockHandler
+        // is the assertion: any POST attempt would find no queued response.
+        $lock = Cache::lock('delivery-submit:'.$this->note->getKey(), 120);
+        $this->assertTrue($lock->get());
+
+        try {
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('ήδη σε εξέλιξη');
+
+            (new DeliveryNoteSubmitter($this->tenant, new MockHandler([])))->submit($this->note);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function test_a_note_filed_by_another_worker_is_seen_under_the_lock(): void
+    {
+        // The in-memory $note is stale — another worker filed it. submit() must
+        // re-read under the lock and refuse, not POST a second time.
+        DB::table('delivery_notes')->where('id', $this->note->id)->update([
+            'mydata_state' => 'VALID', 'mydata_mark' => '400001965177931',
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('already filed');
+
+        (new DeliveryNoteSubmitter($this->tenant, new MockHandler([])))->submit($this->note);
+    }
+
+    // ──────────────────────── the in-doubt window ─────────────────────────
+
+    public function test_the_marker_is_armed_before_the_post(): void
+    {
+        // The core of MYD-021. Before this, a hard kill (OOM, deploy, host failure)
+        // between AADE accepting the request and our catch left NO trace at all —
+        // the lock expired and the next attempt POSTed blindly into a filing that
+        // already existed. Assert the marker is committed at the moment the
+        // transport is entered, read the way a DIFFERENT process would see it.
+        $seenAtPostTime = null;
+        $noteId = $this->note->id;
+
+        $mock = new MockHandler([
+            function () use (&$seenAtPostTime, $noteId) {
+                $seenAtPostTime = DB::table('delivery_notes')->where('id', $noteId)->value('mydata_pending_since');
+
+                throw new RuntimeException('killed mid-flight');
+            },
+        ]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+        } catch (RuntimeException) {
+            // expected
+        }
+
+        $this->assertNotNull(
+            $seenAtPostTime,
+            'the in-doubt marker must be committed BEFORE the POST (a null here also means the '
+            .'transport was never entered — check the payload builds)',
+        );
+        $this->assertNotNull($this->note->fresh()->mydata_pending_since, 'and it must survive the failure');
+    }
+
+    public function test_an_in_doubt_note_adopts_the_existing_mark_instead_of_refiling(): void
+    {
+        $adopted = '400001965177931';
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        // ONLY the reconcile response is queued. A second SendInvoices POST would
+        // find an empty queue and blow up — which is exactly the guarantee.
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', $adopted)]);
+
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame($adopted, (string) $mark->mark);
+        $this->assertSame('INSERT', $mark->mydata_action);
+
+        $fresh = $this->note->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertSame($adopted, (string) $fresh->mydata_mark);
+        $this->assertSame('registered', $fresh->delivery_state);
+        $this->assertNull($fresh->mydata_pending_since, 'adoption clears the marker');
+
+        $this->assertSame(1, DeliveryMark::where('delivery_note_id', $this->note->id)
+            ->where('mark', $adopted)->count());
+        $this->assertSame(0, $mock->count(), 'no second filing may be attempted');
+
+        // The ΑΑ counter was NOT burned — nothing was allocated.
+        $this->assertSame(2, $this->type->fresh()->invcount);
+    }
+
+    public function test_inside_the_grace_window_an_empty_aade_does_not_licence_a_blind_retry(): void
+    {
+        // AADE's feed lags a fresh filing by a minute or two. "Not found" therefore
+        // does NOT mean "never filed" — resubmitting here is how a second MARK gets
+        // created. Only the reconcile response is queued.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        $mock = new MockHandler([$this->emptyTransmittedDocsMock()]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('ΔΕΝ ξαναϋποβάλλουμε τυφλά');
+
+        (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+    }
+
+    public function test_past_the_grace_window_an_empty_aade_does_licence_a_normal_filing(): void
+    {
+        // The other direction: the gate must not strand a note forever when the
+        // earlier POST genuinely never landed.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(30)])->save();
+
+        $sendXml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $mock = new MockHandler([$this->emptyTransmittedDocsMock(), new GuzzleResponse(200, [], $sendXml)]);
+
+        (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $fresh = $this->note->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertNull($fresh->mydata_pending_since, 'a successful filing clears the marker');
+        $this->assertSame(0, $mock->count(), 'both the lookup and the filing ran');
+    }
+
+    public function test_an_unreachable_aade_never_licences_a_blind_retry(): void
+    {
+        // If we cannot verify, we do not gamble — the note stays in-doubt.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(30)])->save();
+
+        $mock = new MockHandler([new RuntimeException('AADE down')]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('Δεν ξαναϋποβάλλουμε');
+
+        (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+    }
+
+    // ───────────────────────── locally cancelled ──────────────────────────
+
+    public function test_a_locally_cancelled_note_is_refused_at_service_level(): void
+    {
+        // The UI hides the button, but that is not protection for a CLI, API or
+        // automation caller — which is exactly where it would go unnoticed.
+        $this->note->forceFill(['local_status' => 'cancelled'])->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('ακυρωμένο τοπικά');
+
+        (new DeliveryNoteSubmitter($this->tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+    }
+
+    // ───────────────────── outcomes that prove no MARK ────────────────────
+
+    public function test_an_ambiguous_response_keeps_the_marker_armed(): void
+    {
+        // The P0 of the first review round. InvalidResponseException and
+        // TransmissionFailedException SUBCLASS MyDataException, so a generic
+        // `catch (MyDataException) { disarm }` swallowed them — and those two are
+        // precisely the AMBIGUOUS cases: an empty HTTP-200 body, or a 5xx after
+        // AADE may already have accepted the POST. Disarming there hands the next
+        // attempt a blind re-POST and a second δελτίο.
+        //
+        // A 502 is a TransmissionFailedException in firebed.
+        $mock = new MockHandler([new GuzzleResponse(502, [], 'Bad Gateway')]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+            $this->fail('Expected the transmission failure to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNotNull(
+            $this->note->fresh()->mydata_pending_since,
+            'an ambiguous response must STAY armed — the POST may have created a MARK',
+        );
+    }
+
+    public function test_an_empty_200_body_keeps_the_marker_armed(): void
+    {
+        // The other half of the same P0: a 200 with an unusable body
+        // (InvalidResponseException) is equally ambiguous.
+        $mock = new MockHandler([new GuzzleResponse(200, [], '')]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+            $this->fail('Expected the invalid response to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNotNull($this->note->fresh()->mydata_pending_since);
+    }
+
+    public function test_a_local_preflight_failure_does_not_lock_the_note_out(): void
+    {
+        // Arming too early is its own bug: a local error that never sent anything
+        // would strand the note for the whole grace window. Blank credentials fail
+        // inside initFirebed, before any byte leaves.
+        $this->tenant->forceFill([
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant->fresh(), new MockHandler([])))->submit($this->note);
+            $this->fail('Expected the missing credentials to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNull(
+            $this->note->fresh()->mydata_pending_since,
+            'nothing was sent, so the note must stay immediately retryable',
+        );
+    }
+
+    public function test_an_adopted_note_can_start_its_movement(): void
+    {
+        // Adoption must produce a USABLE δελτίο. Without AADE's qrUrl the lifecycle
+        // refuses it and tells the operator to re-issue — the very double-filing
+        // the adoption prevents.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', '400001965177931')]);
+        (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertNotNull($this->note->fresh()->mydata_url, 'the adopted note needs AADE\'s QR url');
+    }
+
+    public function test_an_empty_response_doc_is_ambiguous_not_a_rejection(): void
+    {
+        // A well-formed ResponseDoc with NO <response> inside is not AADE saying
+        // "refused" — it is AADE saying nothing. A MARK may exist, so this must stay
+        // armed. Disarming here treats silence as proof and licences a blind retry.
+        $emptyDoc = '<?xml version="1.0" encoding="utf-8"?>'
+            .'<ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"></ResponseDoc>';
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $emptyDoc)]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+            $this->fail('Expected the empty response to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNotNull(
+            $this->note->fresh()->mydata_pending_since,
+            'no response is not a rejection — it must stay armed',
+        );
+    }
+
+    public function test_a_provider_tenant_verifies_against_its_read_credentials(): void
+    {
+        // The in-doubt lookup is a READ, and read mode ≠ submission mode. A provider
+        // tenant's `mydata_mode` is 'off' (it does not submit directly) while its
+        // read credentials live in the sandbox/production slot. Priming with the
+        // SUBMISSION mode meant either a permanent throw (stranding the note — the
+        // round-2 bug reached through another door) or, worse, verifying against the
+        // AADE DEV endpoint, seeing nothing, and filing a second δελτίο.
+        //
+        // The sharp shape: read credentials live in the PRODUCTION slot, the sandbox
+        // slot is empty, and `mydata_mode` is off. Read mode resolves to production;
+        // the submission mode resolves to the empty sandbox slot.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_mode' => 'production',
+            'mydata_mode' => 'off',
+            'mydata_aade_id_production' => 'U', 'mydata_subscription_key_production' => 'K',
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+        $tenant = $this->tenant->fresh();
+
+        $this->assertTrue($tenant->canReadMyData(), 'read credentials are present');
+        $this->assertSame(MyDataMode::Production, $tenant->mydataReadMode());
+        $this->assertNull($tenant->mydataCredentials()[0], 'but the SUBMISSION mode resolves to an empty slot');
+
+        $adopted = '400001965177931';
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', $adopted)]);
+
+        $mark = (new DeliveryNoteSubmitter($tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame($adopted, (string) $mark->mark);
+        $this->assertSame(0, $mock->count(), 'the lookup ran and adopted — no second filing');
+    }
+
+    public function test_an_adopted_mark_row_carries_the_qr_link(): void
+    {
+        // Both normal success paths store invoice_url on the mark row; without it
+        // the self-healed δελτίο's «Ιστορικό myDATA» shows no QR link.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', '400001965177931')]);
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame('https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=adopted', $mark->invoice_url);
+    }
+
+    public function test_unusable_read_credentials_do_not_strand_the_note_either(): void
+    {
+        // The third door into the same stranding bug. canReadMyData() only checks
+        // that an aade-id is present; FirebedCredentials::init() additionally needs a
+        // non-empty, DECRYPTABLE subscription key — so a half-configured tenant, or
+        // an APP_KEY rotation, threw «το myDATA δεν είναι προσβάσιμο» forever, and
+        // the read-less escape hatch sat behind !canReadMyData() where this could
+        // never reach it. A local config error is not evidence about AADE.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_mode' => 'production',
+            'mydata_mode' => 'off',
+            'mydata_aade_id_production' => 'U',
+            'mydata_subscription_key_production' => null,   // id present, key missing
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+        $tenant = $this->tenant->fresh();
+
+        $this->assertTrue($tenant->canReadMyData(), 'the id alone makes it look read-capable');
+
+        // Inside the window → refuse, and say WHY.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+            $this->fail('Expected a refusal inside the grace window.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('κρίσιμο παράθυρο', $e->getMessage());
+        }
+
+        // Past it → submittable again, not stranded for ever.
+        $this->note->forceFill(['mydata_pending_since' => now()->subDays(5)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+        } catch (\Throwable $e) {
+            $this->assertStringNotContainsString('κρίσιμο παράθυρο', $e->getMessage());
+            $this->assertStringNotContainsString('δεν είναι προσβάσιμο', $e->getMessage());
+        }
+    }
+
+    public function test_an_adopted_provider_filing_is_recorded_as_such(): void
+    {
+        // submitViaProvider arms the marker too, so a provider tenant reaches the
+        // adoption path; recording it as a plain INSERT would label a ΥΠΑΗΕΣ filing
+        // «Καταχώρηση» instead of «Καταχώρηση (πάροχος)» in the δελτίο's history.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
+            'einvoice_provider_key' => 'invosign',
+            'mydata_aade_id_production' => 'U', 'mydata_subscription_key_production' => 'K',
+        ])->save();
+        $tenant = $this->tenant->fresh();
+
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', '400001965177931')]);
+
+        $mark = (new DeliveryNoteSubmitter($tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame('PROVIDER_INSERT', $mark->mydata_action);
+        $this->assertSame('invosign', $mark->provider_key);
+    }
+
+    public function test_a_read_less_tenant_is_not_stranded_forever(): void
+    {
+        // The first cut of the "cannot verify → refuse" fix refused UNCONDITIONALLY,
+        // and nothing in the app clears mydata_pending_since — so a provider tenant
+        // ended up with a permanently unsubmittable legal document. That is a worse
+        // operational failure than the risk being avoided. Inside the window: refuse.
+        // Past it: allow, loudly.
+        $this->tenant->forceFill([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'off',
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ])->save();
+        $tenant = $this->tenant->fresh();
+        $this->assertFalse($tenant->canReadMyData());
+
+        // Inside the grace window → refused.
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(1)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+            $this->fail('Expected a refusal inside the grace window.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('κρίσιμο παράθυρο', $e->getMessage());
+        }
+
+        // Past it → the note is submittable again (it reaches the provider branch,
+        // which is what «no longer stranded» means here).
+        $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(30)])->save();
+        try {
+            (new DeliveryNoteSubmitter($tenant, new MockHandler([])))->submit($this->note->fresh('lines'));
+        } catch (\Throwable $e) {
+            $this->assertStringNotContainsString('κρίσιμο παράθυρο', $e->getMessage());
+            $this->assertStringNotContainsString('Δεν ξαναϋποβάλλουμε', $e->getMessage());
+        }
+    }
+
+    public function test_a_blank_state_still_reaches_the_in_doubt_gate(): void
+    {
+        // performSubmit treats '' as equally never-filed, so the gate must too —
+        // otherwise an armed note carrying '' skips adopt-or-file and blind-retries.
+        DB::table('delivery_notes')->where('id', $this->note->id)->update([
+            'mydata_state' => '', 'mydata_pending_since' => now()->subMinutes(1),
+        ]);
+
+        $adopted = '400001965177931';
+        $mock = new MockHandler([$this->transmittedDocsMock('ΔΑ', '1', $adopted)]);
+
+        $mark = (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));
+
+        $this->assertSame($adopted, (string) $mark->mark);
+        $this->assertSame(0, $mock->count(), 'it must adopt, not re-POST');
+    }
+
+    public function test_a_rejection_clears_the_marker_so_a_fix_can_be_retried(): void
+    {
+        // AADE processed the δελτίο and refused it → no MARK. An operator who fixes
+        // the data must be able to retry immediately, not sit out the grace window.
+        $rejectXml = <<<'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+          <response>
+            <index>1</index>
+            <statusCode>ValidationError</statusCode>
+            <errors><error><message>Λάθος στοιχεία</message><code>102</code></error></errors>
+          </response>
+        </ResponseDoc>
+        XML;
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], $rejectXml)]);
+
+        try {
+            (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note);
+            $this->fail('Expected the rejection to throw.');
+        } catch (\Throwable) {
+            // expected
+        }
+
+        $this->assertNull($this->note->fresh()->mydata_pending_since);
+        $this->assertNull($this->note->fresh()->mydata_state, 'a rejection is not a filing');
+    }
+}
