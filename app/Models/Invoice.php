@@ -96,6 +96,10 @@ class Invoice extends Model
             'code', 'customer_id', 'invoice_type_id', 'issued_at', 'local_status',
             'cancel_reason', 'header_discount_percent', 'net_total', 'gross_total',
             'withhold_amount', 'withhold_category', 'payment_method_id',
+            // Operator intent on the filed legal party (which customer establishment) —
+            // audit-worthy like header_discount_percent; logOnlyDirty means it only
+            // records a row on a real change, never for the default-0 no-op.
+            'counterpart_branch',
             'mydata_state', 'mydata_mark',
         ];
     }
@@ -163,6 +167,11 @@ class Invoice extends Model
         'city',
         'postcode',
         'country',
+        // AADE establishment (εγκατάσταση) of the counterpart this document was
+        // issued to; 0 = the party's έδρα. The per-document replacement for the
+        // legacy duplicate-ΑΦΜ branch hack (see the migration). Part of the party
+        // snapshot: operator-set on the draft, then frozen by living on the row.
+        'counterpart_branch',
         'company_name',
         'vat_no',
         'vies_vat',
@@ -185,6 +194,7 @@ class Invoice extends Model
             'issued_at' => 'datetime',
             'delivery_date' => 'date',
             'header_discount_percent' => 'decimal:2',
+            'counterpart_branch' => 'integer',
             'net_total' => 'decimal:2',
             'gross_total' => 'decimal:2',
             'payable_total' => 'decimal:2',
@@ -651,6 +661,31 @@ class Invoice extends Model
         $type = (string) ($this->invoiceType?->mydata_type ?: $this->mydata_type);
 
         return str_starts_with($type, '11.');
+    }
+
+    /**
+     * The counterpart establishment (εγκατάσταση) that ACTUALLY reaches AADE —
+     * the ONE definition shared by the filing (AadeInvoiceDocument) and every
+     * display, so the two can't drift and show a branch that was never filed.
+     *
+     * `counterpart_branch` is what the operator typed; this is what survives the
+     * filing rules: 0 when the document files no counterpart at all (retail 11.x),
+     * and 0 for a foreign party — a branch is a Greek Μητρώο concept, so a non-GR
+     * counterpart has none. Defensive on the country resolve (a document about to
+     * be refused throws there): treat an unresolvable country as "not GR" → 0.
+     */
+    public function filedCounterpartBranch(): int
+    {
+        $branch = (int) ($this->counterpart_branch ?? 0);
+        if ($branch === 0 || $this->filesNoCounterpart()) {
+            return 0;
+        }
+
+        try {
+            return $this->counterpartCountryForFiling() === 'GR' ? $branch : 0;
+        } catch (RuntimeException) {
+            return 0;
+        }
     }
 
     public function paymentMethod(): BelongsTo

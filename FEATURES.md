@@ -26,6 +26,11 @@
 ## 2. Παραστατικά / Τιμολόγηση
 - **VAT/εκπτώσεις/στρογγυλοποίηση** portαρισμένα ακριβώς (`RecomputeInvoiceTotals` +
   `InvoiceVatBreakdown`), per-VAT-rate breakdown.
+- **Υποκατάστημα πελάτη ανά παραστατικό** (`invoices.counterpart_branch`, 0=έδρα) — ο χειριστής
+  δηλώνει ρητά ποια **εγκατάσταση** του πελάτη τιμολογείται· ένας πελάτης = ένα ΑΦΜ (η «by the book»
+  αντικατάσταση του legacy duplicate-ΑΦΜ hack). Ο αριθμός φτάνει στο filed myDATA `Counterpart`
+  (`Invoice::filedCounterpartBranch()` = ο ένας ορισμός· 0 σε λιανική/ξένο μέρος)· η διεύθυνση της
+  εγκατάστασης γράφεται στο ήδη επεξεργάσιμο address snapshot. Πιστωτικά/επανεκδόσεις κρατούν το branch.
 - **Αρίθμηση** συνεχόμενη ανά τύπο, με **row-lock σε transaction** (`InvoiceNumberer`).
 - **QR + PDF** (Blade/dompdf) — **γλώσσα ανά παραστατικό** (Ελληνικά/Αγγλικά/**Δίγλωσσο
   GR-EN**), per-invoice/quote επιλογή με default από τη χώρα πελάτη (GR → Ελληνικά, ξένος
