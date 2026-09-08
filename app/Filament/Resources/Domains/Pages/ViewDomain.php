@@ -49,7 +49,11 @@ class ViewDomain extends ViewRecord
                     );
                     Notification::make()
                         ->title('Συγχρονίστηκε από τον registrar.')
-                        ->body($contacts > 0 ? "Ενημερώθηκαν και {$contacts} επαφές." : null)
+                        ->body(match (true) {
+                            $contacts === 1 => 'Ενημερώθηκε και 1 επαφή.',
+                            $contacts > 1 => "Ενημερώθηκαν και {$contacts} επαφές.",
+                            default => null,
+                        })
                         ->success()->send();
                     $this->refreshFormData(['expires_at', 'status', 'registrar_domain_id', 'last_synced_at', 'sync_error']);
                 }),

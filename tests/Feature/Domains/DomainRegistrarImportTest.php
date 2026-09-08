@@ -272,6 +272,36 @@ class DomainRegistrarImportTest extends TestCase
         $this->assertSame(0, $assigned->contacts()->count());
     }
 
+    public function test_oversize_contact_values_are_truncated_not_fatal(): void
+    {
+        // A registrar can return values past our column limits — strict
+        // MariaDB would fail the upsert and (before the fix) kill the action
+        // AFTER the sync had already persisted. Clipped assign-aid > crash.
+        $tld = DomainTld::create([
+            'company_id' => $this->company->id, 'tld' => 'gr',
+            'registrar_connection_id' => $this->connection->id, 'is_active' => true,
+        ]);
+        $domain = Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'sld' => 'big', 'tld' => 'gr', 'fqdn' => 'big.gr', 'expires_at' => '2027-01-01',
+        ]);
+
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/customers/BIG-1' => Http::response(['data' => [
+                'name' => ['first_name' => str_repeat('Α', 200), 'last_name' => str_repeat('Β', 200)],
+                'email' => str_repeat('x', 250).'@example.gr',
+            ]]),
+        ]);
+
+        $written = app(DomainImportService::class)->refreshContacts($domain, ['registrant' => 'BIG-1']);
+
+        $this->assertSame(1, $written);
+        $contact = $domain->contacts()->sole();
+        $this->assertSame(190, mb_strlen($contact->name));
+        $this->assertSame(190, mb_strlen($contact->email));
+    }
+
     public function test_an_operator_terminal_row_is_never_rewritten_by_import(): void
     {
         $tld = DomainTld::create([

@@ -222,7 +222,13 @@ class DomainImportService
     public function refreshContacts(Domain $domain, array $handles, ?callable $warn = null): int
     {
         $connection = $domain->effectiveRegistrarConnection();
-        if ($connection === null || ! $this->isImportable($connection)) {
+        // Usable non-manual is enough here — supportsPortfolioImport is about
+        // ACCOUNT LISTING, the wrong capability for a per-handle contact GET
+        // (a future adapter with sync+contacts but no listing must still work).
+        if ($connection === null || $connection->trashed() || ! $connection->isUsable()) {
+            return 0;
+        }
+        if ($this->factory->for($connection)->key() === 'manual') {
             return 0;
         }
         $cache = [];
@@ -262,35 +268,46 @@ class DomainImportService
             if (! in_array($type, DomainContact::TYPES, true)) {
                 continue;
             }
-            if (! array_key_exists($handle, $contactCache)) {
-                try {
-                    $contactCache[$handle] = $adapter->getContact($handle, $credentials) ?? false;
-                } catch (\RuntimeException $e) {
-                    $contactCache[$handle] = false; // don't re-hit a broken handle this run
-                    $warn("Επαφή {$handle} ({$domain->fqdn}): ".$e->getMessage());
+            try {
+                if (! array_key_exists($handle, $contactCache)) {
+                    try {
+                        $contactCache[$handle] = $adapter->getContact($handle, $credentials) ?? false;
+                    } catch (\RuntimeException $e) {
+                        $contactCache[$handle] = false; // don't re-hit a broken handle this run
+                        $warn("Επαφή {$handle} ({$domain->fqdn}): ".$e->getMessage());
+                    }
                 }
+                $contact = $contactCache[$handle];
+                if (! $contact instanceof RegistrarContact) {
+                    continue;
+                }
+                DomainContact::updateOrCreate(
+                    ['domain_id' => $domain->id, 'type' => $type],
+                    [
+                        'company_id' => $domain->company_id,
+                        // Truncated to the column limits — a registrar can
+                        // return oversize values and strict MariaDB would
+                        // otherwise fail the upsert (a name is an assign-aid,
+                        // a clipped one still serves it).
+                        'name' => mb_substr($contact->name, 0, 190),
+                        'org' => $contact->org !== null ? mb_substr($contact->org, 0, 190) : null,
+                        'email' => $contact->email !== null ? mb_substr($contact->email, 0, 190) : null,
+                        'phone' => $contact->phone !== null ? mb_substr($contact->phone, 0, 40) : null,
+                        'address1' => $contact->address1 !== null ? mb_substr($contact->address1, 0, 190) : null,
+                        'address2' => $contact->address2 !== null ? mb_substr($contact->address2, 0, 190) : null,
+                        'city' => $contact->city !== null ? mb_substr($contact->city, 0, 120) : null,
+                        'postcode' => $contact->postcode !== null ? mb_substr($contact->postcode, 0, 20) : null,
+                        'country' => $contact->country,
+                        'registrar_contact_handle' => mb_substr($contact->handle, 0, 40),
+                    ],
+                );
+                $written++;
+            } catch (\Throwable $e) {
+                // Belt over the truncation braces: the WRITE itself failing
+                // (DB hiccup) must warn, never kill the sync/import — the
+                // stated contract of both flows.
+                $warn("Επαφή {$handle} ({$domain->fqdn}): ".$e->getMessage());
             }
-            $contact = $contactCache[$handle];
-            if (! $contact instanceof RegistrarContact) {
-                continue;
-            }
-            DomainContact::updateOrCreate(
-                ['domain_id' => $domain->id, 'type' => $type],
-                [
-                    'company_id' => $domain->company_id,
-                    'name' => $contact->name,
-                    'org' => $contact->org,
-                    'email' => $contact->email,
-                    'phone' => $contact->phone,
-                    'address1' => $contact->address1,
-                    'address2' => $contact->address2,
-                    'city' => $contact->city,
-                    'postcode' => $contact->postcode,
-                    'country' => $contact->country,
-                    'registrar_contact_handle' => $contact->handle,
-                ],
-            );
-            $written++;
         }
 
         return $written;

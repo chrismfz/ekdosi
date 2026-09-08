@@ -611,6 +611,11 @@ data model + phase gates: **`PLAN.md`**.
     adapter+creds (A2a), sync+availability (A2b), pricing cost-sync + registrar-first/CSV import +
     `domain_registrar_connections` στο **sealed** export bucket (A2c — ΟΧΙ πια INTENTIONALLY_EXCLUDED).
     Εκκρεμεί από το A2 μόνο το live validation με production credentials.
+    (Deferred P2, review per-domain-contacts: μετά το «Συγχρονισμός» στο ViewDomain, τα
+    relation managers Επαφές/NS της ανοιχτής σελίδας ΔΕΝ ξαναρεντάρουν μόνα τους — το toast
+    λέει «Ενημερώθηκαν επαφές» αλλά ο πίνακας δείχνει τα παλιά rows μέχρι reload/interaction.
+    Pre-existing και για τα NS από το A2b. Fix = dispatch refresh event στα RMs από το action·
+    θέλει έλεγχο σε πραγματικό browser, όχι εικασία — μαζί με το επόμενο UI slice.)
     (Deferred P2, review A2c-3: τα `importConnections`/`importDomainConnections` —και τα
     exporter αδέρφια τους— μοιράζονται ~40 γραμμές match-or-create/seal logic σε δύο αντίγραφα·
     extraction σε κοινό helper όταν έρθει ο ΤΡΙΤΟΣ sealed πίνακας —τα Support mailbox creds,
