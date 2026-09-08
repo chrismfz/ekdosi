@@ -205,6 +205,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   history until a history rewrite, and the exposed credentials must be **rotated** (they are compromised
   regardless). Follow-ups tracked in `docs/BACKLOG.md` «SECURITY — leaked secrets remediation».
 
+### Fixed
+- **Τμήμα Υποστήριξης — φόρμα: διορθώθηκε στάσιμο IMAP φραστικό + κρύφτηκαν dead toggles.** Το «Mailbox (IMAP) —
+  για αργότερα / Phase 3 / δεν χρησιμοποιείται ακόμη» ήταν παλιό — το IMAP support **είναι live** (ο poller
+  διαβάζει το mailbox → αιτήματα, οι απαντήσεις φεύγουν από τη διεύθυνση του τμήματος)· το φραστικό ενημερώθηκε
+  (+ «Test σύνδεσης» / scheduler flag). Επίσης αφαιρέθηκαν από τη φόρμα τα toggles «Αυτόματη απάντηση» +
+  «Να μην κλείνει ο πελάτης το αίτημα» — καμία ροή δεν τα διάβαζε (παραπλανούσαν, με το πρώτο default ON)· οι
+  στήλες μένουν, θα ξαναμπούν όταν υλοποιηθεί η συμπεριφορά.
+
 ### Added
 - **Υποκατάστημα πελάτη ανά παραστατικό (myDATA counterpart branch) — «by the book» αντικατάσταση του legacy
   duplicate-ΑΦΜ hack.** Νέα στήλη `invoices.counterpart_branch` (`unsignedSmallInteger`, default `0` = έδρα):
