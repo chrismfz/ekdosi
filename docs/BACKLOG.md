@@ -866,8 +866,10 @@ data model + phase gates: **`PLAN.md`**.
     failure:** αν ένας server ΔΕΝ υποστηρίζει RFC822.SIZE σε headers-only fetch, ΟΛΑ γίνονται stubs· σπάνιο (RFC822.SIZE
     ~universal) + retry καλύπτει transient· fix αν πονέσει = εναλλακτικό size path ή bounded body. (γ) **`$authorNameCache`
     unbounded static** (TicketInfolist) — Octane-only memory growth + stale names· harmless σε FPM (locked). (δ)
-    **dead config:** `autoresponder`/`prevent_client_closure` toggles στο TicketDepartmentForm δεν enforced πουθενά —
-    wire ή hide. (ε) **`syntheticId` first-300-chars** για no-Message-ID mails (pre-existing, comment-acknowledged).
+    **dead config — HIDDEN:** τα `autoresponder`/`prevent_client_closure` toggles ΑΦΑΙΡΕΘΗΚΑΝ από το
+    TicketDepartmentForm (2026-09-07) γιατί καμία ροή δεν τα διαβάζει (παραπλανούσαν — `autoresponder` default ON
+    χωρίς αποστολή). Οι στήλες μένουν· θα ξαναμπούν όταν υλοποιηθεί η συμπεριφορά (auto-ack στο άνοιγμα· φραγή
+    πελάτη-close). (ε) **`syntheticId` first-300-chars** για no-Message-ID mails (pre-existing, comment-acknowledged).
 - **Menu / Information Architecture — πριν πληθύνουν οι πυλώνες** _(NEW, epic-wide· ήδη πιεστικό)._
   **Πλήρης στόχος-χάρτης (κάθε σημερινό screen + μελλοντικό, mapped) → `docs/menu-ia.md`.** Το nav
   είναι μόνο αριστερά (Filament), ήδη **~59 items** (31 Resources + 28 Pages) σε **9 groups** με τη

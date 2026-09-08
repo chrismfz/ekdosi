@@ -25,7 +25,7 @@ class TicketDepartmentForm
                             ->label('Email τμήματος')
                             ->email()
                             ->maxLength(191)
-                            ->helperText('Η διεύθυνση (π.χ. support@…) που αργότερα (Phase 3) εντοπίζει εισερχόμενα και στέλνει εξερχόμενα. Κενό = χωρίς mailbox.'),
+                            ->helperText('Η διεύθυνση (π.χ. support@…) του τμήματος: ο poller διαβάζει τα εισερχόμενα από εδώ (→ αιτήματα) και οι απαντήσεις προς τον πελάτη φεύγουν από αυτή. Κενό = χωρίς mailbox.'),
                         Select::make('agents')
                             ->label('Χειριστές')
                             ->relationship('agents', 'name')
@@ -48,21 +48,21 @@ class TicketDepartmentForm
                         Toggle::make('clients_only')
                             ->label('Μόνο πελάτες')
                             ->helperText('Δέχεται αίτημα/απάντηση μόνο από καταχωρημένο πελάτη (αλλιώς GUEST).'),
-                        Toggle::make('autoresponder')
-                            ->label('Αυτόματη απάντηση')
-                            ->default(true),
                         Toggle::make('feedback_on_close')
-                            ->label('Αίτημα αξιολόγησης στο κλείσιμο'),
-                        Toggle::make('prevent_client_closure')
-                            ->label('Να μην κλείνει ο πελάτης το αίτημα'),
+                            ->label('Αίτημα αξιολόγησης στο κλείσιμο')
+                            ->helperText('Στο κλείσιμο, ο πελάτης παίρνει email με σύνδεσμο αξιολόγησης (1–5).'),
+                        // «Αυτόματη απάντηση» + «Να μην κλείνει ο πελάτης το αίτημα» ΑΦΑΙΡΕΘΗΚΑΝ από τη
+                        // φόρμα: οι στήλες υπάρχουν αλλά δεν τις διαβάζει καμία ροή ακόμη (θα παραπλανούσαν
+                        // — π.χ. «Αυτόματη απάντηση» με default ON χωρίς να στέλνεται τίποτα). Θα ξαναμπούν
+                        // όταν υλοποιηθεί η συμπεριφορά (docs/BACKLOG.md).
                         TextInput::make('sort')
                             ->label('Σειρά')
                             ->numeric()
                             ->default(0),
                     ]),
 
-                Section::make('Mailbox (IMAP) — για αργότερα')
-                    ->description('Άντληση εισερχόμενων email του τμήματος (Phase 3). Δεν χρησιμοποιείται ακόμη — μπορείς να το συμπληρώσεις εκ των προτέρων.')
+                Section::make('Mailbox (IMAP)')
+                    ->description('Ρυθμίσεις IMAP για την άντληση εισερχόμενων email του τμήματος → αιτήματα. Μετά την αποθήκευση, έλεγξε τη σύνδεση με «Test σύνδεσης». Το αυτόματο poll τρέχει όταν είναι ενεργό κεντρικά στον scheduler (EKDOSI_SCHEDULE_TICKETS_POLL_IMAP)· αλλιώς χειροκίνητα με «tickets:poll-imap».')
                     ->columns(2)
                     ->collapsed()
                     ->schema([
