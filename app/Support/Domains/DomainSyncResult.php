@@ -30,5 +30,12 @@ final class DomainSyncResult
         public readonly ?DomainStatus $status = null,
         public readonly ?string $rawStatus = null,
         public readonly array $contactHandles = [],
+        /**
+         * The ADAPTER's verdict that this record is a tombstone (deleted /
+         * failed-request — e.g. Openprovider DEL/FAI): it represents no
+         * ownership claim. The register adopt-guard treats it as not-ours;
+         * the nightly sync ignores it (its own status rules apply).
+         */
+        public readonly bool $deadRecord = false,
     ) {}
 }

@@ -320,6 +320,8 @@ class OpenproviderRegistrar implements DomainRegistrar
             status: $this->mapStatus($rawStatus),
             rawStatus: $rawStatus,
             contactHandles: $this->extractHandles($data),
+            // DEL = deleted, FAI = failed request — tombstones, not ownership.
+            deadRecord: in_array($rawStatus, ['DEL', 'FAI'], true),
         );
     }
 
@@ -561,7 +563,19 @@ class OpenproviderRegistrar implements DomainRegistrar
         [$name, $extension] = $this->splitFqdn($domain->fqdn);
         $results = $this->request($credentials, 'GET', '/v1beta/domains?full_name='.rawurlencode($name.'.'.$extension))
             ->json('data.results');
-        $first = is_array($results) ? ($results[0] ?? null) : null;
+        // Prefer a LIVE record: after a lapse-and-rebuy the account can hold
+        // BOTH the lingering DEL tombstone AND the fresh ACT record for the
+        // same fqdn (id-ascending puts the tombstone first) — picking the
+        // tombstone would disown a registration that was just paid for.
+        $candidates = is_array($results) ? array_values(array_filter($results, 'is_array')) : [];
+        $first = null;
+        foreach ($candidates as $candidate) {
+            if (! in_array((string) ($candidate['status'] ?? ''), ['DEL', 'FAI'], true)) {
+                $first = $candidate;
+                break;
+            }
+        }
+        $first ??= $candidates[0] ?? null;
         if (! is_array($first)) {
             // TYPED: «not in the account» must be distinguishable from a
             // transport failure — the register adopt-guard acts on the

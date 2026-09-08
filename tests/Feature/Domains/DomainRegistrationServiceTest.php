@@ -315,6 +315,59 @@ class DomainRegistrationServiceTest extends TestCase
         $this->assertSame('558', $domain->registrar_domain_id, 'the NEW id, never the dead record\'s');
     }
 
+    public function test_by_name_prefers_the_live_record_over_a_lingering_tombstone(): void
+    {
+        // r4 P1 #1: rebuy + timed-out-POST-that-charged — the account holds
+        // BOTH the old DEL tombstone (first, id-ascending) AND the fresh ACT
+        // record. The probe must adopt the ACT one, never disown the paid
+        // registration because the tombstone sorted first.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=fresh.eu' => Http::response(['data' => ['results' => [
+                ['id' => 400, 'status' => 'DEL', 'expiration_date' => '2024-01-01 00:00:00'],
+                ['id' => 558, 'status' => 'ACT', 'expiration_date' => '2027-09-08 00:00:00'],
+            ]]]),
+        ]);
+        $domain = $this->pendingDomain();
+        DomainRegistrarLog::create([
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id,
+            'action' => 'register', 'status' => DomainRegistrarLog::STATUS_FAILED,
+            'request' => ['fqdn' => 'fresh.eu', 'years' => 1], 'error' => 'cURL timeout',
+        ]);
+
+        $log = app(DomainRegistrationService::class)->register($domain, 1);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
+        $this->assertSame('558', $domain->refresh()->registrar_domain_id, 'the LIVE record adopted, not the tombstone');
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/v1beta/domains') && $req->method() === 'POST');
+    }
+
+    public function test_a_failed_request_record_fai_is_a_tombstone_too(): void
+    {
+        // r4 P1 #2: an async registration REJECTED by the registry lands as
+        // FAI (unmapped status) — it must count as not-ours exactly like DEL,
+        // never be «adopted» as a success for a name that never registered.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/401' => Http::response(['data' => [
+                'id' => 401, 'status' => 'FAI', 'expiration_date' => null,
+            ]]),
+        ]);
+        $domain = $this->pendingDomain(['registrar_domain_id' => '401']);
+
+        try {
+            app(DomainRegistrationService::class)->register($domain, 1);
+            $this->fail('a FAI record must fail honestly, never adopt');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('δεν βρίσκεται (πλέον)', $e->getMessage());
+        }
+        $domain->refresh();
+        $this->assertNull($domain->registrar_domain_id, 'unwedged');
+        $this->assertSame(DomainStatus::PendingRegister, $domain->status);
+        $this->assertSame(0, DomainRegistrarLog::where('status', DomainRegistrarLog::STATUS_ADOPTED)->count());
+    }
+
     public function test_an_inflight_pointing_at_a_deleted_record_clears_and_fails_honestly(): void
     {
         Http::fake([

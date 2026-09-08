@@ -228,9 +228,10 @@ class DomainRegistrationService
     {
         try {
             $result = $adapter->syncDomain($domain, $credentials);
-            if ($result->status === DomainStatus::Deleted) {
-                // A lingering DEL record is a tombstone at the registrar, not
-                // an ownership claim — same handling as not-found.
+            if ($result->deadRecord || $result->status === DomainStatus::Deleted) {
+                // A tombstone (deleted OR failed-request — the adapter's
+                // verdict, so unmapped raw statuses like OP's FAI count too)
+                // is not an ownership claim — same handling as not-found.
                 return $this->notOurs($domain, $log, $context);
             }
         } catch (DomainNotFoundAtRegistrar) {
