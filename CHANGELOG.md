@@ -137,6 +137,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (transfer-out aid, operator-gated §6.3): ανάκτηση με audit log ΧΩΡΙΣ τον κωδικό (persistent
   notification στον operator). Sync fix: το OP `REQ` δεν υποβιβάζει πλέον «Εκκρεμεί μεταφορά»
   σε «Εκκρεμεί καταχώρηση» (κάλυπτε και τα δύο). Κοινό `createDomainObject` για register+transfer.
+- **Domains — A3d: management writes (NS/lock/privacy/contacts) + restore από redemption.**
+  Νέο trait **`GuardsRegistrarWrites`** = το ΕΝΑ write-skeleton (audit logger, log-then-throw
+  refusal, adapter resolve, cross-tenant sweep, per-domain lock) — renewal/registration/transfer
+  ΞΑΝΑΓΡΑΦΗΚΑΝ πάνω του (το δεσμευτικό extraction του A3c review· behavior-identical, ίδια
+  suites πράσινες). Νέο **`DomainManagementService`** (μοναδικός δρόμος στο
+  `updateDomain`/`restore`): View ➜ ActionGroup «Registrar» με «Αποστολή nameservers» (full
+  replacement, ≥2 hosts), «Κλείδωμα/Ξεκλείδωμα μεταφοράς», «WHOIS privacy», «Αποστολή επαφών»
+  (ensure handles → reassign) — ένα `PUT /v1beta/domains/{id}` ανά ενέργεια, per-operation audit
+  actions, τα τοπικά mirrors (`transfer_lock`/`whois_privacy`) γράφονται ΜΟΝΟ μετά την αποδοχή
+  του registrar. **«Επαναφορά από redemption»** (Redemption/Deleted μόνο, danger confirm):
+  sync-first — ήδη-ζωντανό record = **adopt χωρίς χρέωση**· αλλιώς `POST /{id}/restore`
+  (πραγματική, συνήθως μεγάλη χρέωση)· χρέωση πελάτη χειροκίνητη v1. DNSSEC key-management
+  σκόπιμα εκτός v1 (BACKLOG).
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

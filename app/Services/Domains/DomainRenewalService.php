@@ -8,10 +8,9 @@ use App\Models\Domain;
 use App\Models\DomainRegistrarLog;
 use App\Models\Invoice;
 use App\Models\ServiceContract;
+use App\Services\Domains\Concerns\GuardsRegistrarWrites;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 /**
@@ -30,6 +29,8 @@ use RuntimeException;
  */
 class DomainRenewalService
 {
+    use GuardsRegistrarWrites;
+
     public function __construct(
         private readonly DomainRegistrarFactory $factory,
         private readonly DomainSyncService $sync,
@@ -208,156 +209,115 @@ class DomainRenewalService
         // load-bearing for the re-issue period recovery (a refusal without a
         // failed row would leave a later re-issue with no period to recover,
         // re-opening the interleaved-revert double-renew door).
-        $log = fn (string $status, ?array $response, ?string $error) => DomainRegistrarLog::create([
-            'company_id' => $domain->company_id,
-            'domain_id' => $domain->id,
-            'registrar_connection_id' => $connection?->id,
-            'invoice_id' => $invoice?->id,
-            'action' => 'renew',
-            'status' => $status,
-            'request' => [
-                'fqdn' => $domain->fqdn,
-                'years' => $years,
-                'baseline_expiry' => $baseline,
-                'target_expiry' => $target,
-            ],
-            'response' => $response,
-            'error' => $error,
-        ]);
-        $refuse = function (string $message) use ($log): never {
-            $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
-
-            throw new RuntimeException($message);
-        };
+        $log = $this->writeLogger($domain, $connection, 'renew', [
+            'fqdn' => $domain->fqdn,
+            'years' => $years,
+            'baseline_expiry' => $baseline,
+            'target_expiry' => $target,
+        ], $invoice?->id);
 
         // Dead set / wrong state: never a registrar charge from any path.
         if ($domain->trashed()) {
-            $refuse('Το domain είναι διαγραμμένο — δεν ανανεώνεται.');
+            $this->refuseWrite($log, 'Το domain είναι διαγραμμένο — δεν ανανεώνεται.');
         }
         if ($domain->status instanceof DomainStatus && ! $domain->status->isRenewable()) {
-            $refuse("Το {$domain->fqdn} είναι σε κατάσταση «{$domain->status->getLabel()}» — δεν ανανεώνεται (redemption/μεταφερμένα/ακυρωμένα θέλουν άλλο χειρισμό).");
+            $this->refuseWrite($log, "Το {$domain->fqdn} είναι σε κατάσταση «{$domain->status->getLabel()}» — δεν ανανεώνεται (redemption/μεταφερμένα/ακυρωμένα θέλουν άλλο χειρισμό).");
         }
-        if ($connection === null || ! $connection->isUsable()) {
-            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Καμία ενεργή σύνδεση registrar.');
-
-            throw new DomainRegistrarNotConfigured('Το domain δεν δρομολογείται σε ενεργή σύνδεση registrar.');
-        }
-        $adapter = $this->factory->for($connection);
-        if ($adapter->key() === 'manual') {
-            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Ο registrar είναι «manual».');
-
-            throw new DomainRegistrarNotConfigured('Ο registrar είναι «manual» — ανανεώστε στο portal του registrar και ενημερώστε τη λήξη.');
-        }
+        $adapter = $this->resolveWriteAdapter($connection, $log, 'Ο registrar είναι «manual» — ανανεώστε στο portal του registrar και ενημερώστε τη λήξη.');
         if ($baseline === null) {
-            $refuse("Το {$domain->fqdn} δεν έχει γνωστή λήξη — κάντε πρώτα «Συγχρονισμό από registrar».");
+            $this->refuseWrite($log, "Το {$domain->fqdn} δεν έχει γνωστή λήξη — κάντε πρώτα «Συγχρονισμό από registrar».");
         }
 
         // ONE renewal at a time per domain: the check→write sequence must not
         // race (View button vs on-issue hook vs auto-issue — both would pass
-        // the pre-check and both would POST = double charge). Atomic cache
-        // lock (the DB cache driver supports them — same requirement as
-        // withoutOverlapping, CLAUDE.md Env-prep).
-        $lock = Cache::lock('domains:renew:'.$domain->id, 300);
-        if (! $lock->get()) {
-            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Κλειδωμένο — άλλη ανανέωση σε εξέλιξη.');
+        // the pre-check and both would POST = double charge).
+        return $this->withRegistrarLock(
+            $domain,
+            'renew',
+            $log,
+            "Άλλη ανανέωση του {$domain->fqdn} είναι ήδη σε εξέλιξη — ΜΗΝ ξαναζητήσετε ανανέωση· δείτε το ιστορικό API του domain σε λίγο.",
+            function () use ($domain, $connection, $adapter, $years, $invoice, $baseline, $target, $log): DomainRegistrarLog {
+                // §6.6: FRESH TRUTH FIRST. If the registrar's current expiry already
+                // covers the target period, someone renewed already → ADOPT, no call.
+                try {
+                    $this->sync->sync($domain);
+                } catch (\Throwable $e) {
+                    // If we can't even read the registrar, we must not WRITE to it
+                    // blind — the whole guard rests on the read.
+                    $log(DomainRegistrarLog::STATUS_FAILED, null, 'Προ-έλεγχος (sync) απέτυχε: '.$e->getMessage());
 
-            throw new DomainRenewalInProgress(
-                "Άλλη ανανέωση του {$domain->fqdn} είναι ήδη σε εξέλιξη — ΜΗΝ ξαναζητήσετε ανανέωση· δείτε το ιστορικό API του domain σε λίγο."
-            );
-        }
-
-        try {
-            // §6.6: FRESH TRUTH FIRST. If the registrar's current expiry already
-            // covers the target period, someone renewed already → ADOPT, no call.
-            try {
-                $this->sync->sync($domain);
-            } catch (\Throwable $e) {
-                // If we can't even read the registrar, we must not WRITE to it
-                // blind — the whole guard rests on the read.
-                $log(DomainRegistrarLog::STATUS_FAILED, null, 'Προ-έλεγχος (sync) απέτυχε: '.$e->getMessage());
-
-                throw new RuntimeException("Η ανανέωση του {$domain->fqdn} ΔΕΝ εκτελέστηκε — ο προ-έλεγχος στον registrar απέτυχε: ".$e->getMessage());
-            }
-            $domain->refresh();
-            if ($domain->expires_at !== null && $domain->expires_at->toDateString() >= $target) {
-                // The registrar year(s) covering this adopt may have come from
-                // (unconsumed) button renewals — stamp newest-first until the
-                // stamped years cover the billed term, so NO leftover log can
-                // also satisfy a later intent-match (a double-count would let
-                // billed years exceed registrar years — e.g. two 1yr button
-                // logs behind one biennial adopt must BOTH be consumed).
-                $consumedIds = [];
-                if ($invoice !== null) {
-                    $covered = 0;
-                    // SAME window as the intent-match leg: a stale orphan the
-                    // intent-match refuses must not be swallowed here either
-                    // (it belongs to the A5 reconciler's orphan sweep, not to
-                    // an invoice whose coverage came from elsewhere).
-                    $pool = DomainRegistrarLog::query()
-                        ->unconsumedOkRenewals($domain)
-                        ->where('created_at', '>=', Carbon::parse($baseline)->subYears($years))
-                        ->orderByDesc('id')
-                        ->get();
-                    foreach ($pool as $row) {
-                        if ($covered >= $years) {
-                            break;
-                        }
-                        if (DomainRegistrarLog::query()->whereKey($row->id)->whereNull('invoice_id')
-                            ->update(['invoice_id' => $invoice->id]) === 1) {
-                            $consumedIds[] = $row->id;
-                            $covered += max(1, (int) ($row->request['years'] ?? 1));
+                    throw new RuntimeException("Η ανανέωση του {$domain->fqdn} ΔΕΝ εκτελέστηκε — ο προ-έλεγχος στον registrar απέτυχε: ".$e->getMessage());
+                }
+                $domain->refresh();
+                if ($domain->expires_at !== null && $domain->expires_at->toDateString() >= $target) {
+                    // The registrar year(s) covering this adopt may have come from
+                    // (unconsumed) button renewals — stamp newest-first until the
+                    // stamped years cover the billed term, so NO leftover log can
+                    // also satisfy a later intent-match (a double-count would let
+                    // billed years exceed registrar years — e.g. two 1yr button
+                    // logs behind one biennial adopt must BOTH be consumed).
+                    $consumedIds = [];
+                    if ($invoice !== null) {
+                        $covered = 0;
+                        // SAME window as the intent-match leg: a stale orphan the
+                        // intent-match refuses must not be swallowed here either
+                        // (it belongs to the A5 reconciler's orphan sweep, not to
+                        // an invoice whose coverage came from elsewhere).
+                        $pool = DomainRegistrarLog::query()
+                            ->unconsumedOkRenewals($domain)
+                            ->where('created_at', '>=', Carbon::parse($baseline)->subYears($years))
+                            ->orderByDesc('id')
+                            ->get();
+                        foreach ($pool as $row) {
+                            if ($covered >= $years) {
+                                break;
+                            }
+                            if (DomainRegistrarLog::query()->whereKey($row->id)->whereNull('invoice_id')
+                                ->update(['invoice_id' => $invoice->id]) === 1) {
+                                $consumedIds[] = $row->id;
+                                $covered += max(1, (int) ($row->request['years'] ?? 1));
+                            }
                         }
                     }
+
+                    return $log(DomainRegistrarLog::STATUS_ADOPTED, [
+                        'registrar_expiry' => $domain->expires_at->toDateString(),
+                        'consumed_log_ids' => $consumedIds,
+                    ], null);
+                }
+                // Re-check renewability on the FRESH status: the sync may have just
+                // flipped the row to Deleted/redemption (registrar DEL) — «νεκρό
+                // όνομα = ποτέ χρέωση» holds against stale local state too.
+                if ($domain->status instanceof DomainStatus && ! $domain->status->isRenewable()) {
+                    $log(DomainRegistrarLog::STATUS_FAILED, null, 'Ο registrar αναφέρει κατάσταση «'.$domain->status->getLabel().'» — η ανανέωση δεν εκτελέστηκε.');
+
+                    throw new RuntimeException("Το {$domain->fqdn} είναι πλέον σε κατάσταση «{$domain->status->getLabel()}» στον registrar — δεν ανανεώνεται.");
                 }
 
-                return $log(DomainRegistrarLog::STATUS_ADOPTED, [
-                    'registrar_expiry' => $domain->expires_at->toDateString(),
-                    'consumed_log_ids' => $consumedIds,
+                try {
+                    $result = $adapter->renew($domain, $years, $this->factory->credentialsFor($connection));
+                } catch (\Throwable $e) {
+                    $log(DomainRegistrarLog::STATUS_FAILED, null, $e->getMessage());
+
+                    throw $e;
+                }
+                $this->sync->apply($domain, $result);
+
+                // A renew that landed SHORT of the billed target (the registrar
+                // extended from ITS OWN expiry, which lagged the cursor — e.g. a
+                // prior failed renewal never retried) is a real charge, so it logs
+                // 'ok' — but flagged, so the caller can alert the operator. NULL =
+                // unknown (the post-renew re-fetch fell back; the A5 reconciler
+                // re-evaluates ok-logs whose landed expiry misses their target).
+                $short = $result->expiresAt === null ? null : $result->expiresAt < $target;
+
+                return $log(DomainRegistrarLog::STATUS_OK, [
+                    'registrar_expiry' => $result->expiresAt,
+                    'raw_status' => $result->rawStatus,
+                    'short_of_target' => $short,
                 ], null);
-            }
-            // Re-check renewability on the FRESH status: the sync may have just
-            // flipped the row to Deleted/redemption (registrar DEL) — «νεκρό
-            // όνομα = ποτέ χρέωση» holds against stale local state too.
-            if ($domain->status instanceof DomainStatus && ! $domain->status->isRenewable()) {
-                $log(DomainRegistrarLog::STATUS_FAILED, null, 'Ο registrar αναφέρει κατάσταση «'.$domain->status->getLabel().'» — η ανανέωση δεν εκτελέστηκε.');
-
-                throw new RuntimeException("Το {$domain->fqdn} είναι πλέον σε κατάσταση «{$domain->status->getLabel()}» στον registrar — δεν ανανεώνεται.");
-            }
-
-            try {
-                $result = $adapter->renew($domain, $years, $this->factory->credentialsFor($connection));
-            } catch (\Throwable $e) {
-                $log(DomainRegistrarLog::STATUS_FAILED, null, $e->getMessage());
-
-                throw $e;
-            }
-            $this->sync->apply($domain, $result);
-
-            // A renew that landed SHORT of the billed target (the registrar
-            // extended from ITS OWN expiry, which lagged the cursor — e.g. a
-            // prior failed renewal never retried) is a real charge, so it logs
-            // 'ok' — but flagged, so the caller can alert the operator. NULL =
-            // unknown (the post-renew re-fetch fell back; the A5 reconciler
-            // re-evaluates ok-logs whose landed expiry misses their target).
-            $short = $result->expiresAt === null ? null : $result->expiresAt < $target;
-
-            return $log(DomainRegistrarLog::STATUS_OK, [
-                'registrar_expiry' => $result->expiresAt,
-                'raw_status' => $result->rawStatus,
-                'short_of_target' => $short,
-            ], null);
-        } finally {
-            try {
-                $lock->release();
-            } catch (\Throwable $e) {
-                // NEVER let a lock-release hiccup replace the method's real
-                // outcome (a charged, ok-logged renewal would surface as a
-                // failure). The 300s TTL bounds a stuck lock.
-                Log::warning('domains.renew.lock_release_failed', [
-                    'domain_id' => $domain->id, 'error' => $e->getMessage(),
-                ]);
-            }
-        }
+            },
+        );
     }
 
     /**

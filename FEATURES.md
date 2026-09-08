@@ -947,8 +947,14 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Μεταφορές + κωδικός EPP (A3c, SHIPPED):** «Μεταφορά στον registrar» σε pending-transfer
   domains — async §6.3 (nightly sync ολοκληρώνει ή ⚠-φλαγκάρει το FAI), adopt-on-retry, ο auth
   code δεν λογκάρεται ποτέ· «Κωδικός EPP» (transfer-out aid) με audit ΧΩΡΙΣ τον κωδικό.
-- **Επόμενα:** A3d NS/contacts/DNSSEC/lock writes · WHMCS linkage hint (προαιρετικό, §9) ·
-  margin engine (αν χρειαστεί) · A4 grEPP (+ Recall 5 ημερών .gr) · A5 reconciliation ·
+- **Management writes + restore (A3d, SHIPPED):** ActionGroup «Registrar» στο View — αποστολή
+  nameservers (full replacement), κλείδωμα/ξεκλείδωμα μεταφοράς, WHOIS privacy, αποστολή επαφών
+  (ensure handles) — όλα μέσω `DomainManagementService` πάνω στο κοινό write-skeleton
+  (`GuardsRegistrarWrites`, το ίδιο που τρέχουν πλέον renewal/registration/transfer)· mirrors
+  μόνο μετά την αποδοχή του registrar· **«Επαναφορά από redemption»** sync-first (ήδη-ζωντανό =
+  adopt, καμία χρέωση), χρέωση πελάτη χειροκίνητη v1· DNSSEC keys εκτός v1.
+- **Επόμενα:** WHMCS linkage hint (προαιρετικό, §9) · margin engine (αν χρειαστεί) ·
+  A4 grEPP (+ Recall 5 ημερών .gr) · A5 reconciliation · DNSSEC key management ·
   export/import των υπόλοιπων domain tables (βλ. `docs/BACKLOG.md`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)

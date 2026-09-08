@@ -5,6 +5,7 @@ namespace App\Services\Domains;
 use App\Contracts\DomainRegistrar;
 use App\Models\Domain;
 use App\Support\Domains\AvailabilityResult;
+use App\Support\Domains\DomainChanges;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
@@ -97,6 +98,20 @@ class NullDomainRegistrar implements DomainRegistrar
     {
         throw new DomainRegistrarNotConfigured(
             'Ο registrar «manual» δεν έχει API — πάρτε τον κωδικό EPP από το portal του registrar.'
+        );
+    }
+
+    public function updateDomain(Domain $domain, DomainChanges $changes, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — αλλάξτε NS/κλείδωμα/privacy/επαφές στο portal του registrar (και ενημερώστε το domain εδώ).'
+        );
+    }
+
+    public function restore(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — η επαναφορά από redemption γίνεται στο portal του registrar.'
         );
     }
 }

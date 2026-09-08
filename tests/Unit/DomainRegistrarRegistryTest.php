@@ -8,6 +8,7 @@ use App\Services\Domains\DomainRegistrarNotConfigured;
 use App\Services\Domains\DomainRegistrarRegistry;
 use App\Services\Domains\NullDomainRegistrar;
 use App\Support\Domains\AvailabilityResult;
+use App\Support\Domains\DomainChanges;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
@@ -164,5 +165,15 @@ class FakeDomainRegistrar implements DomainRegistrar
     public function getEppCode(Domain $domain, DomainRegistrarCredentials $credentials): ?string
     {
         return 'fake-code';
+    }
+
+    public function updateDomain(Domain $domain, DomainChanges $changes, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        return new DomainSyncResult(rawStatus: 'ACT');
+    }
+
+    public function restore(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        return new DomainSyncResult(rawStatus: 'ACT');
     }
 }

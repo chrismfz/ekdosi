@@ -641,13 +641,15 @@ data model + phase gates: **`PLAN.md`**.
     (αντί για ένα in-memory fetch ανά TLD) — declined, ~8 μικρά queries/TLD σε
     χειροκίνητο run δεν αξίζουν το refactor.
   - **A3** Openprovider write — **A3a (renew) ✅ + A3b (register) ✅ + A3c (transfer-in +
-    EPP code) ✅ SHIPPED** (βλ. `FEATURES.md §21`)· μένει A3d NS/contacts/DNSSEC/lock writes
-    + grace/redemption χρεώσεις (+ approve-transfer/resend-FOA αν φανούν χρήσιμα live).
-    **ΜΑΖΙ με το A3d (δεσμευτικό, review A3c r1):** extraction του κοινού write-service
-    skeleton (log/refuse closures, Cache::lock+finally, adopt/probe leg, claimedElsewhere,
-    τα duplicated eppCode audit blocks) — τρία αντίγραφα ήδη (renewal/registration/transfer)
-    και το copy-drift ΤΟΥ A3c έχασε τρεις guards· το τέταρτο αντίγραφο δεν γράφεται,
-    γράφεται ο helper. P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
+    EPP code) ✅ + A3d (NS/lock/privacy/contacts writes + redemption restore) ✅ SHIPPED**
+    (βλ. `FEATURES.md §21`). Το δεσμευτικό skeleton-extraction του A3c r1 έγινε ΜΕ το A3d:
+    trait `GuardsRegistrarWrites` (logger/refuse/adapter-resolve/claimedElsewhere/lock) — και
+    τα ΤΕΣΣΕΡΑ write services τρέχουν πάνω του. Εκτός v1 (συνειδητά): **DNSSEC key
+    management** (το `dnssec_enabled` mirror μένει read-only — το key-material UX θέλει
+    σχεδιασμό: add/remove DS/DNSKEY, validation, ρίσκο να σπάσει resolution με λάθος digest)·
+    **restore billing** (η επαναφορά χρεώνει τον πελάτη ΧΕΙΡΟΚΙΝΗΤΑ v1 — δεν κόβει invoice
+    μόνη της· αν φανεί συχνό, hook στο invoice flow όπως το renew)· approve-transfer/
+    resend-FOA (αν φανούν χρήσιμα live). P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
     pre-flight refusals ως «αίτηση» (false ⚠ σε previous-life tombstone + ένα refused click·
     αντίστροφα panel-started FAI χωρίς κανένα log δεν φλαγκάρεται)· (σ) το claimedElsewhere
     over-blocks (αγνοεί ΠΟΙΟ registrar account + withTrashed ξένα rows μπλοκάρουν «πελάτης

@@ -4,6 +4,7 @@ namespace App\Contracts;
 
 use App\Models\Domain;
 use App\Support\Domains\AvailabilityResult;
+use App\Support\Domains\DomainChanges;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
@@ -120,4 +121,26 @@ interface DomainRegistrar
      * registrar has none for this domain.
      */
     public function getEppCode(Domain $domain, DomainRegistrarCredentials $credentials): ?string;
+
+    /**
+     * WRITE (A3d): change registrar-side settings — nameservers / transfer
+     * lock / WHOIS privacy / contact handles, whatever `$changes` carries
+     * (null fields untouched). NOT a charge, but still registrar truth:
+     * callers go through DomainManagementService ONLY (per-operation audit
+     * log + the shared write guards). Returns the fresh registrar truth so
+     * the caller applies it through the one truth-apply path. Throws
+     * DomainRegistrarNotConfigured on an API-less registrar; RuntimeException
+     * on transport/API failure.
+     */
+    public function updateDomain(Domain $domain, DomainChanges $changes, DomainRegistrarCredentials $credentials): DomainSyncResult;
+
+    /**
+     * WRITE (A3d): restore a name from redemption — REAL (usually LARGE)
+     * MONEY at the registrar. Callers go through DomainManagementService ONLY
+     * (it owns the sync-first adopt guard — a name that came back some other
+     * way must never be re-charged — and the audit log). Returns the fresh
+     * registrar truth after the restore. Throws DomainRegistrarNotConfigured
+     * on an API-less registrar; RuntimeException on transport/API failure.
+     */
+    public function restore(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult;
 }

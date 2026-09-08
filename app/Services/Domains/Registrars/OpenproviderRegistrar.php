@@ -8,6 +8,7 @@ use App\Models\Domain;
 use App\Services\Domains\DomainNotFoundAtRegistrar;
 use App\Services\Domains\DomainRegistrarNotConfigured;
 use App\Support\Domains\AvailabilityResult;
+use App\Support\Domains\DomainChanges;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
@@ -139,16 +140,7 @@ class OpenproviderRegistrar implements DomainRegistrar
         // The service's mandatory pre-check sync just adopted/refreshed the
         // stored id — use it and skip a redundant GET; resolve only when the
         // row genuinely lacks one.
-        $id = $domain->registrar_domain_id !== null && $domain->registrar_domain_id !== ''
-            ? $domain->registrar_domain_id
-            : null;
-        if ($id === null) {
-            $data = $this->fetchDomainData($domain, $credentials);
-            $id = isset($data['id']) && (string) $data['id'] !== '' ? (string) $data['id'] : null;
-        }
-        if ($id === null) {
-            throw new RuntimeException('Το Openprovider δεν επέστρεψε id για το '.$domain->fqdn.' — αδύνατη η ανανέωση.');
-        }
+        $id = $this->resolveDomainId($domain, $credentials, 'αδύνατη η ανανέωση');
 
         $this->request($credentials, 'POST', '/v1beta/domains/'.rawurlencode($id).'/renew', [
             'id' => (int) $id,
@@ -159,18 +151,8 @@ class OpenproviderRegistrar implements DomainRegistrar
         // so the caller gets (and applies) the registrar's OWN post-renew
         // truth. From here on the registrar HAS charged: a re-fetch hiccup
         // must never surface as a failed renewal (the caller would log
-        // 'failed' + alert for a renewal that actually succeeded) — fall back
-        // to a minimal result; the nightly sync lands the new expiry.
-        try {
-            $fresh = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id))->json('data');
-        } catch (\Throwable) {
-            return new DomainSyncResult(registrarDomainId: $id);
-        }
-        if (! is_array($fresh)) {
-            return new DomainSyncResult(registrarDomainId: $id);
-        }
-
-        return $this->syncResultFrom($fresh);
+        // 'failed' + alert for a renewal that actually succeeded).
+        return $this->refetchAfterWrite($id, $credentials);
     }
 
     /**
@@ -216,6 +198,95 @@ class OpenproviderRegistrar implements DomainRegistrar
      */
     public function getEppCode(Domain $domain, DomainRegistrarCredentials $credentials): ?string
     {
+        $id = $this->resolveDomainId($domain, $credentials, 'αδύνατη η ανάκτηση κωδικού EPP');
+
+        $code = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id).'/authcode')->json('data.auth_code');
+
+        return is_string($code) && $code !== '' ? $code : null;
+    }
+
+    /**
+     * WRITE (A3d): registrar-side settings — one PUT /v1beta/domains/{id}
+     * carrying exactly what `$changes` asks (name_servers / is_locked /
+     * is_private_whois_enabled / contact handles). ONLY
+     * DomainManagementService calls this. Contacts reuse ensureHandles (same
+     * «persist the handle immediately» discipline as register). Re-fetches
+     * the domain afterwards so the caller applies the registrar's own truth;
+     * a re-fetch hiccup falls back to a minimal result (the PUT DID land —
+     * the nightly sync catches the rest up).
+     */
+    public function updateDomain(Domain $domain, DomainChanges $changes, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        if ($changes->isEmpty()) {
+            throw new RuntimeException('Καμία αλλαγή προς αποστολή στον registrar.');
+        }
+
+        $id = $this->resolveDomainId($domain, $credentials, 'αδύνατη η ενημέρωση');
+
+        $payload = [];
+        if ($changes->nameservers !== null) {
+            $payload['name_servers'] = array_map(
+                fn (string $h) => ['name' => mb_strtolower(trim($h))],
+                $changes->nameservers,
+            );
+        }
+        if ($changes->transferLock !== null) {
+            $payload['is_locked'] = $changes->transferLock;
+        }
+        if ($changes->whoisPrivacy !== null) {
+            $payload['is_private_whois_enabled'] = $changes->whoisPrivacy;
+        }
+        $handles = [];
+        if ($changes->applyContacts) {
+            $handles = $this->ensureHandles($domain, $credentials);
+            if (! isset($handles['registrant'])) {
+                throw new RuntimeException("Το {$domain->fqdn} δεν έχει επαφή registrant — απαιτείται για την ενημέρωση επαφών.");
+            }
+            $payload['owner_handle'] = $handles['registrant'];
+            $payload['admin_handle'] = $handles['admin'] ?? $handles['registrant'];
+            $payload['tech_handle'] = $handles['tech'] ?? $handles['registrant'];
+            $payload['billing_handle'] = $handles['billing'] ?? $handles['registrant'];
+        }
+
+        $this->request($credentials, 'PUT', '/v1beta/domains/'.rawurlencode($id), $payload);
+
+        $base = $this->refetchAfterWrite($id, $credentials);
+
+        return new DomainSyncResult(
+            expiresAt: $base->expiresAt,
+            nameservers: $base->nameservers,
+            registrarDomainId: $base->registrarDomainId,
+            status: $base->status,
+            rawStatus: $base->rawStatus,
+            contactHandles: $handles + $base->contactHandles,
+            deadRecord: $base->deadRecord,
+        );
+    }
+
+    /**
+     * WRITE (A3d): restore from redemption — POST /v1beta/domains/{id}/restore.
+     * REAL (usually large) MONEY: ONLY DomainManagementService calls this (it
+     * owns the sync-first adopt guard + the audit log). From the POST on the
+     * registrar HAS charged — a re-fetch hiccup must never surface as a failed
+     * restore; fall back to a minimal result (the nightly sync lands the rest).
+     */
+    public function restore(Domain $domain, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        $id = $this->resolveDomainId($domain, $credentials, 'αδύνατη η επαναφορά');
+
+        $this->request($credentials, 'POST', '/v1beta/domains/'.rawurlencode($id).'/restore', [
+            'id' => (int) $id,
+        ]);
+
+        return $this->refetchAfterWrite($id, $credentials);
+    }
+
+    /**
+     * The stored OP id, else the by-name resolve (renew/EPP/update/restore all
+     * share the need). Throws when neither yields one.
+     */
+    private function resolveDomainId(Domain $domain, DomainRegistrarCredentials $credentials, string $impossible): string
+    {
         $id = $domain->registrar_domain_id !== null && trim($domain->registrar_domain_id) !== ''
             ? $domain->registrar_domain_id
             : null;
@@ -224,12 +295,29 @@ class OpenproviderRegistrar implements DomainRegistrar
             $id = isset($data['id']) && (string) $data['id'] !== '' ? (string) $data['id'] : null;
         }
         if ($id === null) {
-            throw new RuntimeException('Το Openprovider δεν επέστρεψε id για το '.$domain->fqdn.' — αδύνατη η ανάκτηση κωδικού EPP.');
+            throw new RuntimeException('Το Openprovider δεν επέστρεψε id για το '.$domain->fqdn.' — '.$impossible.'.');
         }
 
-        $code = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id).'/authcode')->json('data.auth_code');
+        return $id;
+    }
 
-        return is_string($code) && $code !== '' ? $code : null;
+    /**
+     * Post-write truth pull with the «the write DID land» fallback — a failed
+     * GET after a successful write returns a minimal result instead of
+     * throwing (renew/update/restore share it; the nightly sync catches up).
+     */
+    private function refetchAfterWrite(string $id, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        try {
+            $fresh = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id))->json('data');
+        } catch (\Throwable) {
+            return new DomainSyncResult(registrarDomainId: $id);
+        }
+        if (! is_array($fresh)) {
+            return new DomainSyncResult(registrarDomainId: $id);
+        }
+
+        return $this->syncResultFrom($fresh);
     }
 
     /**

@@ -65,8 +65,10 @@ class OpenproviderRegistrarTest extends TestCase
         $this->assertContains('register', $methods, 'A3b: register() is a landed write surface');
         $this->assertContains('transferin', $methods, 'A3c: transferIn() is a landed write surface');
         $this->assertContains('geteppcode', $methods, 'A3c: getEppCode() (read, transfer-out aid) landed');
-        foreach (['requestdelete', 'setnameservers', 'setcontacts', 'setlock', 'setdnssec'] as $forbidden) {
-            $this->assertNotContains($forbidden, $methods, "adapter must not expose {$forbidden}() before its A3 slice");
+        $this->assertContains('updatedomain', $methods, 'A3d: updateDomain() (NS/lock/privacy/contacts) landed');
+        $this->assertContains('restore', $methods, 'A3d: restore() (redemption) landed');
+        foreach (['requestdelete', 'setdnssec', 'setdnsseckeys', 'deletedomain'] as $forbidden) {
+            $this->assertNotContains($forbidden, $methods, "adapter must not expose {$forbidden}() before its slice (delete = A4/never; DNSSEC keys = BACKLOG)");
         }
     }
 
