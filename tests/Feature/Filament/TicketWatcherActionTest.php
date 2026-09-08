@@ -5,6 +5,7 @@ namespace Tests\Feature\Filament;
 use App\Actions\Support\OpenTicket;
 use App\Filament\Resources\Tickets\Pages\ViewTicket;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
 use App\Models\TicketDepartment;
@@ -128,5 +129,30 @@ class TicketWatcherActionTest extends TestCase
 
         $this->assertSame(1, TicketWatcher::withoutGlobalScope(CompanyScope::class)
             ->where('ticket_id', $other->id)->count(), "another ticket's watcher is untouched");
+    }
+
+    public function test_link_customer_binds_within_tenant_but_not_a_foreign_one(): void
+    {
+        Gate::before(fn () => true);
+        $company = $this->company('a');
+        $foreignCompany = $this->company('b');
+        $operator = $this->user($company, 'OpA');
+        $ticket = $this->ticket($company); // opened unbound (customer_id null)
+
+        $mine = Customer::create(['company_id' => $company->id, 'name' => 'Δικός', 'email' => 'm@e.gr']);
+        $foreign = Customer::create(['company_id' => $foreignCompany->id, 'name' => 'Ξένος', 'email' => 'x@e.gr']);
+
+        $this->actingAs($operator);
+        Filament::setTenant($company);
+
+        // A foreign-tenant customer id must never bind.
+        Livewire::test(ViewTicket::class, ['record' => $ticket->id, 'tenant' => $company->slug])
+            ->callAction('linkCustomer', ['customer_id' => $foreign->id]);
+        $this->assertNull($ticket->fresh()->customer_id, 'a foreign-tenant customer is never linked');
+
+        // A same-tenant customer binds.
+        Livewire::test(ViewTicket::class, ['record' => $ticket->id, 'tenant' => $company->slug])
+            ->callAction('linkCustomer', ['customer_id' => $mine->id]);
+        $this->assertSame($mine->id, $ticket->fresh()->customer_id, 'a same-tenant customer is linked');
     }
 }

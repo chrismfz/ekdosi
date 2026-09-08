@@ -9,6 +9,7 @@ use App\Filament\Resources\Tickets\TicketResource;
 use App\Jobs\SendTicketFeedbackInvite;
 use App\Jobs\SendTicketReplyEmail;
 use App\Models\CannedReply;
+use App\Models\Customer;
 use App\Models\Ticket;
 use App\Models\TicketBlockedSender;
 use App\Models\TicketMessage;
@@ -132,6 +133,40 @@ class ViewTicket extends ViewRecord
                 ->action(function (array $data, Ticket $record): void {
                     $record->update(['assigned_to' => $data['assigned_to'] ?: null]);
                     Notification::make()->title('Η ανάθεση ενημερώθηκε')->success()->send();
+                }),
+
+            // Link a customer to an UNBOUND ticket (e.g. an email whose address matched
+            // several customers, so the router left it unbound — see InboundTicketRouter).
+            // Only offered when there is no customer yet; binding is tenant-scoped.
+            Action::make('linkCustomer')
+                ->label('Σύνδεση πελάτη')
+                ->icon('heroicon-o-link')
+                ->color('gray')
+                ->authorize($canUpdate)
+                ->visible(fn (Ticket $record): bool => ! $record->isMerged() && $record->customer_id === null)
+                ->schema([
+                    Select::make('customer_id')
+                        ->label('Πελάτης')
+                        ->required()
+                        ->searchable()
+                        ->getSearchResultsUsing(fn (string $search, Ticket $record): array => self::customerOptions($record, $search))
+                        ->getOptionLabelUsing(fn ($value, Ticket $record): ?string => self::customerLabel($record, $value))
+                        ->helperText('Σύνδεσε το αίτημα με τον σωστό πελάτη — π.χ. όταν το email ταίριαζε με πολλούς.'),
+                ])
+                ->action(function (array $data, Ticket $record): void {
+                    // Bind ONLY within the ticket's tenant — a tampered id from another
+                    // company matches nothing (never links a foreign customer).
+                    $customer = Customer::query()
+                        ->where('company_id', $record->company_id)
+                        ->whereKey($data['customer_id'])
+                        ->first();
+                    if ($customer === null) {
+                        Notification::make()->title('Μη έγκυρος πελάτης')->warning()->send();
+
+                        return;
+                    }
+                    $record->update(['customer_id' => $customer->id]);
+                    Notification::make()->title('Ο πελάτης συνδέθηκε')->success()->send();
                 }),
 
             Action::make('hold')
@@ -374,6 +409,39 @@ class ViewTicket extends ViewRecord
         $user = auth()->user();
 
         return $user instanceof User && $record->isWatchedBy($user);
+    }
+
+    /**
+     * Customer search results for «Σύνδεση πελάτη», scoped to the ticket's company
+     * (name / email / ΑΦΜ). Explicit company_id filter so it never offers a foreign
+     * tenant's customer even if the ambient scope were off.
+     *
+     * @return array<int, string>
+     */
+    private static function customerOptions(Ticket $record, string $search): array
+    {
+        $search = trim($search);
+
+        return Customer::query()
+            ->where('company_id', $record->company_id)
+            ->when($search !== '', fn ($q) => $q->where(fn ($w) => $w
+                ->where('name', 'like', '%'.$search.'%')
+                ->orWhere('email', 'like', '%'.$search.'%')
+                ->orWhere('afm', 'like', '%'.$search.'%')))
+            ->orderBy('name')
+            ->limit(50)
+            ->get(['id', 'name', 'afm'])
+            ->mapWithKeys(fn (Customer $c): array => [$c->id => $c->name.($c->afm ? ' · '.$c->afm : '')])
+            ->all();
+    }
+
+    /** Label for a selected customer — only a same-company customer renders one. */
+    private static function customerLabel(Ticket $record, mixed $value): ?string
+    {
+        return Customer::query()
+            ->where('company_id', $record->company_id)
+            ->whereKey($value)
+            ->value('name');
     }
 
     /**

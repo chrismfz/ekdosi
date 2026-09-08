@@ -166,6 +166,63 @@ class InboundTicketRouterTest extends TestCase
         $this->assertSame(1, $first->fresh()->messages()->count(), 'no duplicate message');
     }
 
+    public function test_an_ambiguous_sender_opens_an_unbound_flagged_ticket(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company);
+        // TWO customers of the SAME company share a contact email (email is not unique).
+        Customer::create(['company_id' => $company->id, 'name' => 'Πελ Α', 'email' => 'shared@e.gr']);
+        Customer::create(['company_id' => $company->id, 'name' => 'Πελ Β', 'secondary_email' => 'shared@e.gr']);
+
+        $ticket = $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: 'shared@e.gr', fromName: 'Κάποιος', subject: 'Ασαφές', body: 'σώμα', messageId: '<amb-1@mail>',
+        ));
+
+        $this->assertNotNull($ticket);
+        $this->assertNull($ticket->customer_id, 'ambiguous match → NOT auto-bound (no wrong financials shown)');
+        $this->assertSame('shared@e.gr', $ticket->requester_email, 'still reachable — opened, not dropped');
+        // Flagged with an internal system note for the operator.
+        $note = $ticket->messages()->where('author_role', TicketMessage::ROLE_SYSTEM)->first();
+        $this->assertNotNull($note);
+        $this->assertTrue((bool) $note->is_internal_note, 'the flag is operator-only, never shown to the customer');
+        $this->assertStringContainsString('πολλαπλούς πελάτες', (string) $note->body);
+    }
+
+    public function test_a_single_match_still_binds_normally(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company);
+        $customer = Customer::create(['company_id' => $company->id, 'name' => 'Μόνος', 'email' => 'unique@e.gr']);
+
+        $ticket = $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: 'unique@e.gr', fromName: 'Μ', subject: 'Θ', body: 'x', messageId: '<one-1@mail>',
+        ));
+
+        $this->assertSame($customer->id, $ticket->customer_id, 'an unambiguous single match binds');
+        $this->assertSame(0, $ticket->messages()->where('author_role', TicketMessage::ROLE_SYSTEM)->count(), 'no ambiguity flag');
+    }
+
+    public function test_clients_only_accepts_an_ambiguous_sender_but_rejects_an_unknown_one(): void
+    {
+        $company = $this->company();
+        $dept = $this->department($company, clientsOnly: true);
+        Customer::create(['company_id' => $company->id, 'name' => 'Α', 'email' => 'dup@e.gr']);
+        Customer::create(['company_id' => $company->id, 'name' => 'Β', 'email' => 'dup@e.gr']);
+
+        // Ambiguous sender IS a customer (just ambiguous) → accepted (unbound), not dropped.
+        $accepted = $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: 'dup@e.gr', fromName: 'X', subject: 'Θ', body: 'x', messageId: '<co-1@mail>',
+        ));
+        $this->assertNotNull($accepted, 'clients_only must NOT drop a (shared-email) customer');
+        $this->assertNull($accepted->customer_id);
+
+        // A truly unknown sender is still rejected.
+        $rejected = $this->router()->route($dept, new ParsedInboundEmail(
+            fromEmail: 'stranger@e.gr', fromName: 'Y', subject: 'Θ', body: 'x', messageId: '<co-2@mail>',
+        ));
+        $this->assertNull($rejected, 'clients_only still rejects an unknown sender');
+    }
+
     public function test_message_id_idempotency_is_company_wide_across_departments(): void
     {
         $company = $this->company();

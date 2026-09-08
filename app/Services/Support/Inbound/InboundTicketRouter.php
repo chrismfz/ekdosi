@@ -15,6 +15,7 @@ use App\Support\TicketAttachments;
 use App\Support\TicketReference;
 use EmailReplyParser\EmailReplyParser;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -93,10 +94,19 @@ class InboundTicketRouter
             }
         }
 
-        $customer = $this->matchCustomer($companyId, $email->fromEmail);
+        // Resolve the sender → customer(s). We bind ONLY on an unambiguous single
+        // match: if the address matches TWO+ customers of the company (email is not
+        // unique per company), auto-binding would attach the ticket — and expose that
+        // customer's balance/invoices in the operator infolist — to possibly the WRONG
+        // entity. So on ambiguity we leave the ticket unbound and flag it for a manual
+        // link (below). A truly unknown sender (zero matches) stays null/guest.
+        $matches = $this->matchCustomers($companyId, $email->fromEmail);
+        $customer = $matches->count() === 1 ? $matches->first() : null;
+        $ambiguous = $matches->count() >= 2;
 
-        // «Clients Only»: an unknown sender is rejected outright (no ticket, no leak).
-        if ($department->clients_only && $customer === null) {
+        // «Clients Only»: reject only a TRULY unknown sender (no match at all). An
+        // ambiguous sender IS a customer — accept the ticket (unbound), don't drop it.
+        if ($department->clients_only && $matches->isEmpty()) {
             return null;
         }
 
@@ -156,8 +166,26 @@ class InboundTicketRouter
         if ($opening !== null) {
             $this->storeAttachments($opening, $email);
         }
+        // Ambiguous sender → flag it (internal note) so an operator links the right
+        // customer via the «Σύνδεση πελάτη» action; nothing is shown to the customer.
+        if ($ambiguous) {
+            $this->systemNote($ticket, '⚠ Ο αποστολέας «'.mb_strtolower(trim($email->fromEmail))
+                .'» ταιριάζει με πολλαπλούς πελάτες — δεν έγινε αυτόματη σύνδεση. Σύνδεσε χειροκίνητα τον σωστό πελάτη («Σύνδεση πελάτη»).');
+        }
 
         return $ticket;
+    }
+
+    /** An internal system note on the ticket (operator-only — never shown to the customer). */
+    private function systemNote(Ticket $ticket, string $body): void
+    {
+        $ticket->messages()->create([
+            'company_id' => $ticket->company_id,
+            'author_role' => TicketMessage::ROLE_SYSTEM,
+            'body' => $body,
+            'is_internal_note' => true,
+            'via' => TicketMessage::VIA_SYSTEM,
+        ]);
     }
 
     /**
@@ -251,11 +279,17 @@ class InboundTicketRouter
         return $from !== '' && in_array($from, $ticket->watcherEmailAddresses(), true);
     }
 
-    private function matchCustomer(int $companyId, string $fromEmail): ?Customer
+    /**
+     * The company's customers whose email/secondary_email matches the sender. Capped
+     * at 2 — the caller only needs to tell apart none / exactly-one / ambiguous(≥2).
+     *
+     * @return Collection<int, Customer>
+     */
+    private function matchCustomers(int $companyId, string $fromEmail): Collection
     {
         $needle = mb_strtolower(trim($fromEmail));
         if ($needle === '') {
-            return null;
+            return collect();
         }
 
         return Customer::query()
@@ -264,7 +298,8 @@ class InboundTicketRouter
             ->where(fn (Builder $q): Builder => $q
                 ->whereRaw('LOWER(email) = ?', [$needle])
                 ->orWhereRaw('LOWER(secondary_email) = ?', [$needle]))
-            ->first();
+            ->limit(2)
+            ->get();
     }
 
     private function matchTicket(int $companyId, ParsedInboundEmail $email): ?Ticket

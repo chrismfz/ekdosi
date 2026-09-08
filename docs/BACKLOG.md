@@ -860,9 +860,10 @@ data model + phase gates: **`PLAN.md`**.
     για το «seen this message-id;»), οπότε ένα email σε dept-A + dept-B ίδιας εταιρείας δίνει ΕΝΑ ticket. Το «ένα
     ticket ανά τμήμα» ΔΕΝ είναι dedup tweak — θέλει department-scoped `matchTicket` + merge μαζί (αλλιώς reply-all
     ξανα-collapse-άρει, και redelivery μηνύματος που threaded/merged σε άλλο τμήμα διπλασιάζεται)· design change, χαμηλή
-    προτ. (δοκιμάστηκε per-department dedup, έγινε revert γιατί εισήγαγε duplicate-on-redelivery). (α) **ambiguous customer match:** `matchCustomer()->first()` σε ΜΗ-μοναδικό email (2 πελάτες ίδιας
-    εταιρείας, ίδιο email) δένει αυθαίρετα → ο operator βλέπει λάθος οικονομικά· fix = «>1 match → guest/flag» (product
-    decision — τι σημαίνει shared email; · εντός ΙΔΙΑΣ εταιρείας, όχι cross-tenant). (β) **systematic `getSize()`
+    προτ. (δοκιμάστηκε per-department dedup, έγινε revert γιατί εισήγαγε duplicate-on-redelivery). (α) **ambiguous customer match — FIXED (2026-09-08).** Σε ΜΗ-μοναδικό email (≥2 πελάτες ίδιας
+    εταιρείας) ο router πλέον ΔΕΝ κάνει auto-bind (`matchCustomers`, limit 2 → bind μόνο σε single match)· ανοίγει
+    αδέσμευτο ticket + internal note flag· ο χειριστής συνδέει με «Σύνδεση πελάτη» (ViewTicket, tenant-scoped). Το
+    clients_only δέχεται τον ασαφή (γνωστό) αποστολέα, ρίχνει μόνο τον πραγματικά άγνωστο. (β) **systematic `getSize()`
     failure:** αν ένας server ΔΕΝ υποστηρίζει RFC822.SIZE σε headers-only fetch, ΟΛΑ γίνονται stubs· σπάνιο (RFC822.SIZE
     ~universal) + retry καλύπτει transient· fix αν πονέσει = εναλλακτικό size path ή bounded body. (γ) **`$authorNameCache`
     unbounded static** (TicketInfolist) — Octane-only memory growth + stale names· harmless σε FPM (locked). (δ)
