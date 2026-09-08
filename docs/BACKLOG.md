@@ -657,6 +657,14 @@ data model + phase gates: **`PLAN.md`**.
     helper (χωρίς money συνέπεια, το max(1) σφάλλει προς όφελος του reconciler)· (ζ) εξωτικό:
     refusal γραμμένο σε re-issue μετά από ΔΥΟ αλλαγές κύκλου μπορεί να αποθηκεύσει
     mis-stepped baseline που σκιάζει το πρώτο — αυστηρά λιγότερο λάθος από το pre-r5.
+    Και P2 από το A3b gate r2 (wholesale): (η) το cross-tenant claim guard μετρά ΚΑΙ trashed
+    ξένα rows — ένα διαγραμμένο domain άλλης εταιρείας μπλοκάρει για πάντα το register εδώ
+    (συντηρητικό μπλοκάρισμα = ασφαλής πλευρά· ξεμπλοκάρεται με force-delete ή χειροκίνητα)·
+    (θ) το step-0 in-flight guard κάθεται ΜΕΤΑ τα NS/contact refusals — in-flight row με
+    αδειασμένο NS σφηνώνει σε guard που το adopt δεν χρειάζεται· (ι) το adopt σφραγίζει
+    registered_at=today ενώ το OP payload κουβαλά creation_date που το syncResultFrom πετά —
+    panel-registered/παλιές υιοθετήσεις παίρνουν λάθος ημερομηνία (add registeredAt στο
+    DomainSyncResult όταν χρειαστεί αλλού).
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).

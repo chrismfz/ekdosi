@@ -183,6 +183,105 @@ class DomainRegistrationServiceTest extends TestCase
         $this->assertSame(DomainStatus::PendingRegister, $domain->refresh()->status, 'REQ keeps pending until the registry answers');
     }
 
+    public function test_a_timed_out_register_that_charged_is_adopted_on_retry_not_paid_twice(): void
+    {
+        // r2 finding 1 — THE war story, register flavor: the first POST timed
+        // out AFTER charging (only a 'failed' log, NO id), and the async
+        // registry still answers 'free'. The retry must PROBE the account
+        // first and adopt — never trust availability into a second POST.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=fresh.eu' => Http::response(['data' => ['results' => [[
+                'id' => 555, 'status' => 'ACT', 'expiration_date' => '2027-09-08 00:00:00',
+            ]]]]),
+        ]);
+        $domain = $this->pendingDomain();
+        DomainRegistrarLog::create([
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id,
+            'action' => 'register', 'status' => DomainRegistrarLog::STATUS_FAILED,
+            'request' => ['fqdn' => 'fresh.eu', 'years' => 1], 'error' => 'cURL timeout',
+        ]);
+
+        $log = app(DomainRegistrationService::class)->register($domain, 1);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/v1beta/domains') && $req->method() === 'POST');
+        Http::assertNotSent(fn ($req) => str_ends_with($req->url(), '/v1beta/domains/check'));
+        $this->assertSame('555', $domain->refresh()->registrar_domain_id);
+    }
+
+    public function test_a_probe_that_finds_nothing_falls_through_to_a_real_register(): void
+    {
+        // ...and when the timed-out POST genuinely never landed, the probe
+        // says not-ours and the normal availability+register path runs ONCE.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=fresh.eu' => Http::response(['data' => ['results' => []]]),
+            self::SANDBOX.'/v1beta/domains/check' => Http::response(['data' => ['results' => [['status' => 'free']]]]),
+            self::SANDBOX.'/v1beta/customers' => Http::response(['data' => ['handle' => 'NP1-EU']]),
+            self::SANDBOX.'/v1beta/domains' => Http::response(['data' => [
+                'id' => 557, 'status' => 'ACT', 'expiration_date' => '2027-09-08 00:00:00',
+            ]]),
+        ]);
+        $domain = $this->pendingDomain();
+        DomainRegistrarLog::create([
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id,
+            'action' => 'register', 'status' => DomainRegistrarLog::STATUS_FAILED,
+            'request' => ['fqdn' => 'fresh.eu', 'years' => 1], 'error' => 'cURL timeout',
+        ]);
+
+        $log = app(DomainRegistrationService::class)->register($domain, 1);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_OK, $log->status);
+        $this->assertSame('557', $domain->refresh()->registrar_domain_id);
+    }
+
+    public function test_a_rejected_inflight_registration_clears_the_stale_id_never_says_third_party(): void
+    {
+        // r2 finding 2: REQ later rejected by the registry, OP dropped the
+        // object — the honest message + a cleared id (unwedged), never the
+        // «κατειλημμένο από τρίτο» fiction.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/9' => Http::response(['desc' => 'not found'], 404),
+            self::SANDBOX.'/v1beta/domains?full_name=fresh.eu' => Http::response(['data' => ['results' => []]]),
+        ]);
+        $domain = $this->pendingDomain(['registrar_domain_id' => '9']);
+
+        try {
+            app(DomainRegistrationService::class)->register($domain, 1);
+            $this->fail('the rejected in-flight must fail honestly');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('δεν βρίσκεται (πλέον) στον λογαριασμό', $e->getMessage());
+            $this->assertStringNotContainsString('κατειλημμένο', $e->getMessage());
+        }
+        $domain->refresh();
+        $this->assertNull($domain->registrar_domain_id, 'stale id cleared — the next attempt takes the normal path');
+        $this->assertSame('9', $domain->module_meta['previous_registrar_domain_id']);
+    }
+
+    public function test_a_panel_registered_premium_name_is_still_adoptable(): void
+    {
+        // r2 finding 4: adoption charges nothing — the premium guard protects
+        // only the CHARGE, so a taken premium name in OUR account adopts.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/check' => Http::response(['data' => ['results' => [[
+                'status' => 'active', 'premium' => ['price' => ['create' => 950]],
+            ]]]]),
+            self::SANDBOX.'/v1beta/domains?full_name=fresh.eu' => Http::response(['data' => ['results' => [[
+                'id' => 555, 'status' => 'ACT', 'expiration_date' => '2027-09-08 00:00:00',
+            ]]]]),
+        ]);
+        $domain = $this->pendingDomain();
+
+        $log = app(DomainRegistrationService::class)->register($domain, 1);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
+    }
+
     public function test_a_failed_account_read_is_never_dressed_up_as_taken_by_third_party(): void
     {
         Http::fake([

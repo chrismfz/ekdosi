@@ -252,23 +252,16 @@ class OpenproviderRegistrar implements DomainRegistrar
             if (preg_match('/^(.*?)\s+(\S*\d\S*)$/u', $street, $m) === 1) {
                 [, $street, $number] = $m;
             }
-            // Registrant phone is ICANN-relevant WHOIS data — split carefully:
-            // exact '+30' first (the tenant's world), then a 2-digit CC (the
-            // EU norm) for other '+' numbers; a LOCAL number keeps ALL its
-            // digits (never strip an area code) under the +30 default.
+            // Registrant phone is ICANN-relevant WHOIS data — split on real
+            // ITU country-code lengths; a LOCAL number keeps ALL its digits
+            // (never strip an area code) under the +30 default.
             $digits = str_replace([' ', '-', '(', ')'], '', trim((string) $contact->phone));
+            if (str_starts_with($digits, '00')) {
+                $digits = '+'.substr($digits, 2); // 0030… international form
+            }
             $phonePayload = null;
             if ($digits !== '') {
-                if (str_starts_with($digits, '+30')) {
-                    $cc = '+30';
-                    $subscriber = substr($digits, 3);
-                } elseif (str_starts_with($digits, '+')) {
-                    $cc = substr($digits, 0, 3); // '+' + 2-digit CC
-                    $subscriber = substr($digits, 3);
-                } else {
-                    $cc = '+30';
-                    $subscriber = $digits;
-                }
+                [$cc, $subscriber] = $this->splitCountryCode($digits);
                 $phonePayload = [
                     'country_code' => $cc,
                     'area_code' => '',
@@ -509,6 +502,31 @@ class OpenproviderRegistrar implements DomainRegistrar
         }
 
         return $handles;
+    }
+
+    /**
+     * '+CC' + subscriber per ITU zone rules: +1/+7 are one-digit; zones 3/4
+     * (Europe) are two-digit EXCEPT the 35x/37x/38x/42x three-digit ranges
+     * (+357 Κύπρος, +353, +371, +380, +420, …); everything else defaults to
+     * two digits — a local (no-prefix) number keeps all its digits under +30.
+     *
+     * @return array{0: string, 1: string} [country_code, subscriber]
+     */
+    private function splitCountryCode(string $digits): array
+    {
+        if (! str_starts_with($digits, '+')) {
+            return ['+30', $digits];
+        }
+        if (preg_match('/^\+([17])(\d+)$/', $digits, $m) === 1) {
+            return ['+'.$m[1], $m[2]];
+        }
+        $three = substr($digits, 1, 3);
+        if (preg_match('/^(35\d|37\d|38[0-9])$/', $three) === 1 && ! in_array($three, ['384', '388'], true)
+            || preg_match('/^42[013]$/', $three) === 1) {
+            return ['+'.$three, substr($digits, 4)];
+        }
+
+        return [substr($digits, 0, 3), substr($digits, 3)];
     }
 
     /** OP returns "YYYY-MM-DD HH:MM:SS" — the date part is our clock. */
