@@ -150,4 +150,9 @@ class FakeDomainRegistrar implements DomainRegistrar
     {
         return new DomainSyncResult(expiresAt: '2028-01-01');
     }
+
+    public function register(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        return new DomainSyncResult(expiresAt: '2028-01-01', registrarDomainId: '1');
+    }
 }

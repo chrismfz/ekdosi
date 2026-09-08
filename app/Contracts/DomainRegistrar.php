@@ -89,4 +89,17 @@ interface DomainRegistrar
      * on transport/API failure.
      */
     public function renew(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult;
+
+    /**
+     * WRITE (A3b): register the domain for N years — REAL MONEY at the
+     * registrar. Callers go through DomainRegistrationService ONLY (it owns
+     * the adopt-on-retry guard, the availability pre-check and the audit
+     * log); never call this directly. The adapter reads the domain's loaded
+     * contacts (ensuring reusable registrar handles as needed — returned in
+     * the result's contactHandles so the caller can persist them) and its
+     * nameservers. Returns the fresh registrar truth (id/expiry/status).
+     * Throws DomainRegistrarNotConfigured on an API-less registrar;
+     * RuntimeException on transport/API failure.
+     */
+    public function register(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult;
 }

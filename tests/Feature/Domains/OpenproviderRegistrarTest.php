@@ -61,8 +61,9 @@ class OpenproviderRegistrarTest extends TestCase
         // own slice arrives with its guards. renew() itself is reachable only
         // through DomainRenewalService (§6.6 adopt guard + audit log).
         $methods = array_map('strtolower', get_class_methods(OpenproviderRegistrar::class));
-        $this->assertContains('renew', $methods, 'A3a: renew() is the landed write surface');
-        foreach (['register', 'transfer', 'requestdelete', 'setnameservers', 'setcontacts', 'setlock', 'setdnssec'] as $forbidden) {
+        $this->assertContains('renew', $methods, 'A3a: renew() is a landed write surface');
+        $this->assertContains('register', $methods, 'A3b: register() is a landed write surface');
+        foreach (['transfer', 'requestdelete', 'setnameservers', 'setcontacts', 'setlock', 'setdnssec'] as $forbidden) {
             $this->assertNotContains($forbidden, $methods, "adapter must not expose {$forbidden}() before its A3 slice");
         }
     }

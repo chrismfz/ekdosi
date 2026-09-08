@@ -78,4 +78,11 @@ class NullDomainRegistrar implements DomainRegistrar
             'Ο registrar «manual» δεν έχει API — η ανανέωση γίνεται χειροκίνητα στο portal του registrar (ενημερώστε μετά τη λήξη στο domain).'
         );
     }
+
+    public function register(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — η καταχώρηση γίνεται χειροκίνητα στο portal του registrar (ενημερώστε μετά λήξη/στοιχεία στο domain).'
+        );
+    }
 }

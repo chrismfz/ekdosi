@@ -940,10 +940,13 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   on-issue», best-effort, περίοδος από το SC cursor)· κουμπί «Ανανέωση στον registrar» στο View
   (confirm modal, δεν αγγίζει billing cursor)· **`domain_registrar_logs`** API history (κάθε
   write ok/adopted/failed)· αποτυχίες → καμπανάκι operators.
-- **Επόμενα:** A3b register (post-pay) · A3c transfer in/out + Get EPP code · A3d NS/contacts/
-  DNSSEC/lock writes · WHMCS linkage hint (προαιρετικό, §9) · margin engine (αν χρειαστεί) ·
-  A4 grEPP (+ Recall 5 ημερών .gr) · A5 reconciliation · export/import των υπόλοιπων domain
-  tables (βλ. `docs/BACKLOG.md`).
+- **Registrar register (A3b, SHIPPED):** «Καταχώρηση στον registrar» σε pending domains —
+  operator-gated (post-payment πρακτική), availability-first, **adopt-on-retry** (κατειλημμένο
+  αλλά δικό μας = υιοθέτηση, όχι δεύτερη χρέωση), guards (registrant contact, ≥2 NS, lock),
+  handles reusable (ensure → persist), autorenew πάντα off στον registrar, όλα στο API history.
+- **Επόμενα:** A3c transfer in/out + Get EPP code · A3d NS/contacts/DNSSEC/lock writes · WHMCS
+  linkage hint (προαιρετικό, §9) · margin engine (αν χρειαστεί) · A4 grEPP (+ Recall 5 ημερών
+  .gr) · A5 reconciliation · export/import των υπόλοιπων domain tables (βλ. `docs/BACKLOG.md`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

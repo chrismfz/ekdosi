@@ -117,6 +117,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   write ok/adopted/failed με sanitized request/response — κανένα state-changing call άγραφο.
   Adapter: `POST /v1beta/domains/{id}/renew` + post-renew re-fetch· το read-only guard test
   έγινε «write surface = ακριβώς ό,τι έχει προσγειώσει slice» (μόνο renew).
+- **Domains — A3b: register (operator-gated, adopt-on-retry).** Κουμπί **«Καταχώρηση στον
+  registrar»** σε domains «Εκκρεμεί καταχώρηση» (§6.1 post-payment: ο operator αποφασίζει πότε —
+  η υπάρχουσα πρακτική «Automatic Registration = No»). `DomainRegistrationService` (ο μοναδικός
+  δρόμος): **availability πρώτα** (transport failure = abort, ποτέ τυφλή καταχώρηση)· κατειλημμένο
+  αλλά ΔΙΚΟ μας (retry μετά από timeout-που-χρέωσε ή καταχώρηση από το panel) → **adopt** χωρίς
+  δεύτερη χρέωση· κατειλημμένο από τρίτο → loud refusal· ελεύθερο → register. Guards: μόνο
+  pending status, επαφή registrant με email, ≥2 nameservers, per-domain lock· κάθε απόπειρα
+  (ok/adopted/failed, refusals included) στο API history. Adapter: ensure reusable contact
+  handles (`POST /v1beta/customers`, τα υπάρχοντα δεν ξανα-δημιουργούνται ποτέ — persist στο
+  contact) → `POST /v1beta/domains` με **autorenew πάντα off** (το billing ρολόι είναι δικό μας).
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

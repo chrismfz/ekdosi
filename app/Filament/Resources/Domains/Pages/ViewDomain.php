@@ -7,6 +7,7 @@ use App\Filament\Resources\Domains\DomainResource;
 use App\Filament\Support\StageRenewalNowAction;
 use App\Models\DomainRegistrarLog;
 use App\Services\Domains\DomainImportService;
+use App\Services\Domains\DomainRegistrationService;
 use App\Services\Domains\DomainRenewalService;
 use App\Services\Domains\DomainSyncService;
 use Filament\Actions\Action;
@@ -28,6 +29,45 @@ class ViewDomain extends ViewRecord
     {
         return [
             StageRenewalNowAction::forDomain(),
+            // A3b: register a NEW (pending) domain at the registrar — REAL
+            // charge, operator-gated (§6.1 post-payment / §7.1 «Automatic
+            // Registration = No» is the existing practice). Adopt-on-retry
+            // lives in the service: a retry after a timeout-that-charged
+            // adopts instead of paying twice.
+            Action::make('registerAtRegistrar')
+                ->label('Καταχώρηση στον registrar')
+                ->icon('heroicon-o-rocket-launch')
+                ->color('warning')
+                ->authorize('update')
+                ->visible(fn (): bool => ! $this->record->trashed()
+                    && $this->record->status === DomainStatus::PendingRegister
+                    && app(DomainSyncService::class)->isSyncable($this->record))
+                ->requiresConfirmation()
+                ->modalHeading('Καταχώρηση στον registrar;')
+                ->modalDescription(function (): string {
+                    $years = $this->renewYears();
+
+                    return "Θα καταχωρηθεί το {$this->record->fqdn} για {$years} ".($years === 1 ? 'έτος' : 'έτη')
+                        .'. ΧΡΕΩΝΕΙ τον λογαριασμό σας στον registrar. Απαιτεί επαφή registrant και ≥2 nameservers.'
+                        .' Αν έχει ήδη καταχωρηθεί από αλλού (retry), θα υιοθετηθεί χωρίς δεύτερη χρέωση.';
+                })
+                ->action(function (): void {
+                    try {
+                        $log = app(DomainRegistrationService::class)->register($this->record, $this->renewYears());
+                    } catch (\Throwable $e) {
+                        Notification::make()->title('Η καταχώρηση απέτυχε.')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
+                    $this->record->refresh();
+                    Notification::make()
+                        ->title($log->status === DomainRegistrarLog::STATUS_ADOPTED
+                            ? 'Ήταν ήδη καταχωρημένο στον λογαριασμό — υιοθετήθηκε.'
+                            : 'Καταχωρήθηκε στον registrar.')
+                        ->body('Λήξη: '.($this->record->expires_at?->format('d/m/Y') ?? 'θα έρθει με το επόμενο sync').'.')
+                        ->success()->send();
+                    $this->refreshFormData(['expires_at', 'status', 'registrar_domain_id', 'registered_at', 'last_synced_at', 'sync_error']);
+                }),
             // A3a: the registrar-side renew (REAL charge at the registrar) —
             // goes through DomainRenewalService (§6.6 sync-first adopt guard,
             // audit-logged). Billing stays separate: the cursor advances at

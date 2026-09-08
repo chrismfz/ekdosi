@@ -166,6 +166,125 @@ class OpenproviderRegistrar implements DomainRegistrar
         return $this->syncResultFrom($fresh);
     }
 
+    /**
+     * WRITE (A3b): register at Openprovider — ensure reusable contact handles
+     * (POST /v1beta/customers for contacts without one), then POST
+     * /v1beta/domains. ONLY DomainRegistrationService calls this (it owns the
+     * availability pre-check, the adopt-on-retry guard and the audit log).
+     * autorenew is ALWAYS 'off' — the billing clock is ekdosi's, never the
+     * registrar's. The ensured handles ride back in contactHandles so the
+     * caller persists them onto the domain's contacts.
+     */
+    public function register(Domain $domain, int $years, DomainRegistrarCredentials $credentials): DomainSyncResult
+    {
+        if ($years < 1) {
+            throw new RuntimeException('Μη έγκυρη διάρκεια καταχώρησης: '.$years);
+        }
+        [$name, $extension] = $this->splitFqdn($domain->fqdn);
+
+        $handles = $this->ensureHandles($domain, $credentials);
+        if (! isset($handles['registrant'])) {
+            throw new RuntimeException("Το {$domain->fqdn} δεν έχει επαφή registrant — απαιτείται για την καταχώρηση.");
+        }
+
+        $nameservers = $domain->nameservers->pluck('host')
+            ->filter(fn ($h) => is_string($h) && $h !== '')
+            ->map(fn ($h) => ['name' => mb_strtolower($h)])
+            ->values()
+            ->all();
+
+        $data = $this->request($credentials, 'POST', '/v1beta/domains', [
+            'domain' => ['name' => $name, 'extension' => $extension],
+            'period' => $years,
+            'owner_handle' => $handles['registrant'],
+            'admin_handle' => $handles['admin'] ?? $handles['registrant'],
+            'tech_handle' => $handles['tech'] ?? $handles['registrant'],
+            'billing_handle' => $handles['billing'] ?? $handles['registrant'],
+            'autorenew' => 'off',
+            'name_servers' => $nameservers,
+        ])->json('data');
+
+        // From here on the registrar HAS charged — shape whatever truth the
+        // response carries; a malformed body must never surface as a failed
+        // registration (the nightly sync lands the rest).
+        $base = is_array($data) ? $this->syncResultFrom($data) : new DomainSyncResult;
+
+        return new DomainSyncResult(
+            expiresAt: $base->expiresAt,
+            nameservers: $base->nameservers,
+            registrarDomainId: $base->registrarDomainId,
+            status: $base->status,
+            rawStatus: $base->rawStatus,
+            contactHandles: $handles + $base->contactHandles,
+        );
+    }
+
+    /**
+     * Reusable handles for the domain's contact rows: an existing
+     * registrar_contact_handle is used as-is; a contact without one becomes an
+     * OP «customer» (POST /v1beta/customers). Missing types fall back to the
+     * registrant at the call site — never invented here.
+     *
+     * @return array<string, string> contact type → handle
+     */
+    private function ensureHandles(Domain $domain, DomainRegistrarCredentials $credentials): array
+    {
+        $handles = [];
+        foreach ($domain->contacts as $contact) {
+            $existing = trim((string) $contact->registrar_contact_handle);
+            if ($existing !== '') {
+                $handles[$contact->type] = $existing;
+
+                continue;
+            }
+
+            // Best-effort split of «Οδός 12» / «Νίκος Παπαδόπουλος» into the
+            // structured fields OP requires; OP's own validation errors (400 +
+            // desc) surface verbatim — actionable, never swallowed.
+            $nameParts = preg_split('/\s+/u', trim((string) $contact->name), 2) ?: [];
+            $street = trim((string) $contact->address1);
+            $number = '';
+            if (preg_match('/^(.*?)\s+(\S*\d\S*)$/u', $street, $m) === 1) {
+                [, $street, $number] = $m;
+            }
+            $phone = trim((string) $contact->phone);
+            $phonePayload = null;
+            if ($phone !== '') {
+                $cc = preg_match('/^\+\d{1,3}/', $phone, $pm) === 1 ? $pm[0] : '+30';
+                $phonePayload = [
+                    'country_code' => $cc,
+                    'area_code' => '',
+                    'subscriber_number' => ltrim(str_replace([' ', '-'], '', mb_substr($phone, mb_strlen($cc)))),
+                ];
+            }
+
+            $payload = array_filter([
+                'name' => [
+                    'first_name' => $nameParts[0] ?? '',
+                    'last_name' => $nameParts[1] ?? ($nameParts[0] ?? ''),
+                ],
+                'company_name' => trim((string) $contact->org) !== '' ? trim((string) $contact->org) : null,
+                'email' => $contact->email,
+                'phone' => $phonePayload,
+                'address' => [
+                    'street' => $street,
+                    'number' => $number,
+                    'zipcode' => (string) $contact->postcode,
+                    'city' => (string) $contact->city,
+                    'country' => $contact->country ?: 'GR',
+                ],
+            ], fn ($v) => $v !== null);
+
+            $handle = $this->request($credentials, 'POST', '/v1beta/customers', $payload)->json('data.handle');
+            if (! is_string($handle) || $handle === '') {
+                throw new RuntimeException("Το Openprovider δεν επέστρεψε handle για την επαφή «{$contact->name}» ({$contact->type}).");
+            }
+            $handles[$contact->type] = $handle;
+        }
+
+        return $handles;
+    }
+
     /** One OP domain payload → our truth DTO (sync + post-renew share it). */
     private function syncResultFrom(array $data): DomainSyncResult
     {
