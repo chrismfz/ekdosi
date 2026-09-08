@@ -80,9 +80,15 @@ class DomainRenewalService
             ->first();
         $years = $contract !== null ? $this->yearsFor($contract) : null;
         if ($years === null) {
-            throw new RuntimeException(
-                "Ο κύκλος χρέωσης της υπηρεσίας του {$domain->fqdn} δεν αντιστοιχεί σε έτη ανανέωσης — η ανανέωση στον registrar δεν εκτελέστηκε."
-            );
+            $message = "Ο κύκλος χρέωσης της υπηρεσίας του {$domain->fqdn} δεν αντιστοιχεί σε έτη ανανέωσης — η ανανέωση στον registrar δεν εκτελέστηκε.";
+            DomainRegistrarLog::create([
+                'company_id' => $domain->company_id, 'domain_id' => $domain->id,
+                'registrar_connection_id' => $connection->id, 'invoice_id' => $invoice->id,
+                'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_FAILED,
+                'request' => ['fqdn' => $domain->fqdn], 'error' => $message,
+            ]);
+
+            throw new RuntimeException($message);
         }
 
         // THE BILLED PERIOD WAS FIXED AT THE FIRST ISSUE — recover it from
@@ -112,31 +118,43 @@ class DomainRenewalService
         $cutoff = $periodStart !== null
             ? Carbon::parse($periodStart)->subYears($years)
             : Carbon::today()->subYears($years);
-        $consumable = DomainRegistrarLog::query()
+        $candidates = DomainRegistrarLog::query()
             ->unconsumedOkRenewals($domain)
             ->where('created_at', '>=', $cutoff)
             ->orderByDesc('id')
-            ->get()
-            ->first(fn (DomainRegistrarLog $row) => (int) ($row->request['years'] ?? 0) >= $years);
-        // Compare-and-swap claim: two concurrent invoices must not both adopt
-        // the SAME button renewal — only the one whose UPDATE actually flips
-        // the NULL wins; the loser falls through to renew() (whose lock +
-        // sync-first guard then do the right thing).
-        if ($consumable !== null && DomainRegistrarLog::query()
-            ->whereKey($consumable->id)
-            ->whereNull('invoice_id')
-            ->update(['invoice_id' => $invoice->id]) === 1) {
-
-            return DomainRegistrarLog::create([
-                'company_id' => $domain->company_id,
-                'domain_id' => $domain->id,
-                'registrar_connection_id' => $connection->id,
-                'invoice_id' => $invoice->id,
-                'action' => 'renew',
-                'status' => DomainRegistrarLog::STATUS_ADOPTED,
-                'request' => ['fqdn' => $domain->fqdn, 'years' => $years],
-                'response' => ['consumed_log_id' => $consumable->id],
-            ]);
+            ->get();
+        // AGGREGATE + compare-and-swap: split button renewals (two 1yr logs
+        // behind one biennial invoice) count TOGETHER — same arithmetic as the
+        // date-adopt stamping. Each row is CAS-claimed (whereNull → update),
+        // so two concurrent invoices can never both spend the same year; a
+        // loser whose claims fall short keeps them (its years DID feed the
+        // current expiry) and falls through to renew(), whose sync-backed
+        // date check is the ground truth.
+        if ($candidates->sum(fn (DomainRegistrarLog $r) => max(0, (int) ($r->request['years'] ?? 0))) >= $years) {
+            $covered = 0;
+            $consumedIds = [];
+            foreach ($candidates as $row) {
+                if ($covered >= $years) {
+                    break;
+                }
+                if (DomainRegistrarLog::query()->whereKey($row->id)->whereNull('invoice_id')
+                    ->update(['invoice_id' => $invoice->id]) === 1) {
+                    $consumedIds[] = $row->id;
+                    $covered += max(1, (int) ($row->request['years'] ?? 1));
+                }
+            }
+            if ($covered >= $years) {
+                return DomainRegistrarLog::create([
+                    'company_id' => $domain->company_id,
+                    'domain_id' => $domain->id,
+                    'registrar_connection_id' => $connection->id,
+                    'invoice_id' => $invoice->id,
+                    'action' => 'renew',
+                    'status' => DomainRegistrarLog::STATUS_ADOPTED,
+                    'request' => ['fqdn' => $domain->fqdn, 'years' => $years],
+                    'response' => ['consumed_log_ids' => $consumedIds],
+                ]);
+            }
         }
 
         return $this->renew($domain, $years, $invoice, $periodStart);
@@ -151,39 +169,22 @@ class DomainRenewalService
      */
     public function renew(Domain $domain, int $years, ?Invoice $invoice = null, ?string $periodStart = null): DomainRegistrarLog
     {
-        // Dead set / wrong state: never a registrar charge from any path.
-        if ($domain->trashed()) {
-            throw new RuntimeException('Το domain είναι διαγραμμένο — δεν ανανεώνεται.');
-        }
-        if ($domain->status instanceof DomainStatus && ! $domain->status->isRenewable()) {
-            throw new RuntimeException(
-                "Το {$domain->fqdn} είναι σε κατάσταση «{$domain->status->getLabel()}» — δεν ανανεώνεται (redemption/μεταφερμένα/ακυρωμένα θέλουν άλλο χειρισμό)."
-            );
-        }
-
-        $connection = $domain->effectiveRegistrarConnection();
-        if ($connection === null || ! $connection->isUsable()) {
-            throw new DomainRegistrarNotConfigured('Το domain δεν δρομολογείται σε ενεργή σύνδεση registrar.');
-        }
-        $adapter = $this->factory->for($connection);
-        if ($adapter->key() === 'manual') {
-            throw new DomainRegistrarNotConfigured('Ο registrar είναι «manual» — ανανεώστε στο portal του registrar και ενημερώστε τη λήξη.');
-        }
-
-        // The baseline the renewal extends FROM. Without one, «renew» is
-        // ambiguous — refuse rather than guess a period.
+        // The baseline the renewal extends FROM (nullable until validated —
+        // refusals below still log it so the record carries what was known).
         $baseline = $periodStart ?? $domain->expires_at?->toDateString();
-        if ($baseline === null) {
-            throw new RuntimeException("Το {$domain->fqdn} δεν έχει γνωστή λήξη — κάντε πρώτα «Συγχρονισμό από registrar».");
-        }
         // NoOverflow: consistent with BillingCycle::advance (a Feb-29 baseline
         // must compute the SAME target on first issue and re-issue).
-        $target = Carbon::parse($baseline)->addYearsNoOverflow($years)->toDateString();
+        $target = $baseline !== null ? Carbon::parse($baseline)->addYearsNoOverflow($years)->toDateString() : null;
+        $connection = $domain->effectiveRegistrarConnection();
 
+        // EVERY attempt logs — refusals included: the docblock contract, and
+        // load-bearing for the re-issue period recovery (a refusal without a
+        // failed row would leave a later re-issue with no period to recover,
+        // re-opening the interleaved-revert double-renew door).
         $log = fn (string $status, ?array $response, ?string $error) => DomainRegistrarLog::create([
             'company_id' => $domain->company_id,
             'domain_id' => $domain->id,
-            'registrar_connection_id' => $connection->id,
+            'registrar_connection_id' => $connection?->id,
             'invoice_id' => $invoice?->id,
             'action' => 'renew',
             'status' => $status,
@@ -196,6 +197,33 @@ class DomainRenewalService
             'response' => $response,
             'error' => $error,
         ]);
+        $refuse = function (string $message) use ($log): never {
+            $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
+
+            throw new RuntimeException($message);
+        };
+
+        // Dead set / wrong state: never a registrar charge from any path.
+        if ($domain->trashed()) {
+            $refuse('Το domain είναι διαγραμμένο — δεν ανανεώνεται.');
+        }
+        if ($domain->status instanceof DomainStatus && ! $domain->status->isRenewable()) {
+            $refuse("Το {$domain->fqdn} είναι σε κατάσταση «{$domain->status->getLabel()}» — δεν ανανεώνεται (redemption/μεταφερμένα/ακυρωμένα θέλουν άλλο χειρισμό).");
+        }
+        if ($connection === null || ! $connection->isUsable()) {
+            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Καμία ενεργή σύνδεση registrar.');
+
+            throw new DomainRegistrarNotConfigured('Το domain δεν δρομολογείται σε ενεργή σύνδεση registrar.');
+        }
+        $adapter = $this->factory->for($connection);
+        if ($adapter->key() === 'manual') {
+            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Ο registrar είναι «manual».');
+
+            throw new DomainRegistrarNotConfigured('Ο registrar είναι «manual» — ανανεώστε στο portal του registrar και ενημερώστε τη λήξη.');
+        }
+        if ($baseline === null) {
+            $refuse("Το {$domain->fqdn} δεν έχει γνωστή λήξη — κάντε πρώτα «Συγχρονισμό από registrar».");
+        }
 
         // ONE renewal at a time per domain: the check→write sequence must not
         // race (View button vs on-issue hook vs auto-issue — both would pass
@@ -204,6 +232,8 @@ class DomainRenewalService
         // withoutOverlapping, CLAUDE.md Env-prep).
         $lock = Cache::lock('domains:renew:'.$domain->id, 300);
         if (! $lock->get()) {
+            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Κλειδωμένο — άλλη ανανέωση σε εξέλιξη.');
+
             throw new DomainRenewalInProgress(
                 "Άλλη ανανέωση του {$domain->fqdn} είναι ήδη σε εξέλιξη — ΜΗΝ ξαναζητήσετε ανανέωση· δείτε το ιστορικό API του domain σε λίγο."
             );
@@ -232,8 +262,13 @@ class DomainRenewalService
                 $consumedIds = [];
                 if ($invoice !== null) {
                     $covered = 0;
+                    // SAME window as the intent-match leg: a stale orphan the
+                    // intent-match refuses must not be swallowed here either
+                    // (it belongs to the A5 reconciler's orphan sweep, not to
+                    // an invoice whose coverage came from elsewhere).
                     $pool = DomainRegistrarLog::query()
                         ->unconsumedOkRenewals($domain)
+                        ->where('created_at', '>=', Carbon::parse($baseline)->subYears($years))
                         ->orderByDesc('id')
                         ->get();
                     foreach ($pool as $row) {
