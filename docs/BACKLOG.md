@@ -664,7 +664,13 @@ data model + phase gates: **`PLAN.md`**.
     αδειασμένο NS σφηνώνει σε guard που το adopt δεν χρειάζεται· (ι) το adopt σφραγίζει
     registered_at=today ενώ το OP payload κουβαλά creation_date που το syncResultFrom πετά —
     panel-registered/παλιές υιοθετήσεις παίρνουν λάθος ημερομηνία (add registeredAt στο
-    DomainSyncResult όταν χρειαστεί αλλού).
+    DomainSyncResult όταν χρειαστεί αλλού). Και από r3 (wholesale): (κ) refusal-only logs
+    κοστίζουν ένα extra probe GET σε κάθε retry· (λ) μη-ευρωπαϊκά 3ψήφια CCs (+971/+212/+880)
+    mis-split στο 2ψήφιο default (τα ψηφία διατηρούνται)· (μ) `previous_registrar_domain_id`
+    είναι single slot που overwrite-άρεται (ίδιο pattern και στο DomainSyncService)· (ν)
+    residual race δευτερολέπτων: instant retry ενώ ο OP ακόμα επεξεργάζεται >30s timed-out
+    POST (χωρίς idempotency key στο OP API — cool-down μετά από timeout-flavored failure
+    θα το στένευε)· (ξ) trim-vs-'' predicate consistency στα id checks.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).

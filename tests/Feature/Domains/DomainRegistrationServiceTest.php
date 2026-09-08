@@ -282,6 +282,59 @@ class DomainRegistrationServiceTest extends TestCase
         $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
     }
 
+    public function test_a_lingering_deleted_record_is_not_ours_the_rebuy_registers_fresh(): void
+    {
+        // r3 P1: a lapsed name our account once held lingers as DEL at OP.
+        // The customer re-buys it: the probe must treat the dead record as
+        // NOT-ours and register fresh — adopting it would wedge the row
+        // Deleted forever while the name is genuinely free.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?full_name=fresh.eu' => Http::response(['data' => ['results' => [[
+                'id' => 400, 'status' => 'DEL', 'expiration_date' => '2024-01-01 00:00:00',
+            ]]]]),
+            self::SANDBOX.'/v1beta/domains/check' => Http::response(['data' => ['results' => [['status' => 'free']]]]),
+            self::SANDBOX.'/v1beta/customers' => Http::response(['data' => ['handle' => 'NP1-EU']]),
+            self::SANDBOX.'/v1beta/domains' => Http::response(['data' => [
+                'id' => 558, 'status' => 'ACT', 'expiration_date' => '2027-09-08 00:00:00',
+            ]]),
+        ]);
+        $domain = $this->pendingDomain();
+        DomainRegistrarLog::create([ // e.g. a refused first click → probe path active
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id,
+            'action' => 'register', 'status' => DomainRegistrarLog::STATUS_FAILED,
+            'request' => ['fqdn' => 'fresh.eu'], 'error' => 'refused',
+        ]);
+
+        $log = app(DomainRegistrationService::class)->register($domain, 1);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_OK, $log->status, 'a REAL fresh register ran');
+        $domain->refresh();
+        $this->assertSame(DomainStatus::Active, $domain->status);
+        $this->assertSame('558', $domain->registrar_domain_id, 'the NEW id, never the dead record\'s');
+    }
+
+    public function test_an_inflight_pointing_at_a_deleted_record_clears_and_fails_honestly(): void
+    {
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/400' => Http::response(['data' => [
+                'id' => 400, 'status' => 'DEL', 'expiration_date' => '2024-01-01 00:00:00',
+            ]]),
+        ]);
+        $domain = $this->pendingDomain(['registrar_domain_id' => '400']);
+
+        try {
+            app(DomainRegistrationService::class)->register($domain, 1);
+            $this->fail('a dead in-flight record must fail honestly');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('δεν βρίσκεται (πλέον)', $e->getMessage());
+        }
+        $this->assertNull($domain->refresh()->registrar_domain_id, 'unwedged for the next deliberate attempt');
+        $this->assertSame(DomainStatus::PendingRegister, $domain->status, 'never adopted as Deleted');
+    }
+
     public function test_a_failed_account_read_is_never_dressed_up_as_taken_by_third_party(): void
     {
         Http::fake([

@@ -127,7 +127,7 @@ class DomainRegistrationService
             // the stale id is cleared (honest failure, NOT «third party») so
             // the next deliberate attempt can take the normal path.
             if ($domain->registrar_domain_id !== null && trim($domain->registrar_domain_id) !== '') {
-                return $this->adopt($domain, $credentials, $adapter, $log, inflight: true);
+                return $this->adopt($domain, $credentials, $adapter, $log, context: 'inflight');
             }
 
             // 0b. EVER TRIED? Any earlier register log — a timeout that may
@@ -141,25 +141,11 @@ class DomainRegistrationService
                 ->where('action', 'register')
                 ->exists();
             if ($everTried) {
-                try {
-                    $probe = $adapter->syncDomain($domain, $credentials);
-                    $this->sync->apply($domain, $probe);
-                    $this->persistHandles($domain, $probe->contactHandles);
-                    if ($domain->refresh()->registered_at === null) {
-                        $domain->forceFill(['registered_at' => Carbon::today()->toDateString()])->save();
-                    }
-
-                    return $log(DomainRegistrarLog::STATUS_ADOPTED, [
-                        'registrar_expiry' => $probe->expiresAt,
-                        'raw_status' => $probe->rawStatus,
-                    ], null);
-                } catch (DomainNotFoundAtRegistrar) {
-                    // truly not ours — fall through to availability + register
-                } catch (\Throwable $e) {
-                    $log(DomainRegistrarLog::STATUS_FAILED, null, 'Έλεγχος λογαριασμού (probe) απέτυχε: '.$e->getMessage());
-
-                    throw new RuntimeException("Η καταχώρηση του {$domain->fqdn} ΔΕΝ εκτελέστηκε — ο έλεγχος του λογαριασμού απέτυχε: ".$e->getMessage());
+                $adopted = $this->adopt($domain, $credentials, $adapter, $log, context: 'probe');
+                if ($adopted !== null) {
+                    return $adopted;
                 }
+                // truly not ours — fall through to availability + register
             }
 
             // 1. Availability FIRST — the read the whole guard rests on.
@@ -175,7 +161,7 @@ class DomainRegistrationService
             // Adoption charges nothing, so it comes BEFORE the premium guard —
             // a panel-registered premium name must still be adoptable.
             if (! $availability->available) {
-                return $this->adopt($domain, $credentials, $adapter, $log, inflight: false);
+                return $this->adopt($domain, $credentials, $adapter, $log, context: 'taken');
             }
 
             // 3. Premium = a NON-standard (possibly very large) price the
@@ -224,30 +210,31 @@ class DomainRegistrationService
 
     /**
      * The adopt leg: the name is (or should be) in OUR account — read it and
-     * take its truth. NOT-FOUND means different things per entry: from the
-     * taken branch it's a third party's; from the in-flight branch it means
-     * the registry dropped/rejected our request — the stale id is cleared so
-     * a next deliberate attempt can take the normal path (never wedged, never
-     * the «κατειλημμένο» fiction). A failed READ aborts with the real error.
+     * take its truth. A record the registrar marks DELETED counts as
+     * NOT-OURS: adopting a dead record for a re-buyable name would wedge the
+     * row Deleted forever while the name is actually free (r3 P1). NOT-OURS
+     * means different things per context:
+     *   'probe'    → return null (the caller falls through to availability +
+     *                register),
+     *   'inflight' → the registry dropped/rejected our request: clear the
+     *                stale id (unwedged) + honest failure, never the
+     *                «κατειλημμένο» fiction,
+     *   'taken'    → a third party's name — refuse.
+     * A failed READ always aborts with the real error.
+     *
+     * @param  'probe'|'inflight'|'taken'  $context
      */
-    private function adopt(Domain $domain, $credentials, $adapter, callable $log, bool $inflight): DomainRegistrarLog
+    private function adopt(Domain $domain, $credentials, $adapter, callable $log, string $context): ?DomainRegistrarLog
     {
         try {
             $result = $adapter->syncDomain($domain, $credentials);
-        } catch (DomainNotFoundAtRegistrar) {
-            if ($inflight) {
-                $meta = $domain->module_meta ?? [];
-                $meta['previous_registrar_domain_id'] = $domain->registrar_domain_id;
-                $domain->forceFill(['registrar_domain_id' => null, 'module_meta' => $meta])->save();
-                $message = "Η προηγούμενη καταχώρηση του {$domain->fqdn} δεν βρίσκεται (πλέον) στον λογαριασμό — πιθανόν απορρίφθηκε από το μητρώο. Το παλιό id καθαρίστηκε· ελέγξτε το ιστορικό και δοκιμάστε ξανά συνειδητά.";
-                $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
-
-                throw new RuntimeException($message);
+            if ($result->status === DomainStatus::Deleted) {
+                // A lingering DEL record is a tombstone at the registrar, not
+                // an ownership claim — same handling as not-found.
+                return $this->notOurs($domain, $log, $context);
             }
-            $message = "Το {$domain->fqdn} είναι κατειλημμένο από τρίτο — δεν καταχωρείται. (Δείτε διαθεσιμότητα/WHOIS.)";
-            $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
-
-            throw new RuntimeException($message);
+        } catch (DomainNotFoundAtRegistrar) {
+            return $this->notOurs($domain, $log, $context);
         } catch (\Throwable $e) {
             $log(DomainRegistrarLog::STATUS_FAILED, null, 'Έλεγχος λογαριασμού (sync) απέτυχε: '.$e->getMessage());
 
@@ -264,6 +251,27 @@ class DomainRegistrationService
             'registrar_expiry' => $result->expiresAt,
             'raw_status' => $result->rawStatus,
         ], null);
+    }
+
+    /** The per-context NOT-OURS outcome — see adopt()'s docblock. */
+    private function notOurs(Domain $domain, callable $log, string $context): ?DomainRegistrarLog
+    {
+        if ($context === 'probe') {
+            return null;
+        }
+        if ($context === 'inflight') {
+            $meta = $domain->module_meta ?? [];
+            $meta['previous_registrar_domain_id'] = $domain->registrar_domain_id;
+            $domain->forceFill(['registrar_domain_id' => null, 'module_meta' => $meta])->save();
+            $message = "Η προηγούμενη καταχώρηση του {$domain->fqdn} δεν βρίσκεται (πλέον) στον λογαριασμό — πιθανόν απορρίφθηκε από το μητρώο. Το παλιό id καθαρίστηκε· ελέγξτε το ιστορικό και δοκιμάστε ξανά συνειδητά.";
+            $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
+
+            throw new RuntimeException($message);
+        }
+        $message = "Το {$domain->fqdn} είναι κατειλημμένο από τρίτο — δεν καταχωρείται. (Δείτε διαθεσιμότητα/WHOIS.)";
+        $log(DomainRegistrarLog::STATUS_FAILED, null, $message);
+
+        throw new RuntimeException($message);
     }
 
     /**
