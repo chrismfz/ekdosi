@@ -642,7 +642,11 @@ data model + phase gates: **`PLAN.md`**.
     χειροκίνητο run δεν αξίζουν το refactor.
   - **A3** Openprovider write — **A3a (renew) ✅ + A3b (register) ✅ + A3c (transfer-in +
     EPP code) ✅ SHIPPED** (βλ. `FEATURES.md §21`)· μένει A3d NS/contacts/DNSSEC/lock writes
-    + grace/redemption χρεώσεις (+ approve-transfer/resend-FOA αν φανούν χρήσιμα live). Για τον A5 reconciler (μαζί με τα υπόλοιπα A3):
+    + grace/redemption χρεώσεις (+ approve-transfer/resend-FOA αν φανούν χρήσιμα live).
+    **ΜΑΖΙ με το A3d (δεσμευτικό, review A3c r1):** extraction του κοινού write-service
+    skeleton (log/refuse closures, Cache::lock+finally, adopt/probe leg) — τρία αντίγραφα
+    ήδη (renewal/registration/transfer) και το copy-drift ΤΟΥ A3c έχασε δύο guards στη
+    μεταφορά· το τέταρτο αντίγραφο δεν γράφεται, γράφεται ο helper. Για τον A5 reconciler (μαζί με τα υπόλοιπα A3):
     (α) re-evaluate των renew logs με `short_of_target=null` (το post-renew re-fetch απέτυχε —
     η πραγματική λήξη ήρθε από το nightly sync μετά) και όσων `ok` έμειναν κάτω από το
     `target_expiry` τους· (β) orphan unconsumed button-renewals που δεν τιμολογήθηκαν ποτέ.
