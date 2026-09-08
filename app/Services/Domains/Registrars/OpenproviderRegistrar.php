@@ -10,6 +10,9 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\RegistrarContact;
+use App\Support\Domains\RegistrarDomainPage;
+use App\Support\Domains\RegistrarDomainRecord;
 use App\Support\Domains\TldPricing;
 use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Http\Client\Response;
@@ -58,6 +61,7 @@ class OpenproviderRegistrar implements DomainRegistrar
     {
         return new DomainRegistrarCapabilities(
             supportsPricingSync: true,
+            supportsPortfolioImport: true,
             supportsPrivacy: true,
             supportsDnssec: true,
             supportsTransferLock: true,
@@ -172,6 +176,143 @@ class OpenproviderRegistrar implements DomainRegistrar
         return new TldPricing(tld: $tld, costs: $costs);
     }
 
+    /**
+     * One page of the account's own portfolio (A2c registrar-first import) —
+     * a plain GET, read-only by construction. Records the API can't shape into
+     * (sld, tld) are skipped, never guessed.
+     */
+    public function listDomains(DomainRegistrarCredentials $credentials, int $offset, int $limit): RegistrarDomainPage
+    {
+        $data = $this->request(
+            $credentials,
+            'GET',
+            '/v1beta/domains?limit='.max(1, $limit).'&offset='.max(0, $offset)
+        )->json('data');
+
+        $results = is_array($data) && is_array($data['results'] ?? null) ? $data['results'] : [];
+        $records = [];
+        foreach ($results as $result) {
+            if (! is_array($result)) {
+                continue;
+            }
+            $record = $this->mapDomainRecord($result);
+            if ($record !== null) {
+                $records[] = $record;
+            }
+        }
+
+        $total = isset($data['total']) && is_numeric($data['total']) ? (int) $data['total'] : null;
+
+        return new RegistrarDomainPage(records: $records, total: $total);
+    }
+
+    /**
+     * Resolve a reusable contact handle (Openprovider «customer», e.g.
+     * AB123456-XX). Null on a 404/unknown handle; other failures throw.
+     */
+    public function getContact(string $handle, DomainRegistrarCredentials $credentials): ?RegistrarContact
+    {
+        $response = $this->request($credentials, 'GET', '/v1beta/customers/'.rawurlencode($handle), tolerateStatus: 404);
+        if ($response->status() === 404) {
+            return null; // unknown/foreign handle — not an error, just no assign-aid
+        }
+
+        $data = $response->json('data');
+        if (! is_array($data)) {
+            return null;
+        }
+
+        $first = is_array($data['name'] ?? null) ? trim((string) ($data['name']['first_name'] ?? '')) : '';
+        $last = is_array($data['name'] ?? null) ? trim((string) ($data['name']['last_name'] ?? '')) : '';
+        $person = trim($first.' '.$last);
+        $org = trim((string) ($data['company_name'] ?? ''));
+        $name = $person !== '' ? $person : $org;
+        if ($name === '') {
+            $name = $handle; // never an empty NOT-NULL column — the handle still identifies it
+        }
+
+        $phone = null;
+        if (is_array($data['phone'] ?? null)) {
+            $phone = trim(implode('', [
+                (string) ($data['phone']['country_code'] ?? ''),
+                (string) ($data['phone']['area_code'] ?? ''),
+                (string) ($data['phone']['subscriber_number'] ?? ''),
+            ]));
+            $phone = $phone !== '' ? $phone : null;
+        }
+
+        $address = is_array($data['address'] ?? null) ? $data['address'] : [];
+        $street = trim(((string) ($address['street'] ?? '')).' '.((string) ($address['number'] ?? '')));
+        $country = strtoupper(trim((string) ($address['country'] ?? '')));
+
+        return new RegistrarContact(
+            handle: $handle,
+            name: $name,
+            org: $org !== '' ? $org : null,
+            email: is_string($data['email'] ?? null) && $data['email'] !== '' ? $data['email'] : null,
+            phone: $phone,
+            address1: $street !== '' ? $street : null,
+            address2: null,
+            city: is_string($address['city'] ?? null) && $address['city'] !== '' ? $address['city'] : null,
+            postcode: is_string($address['zipcode'] ?? null) && $address['zipcode'] !== '' ? $address['zipcode'] : null,
+            country: strlen($country) === 2 ? $country : null,
+        );
+    }
+
+    /** Openprovider list/detail result → import record; null = unusable row. */
+    private function mapDomainRecord(array $result): ?RegistrarDomainRecord
+    {
+        $domain = is_array($result['domain'] ?? null) ? $result['domain'] : [];
+        $sld = mb_strtolower(trim((string) ($domain['name'] ?? '')));
+        $tld = mb_strtolower(ltrim(trim((string) ($domain['extension'] ?? '')), '.'));
+        if ($sld === '' || $tld === '') {
+            return null;
+        }
+
+        $rawStatus = isset($result['status']) ? (string) $result['status'] : null;
+
+        $nameservers = [];
+        foreach ((array) ($result['name_servers'] ?? []) as $ns) {
+            $host = is_array($ns) ? ($ns['name'] ?? null) : (is_string($ns) ? $ns : null);
+            if (is_string($host) && $host !== '') {
+                $nameservers[] = mb_strtolower($host);
+            }
+        }
+
+        $handles = [];
+        foreach (['owner_handle' => 'registrant', 'admin_handle' => 'admin', 'tech_handle' => 'tech', 'billing_handle' => 'billing'] as $key => $type) {
+            if (is_string($result[$key] ?? null) && trim($result[$key]) !== '') {
+                $handles[$type] = trim($result[$key]);
+            }
+        }
+
+        // OP autorenew is 'on'/'off'/'default' — only the explicit values map.
+        $autoRenew = match ($result['autorenew'] ?? null) {
+            'on' => true,
+            'off' => false,
+            default => null,
+        };
+
+        return new RegistrarDomainRecord(
+            sld: $sld,
+            tld: $tld,
+            expiresAt: $this->datePart($result['expiration_date'] ?? null),
+            registeredAt: $this->datePart($result['creation_date'] ?? null),
+            registrarDomainId: isset($result['id']) ? (string) $result['id'] : null,
+            status: $this->mapStatus($rawStatus),
+            rawStatus: $rawStatus,
+            nameservers: $nameservers,
+            autoRenew: $autoRenew,
+            contactHandles: $handles,
+        );
+    }
+
+    /** OP returns "YYYY-MM-DD HH:MM:SS" — the date part is our clock. */
+    private function datePart(mixed $value): ?string
+    {
+        return is_string($value) && $value !== '' ? substr($value, 0, 10) : null;
+    }
+
     /** @return array<string, mixed> */
     private function fetchDomainData(Domain $domain, DomainRegistrarCredentials $credentials): array
     {
@@ -225,15 +366,21 @@ class OpenproviderRegistrar implements DomainRegistrar
     /**
      * Authenticated request with ONE re-login retry on 401 (the cached bearer
      * expired server-side). Non-2xx → RuntimeException carrying Openprovider's
-     * own error description (their envelope: code/desc).
+     * own error description (their envelope: code/desc). `tolerateStatus`
+     * returns that one failing status to the caller instead of throwing
+     * (e.g. 404 = unknown contact handle, a legitimate answer).
      */
-    private function request(DomainRegistrarCredentials $credentials, string $method, string $path, array $payload = []): Response
+    private function request(DomainRegistrarCredentials $credentials, string $method, string $path, array $payload = [], ?int $tolerateStatus = null): Response
     {
         $response = $this->send($credentials, $this->token($credentials), $method, $path, $payload);
 
         if ($response->status() === 401) {
             Cache::forget($this->tokenCacheKey($credentials));
             $response = $this->send($credentials, $this->token($credentials), $method, $path, $payload);
+        }
+
+        if ($tolerateStatus !== null && $response->status() === $tolerateStatus) {
+            return $response;
         }
 
         if ($response->failed()) {

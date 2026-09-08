@@ -79,6 +79,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (τιμή πώλησης/is_enabled δεν κινούνται ποτέ από sync), γραμμές που λείπουν γεννιούνται
   **ανενεργές + απούλητες** (αχρέωτες εκ κατασκευής), το κόστος πάει στη γραμμή του ελάχιστου
   term (.gr → years=2). Ρητό `--tenant`/`--tld` που δεν βρίσκει τίποτα = exit FAILURE.
+- **Domains — A2c-2 registrar-first import.** Δύο δρόμοι bootstrap (README §9, «να μην
+  εξαρτιόμαστε από WHMCS db»): (α) `domains:import-registrar [--tenant] [--connection]` — paginated
+  λίστα του portfolio + resolve των contact handles από κάθε import-capable σύνδεση (Openprovider)·
+  (β) `domains:import-csv <file> --tenant=SLUG` — για registrars χωρίς listing API (.gr: grweb
+  export· auto-detect delimiter/στηλών + `--domain-col`/`--expires-col`/`--no-header`, ελληνικές
+  ημερομηνίες d/m/Y). Κοινή πειθαρχία: νέα domains = **αδέσποτα** (customer_id null, auto_renew
+  OFF — επιλογή β) με γεμάτες επαφές ως assign-aid· υπάρχοντα rows παίρνουν ΜΟΝΟ registrar truth
+  (μέσω του ΙΔΙΟΥ `DomainSyncService::apply` με το nightly sync — ποτέ customer/auto_renew/
+  overrides)· επαφές μόνο σε αδέσποτα (μετά την ανάθεση = χώρος του operator)· tombstones και
+  διαγραμμένα TLD δεν ανασταίνονται ποτέ· TLD που λείπει auto-δημιουργείται (registrar import →
+  δρομολογημένο στη σύνδεση, CSV → manual). Σπασμένο contact handle warn+continue· re-runnable
+  upsert σε (company, fqdn)· ρητά no-op runs = exit FAILURE.
 
 ### Added
 - **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):

@@ -11,6 +11,8 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\RegistrarContact;
+use App\Support\Domains\RegistrarDomainPage;
 use App\Support\Domains\TldPricing;
 use Tests\TestCase;
 
@@ -132,5 +134,15 @@ class FakeDomainRegistrar implements DomainRegistrar
     public function getTldPricing(string $tld, DomainRegistrarCredentials $credentials): TldPricing
     {
         return new TldPricing(tld: $tld, costs: ['renewal' => ['cost' => 10.0, 'currency' => 'EUR']]);
+    }
+
+    public function listDomains(DomainRegistrarCredentials $credentials, int $offset, int $limit): RegistrarDomainPage
+    {
+        return new RegistrarDomainPage(records: [], total: 0);
+    }
+
+    public function getContact(string $handle, DomainRegistrarCredentials $credentials): ?RegistrarContact
+    {
+        return null;
     }
 }

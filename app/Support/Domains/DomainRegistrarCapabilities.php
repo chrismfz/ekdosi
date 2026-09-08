@@ -15,6 +15,8 @@ final class DomainRegistrarCapabilities
     public function __construct(
         /** Can getTldPricing() feed the cost-sync (Openprovider yes, grEPP no). */
         public readonly bool $supportsPricingSync = false,
+        /** Can listDomains()/getContact() feed the registrar-first import (grEPP has no list command — .gr comes from the grweb CSV export). */
+        public readonly bool $supportsPortfolioImport = false,
         /** WHOIS privacy / ID protection toggle (.gr registry has none). */
         public readonly bool $supportsPrivacy = false,
         /** DNSSEC (DS record) management at the registry. */

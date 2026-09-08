@@ -7,6 +7,8 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\RegistrarContact;
+use App\Support\Domains\RegistrarDomainPage;
 use App\Support\Domains\TldPricing;
 
 /**
@@ -59,4 +61,20 @@ interface DomainRegistrar
      * failures throw RuntimeException (the command counts + reports them).
      */
     public function getTldPricing(string $tld, DomainRegistrarCredentials $credentials): TldPricing;
+
+    /**
+     * One page of the account's OWN domain portfolio (the A2c registrar-first
+     * import feed, README §9) — meaningful only when
+     * capabilities()->supportsPortfolioImport. Throws DomainRegistrarNotConfigured
+     * on an API-less registrar; transport/API failures throw RuntimeException.
+     */
+    public function listDomains(DomainRegistrarCredentials $credentials, int $offset, int $limit): RegistrarDomainPage;
+
+    /**
+     * Resolve one reusable contact handle to its details (import assign-aid).
+     * Returns null when the registrar doesn't know the handle; transport/API
+     * failures throw RuntimeException (the import warns + continues — a broken
+     * contact must never kill a domain import).
+     */
+    public function getContact(string $handle, DomainRegistrarCredentials $credentials): ?RegistrarContact;
 }

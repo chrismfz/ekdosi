@@ -504,15 +504,25 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 - **Expiry reminders** — 15/10/5 ημέρες πριν, reuse του auto-email infra, sent-log στο `domain_reminders`.
 - **API history** — `domain_registrar_logs` (request/response/status ανά κλήση), «Bridge logs» tab.
 - **Import — REGISTRAR-FIRST bootstrap** (απόφαση ιδιοκτήτη 2026-09-07 — «να μην εξαρτιόμαστε
-  από WHMCS db»):
-  - **Κύρια πηγή = ο registrar** (A2): Openprovider `GET /v1beta/domains` (paginated λίστα ΟΛΩΝ
-    των domains του λογαριασμού) + pull των **registrant/admin/tech/billing contacts** (handles →
-    details) → κάθε domain μπαίνει **αδέσποτο με γεμάτα `domain_contacts`**, και ο operator κάνει
-    το assign ΧΕΙΡΟΚΙΝΗΤΑ από το worklist «Χωρίς πελάτη» βλέποντας δίπλα όνομα/email/εταιρεία
-    του contact (η λίστα συσχέτισης domain ↔ owner).
+  από WHMCS db») — **A2c-2 SHIPPED**:
+  - **Κύρια πηγή = ο registrar**: `domains:import-registrar [--tenant] [--connection]` →
+    Openprovider `GET /v1beta/domains` (paginated, 100/σελίδα) + resolve των
+    **registrant/admin/tech/billing handles** (`GET /v1beta/customers/{handle}`, cached ανά run —
+    κοινά handles = ΜΙΑ κλήση· 404 = σιωπηλό «χωρίς aid», 5xx = warn+continue) → κάθε domain
+    μπαίνει **αδέσποτο με γεμάτα `domain_contacts`**, και ο operator κάνει το assign ΧΕΙΡΟΚΙΝΗΤΑ
+    από το worklist «Χωρίς πελάτη». Υλοποίηση: `DomainImportService` — υπάρχοντα rows παίρνουν
+    ΜΟΝΟ registrar truth μέσω του ΙΔΙΟΥ `DomainSyncService::apply` με το nightly sync·
+    auto_renew ΜΟΝΟ στο create (OP `autorenew` on/off, αλλιώς OFF)· επαφές ΜΟΝΟ σε αδέσποτα
+    (μετά την ανάθεση = χώρος του operator, §3.7)· tombstones/διαγραμμένα TLD ποτέ δεν
+    ανασταίνονται· TLD που λείπει auto-δημιουργείται δρομολογημένο στη σύνδεση του import·
+    το domain καρφώνει `registrar_connection_id` στη σύνδεση που αποδεδειγμένα το έχει.
   - ⚠ **.gr caveat:** το EPP ΔΕΝ έχει list-my-domains command — η αρχική .gr λίστα έρχεται από
-    export του grweb portal (ή το προαιρετικό WHMCS pull), μία φορά· μετά το `domain:info`
-    polling. `[ΕΠΙΒΕΒΑΙΩΣΗ μορφής export]`
+    export του grweb portal: `domains:import-csv <file> --tenant=SLUG` (auto-detect
+    delimiter ,/;/TAB + στηλών από headers «domain/όνομα» & «λήξη/expiry», overrides
+    `--domain-col`/`--expires-col`/`--no-header`, ημερομηνίες Y-m-d και d/m/Y κ.ά., BOM-safe).
+    First-dot split κρατά τα com.gr/net.gr σωστά. TLD που λείπει → manual (η grEPP δρομολόγηση
+    είναι A4)· ΔΕΝ πατά `last_synced_at` (ένα CSV δεν είναι το ρολόι του registrar).
+    `[ΕΠΙΒΕΒΑΙΩΣΗ μορφής export στο πρώτο πραγματικό αρχείο — οι στήλες είναι ρυθμιζόμενες]`
   - **WHMCS = προαιρετικό βοήθημα**, όχι εξάρτηση: `GetClientsDomains` (πάνω στον υπάρχοντα
     `WhmcsClient` — «Plugin-API is THE path», ποτέ raw `tbldomains`) μπορεί να προτείνει linkage
     (userid → `customers.whmcs_client_id`) ως ΥΠΟΔΕΙΞΗ στο assign UI + να γεμίσει `legacy_id`.

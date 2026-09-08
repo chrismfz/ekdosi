@@ -75,7 +75,13 @@ class DomainSyncService
         return $result;
     }
 
-    private function apply(Domain $domain, DomainSyncResult $result): void
+    /**
+     * Apply one registrar-truth result to the row — PUBLIC because the A2c
+     * registrar-first import reuses it verbatim (id adoption, frozen-status
+     * guard, expired derivation, atomic NS snapshot): import and sync must
+     * never disagree about how registrar truth lands.
+     */
+    public function apply(Domain $domain, DomainSyncResult $result): void
     {
         $updates = [
             'last_synced_at' => Carbon::now(),

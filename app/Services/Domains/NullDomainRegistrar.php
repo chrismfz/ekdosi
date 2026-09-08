@@ -8,6 +8,8 @@ use App\Support\Domains\AvailabilityResult;
 use App\Support\Domains\DomainRegistrarCapabilities;
 use App\Support\Domains\DomainRegistrarCredentials;
 use App\Support\Domains\DomainSyncResult;
+use App\Support\Domains\RegistrarContact;
+use App\Support\Domains\RegistrarDomainPage;
 use App\Support\Domains\TldPricing;
 
 /**
@@ -53,6 +55,20 @@ class NullDomainRegistrar implements DomainRegistrar
     {
         throw new DomainRegistrarNotConfigured(
             'Ο registrar «manual» δεν έχει API — οι τιμές κόστους καταχωρούνται χειροκίνητα στα «TLDs & τιμές».'
+        );
+    }
+
+    public function listDomains(DomainRegistrarCredentials $credentials, int $offset, int $limit): RegistrarDomainPage
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — τα domains καταχωρούνται χειροκίνητα (ή με import από CSV).'
+        );
+    }
+
+    public function getContact(string $handle, DomainRegistrarCredentials $credentials): ?RegistrarContact
+    {
+        throw new DomainRegistrarNotConfigured(
+            'Ο registrar «manual» δεν έχει API — οι επαφές καταχωρούνται χειροκίνητα.'
         );
     }
 }
