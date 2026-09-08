@@ -136,8 +136,8 @@ class DomainRenewalService
         // behind one biennial invoice) count TOGETHER — same arithmetic as the
         // date-adopt stamping. Each row is CAS-claimed (whereNull → update),
         // so two concurrent invoices can never both spend the same year; a
-        // loser whose claims fall short keeps them (its years DID feed the
-        // current expiry) and falls through to renew(), whose sync-backed
+        // loser whose claims fall short has them ROLLED BACK to the pool (the
+        // transaction below) and falls through to renew(), whose sync-backed
         // date check is the ground truth.
         if ($candidates->sum(fn (DomainRegistrarLog $r) => max(0, (int) ($r->request['years'] ?? 0))) >= $years) {
             // ATOMIC claim: claims + the ADOPTED summary commit (or vanish)

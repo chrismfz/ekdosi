@@ -652,7 +652,11 @@ data model + phase gates: **`PLAN.md`**.
     invoice) δεν καταγράφει το πλεόνασμα πουθενά — ο reconciler να το εμφανίζει· (ε) τα
     repeated refusal FAILED rows (spam του κουμπιού σε locked domain) είναι θόρυβος στο §9
     history + ένα INSERT-throw στο refusal path αντικαθιστά το typed exception (το
-    DomainRenewalInProgress handling παρακάμπτεται) — wrap σε try/catch.
+    DomainRenewalInProgress handling παρακάμπτεται) — wrap σε try/catch. Από r6 (GREEN):
+    (στ) `max(1,…)` στο date-adopt stamping vs `max(0,…)` στο intent-match — ενοποίηση σε
+    helper (χωρίς money συνέπεια, το max(1) σφάλλει προς όφελος του reconciler)· (ζ) εξωτικό:
+    refusal γραμμένο σε re-issue μετά από ΔΥΟ αλλαγές κύκλου μπορεί να αποθηκεύσει
+    mis-stepped baseline που σκιάζει το πρώτο — αυστηρά λιγότερο λάθος από το pre-r5.
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).
