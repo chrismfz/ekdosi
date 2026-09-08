@@ -69,10 +69,11 @@ class ImportDomainsCsv extends Command
             "{$counts['invalid']} μη έγκυρες γραμμές."
         );
 
-        // A file that produced NOTHING (not even a recognizable-but-skipped
-        // row) is a wrong file/column mapping — never a quiet success.
-        if (array_sum($counts) === 0) {
-            $this->error('Καμία γραμμή δεν αναγνωρίστηκε — ελέγξτε αρχείο/στήλες (--domain-col/--expires-col).');
+        // A run where NOT ONE row resolved to an actual domain (created /
+        // updated / unchanged / skipped) is a wrong file or column mapping —
+        // «invalid» rows alone must not turn the exit green.
+        if ($counts['created'] + $counts['updated'] + $counts['unchanged'] + $counts['skipped'] === 0) {
+            $this->error('Καμία έγκυρη γραμμή domain — ελέγξτε αρχείο/στήλες (--domain-col/--expires-col).');
 
             return self::FAILURE;
         }
@@ -108,16 +109,21 @@ class ImportDomainsCsv extends Command
             $header = str_getcsv(rtrim($first, "\r\n"), $delimiter);
             $hasHeader = ! $this->option('no-header');
 
-            $domainIdx = $this->resolveColumn(
-                (string) ($this->option('domain-col') ?? ''),
-                $hasHeader ? $header : null,
-                '/domain|όνομα|ονομα|name/iu',
-            );
-            $expiresIdx = $this->resolveColumn(
-                (string) ($this->option('expires-col') ?? ''),
-                $hasHeader ? $header : null,
-                '/λήξη|ληξη|expir|renewal|due/iu',
-            );
+            $domainOpt = (string) ($this->option('domain-col') ?? '');
+            $expiresOpt = (string) ($this->option('expires-col') ?? '');
+            $domainIdx = $this->resolveColumn($domainOpt, $hasHeader ? $header : null, '/domain|όνομα|ονομα|name/iu');
+            $expiresIdx = $this->resolveColumn($expiresOpt, $hasHeader ? $header : null, '/λήξη|ληξη|expir|renewal|due/iu');
+
+            // An EXPLICIT column that resolves to nothing (unknown header name
+            // or an index past the file's width) is a typo — error out, never
+            // silently import the whole file without the column it named.
+            foreach ([['--domain-col', $domainOpt, $domainIdx], ['--expires-col', $expiresOpt, $expiresIdx]] as [$flag, $opt, $idx]) {
+                if ($opt !== '' && ($idx === null || $idx >= count($header))) {
+                    $this->error("Η στήλη {$flag}={$opt} δεν υπάρχει στο αρχείο (βρέθηκαν ".count($header).' στήλες: '.implode(', ', $header).').');
+
+                    return null;
+                }
+            }
 
             if ($domainIdx === null && ! $hasHeader) {
                 $domainIdx = 0; // headerless: first column is the name unless told otherwise

@@ -36,6 +36,8 @@ class DomainCsvImportService
     {
         $warn ??= static function (string $message): void {};
         $counts = ['created' => 0, 'updated' => 0, 'unchanged' => 0, 'skipped' => 0, 'invalid' => 0];
+        /** @var array<string, DomainTld|false> $tldCache false = trashed (skip its rows) */
+        $tldCache = [];
 
         foreach ($rows as $row) {
             $fqdn = mb_strtolower(trim(rtrim(trim((string) $row['fqdn']), '.')));
@@ -59,24 +61,30 @@ class DomainCsvImportService
                 $warn("Το {$fqdn} έχει μη αναγνωρίσιμη ημερομηνία λήξης «{$row['expires_at']}» — εισήχθη χωρίς λήξη.");
             }
 
-            $tldRule = DomainTld::withTrashed()
-                ->where('company_id', $company->id)
-                ->where('tld', $tld)
-                ->first();
-            if ($tldRule !== null && $tldRule->trashed()) {
+            if (! array_key_exists($tld, $tldCache)) {
+                $tldRule = DomainTld::withTrashed()
+                    ->where('company_id', $company->id)
+                    ->where('tld', $tld)
+                    ->first();
+                if ($tldRule !== null && $tldRule->trashed()) {
+                    $warn("Παράλειψη domains σε .{$tld}: το TLD είναι διαγραμμένο στον κατάλογο «TLDs & τιμές».");
+                    $tldRule = false;
+                } elseif ($tldRule === null) {
+                    $tldRule = DomainTld::create([
+                        'company_id' => $company->id,
+                        'tld' => $tld,
+                        'registrar_connection_id' => null, // manual — grEPP routing is A4
+                        'min_years' => 1,
+                        'is_active' => true,
+                    ]);
+                }
+                $tldCache[$tld] = $tldRule;
+            }
+            $tldRule = $tldCache[$tld];
+            if ($tldRule === false) {
                 $counts['skipped']++;
-                $warn("Παράλειψη {$fqdn}: το TLD .{$tld} είναι διαγραμμένο στον κατάλογο «TLDs & τιμές».");
 
                 continue;
-            }
-            if ($tldRule === null) {
-                $tldRule = DomainTld::create([
-                    'company_id' => $company->id,
-                    'tld' => $tld,
-                    'registrar_connection_id' => null, // manual — grEPP routing is A4
-                    'min_years' => 1,
-                    'is_active' => true,
-                ]);
             }
 
             $domain = Domain::withTrashed()
@@ -90,6 +98,10 @@ class DomainCsvImportService
             }
 
             if ($domain === null) {
+                // A lapsed expiry lands as Expired straight away — for .gr the
+                // CSV is the ONLY truth source until grEPP (A4), so no sync
+                // will ever derive it later (the API path derives via apply).
+                $lapsed = $expiresAt !== null && Carbon::parse($expiresAt)->lt(Carbon::today());
                 Domain::create([
                     'company_id' => $company->id,
                     'customer_id' => null, // αδέσποτο — ONLY the operator assigns
@@ -97,7 +109,7 @@ class DomainCsvImportService
                     'sld' => $sld,
                     'tld' => $tld,
                     'fqdn' => $fqdn,
-                    'status' => DomainStatus::Active,
+                    'status' => $lapsed ? DomainStatus::Expired : DomainStatus::Active,
                     'expires_at' => $expiresAt,
                     'auto_renew' => false, // option β — assignment turns it on
                     'module_meta' => ['imported_from' => 'csv'],
@@ -107,10 +119,25 @@ class DomainCsvImportService
                 continue;
             }
 
+            // Operator-terminal row (cancelled/transferred_away): frozen —
+            // the nightly sync refuses these and so does the CSV (blocksSync
+            // parity: the recorded expiry is historical record).
+            if ($domain->status instanceof DomainStatus && $domain->status->blocksSync()) {
+                $counts['skipped']++;
+
+                continue;
+            }
+
             // Existing live row: the CSV may only fill/refresh the expiry —
-            // never customer_id, auto_renew, status, routing or overrides.
+            // never customer_id, auto_renew, routing or overrides. Status
+            // moves ONLY on the derived Active→Expired lapse (sync parity).
             if ($expiresAt !== null && $expiresAt !== $domain->expires_at?->toDateString()) {
-                $domain->forceFill(['expires_at' => $expiresAt])->save();
+                $updates = ['expires_at' => $expiresAt];
+                if ($domain->status === DomainStatus::Active
+                    && Carbon::parse($expiresAt)->lt(Carbon::today())) {
+                    $updates['status'] = DomainStatus::Expired;
+                }
+                $domain->forceFill($updates)->save();
                 $counts['updated']++;
             } else {
                 $counts['unchanged']++;
@@ -126,14 +153,17 @@ class DomainCsvImportService
         if ($value === '') {
             return null;
         }
+        // Zero-pad single-digit parts first («1/6/2027» — Greek-locale Excel
+        // re-saves drop the padding) so the round-trip check below rejects
+        // only REAL overflow («31/02/2026» → March), never lazy padding.
+        $normalized = preg_replace('/(?<!\d)(\d)(?!\d)/', '0$1', $value) ?? $value;
         foreach (self::DATE_FORMATS as $format) {
             try {
-                $parsed = Carbon::createFromFormat($format, $value);
+                $parsed = Carbon::createFromFormat($format, $normalized);
             } catch (\Throwable) {
                 continue; // modern Carbon throws instead of returning false
             }
-            // Round-trip check: rejects «31/02/2026»-style overflow parses.
-            if ($parsed !== null && $parsed->format($format) === $value) {
+            if ($parsed !== null && $parsed->format($format) === $normalized) {
                 return $parsed->toDateString();
             }
         }

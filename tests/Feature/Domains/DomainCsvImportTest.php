@@ -142,6 +142,53 @@ class DomainCsvImportTest extends TestCase
         $this->assertNull(Domain::withTrashed()->where('fqdn', 'something.org')->first());
     }
 
+    public function test_lapsed_expiry_lands_and_stays_expired_never_forever_active(): void
+    {
+        // Για .gr το CSV είναι η ΜΟΝΗ πηγή αλήθειας μέχρι το grEPP (A4) —
+        // κανένα sync δεν θα διορθώσει αργότερα ένα ληγμένο row.
+        $past = today()->subMonth()->format('d/m/Y');
+        $path = $this->csv("domain;λήξη\nlapsed.gr;{$past}\nalive.gr;31/12/2099");
+        $this->artisan('domains:import-csv', ['file' => $path, '--tenant' => $this->company->slug])->assertExitCode(0);
+
+        $this->assertSame(DomainStatus::Expired, Domain::where('fqdn', 'lapsed.gr')->sole()->status);
+        $this->assertSame(DomainStatus::Active, Domain::where('fqdn', 'alive.gr')->sole()->status);
+
+        // update path: an Active row whose refreshed expiry is past also lapses
+        $path2 = $this->csv("domain;λήξη\nalive.gr;".today()->subDays(3)->format('d/m/Y'));
+        $this->artisan('domains:import-csv', ['file' => $path2, '--tenant' => $this->company->slug])->assertExitCode(0);
+        $this->assertSame(DomainStatus::Expired, Domain::where('fqdn', 'alive.gr')->sole()->status);
+    }
+
+    public function test_operator_terminal_rows_are_frozen_for_the_csv_too(): void
+    {
+        $tld = DomainTld::create(['company_id' => $this->company->id, 'tld' => 'gr', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'sld' => 'lost', 'tld' => 'gr', 'fqdn' => 'lost.gr',
+            'expires_at' => '2025-06-01', 'status' => 'transferred_away',
+        ]);
+
+        $path = $this->csv("domain,expiry\nlost.gr,2030-01-01");
+        $this->artisan('domains:import-csv', ['file' => $path, '--tenant' => $this->company->slug])
+            ->expectsOutputToContain('1 παραλείφθηκαν')
+            ->assertExitCode(0);
+
+        $this->assertSame('2025-06-01', Domain::where('fqdn', 'lost.gr')->sole()->expires_at->toDateString());
+    }
+
+    public function test_unpadded_greek_excel_dates_parse(): void
+    {
+        $path = $this->csv("domain;λήξη\npadded.gr;01/06/2027\nunpadded.gr;1/6/2027\nymd.gr;2027-1-1");
+        $this->artisan('domains:import-csv', ['file' => $path, '--tenant' => $this->company->slug])->assertExitCode(0);
+
+        $this->assertSame('2027-06-01', Domain::where('fqdn', 'unpadded.gr')->sole()->expires_at->toDateString());
+        $this->assertSame('2027-01-01', Domain::where('fqdn', 'ymd.gr')->sole()->expires_at->toDateString());
+        // real overflow still rejected
+        $bad = $this->csv("domain;λήξη\noverflow.gr;31/02/2026");
+        $this->artisan('domains:import-csv', ['file' => $bad, '--tenant' => $this->company->slug])->assertExitCode(0);
+        $this->assertNull(Domain::where('fqdn', 'overflow.gr')->sole()->expires_at);
+    }
+
     public function test_headerless_files_use_explicit_or_first_column(): void
     {
         $path = $this->csv("plain.gr;31/12/2027\nsecond.gr;15/06/2028");
@@ -175,5 +222,18 @@ class DomainCsvImportTest extends TestCase
         $empty = $this->csv('domain,expiry');
         $this->artisan('domains:import-csv', ['file' => $empty, '--tenant' => $this->company->slug])
             ->assertExitCode(1);
+
+        // ALL rows invalid (wrong column pointed at non-domains) → FAILURE too
+        $allInvalid = $this->csv("domain,expiry\nΕνεργό,2027-01-01\nΕνεργό,2027-02-01");
+        $this->artisan('domains:import-csv', ['file' => $allInvalid, '--tenant' => $this->company->slug])
+            ->assertExitCode(1);
+
+        // explicit column that doesn't exist (name or out-of-range index) → FAILURE
+        $ok = $this->csv("domain,expiry\nx.gr,2027-01-01");
+        $this->artisan('domains:import-csv', ['file' => $ok, '--tenant' => $this->company->slug, '--expires-col' => '9'])
+            ->assertExitCode(1);
+        $this->artisan('domains:import-csv', ['file' => $ok, '--tenant' => $this->company->slug, '--domain-col' => 'nosuch'])
+            ->assertExitCode(1);
+        $this->assertNull(Domain::where('fqdn', 'x.gr')->first(), 'nothing imported under a mis-mapped file');
     }
 }

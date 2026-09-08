@@ -82,18 +82,21 @@ class DomainImportService
         $counts = ['created' => 0, 'updated' => 0, 'skipped' => 0, 'contacts' => 0];
         /** @var array<string, RegistrarContact|false> $contactCache handles are reused across domains — false = failed, don't re-hit */
         $contactCache = [];
+        /** @var array<string, DomainTld|false> $tldCache a portfolio has few distinct TLDs — false = trashed (skip) */
+        $tldCache = [];
 
         $offset = 0;
         for ($page = 0; $page < self::MAX_PAGES; $page++) {
             $result = $adapter->listDomains($credentials, $offset, self::PAGE_SIZE);
             foreach ($result->records as $record) {
-                $this->importRecord($company, $connection, $record, $contactCache, $counts, $warn, $adapter, $credentials);
+                $this->importRecord($company, $connection, $record, $contactCache, $tldCache, $counts, $warn, $adapter, $credentials);
             }
 
-            // Advance by the PAGE size, not the mapped-record count — rows the
-            // adapter couldn't shape were still consumed server-side.
+            // Advance by the PAGE size and stop on the RAW row count — rows
+            // the adapter couldn't shape were still consumed server-side, so
+            // stopping on count($records) would silently truncate the account.
             $offset += self::PAGE_SIZE;
-            if (count($result->records) < self::PAGE_SIZE) {
+            if ($result->rawCount < self::PAGE_SIZE) {
                 break;
             }
             if ($result->total !== null && $offset >= $result->total) {
@@ -104,12 +107,16 @@ class DomainImportService
         return $counts;
     }
 
-    /** @param array<string, RegistrarContact|false> $contactCache */
+    /**
+     * @param  array<string, RegistrarContact|false>  $contactCache
+     * @param  array<string, DomainTld|false>  $tldCache
+     */
     private function importRecord(
         Company $company,
         DomainRegistrarConnection $connection,
         RegistrarDomainRecord $record,
         array &$contactCache,
+        array &$tldCache,
         array &$counts,
         callable $warn,
         DomainRegistrar $adapter,
@@ -117,26 +124,32 @@ class DomainImportService
     ): void {
         $fqdn = $record->fqdn();
 
-        $tldRule = DomainTld::withTrashed()
-            ->where('company_id', $company->id)
-            ->where('tld', $record->tld)
-            ->first();
-        if ($tldRule !== null && $tldRule->trashed()) {
-            // The operator deleted this TLD from the catalogue — an import must
-            // not resurrect it behind their back.
+        if (! array_key_exists($record->tld, $tldCache)) {
+            $tldRule = DomainTld::withTrashed()
+                ->where('company_id', $company->id)
+                ->where('tld', $record->tld)
+                ->first();
+            if ($tldRule !== null && $tldRule->trashed()) {
+                // The operator deleted this TLD from the catalogue — an import
+                // must not resurrect it behind their back. Warn ONCE per TLD.
+                $warn("Παράλειψη domains σε .{$record->tld}: το TLD είναι διαγραμμένο στον κατάλογο «TLDs & τιμές».");
+                $tldRule = false;
+            } elseif ($tldRule === null) {
+                $tldRule = DomainTld::create([
+                    'company_id' => $company->id,
+                    'tld' => $record->tld,
+                    'registrar_connection_id' => $connection->id,
+                    'min_years' => 1,
+                    'is_active' => true,
+                ]);
+            }
+            $tldCache[$record->tld] = $tldRule;
+        }
+        $tldRule = $tldCache[$record->tld];
+        if ($tldRule === false) {
             $counts['skipped']++;
-            $warn("Παράλειψη {$fqdn}: το TLD .{$record->tld} είναι διαγραμμένο στον κατάλογο «TLDs & τιμές».");
 
             return;
-        }
-        if ($tldRule === null) {
-            $tldRule = DomainTld::create([
-                'company_id' => $company->id,
-                'tld' => $record->tld,
-                'registrar_connection_id' => $connection->id,
-                'min_years' => 1,
-                'is_active' => true,
-            ]);
         }
 
         $domain = Domain::withTrashed()
@@ -145,6 +158,14 @@ class DomainImportService
             ->first();
         if ($domain !== null && $domain->trashed()) {
             // Tombstone: an operator delete is never rewritten (sync parity).
+            $counts['skipped']++;
+
+            return;
+        }
+        if ($domain !== null && $domain->status instanceof DomainStatus && $domain->status->blocksSync()) {
+            // Operator-terminal row (cancelled/transferred_away): the nightly
+            // sync refuses to touch these and so does the import — the frozen
+            // expiry/NS snapshot is historical record (blocksSync parity).
             $counts['skipped']++;
 
             return;

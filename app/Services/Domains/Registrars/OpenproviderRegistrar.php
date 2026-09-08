@@ -203,7 +203,7 @@ class OpenproviderRegistrar implements DomainRegistrar
 
         $total = isset($data['total']) && is_numeric($data['total']) ? (int) $data['total'] : null;
 
-        return new RegistrarDomainPage(records: $records, total: $total);
+        return new RegistrarDomainPage(records: $records, total: $total, rawCount: count($results));
     }
 
     /**

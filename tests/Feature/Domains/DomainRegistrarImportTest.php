@@ -239,6 +239,60 @@ class DomainRegistrarImportTest extends TestCase
         $this->assertStringContainsString('BROKEN-1', $warnings[0]);
     }
 
+    public function test_an_operator_terminal_row_is_never_rewritten_by_import(): void
+    {
+        $tld = DomainTld::create([
+            'company_id' => $this->company->id, 'tld' => 'gr',
+            'registrar_connection_id' => $this->connection->id, 'is_active' => true,
+        ]);
+        $frozen = Domain::create([
+            'company_id' => $this->company->id, 'domain_tld_id' => $tld->id,
+            'sld' => 'lost', 'tld' => 'gr', 'fqdn' => 'lost.gr',
+            'expires_at' => '2025-06-01', 'status' => 'transferred_away',
+        ]);
+        $frozen->nameservers()->create(['company_id' => $this->company->id, 'host' => 'ns.old.gr', 'sort_order' => 0]);
+
+        // the OLD account still lists it during the transfer window
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?limit=100&offset=0' => Http::response(['data' => [
+                'results' => [$this->opRecord('lost', 'gr')], 'total' => 1,
+            ]]),
+        ]);
+
+        $counts = app(DomainImportService::class)->import($this->company, $this->connection);
+
+        $this->assertSame(['created' => 0, 'updated' => 0, 'skipped' => 1, 'contacts' => 0], $counts);
+        $frozen->refresh();
+        $this->assertSame('2025-06-01', $frozen->expires_at->toDateString(), 'historical expiry frozen (blocksSync parity)');
+        $this->assertSame(['ns.old.gr'], $frozen->nameservers()->pluck('host')->all(), 'historical NS snapshot frozen');
+        $this->assertNull($frozen->last_synced_at);
+    }
+
+    public function test_pagination_stops_on_raw_rows_not_mapped_records(): void
+    {
+        // 99 mappable + 1 junk row on page 1: the RAW page is full, so the
+        // pager must continue — stopping on the mapped count would silently
+        // truncate the rest of the account with a green exit.
+        $page1 = [];
+        for ($i = 0; $i < 99; $i++) {
+            $page1[] = $this->opRecord('bulk'.$i, 'eu', ['name_servers' => []]);
+        }
+        $page1[] = ['id' => 1, 'domain' => ['name' => '', 'extension' => '']]; // unmappable
+        $page2 = [$this->opRecord('bulk99', 'eu', ['name_servers' => []])];
+
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains?limit=100&offset=0' => Http::response(['data' => ['results' => $page1, 'total' => 101]]),
+            self::SANDBOX.'/v1beta/domains?limit=100&offset=100' => Http::response(['data' => ['results' => $page2, 'total' => 101]]),
+        ]);
+
+        $counts = app(DomainImportService::class)->import($this->company, $this->connection);
+
+        $this->assertSame(100, $counts['created']);
+        $this->assertNotNull(Domain::where('fqdn', 'bulk99.eu')->first(), 'page 2 was fetched despite the short mapped count');
+    }
+
     public function test_pagination_walks_the_whole_account(): void
     {
         $page1 = [];
