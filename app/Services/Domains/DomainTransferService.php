@@ -173,6 +173,29 @@ class DomainTransferService
         if ($adapter->key() === 'manual') {
             throw new DomainRegistrarNotConfigured('Ο registrar είναι «manual» — πάρτε τον κωδικό EPP από το portal του.');
         }
+        // The EPP code is the credential that transfers the name AWAY — on
+        // shared reseller creds the by-id/by-name resolve could hand one
+        // tenant ANOTHER tenant's code: the worst flavor of the cross-tenant
+        // class. Same guard as transferIn/register (declared all-tenant sweep).
+        $claimedElsewhere = Domain::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->withTrashed()
+            ->where('fqdn', $domain->fqdn)
+            ->where('company_id', '!=', $domain->company_id)
+            ->whereNotNull('registrar_domain_id')
+            ->where('registrar_domain_id', '!=', '')
+            ->exists();
+        if ($claimedElsewhere) {
+            DomainRegistrarLog::create([
+                'company_id' => $domain->company_id, 'domain_id' => $domain->id,
+                'registrar_connection_id' => $connection->id,
+                'action' => 'epp_code', 'status' => DomainRegistrarLog::STATUS_FAILED,
+                'request' => ['fqdn' => $domain->fqdn],
+                'error' => 'Το όνομα ανήκει σε άλλη εταιρεία στον ίδιο λογαριασμό registrar.',
+            ]);
+
+            throw new RuntimeException("Το {$domain->fqdn} είναι καταχωρημένο από ΑΛΛΗ εταιρεία στον ίδιο λογαριασμό registrar — ο κωδικός EPP δεν ανακτάται από εδώ.");
+        }
 
         try {
             $code = $adapter->getEppCode($domain, $this->factory->credentialsFor($connection));

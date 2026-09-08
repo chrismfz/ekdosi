@@ -644,9 +644,15 @@ data model + phase gates: **`PLAN.md`**.
     EPP code) ✅ SHIPPED** (βλ. `FEATURES.md §21`)· μένει A3d NS/contacts/DNSSEC/lock writes
     + grace/redemption χρεώσεις (+ approve-transfer/resend-FOA αν φανούν χρήσιμα live).
     **ΜΑΖΙ με το A3d (δεσμευτικό, review A3c r1):** extraction του κοινού write-service
-    skeleton (log/refuse closures, Cache::lock+finally, adopt/probe leg) — τρία αντίγραφα
-    ήδη (renewal/registration/transfer) και το copy-drift ΤΟΥ A3c έχασε δύο guards στη
-    μεταφορά· το τέταρτο αντίγραφο δεν γράφεται, γράφεται ο helper. Για τον A5 reconciler (μαζί με τα υπόλοιπα A3):
+    skeleton (log/refuse closures, Cache::lock+finally, adopt/probe leg, claimedElsewhere,
+    τα duplicated eppCode audit blocks) — τρία αντίγραφα ήδη (renewal/registration/transfer)
+    και το copy-drift ΤΟΥ A3c έχασε τρεις guards· το τέταρτο αντίγραφο δεν γράφεται,
+    γράφεται ο helper. P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
+    pre-flight refusals ως «αίτηση» (false ⚠ σε previous-life tombstone + ένα refused click·
+    αντίστροφα panel-started FAI χωρίς κανένα log δεν φλαγκάρεται)· (σ) το claimedElsewhere
+    over-blocks (αγνοεί ΠΟΙΟ registrar account + withTrashed ξένα rows μπλοκάρουν «πελάτης
+    μετακόμισε μεταξύ των εταιρειών μας» — fails safe/loud)· (τ) scrub evasion σε auth codes
+    με «"»/«\» μέσω του JSON-escaped raw-body fallback (σπάνιο· scrub και το trimmed form). Για τον A5 reconciler (μαζί με τα υπόλοιπα A3):
     (α) re-evaluate των renew logs με `short_of_target=null` (το post-renew re-fetch απέτυχε —
     η πραγματική λήξη ήρθε από το nightly sync μετά) και όσων `ok` έμειναν κάτω από το
     `target_expiry` τους· (β) orphan unconsumed button-renewals που δεν τιμολογήθηκαν ποτέ.

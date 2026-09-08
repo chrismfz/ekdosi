@@ -305,6 +305,52 @@ class DomainTransferServiceTest extends TestCase
         $this->assertStringNotContainsString('OUT-CODE-999', json_encode($log->toArray()), 'the code must never persist');
     }
 
+    public function test_epp_code_refuses_for_a_name_claimed_by_another_tenant(): void
+    {
+        // r2 P0: the code transfers the name AWAY — never hand another
+        // tenant's credential across the shared reseller account.
+        $other = Company::create([
+            'name' => 'Other', 'slug' => 'o-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+            'enable_domain_management' => true,
+        ]);
+        $otherTld = DomainTld::create(['company_id' => $other->id, 'tld' => 'eu', 'is_active' => true]);
+        Domain::create([
+            'company_id' => $other->id, 'domain_tld_id' => $otherTld->id,
+            'sld' => 'own', 'tld' => 'eu', 'fqdn' => 'own.eu',
+            'status' => 'active', 'registrar_domain_id' => '800',
+        ]);
+        $mine = $this->pendingTransferDomain(['sld' => 'own', 'fqdn' => 'own.eu', 'status' => 'active']);
+
+        Http::fake();
+        try {
+            app(DomainTransferService::class)->eppCode($mine);
+            $this->fail('cross-tenant EPP retrieval must refuse');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ΑΛΛΗ εταιρεία', $e->getMessage());
+        }
+        Http::assertNothingSent();
+        $this->assertSame(DomainRegistrarLog::STATUS_FAILED, DomainRegistrarLog::where('action', 'epp_code')->sole()->status);
+    }
+
+    public function test_a_lingering_tombstone_without_a_request_neither_flags_nor_deletes_a_pending_row(): void
+    {
+        // Negative direction of the two new sync gates (r2 P2 #4): a DEL
+        // tombstone from the name's previous life, NO request log → no false
+        // «απέτυχε» flag, and the pending row is not flipped to Deleted.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/700' => Http::response(['data' => ['id' => 700, 'status' => 'DEL']]),
+        ]);
+        $domain = $this->pendingTransferDomain(['registrar_domain_id' => '700']);
+
+        app(DomainSyncService::class)->sync($domain);
+
+        $domain->refresh();
+        $this->assertSame(DomainStatus::PendingTransfer, $domain->status, 'tombstones never flip pending rows');
+        $this->assertNull($domain->sync_error, 'no request was ever made — no false «απέτυχε» flag');
+    }
+
     public function test_epp_code_failures_are_audited_too(): void
     {
         Http::fake([
