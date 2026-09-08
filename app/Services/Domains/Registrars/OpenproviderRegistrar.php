@@ -129,8 +129,16 @@ class OpenproviderRegistrar implements DomainRegistrar
             throw new RuntimeException('Μη έγκυρη διάρκεια ανανέωσης: '.$years);
         }
 
-        $data = $this->fetchDomainData($domain, $credentials);
-        $id = isset($data['id']) && (string) $data['id'] !== '' ? (string) $data['id'] : null;
+        // The service's mandatory pre-check sync just adopted/refreshed the
+        // stored id — use it and skip a redundant GET; resolve only when the
+        // row genuinely lacks one.
+        $id = $domain->registrar_domain_id !== null && $domain->registrar_domain_id !== ''
+            ? $domain->registrar_domain_id
+            : null;
+        if ($id === null) {
+            $data = $this->fetchDomainData($domain, $credentials);
+            $id = isset($data['id']) && (string) $data['id'] !== '' ? (string) $data['id'] : null;
+        }
         if ($id === null) {
             throw new RuntimeException('Το Openprovider δεν επέστρεψε id για το '.$domain->fqdn.' — αδύνατη η ανανέωση.');
         }
@@ -141,11 +149,17 @@ class OpenproviderRegistrar implements DomainRegistrar
         ]);
 
         // The renew envelope doesn't reliably carry the new expiry — re-fetch
-        // so the caller gets (and applies) the registrar's OWN post-renew truth.
-        $fresh = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id))->json('data');
+        // so the caller gets (and applies) the registrar's OWN post-renew
+        // truth. From here on the registrar HAS charged: a re-fetch hiccup
+        // must never surface as a failed renewal (the caller would log
+        // 'failed' + alert for a renewal that actually succeeded) — fall back
+        // to a minimal result; the nightly sync lands the new expiry.
+        try {
+            $fresh = $this->request($credentials, 'GET', '/v1beta/domains/'.rawurlencode($id))->json('data');
+        } catch (\Throwable) {
+            return new DomainSyncResult(registrarDomainId: $id);
+        }
         if (! is_array($fresh)) {
-            // The renewal itself succeeded — never mask that as a failure; the
-            // nightly sync will land the new expiry.
             return new DomainSyncResult(registrarDomainId: $id);
         }
 

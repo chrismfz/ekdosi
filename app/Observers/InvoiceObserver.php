@@ -44,43 +44,86 @@ class InvoiceObserver
 
     /**
      * Domains (Πυλώνας A / A3a, §6.1 «renew = on-issue»): when a renewal
-     * invoice for a DOMAIN-linked contract is issued, drive the registrar
-     * renewal through DomainRenewalService (which syncs first and ADOPTS if
-     * someone already renewed — the §6.6 war-story guard). Best-effort like
-     * its siblings: the issue already persisted, so a registrar failure must
-     * never look like a failed issue — it logs, lands in the API history and
-     * rings the operators' bell instead.
+     * invoice for a DOMAIN-linked contract is FIRST issued (draft→active —
+     * NOT a restore of a cancelled one: a pre-feature invoice restored today
+     * must not fire an unrequested charge), drive the registrar renewal
+     * through DomainRenewalService (sync-first, ADOPTS if someone already
+     * renewed — the §6.6 war-story guard).
+     *
+     * DEFERRED to AFTER COMMIT: the finalize action wraps numbering + status
+     * in one DB transaction — real registrar HTTP inside it would hold the
+     * invoice-type counter lock across up to ~90s of network, and a rollback
+     * after the POST would leave a real charge with its audit row rolled
+     * back. The SC cursor (the invoice's period start) is captured HERE,
+     * in-transaction, before advanceServiceContractOnIssue moves it.
+     * Best-effort like its siblings: a registrar failure must never look
+     * like a failed issue — it logs, lands in the API history and rings the
+     * operators' bell instead.
      */
     private function renewDomainOnIssue(Invoice $invoice): void
     {
         if (! $invoice->wasChanged('local_status') || $invoice->local_status !== 'active') {
             return;
         }
+        if ($invoice->getOriginal('local_status') !== 'draft') {
+            return; // restore of a cancelled invoice — never an implicit charge
+        }
         if ($invoice->service_contract_id === null) {
             return;
         }
 
-        try {
-            app(DomainRenewalService::class)->renewForInvoice($invoice);
-        } catch (Throwable $e) {
-            Log::warning('Domain renewal on invoice issue failed (the issue succeeded)', [
-                'invoice_id' => $invoice->id,
-                'service_contract_id' => $invoice->service_contract_id,
-                'error' => $e->getMessage(),
-            ]);
-            try {
-                $recipients = $invoice->company?->users;
-                if ($recipients !== null && $recipients->isNotEmpty()) {
-                    Notification::make()
-                        ->title('Αποτυχία ανανέωσης domain στον registrar')
-                        ->body('Το παραστατικό '.($invoice->code ?: '#'.$invoice->id).' εκδόθηκε, αλλά η ανανέωση στον registrar απέτυχε: '.$e->getMessage().' Δοκιμάστε «Ανανέωση στον registrar» από το domain.')
-                        ->icon('heroicon-o-globe-alt')
-                        ->danger()
-                        ->sendToDatabase($recipients);
-                }
-            } catch (Throwable $notify) {
-                Log::warning('Domain renewal failure notification failed', ['error' => $notify->getMessage()]);
+        $periodStart = ServiceContract::query()
+            ->where('company_id', $invoice->company_id)
+            ->whereKey($invoice->service_contract_id)
+            ->value('next_due_date');
+        $periodStart = $periodStart !== null ? Carbon::parse($periodStart)->toDateString() : null;
+        $invoiceId = $invoice->id;
+
+        DB::afterCommit(function () use ($invoiceId, $periodStart): void {
+            $invoice = Invoice::query()->find($invoiceId);
+            if ($invoice === null) {
+                return;
             }
+            try {
+                $log = app(DomainRenewalService::class)->renewForInvoice($invoice, $periodStart);
+                if ($log !== null && ($log->response['short_of_target'] ?? false)) {
+                    // Charged for real but landed SHORT of the billed period
+                    // (registrar expiry lagged the cursor) — operator must see.
+                    $this->notifyDomainRenewalProblem(
+                        $invoice,
+                        'Η ανανέωση εκτελέστηκε αλλά η νέα λήξη ('.($log->response['registrar_expiry'] ?? '—').') ΔΕΝ φτάνει την περίοδο που χρεώθηκε ('.($log->request['target_expiry'] ?? '—').') — ελέγξτε το domain.'
+                    );
+                }
+            } catch (Throwable $e) {
+                Log::warning('Domain renewal on invoice issue failed (the issue succeeded)', [
+                    'invoice_id' => $invoice->id,
+                    'service_contract_id' => $invoice->service_contract_id,
+                    'error' => $e->getMessage(),
+                ]);
+                $this->notifyDomainRenewalProblem(
+                    $invoice,
+                    'Το παραστατικό '.($invoice->code ?: '#'.$invoice->id).' εκδόθηκε, αλλά η ανανέωση στον registrar απέτυχε: '.$e->getMessage().' Δοκιμάστε «Ανανέωση στον registrar» από το domain.'
+                );
+            }
+        });
+    }
+
+    /** Best-effort operators' bell for a registrar-renewal problem. */
+    private function notifyDomainRenewalProblem(Invoice $invoice, string $body): void
+    {
+        try {
+            $recipients = $invoice->company?->users;
+            if ($recipients === null || $recipients->isEmpty()) {
+                return;
+            }
+            Notification::make()
+                ->title('Πρόβλημα ανανέωσης domain στον registrar')
+                ->body($body)
+                ->icon('heroicon-o-globe-alt')
+                ->danger()
+                ->sendToDatabase($recipients);
+        } catch (Throwable $notify) {
+            Log::warning('Domain renewal notification failed', ['error' => $notify->getMessage()]);
         }
     }
 

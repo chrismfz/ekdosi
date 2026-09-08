@@ -9,6 +9,7 @@ use App\Models\DomainRegistrarLog;
 use App\Models\Invoice;
 use App\Models\ServiceContract;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
 use RuntimeException;
 
 /**
@@ -40,7 +41,7 @@ class DomainRenewalService
      * observer re-fires). Throws on a REAL failure — the observer catches,
      * logs and alerts (the issue itself must never look failed).
      */
-    public function renewForInvoice(Invoice $invoice): ?DomainRegistrarLog
+    public function renewForInvoice(Invoice $invoice, ?string $periodStart = null): ?DomainRegistrarLog
     {
         if ($invoice->service_contract_id === null) {
             return null;
@@ -83,13 +84,44 @@ class DomainRenewalService
             );
         }
 
-        // The period the INVOICE covers starts at the SC cursor — which is why
-        // this hook must run BEFORE advanceServiceContractOnIssue. Using the
-        // domain's CURRENT expiry here would re-create the war-story bug: an
-        // operator who already hit «Ανανέωση» moved the expiry, so a
-        // current-expiry baseline would target one period FURTHER and renew
-        // AGAIN instead of adopting.
-        $periodStart = $contract->next_due_date?->toDateString();
+        // The period the INVOICE covers starts at the SC cursor — the observer
+        // captures it BEFORE advanceServiceContractOnIssue moves it and passes
+        // it in (the hook itself runs after-commit, when the cursor has
+        // already advanced). Using the domain's CURRENT expiry here would
+        // re-create the war-story bug: an operator who already hit «Ανανέωση»
+        // moved the expiry, so a current-expiry baseline would target one
+        // period FURTHER and renew AGAIN instead of adopting.
+        $periodStart ??= $contract->next_due_date?->toDateString();
+
+        // INTENT-MATCH adopt (date-drift-proof, the second §6.6 leg): an OK
+        // button renewal not yet tied to any invoice IS this invoice's renewal
+        // — consume it, no date comparison needed. Covers the operator who
+        // renewed early while the SC cursor had drifted from the expiry
+        // (billing grace edits), where the cursor+years date check would
+        // wrongly renew again.
+        $consumable = DomainRegistrarLog::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('domain_id', $domain->id)
+            ->where('action', 'renew')
+            ->where('status', DomainRegistrarLog::STATUS_OK)
+            ->whereNull('invoice_id')
+            ->orderByDesc('id')
+            ->get()
+            ->first(fn (DomainRegistrarLog $row) => (int) ($row->request['years'] ?? 0) >= $years);
+        if ($consumable !== null) {
+            $consumable->update(['invoice_id' => $invoice->id]);
+
+            return DomainRegistrarLog::create([
+                'company_id' => $domain->company_id,
+                'domain_id' => $domain->id,
+                'registrar_connection_id' => $connection->id,
+                'invoice_id' => $invoice->id,
+                'action' => 'renew',
+                'status' => DomainRegistrarLog::STATUS_ADOPTED,
+                'request' => ['fqdn' => $domain->fqdn, 'years' => $years],
+                'response' => ['consumed_log_id' => $consumable->id],
+            ]);
+        }
 
         return $this->renew($domain, $years, $invoice, $periodStart);
     }
@@ -147,37 +179,66 @@ class DomainRenewalService
             'error' => $error,
         ]);
 
-        // §6.6: FRESH TRUTH FIRST. If the registrar's current expiry already
-        // covers the target period, someone renewed already → ADOPT, no call.
-        try {
-            $this->sync->sync($domain);
-        } catch (\Throwable $e) {
-            // If we can't even read the registrar, we must not WRITE to it
-            // blind — the whole guard rests on the read.
-            $log(DomainRegistrarLog::STATUS_FAILED, null, 'Προ-έλεγχος (sync) απέτυχε: '.$e->getMessage());
-
-            throw new RuntimeException("Η ανανέωση του {$domain->fqdn} ΔΕΝ εκτελέστηκε — ο προ-έλεγχος στον registrar απέτυχε: ".$e->getMessage());
+        // ONE renewal at a time per domain: the check→write sequence must not
+        // race (View button vs on-issue hook vs auto-issue — both would pass
+        // the pre-check and both would POST = double charge). Atomic cache
+        // lock (the DB cache driver supports them — same requirement as
+        // withoutOverlapping, CLAUDE.md Env-prep).
+        $lock = Cache::lock('domains:renew:'.$domain->id, 300);
+        if (! $lock->get()) {
+            throw new RuntimeException("Άλλη ανανέωση του {$domain->fqdn} είναι ήδη σε εξέλιξη — δοκιμάστε ξανά σε λίγο.");
         }
-        $domain->refresh();
-        if ($domain->expires_at !== null && $domain->expires_at->toDateString() >= $target) {
-            return $log(DomainRegistrarLog::STATUS_ADOPTED, [
-                'registrar_expiry' => $domain->expires_at->toDateString(),
+
+        try {
+            // §6.6: FRESH TRUTH FIRST. If the registrar's current expiry already
+            // covers the target period, someone renewed already → ADOPT, no call.
+            try {
+                $this->sync->sync($domain);
+            } catch (\Throwable $e) {
+                // If we can't even read the registrar, we must not WRITE to it
+                // blind — the whole guard rests on the read.
+                $log(DomainRegistrarLog::STATUS_FAILED, null, 'Προ-έλεγχος (sync) απέτυχε: '.$e->getMessage());
+
+                throw new RuntimeException("Η ανανέωση του {$domain->fqdn} ΔΕΝ εκτελέστηκε — ο προ-έλεγχος στον registrar απέτυχε: ".$e->getMessage());
+            }
+            $domain->refresh();
+            if ($domain->expires_at !== null && $domain->expires_at->toDateString() >= $target) {
+                return $log(DomainRegistrarLog::STATUS_ADOPTED, [
+                    'registrar_expiry' => $domain->expires_at->toDateString(),
+                ], null);
+            }
+            // Re-check renewability on the FRESH status: the sync may have just
+            // flipped the row to Deleted/redemption (registrar DEL) — «νεκρό
+            // όνομα = ποτέ χρέωση» holds against stale local state too.
+            if ($domain->status instanceof DomainStatus && ! $domain->status->isRenewable()) {
+                $log(DomainRegistrarLog::STATUS_FAILED, null, 'Ο registrar αναφέρει κατάσταση «'.$domain->status->getLabel().'» — η ανανέωση δεν εκτελέστηκε.');
+
+                throw new RuntimeException("Το {$domain->fqdn} είναι πλέον σε κατάσταση «{$domain->status->getLabel()}» στον registrar — δεν ανανεώνεται.");
+            }
+
+            try {
+                $result = $adapter->renew($domain, $years, $this->factory->credentialsFor($connection));
+            } catch (\Throwable $e) {
+                $log(DomainRegistrarLog::STATUS_FAILED, null, $e->getMessage());
+
+                throw $e;
+            }
+            $this->sync->apply($domain, $result);
+
+            // A renew that landed SHORT of the billed target (the registrar
+            // extended from ITS OWN expiry, which lagged the cursor — e.g. a
+            // prior failed renewal never retried) is a real charge, so it logs
+            // 'ok' — but flagged, so the caller can alert the operator.
+            $short = $result->expiresAt !== null && $result->expiresAt < $target;
+
+            return $log(DomainRegistrarLog::STATUS_OK, [
+                'registrar_expiry' => $result->expiresAt,
+                'raw_status' => $result->rawStatus,
+                'short_of_target' => $short,
             ], null);
+        } finally {
+            $lock->release();
         }
-
-        try {
-            $result = $adapter->renew($domain, $years, $this->factory->credentialsFor($connection));
-        } catch (\Throwable $e) {
-            $log(DomainRegistrarLog::STATUS_FAILED, null, $e->getMessage());
-
-            throw $e;
-        }
-        $this->sync->apply($domain, $result);
-
-        return $log(DomainRegistrarLog::STATUS_OK, [
-            'registrar_expiry' => $result->expiresAt,
-            'raw_status' => $result->rawStatus,
-        ], null);
     }
 
     /**

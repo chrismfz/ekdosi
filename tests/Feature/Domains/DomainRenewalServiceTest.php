@@ -95,9 +95,9 @@ class DomainRenewalServiceTest extends TestCase
     {
         Http::fake([
             self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
-            // 3 GETs: the §6.6 pre-check sync, renew()'s id resolve, the post-renew re-fetch
+            // 2 GETs: the §6.6 pre-check sync, then the post-renew re-fetch
+            // (renew() reuses the freshly-synced stored id — no resolve GET)
             self::SANDBOX.'/v1beta/domains/77' => Http::sequence()
-                ->push(['data' => $this->opDomain('2026-01-01')])
                 ->push(['data' => $this->opDomain('2026-01-01')])
                 ->push(['data' => $this->opDomain('2027-01-01')]),
             self::SANDBOX.'/v1beta/domains/77/renew' => Http::response(['code' => 0]),
@@ -139,6 +139,141 @@ class DomainRenewalServiceTest extends TestCase
         Http::assertNotSent(fn ($req) => str_contains($req->url(), '/renew'));
         $this->assertSame('2027-01-01', $domain->refresh()->expires_at->toDateString());
         $this->assertSame($invoice->id, $log->invoice_id);
+    }
+
+    public function test_drifted_cursor_still_adopts_by_consuming_the_button_renewal_log(): void
+    {
+        // The date guard's blind spot (review r1): expiry 2026-05-01 but the
+        // SC cursor operator-edited to 2026-06-15. The button renewed →
+        // registrar 2027-05-01 < cursor+1y — a pure date compare would renew
+        // AGAIN. The intent-match leg consumes the button's unconsumed OK log
+        // instead: adopted, ZERO registrar traffic.
+        [$domain, $contract] = $this->assignedDomain('2026-05-01');
+        $contract->forceFill(['next_due_date' => '2026-06-15'])->save();
+        $domain->forceFill(['expires_at' => '2027-05-01'])->save(); // the button moved it
+        $buttonLog = DomainRegistrarLog::create([
+            'company_id' => $this->company->id, 'domain_id' => $domain->id,
+            'registrar_connection_id' => $this->connection->id, 'invoice_id' => null,
+            'action' => 'renew', 'status' => DomainRegistrarLog::STATUS_OK,
+            'request' => ['fqdn' => 'example.gr', 'years' => 1],
+        ]);
+
+        $type = InvoiceType::create(['company_id' => $this->company->id, 'code' => 'TDA', 'name' => 'ΤΔΑ', 'invcount' => 0, 'mydata_type' => '2.1']);
+        $invoice = Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $contract->id,
+            'code' => 2, 'invcode' => 'TDA2', 'issued_at' => now(), 'local_status' => 'draft',
+        ]);
+
+        Http::fake(); // preventStrayRequests + no fakes = ANY http call fails the test
+
+        $log = app(DomainRenewalService::class)->renewForInvoice($invoice);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_ADOPTED, $log->status);
+        $this->assertSame($invoice->id, $buttonLog->refresh()->invoice_id, 'the button renewal is consumed by this invoice');
+        Http::assertNothingSent();
+    }
+
+    public function test_restoring_a_cancelled_invoice_never_fires_an_implicit_renew(): void
+    {
+        // A pre-feature (or any) cancelled invoice restored to active must not
+        // charge the registrar — renew-on-issue means draft→active ONLY.
+        [, $contract] = $this->assignedDomain('2026-01-01');
+        $type = InvoiceType::create(['company_id' => $this->company->id, 'code' => 'TDA', 'name' => 'ΤΔΑ', 'invcount' => 0, 'mydata_type' => '2.1']);
+        $invoice = Invoice::create([
+            'company_id' => $this->company->id, 'invoice_type_id' => $type->id,
+            'customer_id' => $this->customer->id, 'service_contract_id' => $contract->id,
+            'code' => 3, 'invcode' => 'TDA3', 'issued_at' => now(), 'local_status' => 'cancelled',
+        ]);
+
+        Http::fake();
+        $invoice->update(['local_status' => 'active']); // Επαναφορά
+
+        Http::assertNothingSent();
+        $this->assertSame(0, DomainRegistrarLog::count());
+    }
+
+    public function test_a_concurrent_renewal_is_refused_by_the_per_domain_lock(): void
+    {
+        [$domain] = $this->assignedDomain();
+        $lock = Cache::lock('domains:renew:'.$domain->id, 60);
+        $this->assertTrue($lock->get());
+
+        try {
+            Http::fake();
+            try {
+                app(DomainRenewalService::class)->renew($domain, 1);
+                $this->fail('a concurrent renewal must refuse');
+            } catch (RuntimeException $e) {
+                $this->assertStringContainsString('σε εξέλιξη', $e->getMessage());
+            }
+            Http::assertNothingSent();
+        } finally {
+            $lock->release();
+        }
+    }
+
+    public function test_a_sync_that_reveals_a_dead_domain_aborts_the_renew(): void
+    {
+        // Local status stale-Active; the pre-check sync flips it to Deleted
+        // (registrar DEL) — «νεκρό όνομα = ποτέ χρέωση» must hold here too.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/77' => Http::response(['data' => [
+                'id' => 77, 'status' => 'DEL', 'expiration_date' => '2026-01-01 00:00:00', 'name_servers' => [],
+            ]]),
+        ]);
+        [$domain] = $this->assignedDomain();
+
+        try {
+            app(DomainRenewalService::class)->renew($domain, 1);
+            $this->fail('a dead name must never be charged');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Διαγραμμένο', $e->getMessage());
+        }
+        Http::assertNotSent(fn ($req) => str_contains($req->url(), '/renew'));
+        $this->assertSame(DomainRegistrarLog::STATUS_FAILED, DomainRegistrarLog::sole()->status);
+    }
+
+    public function test_a_post_renew_refetch_failure_still_logs_ok_never_failed(): void
+    {
+        // From the POST on, the registrar HAS charged — a re-fetch hiccup must
+        // not misrecord a real charge as failed (review r1 finding 5).
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/77' => Http::sequence()
+                ->push(['data' => $this->opDomain('2026-01-01')]) // pre-check sync
+                ->push(['desc' => 'boom'], 502),                  // post-renew re-fetch
+            self::SANDBOX.'/v1beta/domains/77/renew' => Http::response(['code' => 0]),
+        ]);
+        [$domain] = $this->assignedDomain();
+
+        $log = app(DomainRenewalService::class)->renew($domain, 1);
+
+        $this->assertSame(DomainRegistrarLog::STATUS_OK, $log->status);
+        $this->assertSame('2026-01-01', $domain->refresh()->expires_at->toDateString(), 'expiry lands with the nightly sync');
+    }
+
+    public function test_a_renew_landing_short_of_the_billed_target_is_flagged(): void
+    {
+        // Registrar expiry lagged the cursor (a prior failed renew never
+        // retried): the charge is real → 'ok', but flagged so the operator
+        // sees the domain will lapse before billing says.
+        Http::fake([
+            self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
+            self::SANDBOX.'/v1beta/domains/77' => Http::sequence()
+                ->push(['data' => $this->opDomain('2026-01-01')])
+                ->push(['data' => $this->opDomain('2027-01-01')]),
+            self::SANDBOX.'/v1beta/domains/77/renew' => Http::response(['code' => 0]),
+        ]);
+        [$domain] = $this->assignedDomain('2026-01-01');
+
+        // the invoice bills the period starting at the (drifted-ahead) cursor
+        $log = app(DomainRenewalService::class)->renew($domain, 1, null, '2027-01-01');
+
+        $this->assertSame(DomainRegistrarLog::STATUS_OK, $log->status);
+        $this->assertTrue($log->response['short_of_target']);
+        $this->assertSame('2028-01-01', $log->request['target_expiry']);
     }
 
     public function test_a_failed_precheck_sync_aborts_without_writing_to_the_registrar(): void
@@ -271,7 +406,6 @@ class DomainRenewalServiceTest extends TestCase
         Http::fake([
             self::SANDBOX.'/v1beta/auth/login' => Http::response(['data' => ['token' => 'tok']]),
             self::SANDBOX.'/v1beta/domains/77' => Http::sequence()
-                ->push(['data' => $this->opDomain('2026-01-01')])
                 ->push(['data' => $this->opDomain('2026-01-01')])
                 ->push(['data' => $this->opDomain('2027-01-01')]),
             self::SANDBOX.'/v1beta/domains/77/renew' => Http::response(['code' => 0]),
