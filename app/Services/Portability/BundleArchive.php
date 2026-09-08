@@ -10,8 +10,8 @@ use ZipArchive;
  * Filament UI share one reader/writer instead of duplicating ZipArchive glue.
  *
  * Layout: manifest.json + company.json + secrets.json + users.json +
- * connections.json + setup/<table>.json + data/<table>.json (full bundle only) +
- * files/<name>.
+ * connections.json + domain_connections.json + setup/<table>.json +
+ * data/<table>.json (full bundle only) + files/<name>.
  */
 class BundleArchive
 {
@@ -42,6 +42,11 @@ class BundleArchive
         // Sealed payment-method connections (rows + passphrase-sealed config).
         // Optional key so an older bundle without it still round-trips.
         $zip->addFromString('connections.json', $json($bundle['connections'] ?? []));
+        // Sealed registrar accounts (Πυλώνας A / A2c) — same optional-key rule.
+        // MUST be written here too: an exporter key this writer doesn't
+        // serialise is silently dropped on the real zip path (the exact bug
+        // class the data/ comment below memorialises).
+        $zip->addFromString('domain_connections.json', $json($bundle['domain_connections'] ?? []));
         foreach ($bundle['setup'] as $table => $rows) {
             $zip->addFromString("setup/{$table}.json", $json($rows));
         }
@@ -99,11 +104,13 @@ class BundleArchive
             $zip->close();
             throw new RuntimeException('Μη έγκυρο αρχείο: λείπει manifest/company/secrets.');
         }
-        // Optional (absent in older bundles) → default to no assigned operators.
-        $users = $this->readJsonEntry($zip, 'users.json') ?? [];
-        // Optional (absent in older bundles) → default to no connections. The
-        // importer no-ops on empty rows, so a pre-connections bundle round-trips.
-        $connections = $this->readJsonEntry($zip, 'connections.json') ?? [];
+        // Optional keys: ABSENT (an older bundle) defaults to empty, but a
+        // present-but-corrupt entry must THROW — «?? []» alone would conflate
+        // the two and a restore would complete green with the credentials
+        // silently dropped (the requireJsonEntry rationale applies here too).
+        $users = $this->optionalJsonEntry($zip, 'users.json');
+        $connections = $this->optionalJsonEntry($zip, 'connections.json');
+        $domain_connections = $this->optionalJsonEntry($zip, 'domain_connections.json');
 
         $setup = [];
         $data = [];
@@ -122,7 +129,7 @@ class BundleArchive
         }
         $zip->close();
 
-        return compact('manifest', 'company', 'secrets', 'users', 'connections', 'setup', 'data', 'files');
+        return compact('manifest', 'company', 'secrets', 'users', 'connections', 'domain_connections', 'setup', 'data', 'files');
     }
 
     private function openOrFail(string $path): ZipArchive
@@ -152,6 +159,21 @@ class BundleArchive
         $decoded = json_decode($raw, true);
 
         return is_array($decoded) ? $decoded : null;
+    }
+
+    /**
+     * Optional bundle entry: absent = a legitimate older bundle (empty), but
+     * present-but-corrupt throws like every other entry — never silent loss.
+     *
+     * @return array<mixed>
+     */
+    private function optionalJsonEntry(ZipArchive $zip, string $name): array
+    {
+        if ($zip->locateName($name) === false) {
+            return [];
+        }
+
+        return $this->requireJsonEntry($zip, $name);
     }
 
     /**

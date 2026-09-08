@@ -3,6 +3,7 @@
 namespace App\Services\Portability;
 
 use App\Models\Company;
+use App\Models\DomainRegistrarConnection;
 use App\Models\PaymentGatewayConnection;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
@@ -272,6 +273,10 @@ class CompanyImporter
             // imported bank_accounts map, and upsert via Eloquent so the secret is
             // re-encrypted under the TARGET VM's APP_KEY. After bank_accounts (above).
             $this->importConnections($bundle['connections'] ?? [], $company->id, $maps, $passphrase);
+
+            // Sealed registrar accounts (Πυλώνας A) — same machinery, no FK
+            // rewiring (their config carries only credentials, never ids).
+            $this->importDomainConnections($bundle['domain_connections'] ?? [], $company->id, $passphrase);
 
             // Bucket C (full bundle): transactional, parents before children.
             foreach (self::ORDER_TRANSACTIONAL as $table) {
@@ -687,6 +692,59 @@ class CompanyImporter
             } else {
                 $created = PaymentGatewayConnection::query()->withoutGlobalScope(CompanyScope::class)->create(array_merge(
                     ['company_id' => $companyId, 'gateway' => (string) $row['gateway'], 'label' => $row['label'] ?? null],
+                    $attrs,
+                ));
+                $consumed[] = $created->id;
+            }
+        }
+    }
+
+    /**
+     * Restore the sealed registrar accounts (CompanyExporter::buildDomainConnections)
+     * — the domains sibling of importConnections: open the passphrase-sealed
+     * configs and upsert via Eloquent so the creds re-encrypt under the TARGET
+     * VM's APP_KEY. Idempotent per (company, registrar, label) with the same
+     * consumed-tracking as the gateways (duplicate identities match distinct
+     * target rows). A soft-deleted target row is NOT resurrected — the match
+     * skips trashed rows, and a new row is created instead.
+     *
+     * @param  array{rows?: list<array<string,mixed>>, secrets?: array<string,mixed>}  $connections
+     */
+    private function importDomainConnections(array $connections, int $companyId, ?string $passphrase): void
+    {
+        $rows = $connections['rows'] ?? [];
+        if ($rows === [] || ! Schema::hasTable('domain_registrar_connections')) {
+            return;
+        }
+
+        $configs = isset($connections['secrets'])
+            ? $this->codec->open($connections['secrets'], $passphrase)
+            : [];
+
+        $consumed = [];
+        foreach ($rows as $row) {
+            $ref = (string) ($row['ref'] ?? '');
+            $attrs = [
+                'is_active' => (bool) ($row['is_active'] ?? false),
+                'mode' => (string) ($row['mode'] ?? 'off'),
+                'config' => (array) ($configs[$ref] ?? []),
+            ];
+
+            $match = DomainRegistrarConnection::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $companyId)
+                ->where('registrar', (string) $row['registrar'])
+                ->when($consumed !== [], fn ($q) => $q->whereNotIn('id', $consumed));
+            ($row['label'] ?? null) === null
+                ? $match->whereNull('label')
+                : $match->where('label', $row['label']);
+
+            if ($existing = $match->orderBy('id')->first()) {
+                $existing->forceFill($attrs)->save();
+                $consumed[] = $existing->id;
+            } else {
+                $created = DomainRegistrarConnection::query()->withoutGlobalScope(CompanyScope::class)->create(array_merge(
+                    ['company_id' => $companyId, 'registrar' => (string) $row['registrar'], 'label' => $row['label'] ?? null],
                     $attrs,
                 ));
                 $consumed[] = $created->id;

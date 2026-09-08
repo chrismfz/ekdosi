@@ -47,7 +47,9 @@ A0–A5** — σταματάς όπου θες.
 `CompanyForm` όπως `ai_assistant_enabled`). Μόνο η MyIP το ενεργοποιεί → οι άλλοι tenants δεν
 βλέπουν καθόλου το «Domains» (nav gating, §8).
 
-**Non-goal v1:** DNS zone/record hosting, email forwarding, customer portal (Πυλώνας D), CentralNic.
+**Non-goal v1:** DNS zone/record hosting, email forwarding, customer portal (Πυλώνας D), CentralNic,
+premium domains (OFF και στη WHMCS), addon pricing (ID protection κ.λπ. ως χρεώσιμα add-ons),
+pricing slabs ανά client group (καλύπτεται από το υπάρχον per-customer discount).
 
 ---
 
@@ -88,11 +90,11 @@ Mirror του `billing_connections` (superset· μπορεί να μαζευτε
 | col | τύπος | σημείωση |
 |---|---|---|
 | `company_id` | FK | |
-| `registrar` | string(40) | key: `openprovider` \| `grepp` \| `none` |
+| `registrar` | string(40) | key: `openprovider` \| `grepp` \| `manual` — το `manual` = ο Null adapter ως πλήρης «offline» registrar (χειροκίνητη διαχείριση χωρίς API· το A1 build-first target) |
 | `label` | string | «Openprovider MyIP», «FORTH EPP» |
 | `is_active` | bool | |
 | `mode` | string(20) | `sandbox` \| `production` \| `off` |
-| `config` | **encrypted** json | `MaybeEncrypted::class.':array'` — creds (username/password ή EPP host/user/pass/static-IP) |
+| `config` | **encrypted** json | `encrypted:array` cast (το idiom του `PaymentGatewayConnection` — νέος πίνακας, δεν χρειάζεται το legacy-tolerant `MaybeEncrypted`) — creds (username/password ή EPP host/user/pass/static-IP) |
 | timestamps, softDeletes | | |
 
 **Χωρίς** unique σε `(company_id, registrar)` — ο tenant μπορεί να έχει 2 λογαριασμούς ίδιου
@@ -138,7 +140,7 @@ Unique `(domain_tld_id, operation, years, currency)`.
 | `service_contract_id` | FK `nullOnDelete` — **το billing clock** |
 | `domain_tld_id`, `registrar_connection_id` | FK (routing· `domains` value wins, TLD = default hint) |
 | `sld`(190), `tld`(30), `fqdn`(190) | unique `(company_id, fqdn)`· `fqdn` = derived, authoritative = `sld`+`tld` |
-| `status`(30) | `active\|pending_register\|pending_transfer\|expired\|grace\|redemption\|cancelled\|deleted` |
+| `status`(30) | `active\|pending_register\|pending_transfer\|expired\|grace\|redemption\|transferred_away\|cancelled\|deleted` — το `transferred_away` γράφεται όταν το `syncDomain` γυρίσει transferredAway (φύγαμε registrar· κρατάμε το record, σταματά billing/sync) |
 | `registered_at`, `expires_at` (date) | **`expires_at` = REGISTRAR truth** (sync clock) |
 | `transferred_at` (date, nullable) | πότε μπήκε σε εμάς με transfer-in — γράφεται όταν το `syncTransfer` γυρίσει `completed`· null = registered/imported απευθείας |
 | `auto_renew`, `transfer_lock`, `whois_privacy`, `dnssec_enabled`, `consent_publish` | bool |
@@ -197,7 +199,10 @@ credentials value-object + factory + Null.
 
 ### 4.1 `App\Contracts\DomainRegistrar`
 Ο σκελετός γεννιέται 1:1 από το **επίσημο WHMCS registrar function index** (κάθε method
-αντιστοιχεί σε Filament action):
+αντιστοιχεί σε Filament action). **A0 note (υλοποιημένο):** το interface ξεκίνησε ΣΛΙΜ —
+`key/capabilities/ping/checkAvailability` — και επεκτείνεται ανά slice (A2 read-only, A3 write),
+ώστε ο Null adapter να μην κουβαλά νεκρές υπογραφές που type-hint-άρουν το ανύπαρκτο-ακόμα
+`Domain` model. Ο πλήρης κατάλογος από κάτω παραμένει το blueprint:
 
 ```
 key(): string
@@ -270,11 +275,41 @@ domain → πραγματικό WHOIS = ξεχωριστή port-43/RDAP πηγή
 **Free upside vs WHMCS:** trade, restore, retry-last-op (`…/last-operation/restart`), approve-transfer,
 resend-FOA, NS/DNS templates, autorenew flag.
 
+**Υλοποίηση transport (απόφαση 2026-09-07):** δικός μας thin HTTP client (Laravel `Http`/Guzzle)
+πάνω στα ~15 endpoints του πίνακα — ΟΧΙ composer dependency στο επίσημο `openprovider/rest-client-php`:
+είναι **beta** («we may still make breaking changes», branch `dev-v1beta`) και **χωρίς δηλωμένη
+άδεια** (ούτε LICENSE file ούτε `license` στο composer.json — verify ξανά πριν τυχόν αναθεώρηση).
+Το χρησιμοποιούμε ΜΟΝΟ ως reference για request/response shapes, όπως και το WHMCS module
+(επίσης χωρίς ορατή άδεια → διαβάζουμε semantics, δεν αντιγράφουμε κώδικα). Τα issues του module
+(~28 ανοιχτά) = δωρεάν κατάλογος από real-world gotchas — κοίτα τα πριν το A3.
+
 ### 4.4 grEPP adapter (.gr direct EPP)
-Ξεχωριστός EPP client (RFC 3730-3735 + FORTH custom extensions), όχι REST — το contract κρύβει τη
-διαφορά. `capabilities`: `supportsPricingSync=false`, `supportsPrivacy=false`, `supportsTransferLock=false`.
-**Build-time unknown:** τα ακριβή FORTH EPP host/port + OT&E δίνονται μόνο σε accredited registrars —
-η MyIP τα έχει (τρέχει ήδη grEPP). Τα .gr rules (§5) ζουν στο **validation layer**, όχι στον adapter.
+**Πλήρης οδηγός υλοποίησης: `docs/domains/grepp/README.md`** (+ τα επίσημα v4.3 XML examples/XSDs,
+το reference `EppClient.java` του Μητρώου και το TLS bundle, δίπλα του). Κρίσιμα σημεία:
+- **ΔΕΝ είναι RFC 5734 EPP over TCP/700** — είναι **XML web service over HTTPS**: `POST /epp/proxy`
+  με `Content-Type: text/xml;charset=UTF-8` + session cookie `JSESSIONID`. Καμία έτοιμη
+  socket-based EPP library δεν δουλεύει ως έχει. Ένα session = σειριακά commands (mutex).
+- **Endpoints ΓΝΩΣΤΑ:** UAT `https://uat-regepp.ics.forth.gr:700/epp/proxy`, prod
+  `https://regepp.ics.forth.gr:700/epp/proxy`· + plain WHOIS/check HTTP βοηθητικά (`grwhois…:800`).
+  IP whitelisting (δήλωσε prod+staging+dev IPs στο Μητρώο).
+- Extensions: **`extdomain-1.3`** (ΟΧΙ το 1.2 του παλιού `emavro/eppgr`) + `account-1.1` +
+  `dacor-1.0` + `ext-gr-rls-1.0`· **χωρίς `<svcExtension>` στο login**. DNSSEC = standard `secDNS-1.1`.
+- **Δεν υπάρχει `<poll>`** (2101) → κάθε async κατάσταση (εγκρίσεις ΕΕΤΤ, DS validation, transfers)
+  θέλει **polling με `domain:info`** — τα jobs σχεδιάζονται από την αρχή, όχι patch.
+- `create` γυρίζει **1001** (επιτυχία-με-εκκρεμότητα, ΟΧΙ σφάλμα) + **`protocol` number** (κράτα το —
+  χρειάζεται για `recallApplication`). Εκχώρηση: ενεργοποίηση ~3h, οριστική στις 5 ημέρες·
+  .gov.gr/γεωγραφικά → έγκριση ΕΕΤΤ έως 20 ημέρες (`pendingRegulatorApproval`).
+- **DACoR** = reset auth code → token στο email του δικαιούχου (λύνει το «έχασα τον κωδικό»).
+- **grRLS (Registry Lock)** = συνδρομητική/χρεώσιμη υπηρεσία του Μητρώου (period/exDate/autoRenew) —
+  εμπορική ευκαιρία, μοντελοποιείται ως προϊόν, όχι flag.
+- **`account:info`** δίνει balance (μπορεί και αρνητικό) + `suspendedOn` → monitoring job + alert
+  (αναστολή λογαριασμού = σταματούν ΟΛΑ τα registrations).
+- Regulator statuses (ΕΕΤΤ, υπερισχύουν) + homograph **bundles** (.ελ `dname`, χρεώσιμο) →
+  χαρτογράφηση σε ανθρώπινα μηνύματα στο UI.
+`capabilities`: `supportsPricingSync=false`, `supportsPrivacy=false`, `supportsTransferLock=false`
+(το grRLS είναι άλλο πράγμα από registrar transfer-lock). Τα .gr rules (§5) ζουν στο **validation
+layer**, όχι στον adapter. Library: πιθανότερα `metaregistrar/php-epp-client` (έχει HTTPS transport)
+ή δικός μας thin client — βλ. grepp/README §11.
 
 ---
 
@@ -286,6 +321,8 @@ resend-FOA, NS/DNS templates, autorenew flag.
 - **Κανένα transfer lock** → κρύψε `setLock` για .gr.
 - **Το auth code το βγάζει το REGISTRY και το στέλνει email στον REGISTRANT** — ο gaining registrar
   δεν το τραβά· το transfer-in UX λέει στον πελάτη «πάρε τον κωδικό από το email του μητρώου».
+  Χαμένος κωδικός → **DACoR** (issue-token μέσω domain:update· token στο email δικαιούχου).
+  Ληγμένο όνομα άλλου καταχωρητή μεταφέρεται και **μέσω renew + auth code** (extdomain:renew).
 - **Έλεγχος .gr ↔ .ελ homograph** (`.ελ` = `xn--qxam`, ξεχωριστό ccTLD· cross-check για confusion).
 - Label rules: 1(2)–63 chars, alnum/hyphen, όχι leading/trailing/consecutive hyphens.
 
@@ -302,10 +339,20 @@ public .gr WHOIS auto-redacts natural-person data υπό GDPR (το «no privacy
   `InvoiceObserver` προωθεί τον cursor → domain post-issue hook → `$registrar->renew()`.
 - **Ποτέ auto-file** στην ΑΑΔΕ — τα renewals είναι πρόχειρα (ίδια πειθαρχία με WHMCS inbox / SC).
 
-### 6.2 Renewals (reuse `ServiceContract` 100%)
-Το domain δένει σε `ServiceContract`· `next_due_date` → `App\Actions\StageServiceRenewal` κόβει
-**πρόχειρο** invoice ανανέωσης. `auto_renew=on` → auto-stage draft (operator εκδίδει)· `off` → μόνο
-worklist «λήγουν σύντομα». First-Payment vs Recurring = SC `setup_fee` + `amount`.
+### 6.2 Renewals (reuse `ServiceContract` 100%) — **1:1 ΚΛΕΙΔΩΜΕΝΟ** (ιδιοκτήτης 2026-09-07)
+Κάθε domain δένει στο ΔΙΚΟ του ServiceContract (1:1)· η τιμή του SC από το
+`domain_tld_prices` (operation=renewal) του TLD του (ποτέ term < `min_years`), με το per-domain
+`price_override` να νικά. `next_due_date` (= λήξη registrar· ανάθεση χωρίς λήξη ΑΠΑΓΟΡΕΥΕΤΑΙ) →
+`StageServiceRenewal` κόβει **πρόχειρο** («ΠΡΟΣΧ» semantics: ΧΩΡΙΣ ΑΑ — gapless-at-send, αόρατο
+στην πύλη, μηδενικό ίχνος αν ακυρωθεί). **`auto_renew` ΚΛΕΙΔΩΜΕΝΟ (επιλογή β, ιδιοκτήτης
+2026-09-07):** on → auto-stage draft (η ανάθεση το ανάβει — assignment = intent to bill)· **off →
+ΤΙΠΟΤΑ — ούτε προσχέδιο ούτε γκρίνια** (σιωπηλό skip στο sweep, μία συνολική info γραμμή), μόνο το
+worklist «Λήγουν σύντομα»· το domain απλά λήγει. **«Προσχέδιο ανανέωσης τώρα»**
+(`StageRenewalNowAction`, το «Invoice Selected Items» της WHMCS — κουμπί σε Υπηρεσίες + Domains
+λίστα/View): on-demand early staging για τον πελάτη που θέλει να ανανεώσει νωρίς· η ρητή πρόθεση
+ΠΑΡΑΚΑΜΠΤΕΙ το auto_renew=off, ΠΟΤΕ το dead-set (νεκρό όνομα = αχρέωτο από κάθε μονοπάτι)· ο
+cursor προχωρά στην ΕΚΔΟΣΗ, όχι στο staging (open-draft guard κόβει τα διπλά).
+First-Payment vs Recurring = SC `setup_fee` + `amount`.
 
 ### 6.3 Transfer async state machine (drive από `syncTransfer`)
 ```
@@ -335,28 +382,87 @@ register/renew/transfer = εξωτερικά money+state. **adopt-on-retry** (ί
 `syncDomain`/`GET /domains?full_name=` πριν το ξανακαλέσεις, για το «ο registrar χρέωσε, timeout
 πριν το καταγράψει το ekdosi» → διπλοχρέωση/διπλο-renew. Ο reconciler (A5) έρχεται ΜΑΖΙ με το A3.
 
+**Adopt-on-already-renewed — ΔΕΣΜΕΥΤΙΚΟ, ✅ ΥΛΟΠΟΙΗΜΕΝΟ στο A3a (war story ιδιοκτήτη, WHMCS
+2026-09-07):** το κλασικό WHMCS bug που «θεραπεύεται» με χειροκίνητο relid στη MySQL: operator
+πατά Renew τώρα («ανανέωσέ το και σε πληρώνω τέλος του μήνα»), ο πελάτης πληρώνει αργότερα, το
+mark-paid του invoice ξανα-πυροδοτεί το registrar renew → **διπλή ανανέωση/διπλό κόστος**.
+Υλοποίηση (`DomainRenewalService` — ο ΜΟΝΟΣ δρόμος προς `DomainRegistrar::renew()`):
+- Το on-issue hook (`InvoiceObserver`, ΠΡΙΝ το cursor advance) υπολογίζει την περίοδο του
+  παραστατικού από το **SC cursor** (`next_due_date` + έτη κύκλου — ΟΧΙ από την τρέχουσα λήξη
+  του domain: αν ο operator έχει ήδη πατήσει «Ανανέωση», η τρέχουσα λήξη είναι ήδη η νέα και θα
+  στόχευε μία περίοδο παραπέρα = ξανά το bug). Μετά **sync-first**: αν η λήξη του registrar ήδη
+  καλύπτει την περίοδο → **ΥΙΟΘΕΤΕΙ** (log `adopted`, ΚΑΜΙΑ κλήση renew)· αλλιώς renew.
+- **Το κουμπί «Ανανέωση στον registrar» ΔΕΝ προωθεί το billing cursor** (διόρθωση της αρχικής
+  διατύπωσης εδώ — αν προωθούσε, η μετέπειτα χρέωση του πελάτη ΔΕΝ θα γινόταν ποτέ): το cursor
+  προχωρά ΜΟΝΟ στην έκδοση. Η ροή «ανανέωσε τώρα, πλήρωσε μετά»: κουμπί → registrar renew →
+  αργότερα staging+έκδοση → ο πελάτης χρεώνεται κανονικά → το on-issue hook ΥΙΟΘΕΤΕΙ (μηδέν
+  δεύτερο renew). Ο μόνος τρόπος διπλής ανανέωσης = να τη ζητήσεις ρητά δύο φορές από το κουμπί
+  (το modal δείχνει την τρέχουσα λήξη).
+- Αποτυχία renew στην έκδοση: η έκδοση ΣΤΕΚΕΙ (best-effort hook), log `failed` + καμπανάκι
+  operators + το κουμπί είναι το retry path. Αποτυχία του προ-ελέγχου (sync) = ΔΕΝ γράφουμε
+  τυφλά στον registrar — abort. Κάθε απόπειρα (ok/adopted/failed) → `domain_registrar_logs`.
+Ο reconciler (A5) έρχεται ΜΑΖΙ με τα υπόλοιπα A3 slices.
+
 ---
 
 ## 7. Pricing (cost-sync + margin engine)
 
 3-tier resolution: **TLD price → per-customer discount (υπάρχει) → per-domain override (nullable)**.
 
-**Cost-sync** (registrars με `supportsPricingSync`, δηλ. Openprovider): command
-`domains:sync-pricing --tenant --registrar` καλεί `getTldPricing()` → cost (→ **EUR**, system
-currency) γράφεται στο `domain_tld_prices.cost`. **Margin engine:** `margin_type`
-(percentage/fixed) + `margin_value` (π.χ. 20%) + `round_to` → derived sell `price`, με per-TLD
-manual override + toggle «sync grace/redemption fee με το ίδιο markup». grEPP = manual pricing.
-Explicit per-year τιμές (1–10). (Ακριβώς το «TLD Import & Pricing Sync» screen της WHMCS.)
+**Cost-sync (A2c-1, SHIPPED):** command `domains:sync-pricing [--tenant] [--tld]` (manual-run —
+τα κόστη αλλάζουν σπάνια) → `DomainPricingSyncService` καλεί `getTldPricing()` για κάθε ενεργό
+TLD δρομολογημένο σε usable σύνδεση με `supportsPricingSync`. Πειθαρχία γραφής (το ουσιώδες):
+γράφεται **ΜΟΝΟ το `cost`** — sell `price`/`is_enabled` δεν κινούνται ποτέ από sync· γραμμή που
+λείπει γεννιέται cost-only (**is_enabled=false, price=null** → αχρέωτη εκ κατασκευής, το assign
+απαιτεί enabled+priced)· το κόστος προσγειώνεται στη γραμμή του **ελάχιστου term**
+(`max(1, min_years)` — ο registrar κοστολογεί την ελάχιστη περίοδο, .gr = 2ετία). Από OP
+διαβάζουμε το `reseller` block (τι χρεώνεται ο λογαριασμός ΜΑΣ, στο νόμισμά του — συνήθως EUR)·
+operation που δεν κοστολογήθηκε απλώς λείπει, ποτέ 0.00. grEPP = manual pricing.
+
+**Margin engine (ΔΕΝ χτίστηκε — συνειδητά):** τα πραγματικά sell prices είναι manual per-TLD
+(§7.1 — το 20% default της WHMCS δεν το ακολουθεί κανένα υπάρχον TLD), οπότε ο operator βάζει
+τιμή πώλησης με το χέρι δίπλα στο συγχρονισμένο cost. Αν ποτέ χρειαστεί: `margin_type`
+(percentage/fixed) + `margin_value` + `round_to` → derived sell, per-TLD override.
+Explicit per-year τιμές (1–10) στηρίζονται ήδη από το schema.
+
+### 7.1 Γείωση σε πραγματικά WHMCS δεδομένα (screenshots MyIP, 2026-09)
+
+Από τις live οθόνες «TLD Import & Pricing Sync», «Domain Pricing for .gr» και «Domains/TLDS»:
+
+- **Routing επιβεβαιωμένο:** `.gr/.com.gr/.net.gr/.org.gr/.edu.gr/.gov.gr` → grEPP module·
+  ~29 gTLDs/ccTLDs (`.com/.net/.org/.eu/.biz/.info/.name/.cc/.tv/.co.uk/.asia/.me/.de/.es/
+  .nl/.io/.dev/.co/.uk/.vip/.studio/.online/.shop/.ai/.club/.it/.be/.ch/.at`) → Openprovider.
+  **Lookup Provider = Openprovider** (το availability lookup της WHMCS).
+- **Margin defaults σήμερα:** Percentage **20%**, No rounding, Sync redemption/grace fee = **No**.
+  Τα πραγματικά sell prices όμως αποκλίνουν πολύ από το 20% (π.χ. .com cost 9.45 → sell 16.50 =
+  74.6%· .eu 4.60 → 13.50 = 193%· .me 7.49 → 28.50 = 280%) → το 20% είναι απλώς default για νέα
+  TLDs, τα υπάρχοντα είναι manual per-TLD → **το per-TLD override του engine είναι ο κανόνας,
+  όχι η εξαίρεση**.
+- **Automatic Registration = No** στη WHMCS → η MyIP ΗΔΗ δουλεύει operator-gated (δεν
+  auto-register-άρει με την πληρωμή) — το money-timing μας (§6.1) είναι η υπάρχουσα πρακτική.
+- **.gr pricing (πραγματικό):** EUR μόνο, ενεργά ΜΟΝΟ ζυγά έτη 2/4/6/8/10 = 19/38/57/76/95,
+  renewal = ίδια τιμή με register, **transfer = 0.00** (το μητρώο δεν χρεώνει μεταφορά),
+  redemption «—» → επιβεβαιώνει `min_years=2`/πολλαπλάσια 2ετίας/χωρίς redemption fee, και το
+  WHMCS idiom «-1 = disabled term» → το δικό μας `is_enabled` ανά (operation, years).
+- **Redemption fees (OP):** πραγματικά δεδομένα π.χ. .com €96.50, .eu €25.50, .me €112.50,
+  .nl €107.24 — χοντρά ποσά, γι' αυτό το redemption pricing είναι first-class (§3.3).
+- **ID Protection addon:** πωλείται €5.50/EUR στη WHMCS — το addon pricing (DNS mgmt / email
+  fwd / ID protection ως χρεώσιμα add-ons) μένει **deferred μαζί με τα ίδια τα addons**.
+- **Premium Domains = OFF** στη WHMCS → non-goal (§11).
 
 ---
 
 ## 8. Filament UI
 
-### 8.1 Gating (per-tenant + permission)
-Shared trait `GatesOnDomainManagement` με `canAccess()`/`shouldRegisterNavigation()` =
-`Filament::getTenant() instanceof Company && Filament::getTenant()->enable_domain_management &&
-auth()->user()?->can('View:Domain')`. Κάθε Domains resource/page το κουβαλά (δεν υπάρχει
-group-level toggle). Πρότυπο: `ExpenseClassificationRuleResource::canAccess()`.
+### 8.1 Gating (per-tenant + permission) — **cluster, όχι trait**
+Πρότυπο ο **Πυλώνας E**: `app/Filament/Clusters/SupportCluster.php` + `companies.support_enabled`
+(η πειθαρχία του `docs/menu-ia.md`: «κάθε νέος πυλώνας = ΕΝΑ top nav entry, κρυφό αν δεν είναι
+enabled»). Άρα: **`DomainsCluster`** με `canAccess()` = `Filament::getTenant()?->enable_domain_management
+&& canAccessClusteredComponents()` — όλα τα Domains resources/pages γίνονται μέλη του cluster και
+κληρονομούν το gate· κανένα trait ανά resource. Το toggle στο `CompanyForm` σε **δικό του Tab
+«Domains»** (όπως το Tab «Υποστήριξη» με το `support_enabled`), super_admin-only.
+_(Το αρχικό σχέδιο για shared trait `GatesOnDomainManagement` προϋπήρχε του cluster pattern —
+ξεπερασμένο.)_
 
 ### 8.2 `DomainResource` + η πλούσια per-domain View (RICHER από WHMCS)
 Ο ιδιοκτήτης: η WHMCS per-domain οθόνη είναι «φτωχή» (NS + dates + buttons). Η δική μας View
@@ -375,8 +481,9 @@ group-level toggle). Πρότυπο: `ExpenseClassificationRuleResource::canAcce
   registered / **transferred** (`transferred_at`) / expiry / next-due.
 - **Καρτέλα πελάτη — tab «Domains»**: `DomainsRelationManager` στο `CustomerResource` (ίδιο
   pattern με invoices/contracts RMs) — ο operator βλέπει ανά πελάτη τα assigned domains του με
-  status/expiry, με link στην πλήρη View. Gated με το ίδιο `GatesOnDomainManagement` (ο tenant
-  χωρίς domain management δεν βλέπει καν το tab).
+  status/expiry, με link στην πλήρη View. Gated με το ίδιο flag (RM `canViewForRecord()` ελέγχει
+  `enable_domain_management` — ο tenant χωρίς domain management δεν βλέπει καν το tab· τα RMs δεν
+  είναι cluster members, θέλουν δικό τους check).
 - **Reminder history** tab (`domain_reminders`) · **API history** tab (`domain_registrar_logs`,
   «Bridge logs»-style) · shared `ActivityLog`/`Attachments`/`InternalNotes` RMs.
 - Filament-5 idioms: `Schema`/`configure`, `recordActions`/`toolbarActions`, `extends
@@ -387,8 +494,10 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 που λήγουν» (mirror `UpcomingRenewalsTable`).
 
 ### 8.3 Permissions (Shield)
-`company_admin` κληρονομεί αυτόματα τα `Domain*` perms (default-allow, `ADMIN_FORBIDDEN_RESOURCES`).
-`operator` θέλει ρητή εγγραφή στο `OPERATOR_PERMISSION_MAP` (`'Domain' => ['ViewAny','View','Create','Update']`).
+`company_admin` κληρονομεί αυτόματα τα `Domain*` perms (default-allow, `ADMIN_FORBIDDEN_RESOURCES`
+— πλην `DomainRegistrarConnection` που είναι ρητά forbidden/super_admin). `operator` θέλει ρητή
+εγγραφή στο `OPERATOR_PERMISSION_MAP` — **απόφαση ιδιοκτήτη 2026-09-07: Create/Update ΝΑΙ**
+(`'Domain' => ['ViewAny','View','Create','Update']`, ίδια για `DomainTld` — όχι Delete).
 Μετά deploy: `shield:generate` + re-provision.
 
 ---
@@ -404,12 +513,38 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
   (αδέσποτο) → πελάτη, + δέσιμο ServiceContract.
 - **Expiry reminders** — 15/10/5 ημέρες πριν, reuse του auto-email infra, sent-log στο `domain_reminders`.
 - **API history** — `domain_registrar_logs` (request/response/status ανά κλήση), «Bridge logs» tab.
-- **Import** — command `domains:import --tenant`:
-  - **WHMCS `tbldomains`** (customer/τιμή/registrar/reminder linkage, upsert σε `legacy_id`),
-  - **+** registrar sync (Openprovider/grEPP) για επαλήθευση expiry/status/NS.
-  - Ό,τι ΔΕΝ κάνει match σε πελάτη δεν μπλοκάρει το import — μπαίνει **αδέσποτο**
-    (`customer_id=null`, §3.4) και βγαίνει στο worklist «Χωρίς πελάτη» → «Ανάθεση σε πελάτη».
-  - Import-first· manual entry (A1) = fallback, όχι main path.
+- **Import — REGISTRAR-FIRST bootstrap** (απόφαση ιδιοκτήτη 2026-09-07 — «να μην εξαρτιόμαστε
+  από WHMCS db») — **A2c-2 SHIPPED**:
+  - **Κύρια πηγή = ο registrar**: `domains:import-registrar [--tenant] [--connection]` →
+    Openprovider `GET /v1beta/domains` (paginated, 100/σελίδα) + resolve των
+    **registrant/admin/tech/billing handles** (`GET /v1beta/customers/{handle}`, cached ανά run —
+    κοινά handles = ΜΙΑ κλήση· 404 = σιωπηλό «χωρίς aid», 5xx = warn+continue) → κάθε domain
+    μπαίνει **αδέσποτο με γεμάτα `domain_contacts`**, και ο operator κάνει το assign ΧΕΙΡΟΚΙΝΗΤΑ
+    από το worklist «Χωρίς πελάτη». Υλοποίηση: `DomainImportService` — υπάρχοντα rows παίρνουν
+    ΜΟΝΟ registrar truth μέσω του ΙΔΙΟΥ `DomainSyncService::apply` με το nightly sync·
+    auto_renew ΜΟΝΟ στο create (OP `autorenew` on/off, αλλιώς OFF)· επαφές ΜΟΝΟ σε αδέσποτα
+    (μετά την ανάθεση = χώρος του operator, §3.7)· tombstones/διαγραμμένα TLD ποτέ δεν
+    ανασταίνονται· TLD που λείπει auto-δημιουργείται δρομολογημένο στη σύνδεση του import·
+    το domain καρφώνει `registrar_connection_id` στη σύνδεση που αποδεδειγμένα το έχει.
+  - ⚠ **.gr caveat:** το EPP ΔΕΝ έχει list-my-domains command — η αρχική .gr λίστα έρχεται από
+    export του grweb portal: `domains:import-csv <file> --tenant=SLUG` (auto-detect
+    delimiter ,/;/TAB + στηλών από headers «domain/όνομα» & «λήξη/expiry», overrides
+    `--domain-col`/`--expires-col`/`--no-header`, ημερομηνίες Y-m-d και d/m/Y κ.ά., BOM-safe).
+    First-dot split κρατά τα com.gr/net.gr σωστά. TLD που λείπει → manual (η grEPP δρομολόγηση
+    είναι A4)· ΔΕΝ πατά `last_synced_at` (ένα CSV δεν είναι το ρολόι του registrar).
+    `[ΕΠΙΒΕΒΑΙΩΣΗ μορφής export στο πρώτο πραγματικό αρχείο — οι στήλες είναι ρυθμιζόμενες]`
+  - **WHMCS = προαιρετικό βοήθημα**, όχι εξάρτηση: `GetClientsDomains` (πάνω στον υπάρχοντα
+    `WhmcsClient` — «Plugin-API is THE path», ποτέ raw `tbldomains`) μπορεί να προτείνει linkage
+    (userid → `customers.whmcs_client_id`) ως ΥΠΟΔΕΙΞΗ στο assign UI + να γεμίσει `legacy_id`.
+    Το status/expiry ΔΕΝ έρχεται ποτέ από WHMCS — μόνο από registrar sync.
+  - Ό,τι δεν γίνεται assign δεν μπλοκάρει τίποτα — μένει **αδέσποτο** (`customer_id=null`, §3.4),
+    εκτός billing, ορατό στο worklist.
+  - Manual entry (A1) = ο τρόπος να δουλέψει το σύστημα ΠΡΙΝ καν συνδεθεί registrar.
+  - **Per-domain flow (το WHMCS idiom «γράφεις domain → φέρνει στοιχεία»):** δημιουργείς το
+    row (ή υπάρχει ήδη) → «Συγχρονισμός από registrar» στο View τραβά λήξη/NS/status/id ΚΑΙ
+    τις επαφές του (ίδιο pull, χωρίς δεύτερο fetch — `DomainSyncResult.contactHandles` →
+    `DomainImportService::refreshContacts`). Επαφές ΜΟΝΟ σε αδέσποτα (μετά την ανάθεση =
+    χώρος operator, §3.7). Τα κουμπιά Register/Transfer/Renew/EPP-code/Recall = A3/A4.
 
 ---
 
@@ -420,8 +555,8 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 | **A0** Θεμέλιο | `enable_domain_management` flag + nav-gating trait + `DomainRegistrar` contract/registry/creds/Null + `ekdosi.domains.registrars` + `domain_registrar_connections` (super_admin creds) | Ενεργοποιείς tenant → βλέπεις **κενή, gated** περιοχή «Domains» |
 | **A1** Data model + manual CRUD | Όλοι οι πίνακες + `DomainResource` (rich View) + link σε `ServiceContract` + **import** (`tbldomains`) + αδέσποτα/«Ανάθεση σε πελάτη» + Customer tab «Domains» | Το υπάρχον portfolio φορτώνεται/καταχωρείται, expiry+renewals ορατά, **μηδέν registrar API** |
 | **A2** Openprovider read-only | `checkAvailability` + WHOIS (`WhoisLookup`) + `syncDomain`/`syncTransfer` + `getTldPricing` (sandbox) | Nightly `domains:sync` + pricing-sync «ανάβουν»· καμία state-changing εγγραφή |
-| **A3** Openprovider write | register(post-pay)/renew(on-issue)/transfer(in+out, state machine)/NS/glue/contacts(handles+trade/IRTP)/DNSSEC/privacy/lock + renewal billing + grace/redemption + **idempotency + reconciler** | Πλήρης κύκλος end-to-end (sandbox→prod), operator-gated invoices |
-| **A4** grEPP (.gr) | 2ος adapter (EPP), .gr validation rules (2ετία/no-privacy/no-lock/registry-auth-code/homograph) | .gr/.ελ end-to-end· το abstraction αποδεδειγμένο (2ος registrar = adapter, όχι rewrite) |
+| **A3** Openprovider write ✅ (πλην A5-reconciler & DNSSEC keys) | register(post-pay) ✅ /renew(on-issue) ✅ /transfer(in+out, state machine) ✅ /NS ✅ /contacts(handles) ✅ /privacy ✅ /lock ✅ + **Get EPP/auth code** ✅ (το «Get EPP Code» της WHMCS — transfer-out aid) + renewal billing ✅ + redemption **restore** ✅ (sync-first adopt, χρέωση πελάτη χειροκίνητη v1) + **idempotency + adopt-on-already-renewed (§6.6 BINDING)** ✅ — όλα πάνω στο κοινό `GuardsRegistrarWrites` skeleton· DNSSEC key-management + glue → BACKLOG· reconciler → A5 | Πλήρης κύκλος end-to-end (sandbox→prod), operator-gated invoices |
+| **A4** grEPP (.gr) | 2ος adapter (EPP), .gr validation rules (2ετία/no-privacy/no-lock/registry-auth-code/homograph) + **Recall** (ανάκληση διαγραφής εντός **5 ημερών** — δουλεύει στο .gr, το 'Recall (5 days)' κουμπί της WHMCS/grEPP· owner-confirmed χρήσιμο) + **auth code (πληροφοριακό)** για transfer-out | .gr/.ελ end-to-end· το abstraction αποδεδειγμένο (2ος registrar = adapter, όχι rewrite) |
 | **A5** Polish | bulk availability search, portfolio dashboard, **registrar↔local reconciliation** (mirror myDATA reconcile), «Μεταφορά ιδιοκτησίας», reminders polish | Δύο clocks reconciled· worklist ασυμφωνιών |
 
 ---
@@ -431,15 +566,29 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 **Deferred (flags/hooks μένουν, λειτουργία μετά):**
 - **DNS zone/record hosting** (A/AAAA/MX/TXT) + **email forwarding** — capability flags στο
   `domain_tlds` τώρα, `getDns/setDns` στο contract, αλλά UI/λειτουργία post-v1.
-- **Customer portal** (Πυλώνας D) — ξεχωριστό doc/phase· εκεί το transfer-out γίνεται self-service.
+- **Customer portal «Τα domains μου»** (`/user`, Flux UI — Πυλώνας D): λίστα/expiry/NS view,
+  αργότερα self-service renew-pay + transfer-out. **Build-ready ΑΠΟ ΤΩΡΑ (A1 discipline):**
+  (α) κάθε domain write = `App\Actions\*` καλέσιμο κι εκτός Filament, (β) read-scoping με το
+  grant-scoped fail-closed μοτίβο της πύλης (όπως «Τα αιτήματά μου»/παραστατικά — ρητό
+  company+customer, 404 σε ξένο id), (γ) τίποτα panel-coupled στα services. Έτσι το portal
+  γίνεται «μία σελίδα», όχι refactor.
 - **CentralNic** adapter — legacy (η MyIP έφυγε)· μπαίνει αργότερα ως drop-in αν χρειαστεί.
 - **Multi-currency invoicing** — EUR settlement v1· USD = display.
 
 **Build-time unknowns (verify πριν το coding):**
-- FORTH/grEPP EPP host/port + OT&E credentials (δίνονται σε accredited registrars — η MyIP τα έχει).
+- Μέγεθος/σύνθεση portfolio (πόσα domains ανά TLD/registrar) — βγαίνει από `tbldomains` πριν το A1.
+- grEPP: **UAT credentials + IP whitelisting** στο Μητρώο (endpoints πλέον ΓΝΩΣΤΑ —
+  `docs/domains/grepp/README.md` §1)· + τα `[ΕΠΙΒΕΒΑΙΩΣΗ]` εκείνου του οδηγού (contact-ID prefix
+  μας, άρτια έτη 2–10 από τον Οδηγό v4.3, WHOIS REST doc, login χωρίς `<svcExtension>`).
 - Openprovider bearer token TTL (~24h· cache + re-auth σε 401 ανεξαρτήτως).
-- .gr «trade» (registrant change) μηχανική/τέλη· .gr WHOIS GDPR auto-redaction.
-- Sandbox accounts (Openprovider `*.sandbox.openprovider.nl` + grEPP OT&E) πριν το A2/A4.
+- .gr αλλαγή δικαιούχου: μηχανική ΓΝΩΣΤΗ (`ownerChange`/`ownerNameChange`, μη ανακλήσιμα,
+  .gov.gr/γεωγραφικά → ΕΕΤΤ) — **τέλη** άγνωστα· .gr WHOIS GDPR auto-redaction.
+- Sandbox accounts (Openprovider `*.sandbox.openprovider.nl` + grEPP UAT) πριν το A2/A4.
+
+**Λυμένα (αποφάσεις/δεδομένα — μην ξανανοίξουν χωρίς λόγο):**
+- DNS Management + Email Forwarding φαίνονται ενεργά στα OP TLDs της WHMCS, αλλά ΑΠΟΦΑΣΗ
+  ιδιοκτήτη (2026-09-07): εμπορικές υπηρεσίες για όποιον τις παρέχει — **τα αγνοούμε για τώρα**,
+  το deferred ισχύει.
 
 **Πάντα:** operator-gated legal docs (ποτέ auto-AADE)· sandbox-first + mock-HTTP tests (mirror
 `MyDataSubmitterSafetyTest`)· κάθε shipped slice → `FEATURES.md` + `CHANGELOG.md` + move BACKLOG item.
@@ -451,8 +600,20 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
   · `app/Services/EInvoice/ProviderTransportRegistry.php` · `app/Models/BillingConnection.php` ·
   `app/Support/Billing/SourceCapabilities.php` · `app/Actions/StageServiceRenewal.php` ·
   `app/Casts/MaybeEncrypted.php` · `app/Services/TenantRoleProvisioner.php` · `config/ekdosi.php`.
-- Openprovider: module `openprovider/Openprovider-WHMCS-domains`, swagger `openprovider/api-documentation`
-  (`domain/auth/dns/reseller-customer.swagger.json`).
+- Openprovider (org `github.com/openprovider`, χαρτογραφημένο 2026-09-07):
+  - `api-documentation` — το swagger/δημόσιο API reference (**η κύρια πηγή** του §4.3 mapping)·
+    ενεργό (upd. 2026-09).
+  - `Openprovider-WHMCS-domains` — το module που τρέχει η MyIP σήμερα· ενεργό (1141 commits)·
+    reference για real-world semantics (sync statuses, transfer completion→renewal, TLD pricing
+    sync μέσω WHMCS cron)· **χωρίς ορατή άδεια → όχι copy κώδικα**.
+  - `rest-client-php` — επίσημος PHP client (Guzzle ^7.4)· **beta + χωρίς άδεια → reference only**,
+    όχι dependency (βλ. §4.3 απόφαση transport).
+  - `openprovider-mcp` (MIT) — MCP server για το OP API· άχρηστο για την app, πιθανώς χρήσιμο
+    ως dev tooling σε AI sessions.
+  - Λοιπά (WHMCS SSL/PremiumDNS/Email/Plesk, Blesta, billmanager, το αρχαίο `op-whmcs` 2020) —
+    εκτός scope v1.
 - WHMCS registrar function index: developers.whmcs.com/domain-registrars (Function Index, Domain
   Syncing, TLD & Pricing Sync).
 - .gr/.ελ: EETT (regulator) + ICS-FORTH (registry) — 2yr term, no privacy, registry-emailed auth code, .ελ = xn--qxam.
+- **grEPP υλοποίηση: `docs/domains/grepp/`** — οδηγός (`README.md`), επίσημα v4.3 XML examples +
+  XSDs, reference `EppClient.java` + PDF του Μητρώου, HARICA/GEANT TLS bundle (δημόσια certs).

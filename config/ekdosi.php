@@ -5,6 +5,7 @@ use App\Services\Backup\Destinations\LocalBackupDestination;
 use App\Services\Backup\Destinations\S3BackupDestination;
 use App\Services\Backup\Destinations\SftpBackupDestination;
 use App\Services\Billing\Sources\WhmcsBillingSource;
+use App\Services\Domains\Registrars\OpenproviderRegistrar;
 use App\Services\EInvoice\Transports\InvoSignTransport;
 use App\Services\Payments\Gateways\EurobankGateway;
 use App\Services\Payments\Gateways\ManualPaymentGateway;
@@ -159,6 +160,12 @@ return [
         // live («Test σύνδεσης» / MCP support_imap). Every 5 min when armed.
         'tickets_poll_imap_enabled' => env('EKDOSI_SCHEDULE_TICKETS_POLL_IMAP', false),
         'tickets_poll_imap_cron' => env('EKDOSI_TICKETS_POLL_IMAP_CRON', '*/5 * * * *'),
+
+        // domains:sync — nightly registrar-truth pull (expiry/status/NS) for
+        // domain-enabled tenants. READ-ONLY at the registrar. OFF by default —
+        // enable once a real registrar connection is configured.
+        'domain_sync_enabled' => env('EKDOSI_SCHEDULE_DOMAIN_SYNC', false),
+        'domain_sync_cron' => env('EKDOSI_DOMAIN_SYNC_CRON', '0 5 * * *'),
 
         // whmcs:reconcile-payments — READ-ONLY detector: recompute the worklist
         // of open «επί πιστώσει» invoices that WHMCS now reports Paid, cache it
@@ -473,6 +480,55 @@ return [
                 'aade_code' => '030',
                 'licence_no' => '2025_05_130GVSolutions_001_iNVO Sign_V1_07052025',
             ],
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Domains (Πυλώνας A) — docs/domains/README.md
+    |--------------------------------------------------------------------------
+    |
+    | Map of registrar key → DomainRegistrar adapter, resolved by
+    | DomainRegistrarRegistry. A domain_registrar_connections row's `registrar`
+    | key selects the adapter its API calls go through. EMPTY by default — the
+    | 'manual' key (and every unknown key) resolves to NullDomainRegistrar,
+    | which throws on API operations (never a faked registrar success). The real
+    | adapters drop in here with one line + one class each: 'openprovider' (A2)
+    | and 'grepp' (A4). No core edit. (Mirrors einvoice.providers.)
+    |
+    */
+    'domains' => [
+        'registrars' => [
+            'openprovider' => OpenproviderRegistrar::class, // A2: READ-ONLY adapter
+            // 'grepp'     => App\Services\Domains\Registrars\GrEppRegistrar::class,        // A4
+        ],
+
+        /*
+        | Per-registrar credential field schema for the connection form (the
+        | einvoice `provider_fields` idiom): labeled inputs, no raw JSON.
+        | `secret` fields are WRITE-ONLY in the UI (never round-trip to the
+        | browser). Stored into the encrypted domain_registrar_connections.config
+        | blob — adding a registrar's fields never needs a schema change.
+        */
+        'registrar_fields' => [
+            'openprovider' => [
+                'username' => ['label' => 'Username', 'secret' => false],
+                'password' => ['label' => 'Password', 'secret' => true],
+            ],
+            // 'grepp' => EPP host/user/pass — A4.
+        ],
+
+        /*
+        | Human labels for the connection «Registrar» dropdown. 'manual' is always
+        | offered (the API-less connection domains attach to when managed by hand);
+        | a key listed here is SELECTABLE (and its credentials enterable) before
+        | its adapter class is wired above — until then «Έλεγχος σύνδεσης» and any
+        | API action fail loudly via the Null adapter (never silently).
+        */
+        'registrar_labels' => [
+            'manual' => 'Manual (χωρίς API)',
+            'openprovider' => 'Openprovider',
+            'grepp' => 'grEPP — Μητρώο .gr/.ελ (FORTH)',
         ],
     ],
 

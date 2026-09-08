@@ -3,7 +3,9 @@
 namespace App\Console\Commands;
 
 use App\Actions\StageServiceRenewal;
+use App\Enums\DomainStatus;
 use App\Models\Company;
+use App\Models\Domain;
 use App\Models\ServiceContract;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -88,7 +90,7 @@ class StageServiceRenewals extends Command
         $verb = $dryRun ? 'would stage' : 'staged';
         $this->newLine();
         $this->info("Done. {$verb} {$totalStaged} renewal draft(s)"
-            .($totalSkipped > 0 ? "; skipped {$totalSkipped} (no invoice type)" : '')
+            .($totalSkipped > 0 ? "; skipped {$totalSkipped} (χωρίς τύπο παραστατικού ή νεκρό domain — see warnings)" : '')
             .($totalErrors > 0 ? "; {$totalErrors} error(s) — see log" : '')
             .'.');
 
@@ -144,8 +146,57 @@ class StageServiceRenewals extends Command
         $skipped = 0;
         $errors = 0;
 
+        // Domains pillar guard: a contract that IS a domain's 1:1 renewal clock
+        // must not stage while the domain is dead (transferred_away/cancelled/
+        // deleted — money-wrong direction: billing a name the tenant no longer
+        // holds). One query, keyed by contract. docs/domains/README.md §6.
+        $domainsByContract = Domain::query()
+            // withTrashed: a soft-deleted domain's still-Active contract must
+            // ALSO be blocked — a trashed name is not billable either.
+            ->withTrashed()
+            ->where('company_id', $tenant->id)
+            ->whereIn('service_contract_id', $due->pluck('id'))
+            ->get()
+            ->keyBy('service_contract_id');
+
+        $noRenew = 0;
+
         foreach ($due as $contract) {
             $label = "#{$contract->id} {$contract->customer?->name} — ".($contract->description ?: 'υπηρεσία');
+
+            $domain = $domainsByContract->get($contract->id);
+
+            // auto_renew=off (owner decision 2026-09-07): the domain is meant
+            // to LAPSE — no draft, no per-row nagging; the «Λήγουν σύντομα»
+            // worklist is the only surface. SILENT: this is a normal state,
+            // not an anomaly.
+            if ($domain !== null && ! $domain->auto_renew) {
+                $noRenew++;
+
+                continue;
+            }
+
+            // Blocked = the DEAD set (trashed/terminal) + redemption (its money
+            // is the A3 restore-fee flow, not a plain renewal draft). A pending
+            // register/transfer domain still stages — the tenant is ACQUIRING
+            // the name and its first period bills normally.
+            $blocked = $domain !== null && ($domain->trashed()
+                || $domain->status->isTerminal()
+                || $domain->status === DomainStatus::Redemption);
+            if ($blocked) {
+                $skipped++;
+                $state = $domain->trashed() ? 'διαγραμμένο' : $domain->status->getLabel();
+                $this->warn("  · {$label}: το domain {$domain->fqdn} είναι «{$state}» — δεν χρεώνουμε, skipped.");
+                Log::warning('services:stage-renewals skipped a contract — domain not renewable', [
+                    'company_id' => $tenant->id,
+                    'slug' => $tenant->slug,
+                    'service_contract_id' => $contract->id,
+                    'domain' => $domain->fqdn,
+                    'domain_status' => $domain->status->value,
+                ]);
+
+                continue;
+            }
 
             // A contract without a renewal type would make the action throw.
             // Count + warn, never hand it to the action.
@@ -196,6 +247,11 @@ class StageServiceRenewals extends Command
                     'error' => $e->getMessage(),
                 ]);
             }
+        }
+
+        if ($noRenew > 0) {
+            // One quiet info line per tenant (never per row): these lapse by design.
+            $this->line("  · {$noRenew} domain(s) χωρίς αυτόματη ανανέωση — καμία χρέωση, αφήνονται να λήξουν.");
         }
 
         return [$staged, $skipped, $errors];

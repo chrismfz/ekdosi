@@ -18,7 +18,176 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Domains πυλώνας (Πυλώνας A) — A0 θεμέλιο.** Νέο per-tenant knob `enable_domain_management`
+  (default OFF, Tab «Domains» στη φόρμα εταιρείας, super_admin) που εμφανίζει το gated cluster
+  «Domains» — για όλους τους άλλους tenants ο πυλώνας είναι τελείως αόρατος. Μέσα: «Συνδέσεις
+  registrar» (super_admin-only — κουβαλούν credentials, `config` encrypted at rest) με «Έλεγχος
+  σύνδεσης». Το modular seam: contract `DomainRegistrar` + `DomainRegistrarRegistry`
+  (config-driven `ekdosi.domains.registrars`, κενό) + `NullDomainRegistrar` = ο first-class
+  **«Manual (χωρίς API)»** registrar που ρίχνει typed `DomainRegistrarNotConfigured` σε κάθε
+  API ενέργεια — ποτέ ψεύτικη επιτυχία. Openprovider (A2) / grEPP (A4) = μία γραμμή config +
+  μία κλάση ο καθένας. Design: `docs/domains/README.md`.
+- **Domains — A1a data model + κατάλογος TLD.** Οι 5 πίνακες του πυρήνα (`domain_tlds` με
+  κανόνες/routing ανά TLD, `domain_tld_prices` με ρητή τιμή ανά ενέργεια×έτος×νόμισμα + το
+  «-1 disables» ως toggle, `domains` με nullable `customer_id` = αδέσποτο & δύο ορθογώνια
+  ρολόγια, `domain_nameservers`, `domain_contacts` ένα ανά τύπο) + enum `DomainStatus`
+  (με `transferred_away`) + resource **«TLDs & τιμές»** στο cluster (operator Create/Update,
+  GuardedDelete όταν υπάρχουν domains). Ο operator μπαίνει στο `OPERATOR_PERMISSION_MAP`
+  για Domain/DomainTld.
+- **Domains — A1b portfolio CRUD + ανάθεση + καρτέλα πελάτη.** Resource «Domains» με work tabs
+  (Ενεργά / Λήγουν σύντομα / **Χωρίς πελάτη** + nav badge αδέσποτων), χειροκίνητη καταχώρηση
+  (sld+TLD από κατάλογο, fqdn derived), View με inline Επαφές (registrant/admin/tech/billing,
+  μία ανά τύπο) + Nameservers + σημειώσεις/συνημμένα/ιστορικό. **«Ανάθεση σε πελάτη»**
+  (`AssignDomainToCustomer` — guarded action με lock, δημιουργεί το 1:1 ServiceContract:
+  τιμή = per-domain override ή η ενεργή τιμή ανανέωσης του TLD, κύκλος από τα έτη της
+  (.gr 2ετία = biennial), `next_due_date` = η λήξη του registrar) και **«Μεταφορά ιδιοκτησίας»**
+  (νέος πελάτης + το SC τον ακολουθεί· τα ιστορικά παραστατικά μένουν — νομικό αρχείο).
+  Tab «Domains» στην καρτέλα πελάτη (κρυφό σε tenants χωρίς τον πυλώνα). Στο αδέσποτο row
+  φαίνεται ο registrant (όνομα/email) ως βοήθημα χειροκίνητης συσχέτισης.
+- **Domains — A2a Openprovider adapter (READ-ONLY) + credentials.** Πρώτος πραγματικός registrar:
+  `OpenproviderRegistrar` (auth → cached bearer ~6h με single re-login σε 401, fail-safe
+  routing: ΜΟΝΟ ρητό `production` χτυπά το live API, sandbox αλλιώς) με `ping` + `checkAvailability`.
+  **Σκόπιμα ΧΩΡΙΣ κανένα mutating endpoint** (register/renew/transfer ΔΕΝ υπάρχουν στην κλάση
+  μέχρι το A3 — test το επιβάλλει), ώστε production credentials να είναι ακίνδυνα από την πρώτη
+  μέρα. Credential fields στη φόρμα σύνδεσης από config `registrar_fields` (το einvoice idiom):
+  labeled inputs, secrets **write-only** (ποτέ δεν ξαναφορτώνονται στο browser· κενό = αμετάβλητο).
+  Mock-HTTP tests (auth/routing/never-throw ping/availability parsing/401 retry/error surfacing).
+- **Domains — A2b registrar sync + availability στο UI.** `domains:sync [--tenant]` (scheduler-gated
+  `EKDOSI_SCHEDULE_DOMAIN_SYNC` default OFF, καθημερινό 05:00) τραβά την αλήθεια του registrar ανά
+  domain: λήξη, NS delegation, **υιοθέτηση του registrar id** (resolve μέσω `?full_name=` την πρώτη
+  φορά), status μόνο σε confident mapping (ACT/DEL/PEN — άγνωστο = κρατά το τοπικό + raw στο
+  module_meta)· αποτυχίες γράφονται στο `sync_error` ανά row (ορατό ⚠ στο View) και δεν σταματούν
+  τον υπόλοιπο tenant. Κουμπί **«Συγχρονισμός από registrar»** στο View και **«Έλεγχος
+  διαθεσιμότητας»** στη λίστα (δρομολόγηση μέσω TLD, gated σε Create:Domain). Tests με
+  `Http::preventStrayRequests()` — κανένα live registrar call στο CI, ποτέ. **Guards (review):**
+  το sync δεν τρέχει/δεν πατά ποτέ operator-terminal statuses (ακυρωμένα/transferred_away — τα
+  δύο ρολόγια μένουν ορθογώνια· το registrar-set Deleted συνεχίζει να παρακολουθείται για
+  redemption restore)· «Ανενεργή» σύνδεση (mode off ή inactive) = καμία API κλήση· stale registrar
+  id → by-name resolve + υιοθέτηση του νέου id· NS snapshot ατομικό· λάθος credentials βγάζουν το
+  μήνυμα του Openprovider (διακριτό από outage) με ΜΙΑ αποτυχημένη login ανά run.
+- **Domains — View header «Τα δύο ρολόγια».** Η σελίδα κάθε domain ανοίγει με infolist σύνοψη:
+  ταυτότητα/πελάτης/registrar (routing-aware badge, ίδια απάντηση με το sync), **λήξη registrar
+  δίπλα στην επόμενη χρέωση της υπηρεσίας** (+ ποσό/κύκλος) — η πειθαρχία registrar-truth ≠
+  billing clock ορατή με μια ματιά — ημερομηνίες καταχώρησης/μεταφοράς, flags, τελευταίο sync
+  με το σφάλμα του. Routing/label/«λήγει σύντομα» παράθυρο κεντρικοποιήθηκαν
+  (`Domain::effectiveRegistrarConnection/EXPIRING_SOON_DAYS`, `connectionLabel`) ώστε λίστα,
+  View και sync να μη διαφωνούν ποτέ· «λήγει σήμερα» ≠ «έληξε» (strict-before-today).
+- **Domains — A2c-1 pricing cost-sync.** `domains:sync-pricing [--tenant] [--tld]` (manual-run)
+  τραβά το κόστος ανά TLD από registrars με `supportsPricingSync` (Openprovider: το `reseller`
+  price block = τι χρεώνεται ο λογαριασμός μας). Πειθαρχία: γράφεται **ΜΟΝΟ το `cost`**
+  (τιμή πώλησης/is_enabled δεν κινούνται ποτέ από sync), γραμμές που λείπουν γεννιούνται
+  **ανενεργές + απούλητες** (αχρέωτες εκ κατασκευής), το κόστος πάει στη γραμμή του ελάχιστου
+  term (.gr → years=2). Ρητό `--tenant`/`--tld` που δεν βρίσκει τίποτα = exit FAILURE.
+- **Domains — A2c-2 registrar-first import.** Δύο δρόμοι bootstrap (README §9, «να μην
+  εξαρτιόμαστε από WHMCS db»): (α) `domains:import-registrar [--tenant] [--connection]` — paginated
+  λίστα του portfolio + resolve των contact handles από κάθε import-capable σύνδεση (Openprovider)·
+  (β) `domains:import-csv <file> --tenant=SLUG` — για registrars χωρίς listing API (.gr: grweb
+  export· auto-detect delimiter/στηλών + `--domain-col`/`--expires-col`/`--no-header`, ελληνικές
+  ημερομηνίες d/m/Y). Κοινή πειθαρχία: νέα domains = **αδέσποτα** (customer_id null, auto_renew
+  OFF — επιλογή β) με γεμάτες επαφές ως assign-aid· υπάρχοντα rows παίρνουν ΜΟΝΟ registrar truth
+  (μέσω του ΙΔΙΟΥ `DomainSyncService::apply` με το nightly sync — ποτέ customer/auto_renew/
+  overrides)· επαφές μόνο σε αδέσποτα (μετά την ανάθεση = χώρος του operator)· tombstones και
+  διαγραμμένα TLD δεν ανασταίνονται ποτέ· TLD που λείπει auto-δημιουργείται (registrar import →
+  δρομολογημένο στη σύνδεση, CSV → manual). Σπασμένο contact handle warn+continue· re-runnable
+  upsert σε (company, fqdn)· ρητά no-op runs = exit FAILURE.
+- **Domains — A2c-3 sealed export συνδέσεων registrar.** Τα `domain_registrar_connections`
+  μπήκαν στο per-company portability bundle μέσω του sealed μηχανισμού των payment gateways
+  (νέο bundle key `domain_connections`): μεταδεδομένα (registrar/label/mode/active) καθαρά, τα
+  encrypted creds **passphrase-sealed** (ποτέ raw APP_KEY ciphertext), re-encrypt κάτω από το
+  APP_KEY του στόχου στο import. Idempotent ανά (company, registrar, label) με consumed-tracking
+  (διπλές ταυτότητες → διαφορετικά rows)· tombstones δεν ταξιδεύουν και δεν ανασταίνονται·
+  additive bundle schema (παλιά bundles εισάγονται κανονικά).
+- **Domains — «Συγχρονισμός» με επαφές (το WHMCS per-domain flow).** Το κουμπί «Συγχρονισμός
+  από registrar» στο View τραβά πλέον ΚΑΙ τις registrant/admin/tech/billing επαφές του domain
+  (ίδιο pull — τα handles έρχονται με το ίδιο payload), μόνο σε **αδέσποτα** rows (μετά την
+  ανάθεση οι επαφές είναι χώρος του operator). Αποτυχία επαφής = warning, δεν ρίχνει το sync.
+  Στο design μπήκαν ρητά για A3/A4 τα **Get EPP/auth code** και το **Recall** (.gr ανάκληση
+  διαγραφής εντός 5 ημερών) — owner-confirmed χρήσιμα από τη WHMCS χρήση.
+- **Domains — A3a: το πρώτο registrar WRITE (renew) με το adopt-on-already-renewed guard.**
+  `DomainRenewalService` = ο ΜΟΝΟΣ δρόμος προς `DomainRegistrar::renew()` (§6.6 ΔΕΣΜΕΥΤΙΚΟ —
+  το WHMCS double-renew/relid war story): **sync-first** πριν από κάθε renew· αν η λήξη του
+  registrar ήδη καλύπτει την περίοδο → **ΥΙΟΘΕΤΕΙ** (log `adopted`, καμία κλήση)· η περίοδος
+  του on-issue flow υπολογίζεται από το **SC cursor**, όχι την τρέχουσα λήξη (αλλιώς το κουμπί
+  «Ανανέωση» πριν την έκδοση θα ξανα-δημιουργούσε το bug). Νέο on-issue hook στο
+  `InvoiceObserver` (πριν το cursor advance, best-effort — αποτυχία registrar δεν αγγίζει ποτέ
+  την έκδοση: log + καμπανάκι + το κουμπί ως retry). Κουμπί **«Ανανέωση στον registrar»** στο
+  View (confirm modal με λήξη/έτη/προειδοποίηση χρέωσης — ΔΕΝ προωθεί το billing cursor, η
+  χρέωση μένει οφειλόμενη). Νέος πίνακας **`domain_registrar_logs`** (API history §9): κάθε
+  write ok/adopted/failed με sanitized request/response — κανένα state-changing call άγραφο.
+  Adapter: `POST /v1beta/domains/{id}/renew` + post-renew re-fetch· το read-only guard test
+  έγινε «write surface = ακριβώς ό,τι έχει προσγειώσει slice» (μόνο renew).
+- **Domains — A3b: register (operator-gated, adopt-on-retry).** Κουμπί **«Καταχώρηση στον
+  registrar»** σε domains «Εκκρεμεί καταχώρηση» (§6.1 post-payment: ο operator αποφασίζει πότε —
+  η υπάρχουσα πρακτική «Automatic Registration = No»). `DomainRegistrationService` (ο μοναδικός
+  δρόμος): **availability πρώτα** (transport failure = abort, ποτέ τυφλή καταχώρηση)· κατειλημμένο
+  αλλά ΔΙΚΟ μας (retry μετά από timeout-που-χρέωσε ή καταχώρηση από το panel) → **adopt** χωρίς
+  δεύτερη χρέωση· κατειλημμένο από τρίτο → loud refusal· ελεύθερο → register. Guards: μόνο
+  pending status, επαφή registrant με email, ≥2 nameservers, per-domain lock· κάθε απόπειρα
+  (ok/adopted/failed, refusals included) στο API history. Adapter: ensure reusable contact
+  handles (`POST /v1beta/customers`, τα υπάρχοντα δεν ξανα-δημιουργούνται ποτέ — persist στο
+  contact) → `POST /v1beta/domains` με **autorenew πάντα off** (το billing ρολόι είναι δικό μας).
+- **Domains — A3c: εισερχόμενες μεταφορές + κωδικός EPP.** Κουμπί **«Μεταφορά στον registrar»**
+  σε domains «Εκκρεμεί μεταφορά» (§6.3): auth code στο modal (password field), `POST
+  /v1beta/domains/transfer` (period 1, autorenew off), **ασύγχρονο** — το row μένει «Εκκρεμεί
+  μεταφορά» και το nightly sync ολοκληρώνει (ACT → Active+λήξη) ή **⚠-φλαγκάρει** την αποτυχία
+  (FAI → sync_error, το status μένει για τον operator). Adopt-on-retry όπως στο register (probe
+  πρώτα — in-flight/ολοκληρωμένη μεταφορά υιοθετείται, ποτέ δεύτερη χρέωση· FAI tombstone →
+  fresh restart). **Ο auth code δεν γράφεται ΠΟΤΕ σε log.** Κουμπί **«Κωδικός EPP»**
+  (transfer-out aid, operator-gated §6.3): ανάκτηση με audit log ΧΩΡΙΣ τον κωδικό (persistent
+  notification στον operator). Sync fix: το OP `REQ` δεν υποβιβάζει πλέον «Εκκρεμεί μεταφορά»
+  σε «Εκκρεμεί καταχώρηση» (κάλυπτε και τα δύο). Κοινό `createDomainObject` για register+transfer.
+- **Domains — A3d: management writes (NS/lock/privacy/contacts) + restore από redemption.**
+  Νέο trait **`GuardsRegistrarWrites`** = το ΕΝΑ write-skeleton (audit logger, log-then-throw
+  refusal, adapter resolve, cross-tenant sweep, per-domain lock) — renewal/registration/transfer
+  ΞΑΝΑΓΡΑΦΗΚΑΝ πάνω του (το δεσμευτικό extraction του A3c review· behavior-identical, ίδια
+  suites πράσινες). Νέο **`DomainManagementService`** (μοναδικός δρόμος στο
+  `updateDomain`/`restore`): View ➜ ActionGroup «Registrar» με «Αποστολή nameservers» (full
+  replacement, ≥2 hosts), «Κλείδωμα/Ξεκλείδωμα μεταφοράς», «WHOIS privacy», «Αποστολή επαφών»
+  (ensure handles → reassign) — ένα `PUT /v1beta/domains/{id}` ανά ενέργεια, per-operation audit
+  actions, τα τοπικά mirrors (`transfer_lock`/`whois_privacy`) γράφονται ΜΟΝΟ μετά την αποδοχή
+  του registrar. **«Επαναφορά από redemption»** (Redemption/Deleted μόνο, danger confirm):
+  sync-first — ήδη-ζωντανό record = **adopt χωρίς χρέωση**· αλλιώς `POST /{id}/restore`
+  (πραγματική, συνήθως μεγάλη χρέωση)· χρέωση πελάτη χειροκίνητη v1. DNSSEC key-management
+  σκόπιμα εκτός v1 (BACKLOG). Gate fixes (r1): το renew πήρε επιτέλους και αυτό το cross-tenant
+  sweep (η ανανέωση σε όνομα ΑΛΛΟΥ tenant στο κοινό reseller account αρνείται — ήταν το μόνο
+  write χωρίς το guard)· τα `transfer_lock`/`whois_privacy` είναι πλέον και **sync truth**
+  (`is_locked`/`is_private_whois_enabled` → mirrors διορθώνονται από τον registrar, όχι μόνο
+  από το δικό μας PUT)· το restore adopt-άρει ΜΟΝΟ σε καθαρό ACT (ενδιάμεση/άγνωστη κατάσταση
+  → ηχηρή άρνηση, ποτέ ψεύτικο «επανήλθε»)· και τα config-refusals του «Κωδικός EPP» γράφουν
+  πλέον audit row.
+
+### Added
+- **Domains/Υπηρεσίες — «Προσχέδιο ανανέωσης τώρα»** (το «Invoice Selected Items» της WHMCS):
+  on-demand early staging του επόμενου προσχεδίου ανανέωσης (κουμπί σε Υπηρεσίες + Domains
+  λίστα/View) για πελάτη που θέλει να ανανεώσει νωρίτερα. Η ρητή πρόθεση παρακάμπτει το
+  auto_renew=off, ποτέ το dead-set· ΠΡΟΣΧ semantics (χωρίς ΑΑ/myDATA)· open-draft guard κόβει
+  τα διπλά· ο cursor προχωρά στην έκδοση.
+
+### Changed
+- **Domains — `auto_renew` = επιλογή «β» (απόφαση ιδιοκτήτη).** off = το domain αφήνεται να λήξει:
+  ΚΑΝΕΝΑ προσχέδιο, καμία ανά-γραμμή γκρίνια στο sweep (σιωπηλό skip + μία info γραμμή ανά tenant)
+  — μόνο το worklist «Λήγουν σύντομα». Η «Ανάθεση σε πελάτη» ανάβει το auto_renew (ανάθεση =
+  πρόθεση χρέωσης)· τα αδέσποτα imports μένουν off.
+
+### Fixed
+- **Domains — pre-A2c review σκληρύνσεις (2 γύροι).** «Νεκρό» domain (transferred_away/ακυρωμένο/
+  διαγραμμένο — και soft-deleted) δεν χρεώνει ΠΟΤΕ: το `services:stage-renewals` παρακάμπτει το
+  συμβόλαιό του με warning, και η «Μεταφορά ιδιοκτησίας» το αρνείται (ο ίδιος guard με την ανάθεση,
+  σε όλη τη ζωή του domain). Το TLD string κλειδώνει server-side όταν έχει domains (και tombstones).
+  Ληγμένο domain γίνεται «Ληγμένο» από το sync ακόμα κι όταν ο registrar αναφέρει ACT ή άγνωστο
+  status. `domains:sync --limit` μετρά syncable απόπειρες. Friendly validation στα διπλά price rows
+  + κανονικοποίηση νομίσματος στο write. **Γύρος 3 (full-concept sweep):** ανάθεση αρνείται domain
+  ΧΩΡΙΣ ημερομηνία λήξης (θα έκοβε πρόχειρο ανανέωσης το ίδιο βράδυ)· η τιμή καταλόγου σέβεται το
+  ελάχιστο term του TLD (αδέσποτη 1ετής τιμή σε .gr δεν φτιάχνει ετήσιο συμβόλαιο)· ο registrar
+  key σύνδεσης κλειδώνει και server-side· tombstones δεν συγχρονίζονται ούτε χειροκίνητα· το
+  staging-skip αφορά μόνο τα νεκρά+redemption (τα pending χρεώνουν κανονικά)· TrashedFilter/restore
+  στις συνδέσεις· ενιαίο connection label παντού (helper, όχι αντίγραφα).
+
 ### Security
+- **Το Openprovider bearer token αποθηκεύεται ΚΡΥΠΤΟΓΡΑΦΗΜΕΝΟ στην cache** (με DB cache driver
+  ένα plaintext token θα κατέληγε σε κάθε dump του πίνακα `cache`), με αυτόματο re-login σε
+  stale/ξένο ciphertext.
 - **IMAP poller memory hardening (availability, Πυλώνας E).** Ο poller διατρέχει πλέον τα unseen **ένα-ένα**
   (`chunked(…, 1)`, headers-only) — κάθε chunk φτιάχνει νέα single-message collection κι απελευθερώνει την
   προηγούμενη, ώστε το webklex να μη κρατά ποτέ πάνω από **ένα** σώμα/attachments/raw structure τη φορά (πριν
@@ -272,6 +441,21 @@ from `[Unreleased]`; `--major` explicit for milestones).
   συγχρονίζονται + επαναελέγχονται on-blur. Επίσης το `company_id` γράφεται ρητά στη δημιουργία (explicit tenancy).
 
 ### Changed
+- **Domains design doc** (`docs/domains/README.md`, πυλώνας A): αδέσποτα (un-assigned) domains ως
+  νόμιμη κατάσταση (`customer_id` nullable, εκτός billing μέχρι ανάθεση) + action «Ανάθεση σε
+  πελάτη», στήλη `transferred_at`, tab «Domains» στην καρτέλα πελάτη, import που δεν μπλοκάρει σε
+  unmatched πελάτες. **Γείωση σε live WHMCS δεδομένα** (§7.1): επιβεβαιωμένο TLD→registrar routing,
+  πραγματικά margins/τιμές, Automatic Registration ήδη OFF· registrar key `none` → `manual`, status
+  `transferred_away`, non-goals premium domains/addon pricing/slabs. **Registrar-first bootstrap**
+  (απόφαση ιδιοκτήτη): λίστα+contacts από τον registrar → manual assign· WHMCS = προαιρετικό hint.
+- **grEPP reference material στο repo** (`docs/domains/grepp/`): οδηγός υλοποίησης EPP για το
+  .gr/.ελ Μητρώο (transport = XML-over-HTTPS με JSESSIONID, ΟΧΙ RFC 5734/TCP-700· extdomain-1.3·
+  χωρίς poll → polling jobs· 1001+protocol· DACoR· grRLS· account balance monitoring) + τα επίσημα
+  v4.3 XML examples/XSDs, reference EppClient.java/PDF και HARICA TLS bundle (public — ελεγμένα,
+  κανένα credential). Το §4.4 του design ξαναγράφτηκε πάνω σε αυτά· endpoints πλέον γνωστά.
+- **Openprovider org χαρτογράφηση + απόφαση transport** (Domains design §4.3/Πηγές): δικός μας thin
+  HTTP client αντί για το επίσημο `rest-client-php` (beta, χωρίς δηλωμένη άδεια — reference only)·
+  WHMCS module = semantics reference μόνο (επίσης χωρίς ορατή άδεια, όχι copy κώδικα).
 - **Μενού: υπο-ομαδοποίηση του `SettingsCluster` σε 4 ενότητες (polish).** Τα config items του cluster
   χωρίστηκαν σε 4 collapsible sub-sections μέσα στο settings area — **«Τιμολόγηση & πληρωμές»**, **«Είδη &
   αποστολή»**, **«Εταιρεία»**, **«Λειτουργία»** — αντί για μία μακριά λίστα, μέσω `navigationGroup` στα
@@ -1508,12 +1692,6 @@ from `[Unreleased]`; `--major` explicit for milestones).
   **Soft** requirements only warn and name the one feature that won't work — `pdo_firebird` → Firebird
   ETL, `gd` → the printed QR (the invoice still issues without it), `curl` → HTTP has a stream fallback,
   `zip` → backups, `bcmath`, `proc_open`, the upload/memory ini ceilings for imports, HTTPS.
-
-### Changed
-- **Domains design doc** (`docs/domains/README.md`, πυλώνας A — still pre-build): αδέσποτα
-  (un-assigned) domains ως νόμιμη κατάσταση (`customer_id` nullable, εκτός billing μέχρι ανάθεση)
-  + action «Ανάθεση σε πελάτη», νέα στήλη `transferred_at`, tab «Domains» στην καρτέλα πελάτη
-  (`DomainsRelationManager`), import που δεν μπλοκάρει σε unmatched πελάτες.
 
 ## [1.12.1] - 2026-07-13
 

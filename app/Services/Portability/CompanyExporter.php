@@ -4,6 +4,7 @@ namespace App\Services\Portability;
 
 use App\Casts\MaybeEncrypted;
 use App\Models\Company;
+use App\Models\DomainRegistrarConnection;
 use App\Models\PaymentGatewayConnection;
 use App\Models\Scopes\CompanyScope;
 use App\Services\TenantRoleProvisioner;
@@ -121,6 +122,23 @@ class CompanyExporter
         'ticket_poll_runs', // IMAP poll health log — runtime, re-accrues per poll.
         'ticket_watchers', // per-ticket watchers/CC — travels with tickets once FK-rewiring is written.
         'ticket_blocked_senders', // per-tenant spam blocklist — operational, re-created as needed.
+        // Domains pillar (Πυλώνας A) — NEW and default-off.
+        // domain_registrar_connections moved to SEALED_TABLES at A2c (their
+        // encrypted registrar creds now travel passphrase-sealed).
+        // A1 data model: wiring the pillar's export/import (FK-rewiring
+        // domain→customer/service-contract/tld/connection, tld→connection) into
+        // the portability bundle is a dedicated later slice, same as the Support
+        // pillar above; until then whole-DB backups cover it. Tracked in
+        // docs/BACKLOG.md «Πυλώνας A».
+        'domain_tlds',
+        'domain_tld_prices',
+        'domains',
+        'domain_nameservers',
+        'domain_contacts',
+        // Registrar API history (A3 write log) — runtime diagnostics bound to
+        // THIS deployment's traffic, the payment_gateway_events rule: never
+        // travels, re-accrues on the target as commands run.
+        'domain_registrar_logs',
     ];
 
     /**
@@ -154,6 +172,10 @@ class CompanyExporter
         // Devbox → production: the operator re-adds NOTHING — the methods land
         // configured, secrets and all (portal logins stay OUT, by design).
         'payment_gateway_connections',
+        // Registrar accounts (Πυλώνας A / A2c) — encrypted API/EPP creds in
+        // `config`, same shape as the gateways: sealed under the passphrase,
+        // re-encrypted under the target APP_KEY on import.
+        'domain_registrar_connections',
     ];
 
     public function __construct(
@@ -170,6 +192,7 @@ class CompanyExporter
      *     data: array<string, list<array<string,mixed>>>,
      *     users: list<array{email:string, name:string, role:?string}>,
      *     connections: array{rows: list<array<string,mixed>>, secrets: array<string,mixed>},
+     *     domain_connections: array{rows: list<array<string,mixed>>, secrets: array<string,mixed>},
      *     files: array<string,string>
      * }
      */
@@ -213,6 +236,10 @@ class CompanyExporter
         $connections = $this->buildConnections($company, $secretsMode, $passphrase);
         $counts['payment_gateway_connections'] = count($connections['rows']);
 
+        // Registrar accounts (Πυλώνας A) — same sealed machinery, own bundle key.
+        $domainConnections = $this->buildDomainConnections($company, $secretsMode, $passphrase);
+        $counts['domain_registrar_connections'] = count($domainConnections['rows']);
+
         $files = [];
         if (($logo = $this->logo($company)) !== null) {
             $files['files/'.$logo['name']] = $logo['bytes'];
@@ -241,6 +268,7 @@ class CompanyExporter
             'data' => $data,
             'users' => $users,
             'connections' => $connections,
+            'domain_connections' => $domainConnections,
             'files' => $files,
         ];
     }
@@ -282,6 +310,47 @@ class CompanyExporter
                     'payment_method_id' => $conn->payment_method_id,
                 ];
                 // `config` is the decrypted array (encrypted:array cast); seal it.
+                $configs[$ref] = $conn->config ?? [];
+            }
+        }
+
+        return [
+            'rows' => $rows,
+            'secrets' => $this->codec->seal($configs, $secretsMode, $passphrase),
+        ];
+    }
+
+    /**
+     * Registrar accounts (Πυλώνας A / A2c) — the domains sibling of
+     * buildConnections, same discipline: clear metadata in `rows` (registrar/
+     * label/mode/active), the decrypted `config` (API/EPP creds) sealed under
+     * the passphrase by ref — never raw APP_KEY ciphertext. Trashed
+     * connections deliberately stay behind (a tombstone is not config).
+     *
+     * @return array{rows: list<array<string,mixed>>, secrets: array{mode:string, salt?:string, values:array<string,?string>}}
+     */
+    private function buildDomainConnections(Company $company, string $secretsMode, ?string $passphrase): array
+    {
+        $rows = [];
+        $configs = [];
+        if (Schema::hasTable('domain_registrar_connections')) {
+            $connections = DomainRegistrarConnection::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->where('company_id', $company->id)
+                ->orderBy('id')
+                ->get();
+
+            foreach ($connections as $i => $conn) {
+                // Stable per-connection ref (the buildConnections idiom): a
+                // row and its sealed config never rely on positional index.
+                $ref = 'd'.$i;
+                $rows[] = [
+                    'ref' => $ref,
+                    'registrar' => (string) $conn->registrar,
+                    'label' => $conn->label,
+                    'is_active' => (bool) $conn->is_active,
+                    'mode' => (string) $conn->mode,
+                ];
                 $configs[$ref] = $conn->config ?? [];
             }
         }

@@ -617,14 +617,105 @@ data model + phase gates: **`PLAN.md`**.
   «Μεταφορά ιδιοκτησίας», API history). Dedicated `Domain` ↔ `ServiceContract` billing clock·
   registrar modules à la `EInvoiceProviderTransport`: **Openprovider** (gTLDs) + **grEPP** (.gr,
   direct EPP), routing ανά TLD. Φάσεις (stop σε κάθε gate):
-  - **A0** θεμέλιο — `companies.enable_domain_management` flag + nav-gating trait +
-    `DomainRegistrar` contract/registry/creds/Null + `config('ekdosi.domains.registrars')` +
-    `domain_registrar_connections` (super_admin creds).
-  - **A1** data model + manual CRUD (`domains`/`domain_tlds`/`domain_tld_prices`/
-    `domain_nameservers`/`domain_contacts`) — καταχώριση υπάρχοντος portfolio, μηδέν API.
-  - **A2** Openprovider read-only — availability/WHOIS/`domains:sync` (expiry pull).
-  - **A3** Openprovider write — register/renew/transfer/NS/DNSSEC/privacy/lock + renewal
-    billing (reuse `StageServiceRenewal`) + grace/redemption.
+  - **A0** θεμέλιο — ✅ **SHIPPED** (βλ. `FEATURES.md §21`): `enable_domain_management` flag +
+    gated `DomainsCluster` + `DomainRegistrar` contract/registry/creds/Null («manual») +
+    `config('ekdosi.domains.registrars')` + `domain_registrar_connections` (super_admin creds).
+  - **A1** data model + manual CRUD — ✅ **SHIPPED σε δύο slices** (βλ. `FEATURES.md §21`):
+    A1a πίνακες + «TLDs & τιμές»· A1b «Domains» resource + «Ανάθεση σε πελάτη» (SC 1:1) +
+    «Μεταφορά ιδιοκτησίας» + Customer tab. Εκκρεμεί από το αρχικό A1 σκοπό ΜΟΝΟ το import
+    (μετακόμισε: registrar-first → A2· το .gr list από grweb export).
+  - **A2** Openprovider read-only — ✅ **SHIPPED σε slices A2a/A2b/A2c** (βλ. `FEATURES.md §21`):
+    adapter+creds (A2a), sync+availability (A2b), pricing cost-sync + registrar-first/CSV import +
+    `domain_registrar_connections` στο **sealed** export bucket (A2c — ΟΧΙ πια INTENTIONALLY_EXCLUDED).
+    Εκκρεμεί από το A2 μόνο το live validation με production credentials.
+    (Deferred P2, review per-domain-contacts: μετά το «Συγχρονισμός» στο ViewDomain, τα
+    relation managers Επαφές/NS της ανοιχτής σελίδας ΔΕΝ ξαναρεντάρουν μόνα τους — το toast
+    λέει «Ενημερώθηκαν επαφές» αλλά ο πίνακας δείχνει τα παλιά rows μέχρι reload/interaction.
+    Pre-existing και για τα NS από το A2b. Fix = dispatch refresh event στα RMs από το action·
+    θέλει έλεγχο σε πραγματικό browser, όχι εικασία — μαζί με το επόμενο UI slice.)
+    (Deferred P2, review A2c-3: τα `importConnections`/`importDomainConnections` —και τα
+    exporter αδέρφια τους— μοιράζονται ~40 γραμμές match-or-create/seal logic σε δύο αντίγραφα·
+    extraction σε κοινό helper όταν έρθει ο ΤΡΙΤΟΣ sealed πίνακας —τα Support mailbox creds,
+    ήδη σημειωμένα στο INTENTIONALLY_EXCLUDED— rule of three, όχι πριν.)
+    Επίσης (deferred P2, review r3 2026-09-07): **IDN/punycode validation στο sld** — το
+    maxLength(63) μετρά unicode chars ενώ το DNS όριο είναι 63 octets του A-label, και το
+    `\p{N}` δέχεται μη-ASCII ψηφία· ο σωστός έλεγχος (idn_to_ascii + strlen) μπαίνει μαζί
+    με το availability/registry validation του A2 (εκεί απορρίπτεται τελικά έτσι κι αλλιώς).
+    Επίσης (deferred P2, review A2c-1 2026-09-07): **επαλήθευση σε live OP creds του
+    min-term quoting** — το cost-sync γράφει το κόστος στη γραμμή του ελάχιστου term
+    (`max(1, min_years)`) με την υπόθεση ότι το `GET /tlds/{name}?with_price=true`
+    κοστολογεί την ελάχιστη registrable περίοδο· αν το OP κοστολογεί per-year, TLD με
+    min_years>1 παίρνει μισό κόστος. Δεν δαγκώνει σήμερα (τα OP-routed TLDs του tenant
+    είναι όλα min_years=1 — τα .gr πάνε grEPP/manual), αλλά τσεκάρεται στο go-live του
+    A2 με πραγματικά credentials πριν εμπιστευτούμε κόστη πολυετών TLDs.
+    Επίσης (review A2c-1 r3, ρητές αποφάσεις — ΟΧΙ bugs): (1) TLD που ο registrar
+    επίμονα δεν κοστολογεί (κανένα reseller quote) βγάζει FAILURE σε κάθε run —
+    ΣΚΟΠΙΜΑ loud· αν εμφανιστεί στην πράξη, το silencing είναι per-TLD «skip pricing
+    sync» flag (μικρό migration). (2) Το currency-mismatch warning φωνάζει σε κάθε
+    run και για το δικό του disabled artifact row (π.χ. quote USD→EUR και πίσω) —
+    ο operator σβήνει το αχρησιμοποίητο row από τα «TLDs & τιμές» και σωπαίνει·
+    προτιμήθηκε από one-shot warning που χάνεται. (3) Το extra exists() ανά operation
+    (αντί για ένα in-memory fetch ανά TLD) — declined, ~8 μικρά queries/TLD σε
+    χειροκίνητο run δεν αξίζουν το refactor.
+  - **A3** Openprovider write — **A3a (renew) ✅ + A3b (register) ✅ + A3c (transfer-in +
+    EPP code) ✅ + A3d (NS/lock/privacy/contacts writes + redemption restore) ✅ SHIPPED**
+    (βλ. `FEATURES.md §21`). Το δεσμευτικό skeleton-extraction του A3c r1 έγινε ΜΕ το A3d:
+    trait `GuardsRegistrarWrites` (logger/refuse/adapter-resolve/claimedElsewhere/lock) — και
+    τα ΤΕΣΣΕΡΑ write services τρέχουν πάνω του. Εκτός v1 (συνειδητά): **DNSSEC key
+    management** (το `dnssec_enabled` mirror μένει read-only — το key-material UX θέλει
+    σχεδιασμό: add/remove DS/DNSKEY, validation, ρίσκο να σπάσει resolution με λάθος digest)·
+    **restore billing** (η επαναφορά χρεώνει τον πελάτη ΧΕΙΡΟΚΙΝΗΤΑ v1 — δεν κόβει invoice
+    μόνη της· αν φανεί συχνό, hook στο invoice flow όπως το renew)· approve-transfer/
+    resend-FOA (αν φανούν χρήσιμα live). **P2 από το A3d gate r1 (deferred με λόγο):** αν το
+    `sync->apply()` (τοπικό DB transaction) σκάσει ΜΕΤΑ από αποδεκτό/χρεωμένο registrar write,
+    δεν γράφεται ΚΑΝΕΝΑ audit row (ούτε ok ούτε failed) — ισχύει ομοιόμορφα και στα τέσσερα
+    write services (προϋπήρχε σε renew/register/transfer)· recovery ασφαλές (retry → sync-first
+    adopt, μηδενική χρέωση), οπότε είναι κενό ΙΧΝΟΥΣ, όχι χρήματος. Fix μαζί για και τα 4
+    (ok-row πριν το τοπικό apply, ή wrap του apply ώστε αποτυχία τοπικής εγγραφής να λογκάρει
+    το αποδεκτό write) — μαζί με τον A5 reconciler που έτσι κι αλλιώς ξαναδιαβάζει τα ok-logs.
+    **P2 από το A3d gate r2 (pre-existing A2, deferred):** το READ path (`DomainSyncService::sync`
+    → by-name resolve) ΔΕΝ έχει cross-tenant guard — ένα sync σε fqdn που άλλος tenant έχει
+    claimed στο κοινό reseller account υιοθετεί id/λήξη/NS/contact handles του άλλου tenant στο
+    δικό μας row (truth/handle leak, ΟΧΙ χρήματα — κάθε write μετά αρνείται με το δικό του
+    sweep). Συγγενές με το υπάρχον «claimedElsewhere over-blocks» item (σ) — λύσιμο μαζί:
+    ποιο registrar account + guard και στο read-adopt. P2 από A3c r2 (wholesale): (ρ) το tombstone-flag gate μετρά ΚΑΙ
+    pre-flight refusals ως «αίτηση» (false ⚠ σε previous-life tombstone + ένα refused click·
+    αντίστροφα panel-started FAI χωρίς κανένα log δεν φλαγκάρεται)· (σ) το claimedElsewhere
+    over-blocks (αγνοεί ΠΟΙΟ registrar account + withTrashed ξένα rows μπλοκάρουν «πελάτης
+    μετακόμισε μεταξύ των εταιρειών μας» — fails safe/loud)· (τ) scrub evasion σε auth codes
+    με «"»/«\» μέσω του JSON-escaped raw-body fallback (σπάνιο· scrub και το trimmed form). Για τον A5 reconciler (μαζί με τα υπόλοιπα A3):
+    (α) re-evaluate των renew logs με `short_of_target=null` (το post-renew re-fetch απέτυχε —
+    η πραγματική λήξη ήρθε από το nightly sync μετά) και όσων `ok` έμειναν κάτω από το
+    `target_expiry` τους· (β) orphan unconsumed button-renewals που δεν τιμολογήθηκαν ποτέ.
+    Επίσης P2 από το A3a gate r5 (wholesale): (γ) στο periodStart-null branch το stamping
+    window (baseline=expires_at) ανοίγει νωρίτερα από το intent window (today) σε ληγμένα
+    domains — ευθυγράμμιση σε έναν υπολογισμό· (δ) overshoot claim (3yr log σε biennial
+    invoice) δεν καταγράφει το πλεόνασμα πουθενά — ο reconciler να το εμφανίζει· (ε) τα
+    repeated refusal FAILED rows (spam του κουμπιού σε locked domain) είναι θόρυβος στο §9
+    history + ένα INSERT-throw στο refusal path αντικαθιστά το typed exception (το
+    DomainRenewalInProgress handling παρακάμπτεται) — wrap σε try/catch. Από r6 (GREEN):
+    (στ) `max(1,…)` στο date-adopt stamping vs `max(0,…)` στο intent-match — ενοποίηση σε
+    helper (χωρίς money συνέπεια, το max(1) σφάλλει προς όφελος του reconciler)· (ζ) εξωτικό:
+    refusal γραμμένο σε re-issue μετά από ΔΥΟ αλλαγές κύκλου μπορεί να αποθηκεύσει
+    mis-stepped baseline που σκιάζει το πρώτο — αυστηρά λιγότερο λάθος από το pre-r5.
+    Και P2 από το A3b gate r2 (wholesale): (η) το cross-tenant claim guard μετρά ΚΑΙ trashed
+    ξένα rows — ένα διαγραμμένο domain άλλης εταιρείας μπλοκάρει για πάντα το register εδώ
+    (συντηρητικό μπλοκάρισμα = ασφαλής πλευρά· ξεμπλοκάρεται με force-delete ή χειροκίνητα)·
+    (θ) το step-0 in-flight guard κάθεται ΜΕΤΑ τα NS/contact refusals — in-flight row με
+    αδειασμένο NS σφηνώνει σε guard που το adopt δεν χρειάζεται· (ι) το adopt σφραγίζει
+    registered_at=today ενώ το OP payload κουβαλά creation_date που το syncResultFrom πετά —
+    panel-registered/παλιές υιοθετήσεις παίρνουν λάθος ημερομηνία (add registeredAt στο
+    DomainSyncResult όταν χρειαστεί αλλού). Και από r3 (wholesale): (κ) refusal-only logs
+    κοστίζουν ένα extra probe GET σε κάθε retry· (λ) μη-ευρωπαϊκά 3ψήφια CCs (+971/+212/+880)
+    mis-split στο 2ψήφιο default (τα ψηφία διατηρούνται)· (μ) `previous_registrar_domain_id`
+    είναι single slot που overwrite-άρεται (ίδιο pattern και στο DomainSyncService)· (ν)
+    residual race δευτερολέπτων: instant retry ενώ ο OP ακόμα επεξεργάζεται >30s timed-out
+    POST (χωρίς idempotency key στο OP API — cool-down μετά από timeout-flavored failure
+    θα το στένευε)· (ξ) trim-vs-'' predicate consistency στα id checks. Από r5 (GREEN):
+    (ο) shared-account edge: no-id row του οποίου το ληγμένο όνομα ξανα-καταχωρήθηκε από
+    ΑΛΛΟΝ reseller-client στον ίδιο OP λογαριασμό → το by-name πιάνει το ξένο ACT (πάντα
+    account-scoped ambiguity· το nightly sync παγώνει Deleted πριν το rebuy στην πράξη)·
+    (π) το register() re-wrap πετά το $base->deadRecord (αδρανές — μόνο το adopt το διαβάζει).
   - **A4** 2ος registrar **grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
   - **A5** polish — bulk availability search, portfolio dashboard, **registrar↔local
     reconciliation** (mirror myDATA reconcile).
@@ -923,6 +1014,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   ίδιο πέρασμα (super-admin-only, mutations `false`) όταν ακουμπήσουμε ξανά τα δικαιώματα.
 
 ## 🔒 Backup / DR / Portability
+- **Installer pre-migrate passphrase gate validates only company secrets** _(P2, pre-existing,
+  surfaced στο A2c-3 review)._ Το `readHeader()` gate του web installer ελέγχει το passphrase
+  μόνο πάνω στα sealed secrets της εταιρείας· tenant με ΟΛΑ τα encrypted company columns null
+  (π.χ. Εσθονικός `einvoice_provider=none`) αλλά με sealed gateway/registrar connections περνά
+  το gate με ΛΑΘΟΣ passphrase, τρέχει migrate, και σκάει DecryptException μέσα στο import
+  transaction → migrated-but-empty DB (ακριβώς ό,τι το gate υπάρχει να αποτρέψει). Fix = το
+  gate να δοκιμάζει open() και στα connections/domain_connections secrets blobs όταν τα company
+  values είναι όλα null. Σπάνιο (όλοι οι τωρινοί tenants έχουν myDATA/GSIS secrets).
 - **Operator export/import role queries are N+1** _(P2, from the operators-in-bundle review)._
   `CompanyExporter::exportUsers()` reuses `TenantRoleProvisioner::roleInCompany()` (up to 3 `userHoldsRole`
   queries per user); `planUsers`/`importUsers` add ~1 query per user each. A 40-operator tenant is ~120+ tiny

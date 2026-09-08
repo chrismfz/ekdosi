@@ -4,6 +4,7 @@ namespace App\Filament\Resources\ServiceContracts\Tables;
 
 use App\Enums\BillingCycle;
 use App\Enums\ServiceContractStatus;
+use App\Filament\Support\StageRenewalNowAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Forms\Components\Select;
@@ -107,6 +108,9 @@ class ServiceContractsTable
             ->recordActions([
                 ViewAction::make(),
                 EditAction::make(),
+                // «Invoice Selected Items»: stage the next renewal draft NOW
+                // (early billing on demand) — shared with the Domains surfaces.
+                StageRenewalNowAction::make(),
             ]);
     }
 }
