@@ -10,8 +10,8 @@ use ZipArchive;
  * Filament UI share one reader/writer instead of duplicating ZipArchive glue.
  *
  * Layout: manifest.json + company.json + secrets.json + users.json +
- * connections.json + setup/<table>.json + data/<table>.json (full bundle only) +
- * files/<name>.
+ * connections.json + domain_connections.json + setup/<table>.json +
+ * data/<table>.json (full bundle only) + files/<name>.
  */
 class BundleArchive
 {
@@ -42,6 +42,11 @@ class BundleArchive
         // Sealed payment-method connections (rows + passphrase-sealed config).
         // Optional key so an older bundle without it still round-trips.
         $zip->addFromString('connections.json', $json($bundle['connections'] ?? []));
+        // Sealed registrar accounts (Πυλώνας A / A2c) — same optional-key rule.
+        // MUST be written here too: an exporter key this writer doesn't
+        // serialise is silently dropped on the real zip path (the exact bug
+        // class the data/ comment below memorialises).
+        $zip->addFromString('domain_connections.json', $json($bundle['domain_connections'] ?? []));
         foreach ($bundle['setup'] as $table => $rows) {
             $zip->addFromString("setup/{$table}.json", $json($rows));
         }
@@ -104,6 +109,8 @@ class BundleArchive
         // Optional (absent in older bundles) → default to no connections. The
         // importer no-ops on empty rows, so a pre-connections bundle round-trips.
         $connections = $this->readJsonEntry($zip, 'connections.json') ?? [];
+        // Optional (absent in pre-A2c bundles) → same no-op rule.
+        $domain_connections = $this->readJsonEntry($zip, 'domain_connections.json') ?? [];
 
         $setup = [];
         $data = [];
@@ -122,7 +129,7 @@ class BundleArchive
         }
         $zip->close();
 
-        return compact('manifest', 'company', 'secrets', 'users', 'connections', 'setup', 'data', 'files');
+        return compact('manifest', 'company', 'secrets', 'users', 'connections', 'domain_connections', 'setup', 'data', 'files');
     }
 
     private function openOrFail(string $path): ZipArchive

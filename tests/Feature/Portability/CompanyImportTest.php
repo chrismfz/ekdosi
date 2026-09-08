@@ -11,6 +11,7 @@ use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentMethod;
 use App\Models\VatCategory;
 use App\Models\WhmcsPaymentMap;
+use App\Services\Portability\BundleArchive;
 use App\Services\Portability\CompanyExporter;
 use App\Services\Portability\CompanyImporter;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -174,6 +175,20 @@ class CompanyImportTest extends TestCase
         $this->assertSame('passphrase', $bundle['domain_connections']['secrets']['mode']);
         $this->assertStringNotContainsString('OP-TOP-SECRET', json_encode($bundle['domain_connections']));
         $this->assertSame(2, $bundle['manifest']['counts']['domain_registrar_connections']);
+
+        // THROUGH THE ZIP — the real export path. BundleArchive once shipped a
+        // full backup with zero data/ tables because write() didn't know the
+        // key; an in-memory-only round-trip cannot catch that class of bug,
+        // and the raw archive bytes are where «no plaintext secret» is proven.
+        $path = sys_get_temp_dir().'/ekdosi-domain-conn-'.uniqid().'.zip';
+        try {
+            app(BundleArchive::class)->write($path, $bundle);
+            $this->assertStringNotContainsString('OP-TOP-SECRET', (string) file_get_contents($path));
+            $bundle = app(BundleArchive::class)->read($path);
+        } finally {
+            @unlink($path);
+        }
+        $this->assertCount(2, $bundle['domain_connections']['rows'] ?? [], 'the zip must carry domain_connections');
 
         // Simulate the target VM.
         Company::where('slug', 'src')->forceDelete();

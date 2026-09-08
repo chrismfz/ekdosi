@@ -611,6 +611,10 @@ data model + phase gates: **`PLAN.md`**.
     adapter+creds (A2a), sync+availability (A2b), pricing cost-sync + registrar-first/CSV import +
     `domain_registrar_connections` στο **sealed** export bucket (A2c — ΟΧΙ πια INTENTIONALLY_EXCLUDED).
     Εκκρεμεί από το A2 μόνο το live validation με production credentials.
+    (Deferred P2, review A2c-3: τα `importConnections`/`importDomainConnections` —και τα
+    exporter αδέρφια τους— μοιράζονται ~40 γραμμές match-or-create/seal logic σε δύο αντίγραφα·
+    extraction σε κοινό helper όταν έρθει ο ΤΡΙΤΟΣ sealed πίνακας —τα Support mailbox creds,
+    ήδη σημειωμένα στο INTENTIONALLY_EXCLUDED— rule of three, όχι πριν.)
     Επίσης (deferred P2, review r3 2026-09-07): **IDN/punycode validation στο sld** — το
     maxLength(63) μετρά unicode chars ενώ το DNS όριο είναι 63 octets του A-label, και το
     `\p{N}` δέχεται μη-ASCII ψηφία· ο σωστός έλεγχος (idn_to_ascii + strlen) μπαίνει μαζί
