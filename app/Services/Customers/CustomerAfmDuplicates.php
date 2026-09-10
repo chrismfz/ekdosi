@@ -132,8 +132,10 @@ class CustomerAfmDuplicates
                 $groups->push([
                     'company_id' => $cid,
                     'afm_key' => (string) $key,
+                    // (string) — a numeric PHP array key comes back as an INT and
+                    // would bind numerically against the varchar index.
                     'holder' => Customer::query()->withoutGlobalScopes()->withTrashed()
-                        ->where('company_id', $cid)->where('afm_key', $key)->orderBy('id')->first(),
+                        ->where('company_id', $cid)->where('afm_key', (string) $key)->orderBy('id')->first(),
                     'parked' => Customer::query()->withoutGlobalScopes()->withTrashed()
                         ->whereIn('id', $ids)->orderBy('id')->get(),
                 ]);

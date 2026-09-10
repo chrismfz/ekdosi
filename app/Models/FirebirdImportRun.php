@@ -55,7 +55,24 @@ class FirebirdImportRun extends Model
         'fb_host',
         'fb_user',
         'fb_database',
+        'afm_keep',
     ];
+
+    /**
+     * The CUST_IDs the operator said keep their ΑΦΜ when two legacy customers
+     * share one (`afm_keep`, as typed: «41, 87» / «41 87» / «41»). Handed to
+     * `migrate:firebird --afm-keep=` one by one. Anything that is not a positive
+     * integer is dropped — a stray id simply matches no duplicate group, and the
+     * import says so instead of acting on it.
+     *
+     * @return list<int>
+     */
+    public function afmKeepIds(): array
+    {
+        $ids = array_map('intval', preg_split('/[^0-9]+/', (string) $this->afm_keep, -1, PREG_SPLIT_NO_EMPTY) ?: []);
+
+        return array_values(array_unique(array_filter($ids, fn (int $id): bool => $id > 0)));
+    }
 
     /** A live-connection run (direct to a remote Firebird) vs a file upload. */
     public function isLiveConnection(): bool

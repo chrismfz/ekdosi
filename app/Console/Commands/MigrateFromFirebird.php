@@ -431,15 +431,19 @@ class MigrateFromFirebird extends Command
         // A parked row imports whole (ΑΦΜ text, documents, history) — it just does
         // not hold the identity. Say so loudly: it is a legally significant choice
         // the operator made on the command line, not a detail to bury.
+        // --slug is absent on the UI-driven (--company-id) path, so read the
+        // tenant back rather than printing an audit command scoped to nothing.
+        $slug = $this->option('slug') ?: Company::query()->whereKey($this->companyId)->value('slug');
+        $audit = 'php artisan customers:afm-duplicates'.($slug ? " --tenant={$slug}" : '');
+
         foreach ($report->parked() as $custId => $parked) {
             $this->warn(sprintf(
-                '  ⚠ ΑΦΜ %s: το CUST_ID %d «%s» μπαίνει ΧΩΡΙΣ ταυτότητα ΑΦΜ (την κρατά το %d) — '
-                .'δες «php artisan customers:afm-duplicates --tenant=%s»',
+                '  ⚠ ΑΦΜ %s: το CUST_ID %d «%s» μπαίνει ΧΩΡΙΣ ταυτότητα ΑΦΜ (την κρατά το %d) — δες «%s»',
                 $parked['key'],
                 $custId,
                 $parked['name'] ?? '',
                 $parked['keeper'],
-                (string) $this->option('slug'),
+                $audit,
             ));
         }
 

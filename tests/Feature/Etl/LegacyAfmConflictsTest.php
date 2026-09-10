@@ -167,6 +167,8 @@ class LegacyAfmConflictsTest extends TestCase
         $this->assertFalse($report->tenantChecked);
         $this->assertSame([], $report->localOwners);
         $this->assertFalse($report->hasBlockers());
+        // …and it says so, instead of a clean bill of health it never established.
+        $this->assertStringContainsString('δεν ελέγχθηκε η πλευρά του ekdosi', $report->summary());
     }
 
     public function test_map_legacy_rows_uses_the_callers_charset_cleaner(): void

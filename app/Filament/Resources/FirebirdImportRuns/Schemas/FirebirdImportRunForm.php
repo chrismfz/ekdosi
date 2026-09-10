@@ -133,6 +133,20 @@ class FirebirdImportRunForm
                                             ->columnSpanFull(),
                                     ]),
 
+                                Section::make('Διπλά ΑΦΜ πελατών')
+                                    ->collapsible()
+                                    ->collapsed()
+                                    ->description('Η παλιά εφαρμογή δεν είχε πεδίο υποκαταστήματος, οπότε ένα υποκατάστημα ήταν ΔΕΥΤΕΡΟΣ πελάτης με το ίδιο ΑΦΜ. Το ekdosi κρατά έναν πελάτη ανά ΑΦΜ, οπότε η εισαγωγή σταματά και ρωτά ποιος κρατά την ταυτότητα. Συμπλήρωσέ το ΜΟΝΟ αν το «Έλεγχος σύνδεσης» (ή η εισαγωγή) σου το ζητήσει. Η παλιά βάση ΔΕΝ πειράζεται ποτέ — μόνο διαβάζεται.')
+                                    ->schema([
+                                        TextInput::make('afm_keep')
+                                            ->label('CUST_ID που κρατούν το ΑΦΜ')
+                                            ->placeholder('π.χ. 41, 87')
+                                            ->maxLength(255)
+                                            ->rule('regex:/^[0-9\s,]*$/')
+                                            ->helperText('Ένα CUST_ID ανά διπλό ΑΦΜ, χωρισμένα με κόμμα. Ο άλλος πελάτης μπαίνει κανονικά — με ΑΦΜ, παραστατικά και ιστορικό — αλλά χωρίς την ταυτότητα ΑΦΜ, και τον τακτοποιείς μετά μέσα στο ekdosi (συγχώνευση ή υποκατάστημα ανά παραστατικό). Ισχύει και για τη «Ζωντανή σύνδεση».')
+                                            ->columnSpanFull(),
+                                    ]),
+
                                 Section::make('Or import via the artisan command')
                                     ->collapsible()
                                     ->collapsed()
@@ -248,6 +262,7 @@ class FirebirdImportRunForm
                                                                 e($body).'<br><strong>'.e((string) $result->afmSummary()).'</strong><br>'
                                                                 .nl2br(e(self::firstLines($result->afm->describe(), 8)))
                                                                 .'<br>'.e($result->afm->howTo())
+                                                                .'<br><em>'.e('Από εδώ: συμπλήρωσε τα CUST_ID στο «Διπλά ΑΦΜ πελατών» (καρτέλα Firebird) πριν την εισαγωγή.').'</em>'
                                                             ))
                                                             ->warning()->persistent()->send();
 

@@ -943,6 +943,18 @@ class CompanyImporter
     }
 
     /**
+     * A bundle customer row that holds NO ΑΦΜ identity on purpose — the legacy
+     * υποκατάστημα twin the Firebird ETL parked with `--afm-keep`. Older bundles
+     * predate the column, so a missing value simply means «not parked».
+     *
+     * @param  array<string,mixed>  $row
+     */
+    private static function rowIsParked(array $row): bool
+    {
+        return (bool) ($row['afm_key_parked'] ?? false);
+    }
+
+    /**
      * What cannot be written is refused up-front — the SAME check in plan()
      * and in importTable(), so the dry-run reports exactly what execute would
      * refuse, and nothing is ever refused mid-transaction:
@@ -966,18 +978,6 @@ class CompanyImporter
      * @param  array<int,true>  $twinIds
      * @param  array<int,array{legacy_id:?string,trashed:bool}>  $owners  local id => state
      */
-    /**
-     * A bundle customer row that holds NO ΑΦΜ identity on purpose — the legacy
-     * υποκατάστημα twin the Firebird ETL parked with `--afm-keep`. Older bundles
-     * predate the column, so a missing value simply means «not parked».
-     *
-     * @param  array<string,mixed>  $row
-     */
-    private static function rowIsParked(array $row): bool
-    {
-        return (bool) ($row['afm_key_parked'] ?? false);
-    }
-
     private function assertNoCustomerAfmConflicts(array $rows, array $index, array $afmIndex, array $twinIds, array $owners): void
     {
         $seen = [];

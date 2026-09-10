@@ -139,6 +139,19 @@ class RunFirebirdImport implements ShouldQueue
         $this->fbPassword = Crypt::encryptString($fbPassword);
     }
 
+    /**
+     * The operator's ΑΦΜ decision from the import form: which CUST_ID keeps the
+     * ΑΦΜ when two legacy customers share one (`--afm-keep`, one per duplicate).
+     * Empty for the overwhelming majority of runs — and an import that needs one
+     * and does not get it refuses with the list, it never guesses.
+     *
+     * @return list<string>
+     */
+    private function afmKeepArgs(FirebirdImportRun $run): array
+    {
+        return array_map(fn (int $id): string => '--afm-keep='.$id, $run->afmKeepIds());
+    }
+
     /** The plaintext Firebird password, decrypted at the point of use only. */
     private function password(): string
     {
@@ -274,6 +287,7 @@ class RunFirebirdImport implements ShouldQueue
             '--fbuser='.$run->fb_user,
             '--fbpass='.$this->password(),
             '--counts-out='.$countsPath,
+            ...$this->afmKeepArgs($run),
         ], base_path());
         $artisan->setTimeout($this->timeout - 60);  // leave headroom
 
@@ -364,6 +378,7 @@ class RunFirebirdImport implements ShouldQueue
             '--fbuser='.$run->fb_user,
             '--fbpass='.$this->password(),
             '--counts-out='.$countsPath,
+            ...$this->afmKeepArgs($run),
         ], base_path());
         $artisan->setTimeout($this->timeout - 60);
 

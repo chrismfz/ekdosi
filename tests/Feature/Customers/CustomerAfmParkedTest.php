@@ -5,6 +5,7 @@ namespace Tests\Feature\Customers;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Services\Customers\CustomerAfmDuplicates;
+use App\Services\Customers\MergeCustomers;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
@@ -141,6 +142,39 @@ class CustomerAfmParkedTest extends TestCase
             ->expectsOutputToContain('ΧΩΡΙΣ ταυτότητα ΑΦΜ')
             ->expectsOutputToContain('Εγκατάσταση πελάτη (myDATA)')
             ->assertExitCode(0);
+    }
+
+    public function test_merging_the_holder_into_a_parked_survivor_hands_the_identity_over(): void
+    {
+        $company = $this->tenant();
+        $holder = Customer::create(['company_id' => $company->id, 'legacy_id' => 41, 'name' => 'ΕΤΑΙΡΕΙΑ ΑΕ', 'afm' => '123456789']);
+        $twin = $this->parkedTwin($company);
+
+        // The survivor is the PARKED row (the panel's «Συγχώνευση» always keeps
+        // the open record, and suggestKeeper picks the fullest one — either can
+        // land here). The merge force-deletes the holder, so without the reclaim
+        // NOBODY would hold this ΑΦΜ afterwards.
+        app(MergeCustomers::class)($twin, $holder);
+
+        $this->assertNull(Customer::withTrashed()->find($holder->id), 'the holder is force-deleted by the merge');
+        $this->assertSame('123456789', $twin->fresh()->afm_key);
+        $this->assertFalse((bool) $twin->fresh()->afm_key_parked);
+        // (The caller's instance stays stale — the merge re-reads both rows under
+        // a lock and works on those, exactly as it already does for legacy_id.)
+    }
+
+    public function test_a_merge_never_steals_an_afm_another_customer_still_holds(): void
+    {
+        $company = $this->tenant();
+        Customer::create(['company_id' => $company->id, 'name' => 'ΕΤΑΙΡΕΙΑ ΑΕ', 'afm' => '123456789']);
+        $twin = $this->parkedTwin($company);
+        // A third, unrelated row is what gets merged away.
+        $other = Customer::create(['company_id' => $company->id, 'name' => 'ΑΣΧΕΤΟΣ', 'afm' => '094123456']);
+
+        app(MergeCustomers::class)($twin, $other);
+
+        $this->assertNull($twin->fresh()->afm_key, 'the ΑΦΜ is still held by the original holder');
+        $this->assertTrue((bool) $twin->fresh()->afm_key_parked);
     }
 
     public function test_a_placeholder_afm_is_never_reported_as_parked(): void

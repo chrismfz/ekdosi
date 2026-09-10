@@ -4,6 +4,7 @@ namespace App\Services\Customers;
 
 use App\Models\Customer;
 use App\Models\Note;
+use App\Support\Afm;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use RuntimeException;
@@ -243,8 +244,53 @@ class MergeCustomers
                 $keep->forceFill($adopt)->syncOriginal();
             }
 
+            // …and the ΑΦΜ identity itself. The survivor can be a PARKED row (the
+            // legacy υποκατάστημα twin the ETL imported keyless because the row we
+            // just force-deleted held the ΑΦΜ) — and every write here is query
+            // builder, so the model hook that would re-derive `afm_key` never runs.
+            // Without this the party ends up with NO customer holding its ΑΦΜ and
+            // the matchers (WHMCS by ΑΦΜ, LeadMatcher, myDATA sync) start minting
+            // duplicates of the very customer we just merged.
+            $this->reclaimFreedAfmKey($keep);
+
             return $result;
         });
+    }
+
+    /**
+     * Give the survivor the ΑΦΜ identity when it holds none and nobody else in
+     * the tenant does — the merge just freed it. No-op for the ordinary merge
+     * (the survivor already has its key) and for a row whose ΑΦΜ is no identity
+     * at all (placeholder/blank). Never steals a key another row still holds.
+     */
+    private function reclaimFreedAfmKey(Customer $keep): void
+    {
+        // Pre-migration schema (where update.sh sends the operator) has neither column.
+        if (! Schema::hasColumn('customers', 'afm_key') || $keep->afm_key !== null) {
+            return;
+        }
+
+        $key = Afm::uniqueKey($keep->afm);
+        if ($key === null) {
+            return;
+        }
+
+        $stillHeld = DB::table('customers')
+            ->where('company_id', $keep->company_id)
+            ->where('afm_key', (string) $key)
+            ->where('id', '!=', $keep->getKey())
+            ->exists();
+        if ($stillHeld) {
+            return;
+        }
+
+        $values = ['afm_key' => (string) $key];
+        if (Schema::hasColumn('customers', 'afm_key_parked')) {
+            $values['afm_key_parked'] = false;
+        }
+
+        DB::table('customers')->where('id', $keep->getKey())->update($values);
+        $keep->forceFill($values)->syncOriginal();
     }
 
     /**

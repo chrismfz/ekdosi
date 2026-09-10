@@ -91,7 +91,9 @@ final class LegacyAfmConflictReport
     public function summary(): string
     {
         if ($this->isEmpty()) {
-            return 'Κανένα διπλό ΑΦΜ πελάτη.';
+            return $this->tenantChecked
+                ? 'Κανένα διπλό ΑΦΜ πελάτη.'
+                : 'Κανένα διπλό ΑΦΜ μέσα στη legacy βάση (δεν ελέγχθηκε η πλευρά του ekdosi).';
         }
 
         $parts = [];

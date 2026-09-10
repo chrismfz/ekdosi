@@ -27,6 +27,14 @@ class FirebirdConnectionTester
     /** Core legacy tables the ETL reads — presence + count confirms it's the right DB. */
     public const PROBE_TABLES = ['CUSTOMER', 'INVTYPE', 'INVOICE', 'PRODUCT'];
 
+    /**
+     * Above this many customers the ΑΦΜ probe is skipped (see afmReport). The
+     * real tenants are in the low thousands, so the cap is never reached in
+     * practice — it exists so an unexpectedly huge/remote source degrades to
+     * «unknown» instead of hanging the panel.
+     */
+    public const AFM_PROBE_MAX_ROWS = 50000;
+
     /** @var (Closure(string): PDO)|null */
     private $connectionFactory;
 
@@ -98,7 +106,7 @@ class FirebirdConnectionTester
                 .'ή ο χρήστης δεν έχει δικαίωμα ανάγνωσης σε αυτούς τους πίνακες.');
         }
 
-        return FirebirdProbeResult::success($counts, $missing, $this->afmReport($pdo, $companyId));
+        return FirebirdProbeResult::success($counts, $missing, $this->afmReport($pdo, $companyId, $counts['CUSTOMER'] ?? null));
     }
 
     /**
@@ -107,8 +115,17 @@ class FirebirdConnectionTester
      * connection test into a failure: the authoritative check is the import's own
      * guard, this is the early warning.
      */
-    private function afmReport(PDO $pdo, ?int $companyId): ?LegacyAfmConflictReport
+    private function afmReport(PDO $pdo, ?int $companyId, ?int $customerCount): ?LegacyAfmConflictReport
     {
+        // This runs inside a synchronous Livewire request, so it reads the whole
+        // CUSTOMER table exactly once and only while that is cheap. Past the cap
+        // the answer is «not established» (the import's own guard still runs on
+        // every row) rather than a probe that times out and reports a healthy
+        // connection as broken.
+        if ($customerCount === null || $customerCount > self::AFM_PROBE_MAX_ROWS) {
+            return null;
+        }
+
         try {
             $rows = $pdo->query('SELECT CUST_ID, AFM, NAME FROM CUSTOMER')->fetchAll(PDO::FETCH_ASSOC);
         } catch (Throwable) {
