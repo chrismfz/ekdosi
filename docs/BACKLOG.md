@@ -1051,6 +1051,42 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **`WhmcsReceiptRecorder`: `transaction_id` = πραγματικό vPOS ref → ο syncer δεν το «βλέπει» στη στενή credit-term γωνία (P2, accepted tradeoff).**
+  Κρατάμε σκόπιμα το πραγματικό acquirer/vPOS ref ως «Κωδ. συναλλαγής» (operator προτίμηση). Ο recorder μένει
+  πλήρως idempotent (dedup withTrashed στο ίδιο id). Ο `WhmcsPaymentSyncer` όμως κάνει dedup στο σταθερό
+  `whmcs-paid:{id}`, οπότε ΔΕΝ αναγνωρίζει μια recorder-γραμμή με vPOS id. **Αδιάφορο για την πραγματική
+  περίπτωση** (Eurobank vPOS = cash-term· ο syncer εξ ορισμού αγνοεί cash-term). Στενή γωνία που μένει
+  ανοιχτή: credit-term WHMCS τιμολόγιο πληρωμένο-στην-έκδοση → refund της είσπραξης → sweep → ο syncer
+  ξαναγράφει (whmcs-paid key). Αν ποτέ ενοχλήσει: ο recorder να κρατά ΚΑΙ το whmcs-paid key (χωρίς να
+  πειράζει το «Κωδ. συναλλαγής») — π.χ. ο syncer να κάνει και έναν per-invoice έλεγχο ύπαρξης WHMCS-είσπραξης.
+- **`WhmcsReceiptRecorder`: πολλαπλές εισροές (installments) → το «Κωδ. συναλλαγής» δείχνει μόνο τη μία (P2, display-only).**
+  Το `provenance()` διαλέγει το transaction με το μεγαλύτερο `amountin` για το ref· αν το WHMCS εισέπραξε το
+  τιμολόγιο με ≥2 captures (π.χ. 60€+64€), καταγράφεται ΜΙΑ πληρωμή για το πλήρες owed με το transid ΜΟΝΟ
+  του ενός. Καθαρά display/audit (μηδέν επίπτωση στο υπόλοιπο)· τα υπόλοιπα refs φαίνονται ούτως ή άλλως στο
+  WHMCS. Αν χρειαστεί: όλα τα transids στη «Σημείωση».
+- **`WhmcsReceiptRecorder`: το ποσό είσπραξης = δικό μας owed, ΟΧΙ το ευρώ που εισέπραξε το WHMCS (P2, by design).**
+  Ακολουθούμε το trail του WHMCS id, κρατώντας το ΔΙΚΟ μας παραστατικό netted-to-zero. Στο `file()` path ο
+  `WhmcsFilingGuard::assertTotalsReconcile` ήδη εγγυάται ότι το gross ταιριάζει με το WHMCS total· στο
+  **draft-first** path (createDraft — σκόπιμα ΧΩΡΙΣ reconcile, ώστε ο χειριστής να διορθώνει γραμμές) αν ο
+  χειριστής αλλάξει το σύνολο, η αυτόματη είσπραξη μηδενίζει στο νέο owed και μια τυχόν διαφορά με το WHMCS
+  δεν επιφαίνεται ως over/under-payment. Αποδεκτό: η είσπραξη είναι editable/deletable money-trail, όχι
+  reconciliation· αν ποτέ χρειαστεί, βάλε ένα προαιρετικό reconcile-warning στο draft-issue.
+- **`WhmcsReceiptRecorder`: το draft-first μονοπάτι δεν αυτο-καταγράφει σε off-mode tenant (P2, non-prod edge).**
+  Ο recorder καλείται (α) στο `WhmcsInvoiceFiler::file()` (τρέχει πάντα, ακόμη κι off-mode — pending=FILED)
+  και (β) στο `WhmcsWritebackService::syncFiledFromLifecycle()` για το draft-first. Το (β) καλείται από τον
+  MyDataSubmitter στο VALID persist και επιστρέφει νωρίς όταν δεν υπάρχει MARK — άρα ένας **off-mode** tenant
+  (NullSubmitter, χωρίς MARK) που εκδίδει WHMCS draft μέσω lifecycle ΔΕΝ αυτο-καταγράφει την είσπραξη
+  (προστίθεται χειροκίνητα στο «Πληρωμές»). Ασήμαντο σήμερα (όλοι οι πραγματικοί tenants myDATA-on)· αν ποτέ
+  γίνει πρόβλημα, μετακίνησε την κλήση του recorder πριν το no-MARK early-return (είναι ορθογώνια στο myDATA).
+- **`PaymentAllocator::absorbableTotal()` = N balance reads (P2, perf on data we don't have).** Ο guard της
+  «Είσπραξη (έμβασμα)» στην Καρτέλα (και ό,τι preview το χρησιμοποιεί) καλεί `balanceData()` ανά live+active
+  τιμολόγιο του πελάτη — 2 aggregate queries + eager `paymentMethod` το καθένα — και ξανα-τρέχει σε κάθε
+  `amount` onBlur round-trip (μνημονεύεται μόνο εντός ενός request). Ασήμαντο για πελάτη με λίγα ανοιχτά·
+  αργό αν κάποιος έχει δεκάδες/εκατοντάδες ανοιχτά. Deferred συνειδητά: το ίδιο κόστος πληρώνει ήδη το
+  write-path (`allocate()`), και η φθηνή εναλλακτική (άθροισμα από cache columns) ξανα-εισάγει το
+  cache-vs-live divergence που θέλαμε να αποφύγουμε. Σωστή λύση αν χρειαστεί: ένα aggregate που διπλώνει
+  paid/credited ανά πελάτη (όπως το `Customer::withOutstandingBalance`) και live-confirm μόνο στα λίγα
+  υποψήφια. Καρφωμένη συμπεριφορά: `CustomerLedgerReceiptGuardTest`.
 - **Το blob `einvoice_provider_config` δεν καταγράφει ΣΕ ΠΟΙΟΝ πάροχο ανήκει (P2, residual).** Είναι επίπεδο
   (`base_url`, `token`, …) και ο ιδιοκτήτης συνάγεται από το `companies.einvoice_provider_key` — που όμως
   ΜΗΔΕΝΙΖΕΤΑΙ όταν ο tenant παρκάρει σε κανάλι myDATA («Καθόλου»), ενώ το blob κρατιέται σκόπιμα. Έτσι στη

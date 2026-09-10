@@ -69,6 +69,7 @@ class WhmcsInvoiceFiler
         private RecomputeInvoiceTotals $recompute,
         private EInvoiceSubmitterFactory $submitterFactory,
         private WhmcsWritebackService $writeback,
+        private WhmcsReceiptRecorder $receiptRecorder,
     ) {}
 
     /**
@@ -227,6 +228,20 @@ class WhmcsInvoiceFiler
         // tenant has no bridge plugin configured.
         if ($hasMark) {
             $this->writeback->pushMark($tenant, $pendingFresh, $invoice, $mark->mark);
+        }
+
+        // Money-trail: if WHMCS already collected the money (gateway/vPOS), record
+        // the matching receipt on the now-issued invoice. Best-effort and AFTER the
+        // filing is committed — a failure here must never undo a filed invoice.
+        try {
+            $this->receiptRecorder->recordIfPaid($pendingFresh->fresh(), $invoice);
+        } catch (Throwable $e) {
+            Log::warning('WHMCS inbox: invoice filed but the WHMCS receipt could not be recorded', [
+                'pending_id' => $pending->id,
+                'invoice_id' => $invoice->id,
+                'whmcs_invoice_id' => $pending->whmcs_invoice_id,
+                'error' => $e->getMessage(),
+            ]);
         }
 
         return new FileResult(

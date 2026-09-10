@@ -6,6 +6,7 @@ use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\PendingWhmcsInvoice;
+use App\Services\WhmcsInbox\WhmcsReceiptRecorder;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
@@ -104,6 +105,21 @@ class WhmcsWritebackService
             ]);
 
             $this->pushMark($tenant, $pending->fresh(), $invoice, $mark);
+
+            // Money-trail: a draft-first WHMCS invoice becomes ISSUED here (VALID
+            // persist). If WHMCS already collected the money, record the matching
+            // receipt now — the same behaviour as the direct file() path. Best-
+            // effort in its own guard so a receipt hiccup can't mask the completed
+            // filing + write-back above.
+            try {
+                app(WhmcsReceiptRecorder::class)->recordIfPaid($pending->fresh(), $invoice);
+            } catch (Throwable $re) {
+                Log::warning('WHMCS lifecycle: filing done but the WHMCS receipt could not be recorded', [
+                    'invoice_id' => $invoice->id,
+                    'pending_id' => $pending->id,
+                    'error' => $re->getMessage(),
+                ]);
+            }
         } catch (Throwable $e) {
             // Defensive: even an unexpected failure in the flip/lookup must not
             // bubble into the submit() choke-point and mask the VALID filing.
