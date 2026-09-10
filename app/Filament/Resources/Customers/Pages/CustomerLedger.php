@@ -28,6 +28,7 @@ use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Repeater;
@@ -544,8 +545,8 @@ class CustomerLedger extends Page implements HasTable
 
     private ?float $availableCreditCache = null;
 
-    /** @var array<int, string>|null */
-    private ?array $openInvoiceOptionsCache = null;
+    /** @var array<int, array{invcode: string, balance: float}>|null */
+    private ?array $openInvoiceRowsCache = null;
 
     /**
      * This customer's available on-account credit (unallocated money). Memoised
@@ -559,17 +560,21 @@ class CustomerLedger extends Page implements HasTable
     }
 
     /**
-     * The customer's OPEN credit-term invoices as id => «ΤΙΜ123 — υπόλοιπο X€»,
-     * for the apply-credit / manual-allocation pickers. Balance from the cached
-     * money columns (paid_total already nets refunds). Only positive balances.
-     * Memoised per request (read from several action closures per render).
+     * OPEN, live, credit-term, non-credit-note invoices for this customer, each
+     * as ['invcode' => …, 'balance' => …] keyed by id (only positive balances,
+     * oldest first). The SINGLE source for both the allocation pickers
+     * (openInvoiceOptions) and the «Είσπραξη (έμβασμα)» guard total
+     * (openCreditTermBalanceTotal) — so the guard can never drift from what the
+     * FIFO allocator will actually target. Balance from the cached money columns
+     * (paid_total already nets refunds). Memoised per request (a private prop is
+     * not Livewire-hydrated, so it resets fresh each round-trip — no staleness).
      *
-     * @return array<int, string>
+     * @return array<int, array{invcode: string, balance: float}>
      */
-    private function openInvoiceOptions(): array
+    private function openInvoiceRows(): array
     {
-        if ($this->openInvoiceOptionsCache !== null) {
-            return $this->openInvoiceOptionsCache;
+        if ($this->openInvoiceRowsCache !== null) {
+            return $this->openInvoiceRowsCache;
         }
 
         $q = Invoice::query()
@@ -584,18 +589,45 @@ class CustomerLedger extends Page implements HasTable
         InvoiceScope::excludeCreditNotes($q);
         InvoiceScope::live($q, 'invoices.');
 
-        return $this->openInvoiceOptionsCache = $q->orderBy('invoices.issued_at')
-            ->get(['invoices.id', 'invoices.invcode', 'invoices.gross_total', 'invoices.payable_total', 'invoices.credited_total', 'invoices.paid_total'])
-            ->mapWithKeys(function (Invoice $inv): array {
-                // Open balance = collectible (payable_total, gross fallback) − credited − paid.
-                $payable = (float) ($inv->payable_total ?? $inv->gross_total);
-                $balance = round($payable - (float) $inv->credited_total - (float) $inv->paid_total, 2);
+        $rows = [];
+        foreach ($q->orderBy('invoices.issued_at')
+            ->get(['invoices.id', 'invoices.invcode', 'invoices.gross_total', 'invoices.payable_total', 'invoices.credited_total', 'invoices.paid_total']) as $inv) {
+            // Open balance = collectible (payable_total, gross fallback) − credited − paid.
+            $payable = (float) ($inv->payable_total ?? $inv->gross_total);
+            $balance = round($payable - (float) $inv->credited_total - (float) $inv->paid_total, 2);
+            if ($balance > 0.005) {
+                $rows[(int) $inv->id] = ['invcode' => (string) $inv->invcode, 'balance' => $balance];
+            }
+        }
 
-                return $balance > 0.005
-                    ? [$inv->id => $inv->invcode.' — υπόλοιπο '.$this->fmtMoney($balance)]
-                    : [];
-            })
-            ->all();
+        return $this->openInvoiceRowsCache = $rows;
+    }
+
+    /**
+     * The customer's OPEN credit-term invoices as id => «ΤΙΜ123 — υπόλοιπο X€»,
+     * for the apply-credit / manual-allocation pickers.
+     *
+     * @return array<int, string>
+     */
+    private function openInvoiceOptions(): array
+    {
+        return array_map(
+            fn (array $row): string => $row['invcode'].' — υπόλοιπο '.$this->fmtMoney($row['balance']),
+            $this->openInvoiceRows(),
+        );
+    }
+
+    /**
+     * Σ of the open credit-term balances — how much an «Είσπραξη (έμβασμα)» can
+     * actually ABSORB before the remainder falls to on-account credit. When this
+     * is 0 (no open credit-term invoices) every cent of a customer-level receipt
+     * becomes credit/προκαταβολή and the customer shows as πιστωτικός — the
+     * footgun the record_receipt guard warns about. Reuses openInvoiceRows() so
+     * it can't diverge from the picker.
+     */
+    private function openCreditTermBalanceTotal(): float
+    {
+        return round(array_sum(array_column($this->openInvoiceRows(), 'balance')), 2);
     }
 
     /** Tenant's payment methods as id => description (shared by the action schemas). */
@@ -636,7 +668,24 @@ class CustomerLedger extends Page implements HasTable
                     ->icon('heroicon-o-arrow-down-on-square-stack')
                     ->color('success')
                     ->modalHeading('Είσπραξη / Έμβασμα')
-                    ->modalDescription('Το ποσό κατανέμεται αυτόματα στα ανοιχτά τιμολόγια (παλαιότερα πρώτα). Ό,τι περισσέψει μένει ως πίστωση/προκαταβολή στον πελάτη.')
+                    ->modalDescription(function (): string {
+                        // Guard the footgun: an «Είσπραξη (έμβασμα)» allocates FIFO to
+                        // OPEN credit-term invoices only; whatever's left becomes
+                        // on-account credit. With NO open credit-term invoices the
+                        // WHOLE amount becomes credit and the customer shows as
+                        // πιστωτικός — the "money went on top" surprise. Say so, and
+                        // point at the per-invoice action for a cash-term document.
+                        $open = $this->openCreditTermBalanceTotal();
+                        if ($open <= 0.005) {
+                            return '⚠ Ο πελάτης ΔΕΝ έχει ανοιχτά επί-πιστώσει τιμολόγια. Ό,τι καταχωρήσεις εδώ '
+                                .'θα μείνει ΟΛΟ ως πίστωση/προκαταβολή και ο πελάτης θα εμφανιστεί πιστωτικός. Για '
+                                .'είσπραξη ΣΥΓΚΕΚΡΙΜΕΝΟΥ τιμολογίου (και τοις μετρητοίς), άνοιξέ το → tab «Πληρωμές» '
+                                .'→ «Καταχώριση πληρωμής».';
+                        }
+
+                        return 'Το ποσό κατανέμεται αυτόματα στα ανοιχτά τιμολόγια (παλαιότερα πρώτα, έως '
+                            .$this->fmtMoney($open).'). Ό,τι περισσέψει μένει ως πίστωση/προκαταβολή στον πελάτη.';
+                    })
                     ->modalSubmitActionLabel('Καταχώριση')
                     ->schema([
                         TextInput::make('amount')
@@ -653,6 +702,15 @@ class CustomerLedger extends Page implements HasTable
                             ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας. Μπαίνει σε όλες τις γραμμές του εμβάσματος.'),
                         Textarea::make('notes')
                             ->label('Σημειώσεις')->rows(2),
+                        // Speed bump for the πιστωτικός footgun: with NO open
+                        // credit-term invoices to absorb the amount, force an explicit
+                        // acknowledgement that the whole receipt becomes on-account
+                        // credit. Hidden (and not validated) in the normal case, so a
+                        // genuine έμβασμα against open receivables stays one click.
+                        Checkbox::make('acknowledge_credit')
+                            ->label('Το γνωρίζω — να καταχωρηθεί ΟΛΟ ως πίστωση/προκαταβολή στον πελάτη')
+                            ->visible(fn (): bool => $this->openCreditTermBalanceTotal() <= 0.005)
+                            ->accepted(),
                     ])
                     ->action(function (array $data) {
                         $res = app(PaymentAllocator::class)->allocate(
@@ -678,6 +736,7 @@ class CustomerLedger extends Page implements HasTable
                     ->icon('heroicon-o-banknotes')
                     ->color('success')
                     ->modalHeading('Πληρωμή έναντι λογαριασμού')
+                    ->modalDescription('Καταγράφει χρήματα ΧΩΡΙΣ σύνδεση με τιμολόγιο — μένουν ως πίστωση/προκαταβολή (ο πελάτης εμφανίζεται πιστωτικός) μέχρι να τα εφαρμόσεις σε τιμολόγιο με τη «Χρήση πίστωσης». Για είσπραξη ΣΥΓΚΕΚΡΙΜΕΝΟΥ τιμολογίου, άνοιξέ το → «Πληρωμές» → «Καταχώριση πληρωμής».')
                     ->modalSubmitActionLabel('Καταχώριση')
                     ->schema([
                         TextInput::make('amount')
