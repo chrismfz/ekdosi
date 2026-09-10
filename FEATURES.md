@@ -411,6 +411,14 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   money-write μόνο στο ekdosi, only-if-open + dedup. **On-demand και από το UI**: header action
   «Συγχρονισμός πληρωμών τώρα» στο inbox (bulk) + per-invoice «Έχει πληρωθεί στο WHMCS;» πάνω σε
   ανοιχτό WHMCS-συνδεδεμένο παραστατικό.
+- **Αυτόματη καταγραφή είσπραξης στην έκδοση** (`WhmcsReceiptRecorder`): όταν το WHMCS τιμολόγιο ήταν
+  **ήδη πληρωμένο** τη στιγμή της έκδοσης (Eurobank vPOS / έμβασμα — η περίπτωση που ο inbound sync ΔΕΝ
+  πιάνει, γιατί είναι only-if-open), καταγράφεται αυτόματα η αντίστοιχη είσπραξη πάνω στο νέο παραστατικό
+  με το money-trail (gateway + πραγματικό transaction id + ημερομηνία, από το payload). Τρέχει και στα
+  **δύο** μονοπάτια έκδοσης (ανεπιτήρητο `whmcs:auto-issue`/direct `file()` + draft-first lifecycle),
+  best-effort (ποτέ δεν μπλοκάρει το AADE filing), idempotent, και συνεργάζεται με τον inbound sync
+  (full receipt → balance 0 → only-if-open ⇒ no double). Είναι απλή, **editable/deletable** πληρωμή στο
+  tab «Πληρωμές» (όχι νομικό παραστατικό — λάθος διορθώνεται εκεί, μηδέν επίπτωση στο myDATA).
 - **Κεντρικός «Συγχρονισμός πληρωμών»** (σελίδα ομάδας Data + dashboard tile + bell): read-only
   `whmcs:reconcile-payments` εντοπίζει ποια ανοιχτά επί-πιστώσει πληρώθηκαν στο WHMCS και τα δείχνει
   εύκαιρα με 1-click «Καταγραφή πληρωμής» (ζωντανή επιβεβαίωση + κλείσιμο οφειλής). Cache μόνο ids,

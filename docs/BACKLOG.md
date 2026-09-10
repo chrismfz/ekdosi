@@ -1051,6 +1051,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **`WhmcsReceiptRecorder`: το draft-first μονοπάτι δεν αυτο-καταγράφει σε off-mode tenant (P2, non-prod edge).**
+  Ο recorder καλείται (α) στο `WhmcsInvoiceFiler::file()` (τρέχει πάντα, ακόμη κι off-mode — pending=FILED)
+  και (β) στο `WhmcsWritebackService::syncFiledFromLifecycle()` για το draft-first. Το (β) καλείται από τον
+  MyDataSubmitter στο VALID persist και επιστρέφει νωρίς όταν δεν υπάρχει MARK — άρα ένας **off-mode** tenant
+  (NullSubmitter, χωρίς MARK) που εκδίδει WHMCS draft μέσω lifecycle ΔΕΝ αυτο-καταγράφει την είσπραξη
+  (προστίθεται χειροκίνητα στο «Πληρωμές»). Ασήμαντο σήμερα (όλοι οι πραγματικοί tenants myDATA-on)· αν ποτέ
+  γίνει πρόβλημα, μετακίνησε την κλήση του recorder πριν το no-MARK early-return (είναι ορθογώνια στο myDATA).
 - **`PaymentAllocator::absorbableTotal()` = N balance reads (P2, perf on data we don't have).** Ο guard της
   «Είσπραξη (έμβασμα)» στην Καρτέλα (και ό,τι preview το χρησιμοποιεί) καλεί `balanceData()` ανά live+active
   τιμολόγιο του πελάτη — 2 aggregate queries + eager `paymentMethod` το καθένα — και ξανα-τρέχει σε κάθε
