@@ -105,10 +105,9 @@ class MyDataPictureStats extends StatsOverviewWidget
 
         // 4th card for provider tenants: the ΥΠΑΗΕΣ issuance quota. Placed before the
         // optional breakdown extras so it sits right after the three headline ΦΠΑ
-        // cards rather than trailing a variable number of «Τρίμηνο — …» ones. With no
-        // breakdown that's a clean 4-across row (Filament's getColumns() picks 4 when
-        // count % 3 === 1); with breakdown lines the grid falls back to 3-across and
-        // the card wraps to the next row — still high on the page, which is the point.
+        // cards rather than trailing a variable number of «Τρίμηνο — …» ones.
+        // getColumns() below pins the grid to 4 so that position really is the top
+        // row, whatever the breakdown count.
         $stats = $this->withProviderQuota($tenant, $stats);
 
         // Self-declared transmitted docs that are NOT sales (μισθοδοσία,
@@ -129,6 +128,24 @@ class MyDataPictureStats extends StatsOverviewWidget
     }
 
     /**
+     * Pin the grid to 4 columns once the quota card rides along, instead of leaving it
+     * to Filament's count heuristic (4 across only when count % 3 === 1, else 3).
+     *
+     * Two reasons. The card is meant to SHARE the headline row with the three ΦΠΑ
+     * cards — under the heuristic that only held for 0 or 3 breakdown extras. And
+     * without pinning, adding this card RE-FLOWS the pre-existing ΦΠΑ cards: a tenant
+     * with exactly one breakdown line went 4 stats (4-across) → 5 (3-across), so three
+     * untouched cards visibly resize because of a fourth. Everyone else keeps
+     * Filament's default.
+     */
+    protected function getColumns(): int|array|null
+    {
+        return self::providerQuotaCardApplies(Filament::getTenant()) && count($this->getCachedStats()) >= 4
+            ? ['@xl' => 4, '!@lg' => 4]
+            : parent::getColumns();
+    }
+
+    /**
      * Append the provider-quota card for a gr-provider tenant; a no-op for everyone
      * else (a direct gr-mydata tenant has no provider account, hence no quota).
      *
@@ -137,7 +154,7 @@ class MyDataPictureStats extends StatsOverviewWidget
      */
     private function withProviderQuota(Company $tenant, array $stats): array
     {
-        if ($tenant->einvoice_provider !== 'gr-provider') {
+        if (! self::providerQuotaCardApplies($tenant)) {
             return $stats;
         }
 

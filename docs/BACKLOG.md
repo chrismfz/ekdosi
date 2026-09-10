@@ -1039,6 +1039,30 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **🔴 `einvoice_provider_key` δεν κανονικοποιείται στο ΓΡΑΨΙΜΟ — ένα κλειδί με κενά σβήνει τα
+  credentials του παρόχου (P1, latent).** Ο `ProviderTransportRegistry::for()` κάνει `trim()` πριν στήσει το
+  transport, άρα η ΥΠΟΒΟΛΗ δουλεύει και το `mydata_marks.provider_key` γράφεται καθαρό — αλλά κάθε σημείο που
+  ΣΥΓΚΡΙΝΕΙ την ωμή στήλη αστοχεί. Σημεία (audit από το review του PR #518):
+  - `SendChannelFormBridge` — `$sameProvider` βγαίνει false, οπότε **η αποθήκευση της φόρμας εταιρείας
+    μηδενίζει το `einvoice_provider_config`** (το API token του παρόχου). Αυτό είναι το σοβαρό.
+    Επίσης η `SendChannel::fromCompany()` συνθέτει channel εκτός `options()` → το Select βγαίνει κενό.
+  - `GoLiveCheckReport` — `empty($key)` είναι false για `' '`, άρα το gate γράφει **pass/exit 0** για tenant
+    που στην πράξη πέφτει σε `NullProviderTransport` και δεν μπορεί να υποβάλει καθόλου.
+  - `ViewInvoice` (preview payload) + `EInvoiceProviderTestSubmit` — `=== 'invosign'` αστοχεί → δείχνουν
+    **μη-augmented** AADE XML ενώ η πραγματική υποβολή ΕΙΝΑΙ augmented.
+  - `BuildsProviderQuotaStat` — η κάρτα λέει «καμία υποβολή ακόμη» ενώ ο tenant εκδίδει καθημερινά.
+  **Root fix = κανονικοποίηση στο WRITE** (mutator/cast στο `Company`) + data-fix migration για υπάρχουσες
+  γραμμές — ΟΧΙ `trim()` σε N readers (δοκιμάστηκε στο #518 και αφέθηκε: μισο-φτιαγμένο κρύβει τα υπόλοιπα
+  σημεία). Προσοχή στο όνομα: μια μέθοδος `einvoiceProviderKey()` είναι ακριβώς το όνομα που ψάχνει ο Laravel
+  για mutator της στήλης. Δεν παράγεται από το UI (το πεδίο οδηγείται από Select) — γι' αυτό latent, όχι
+  ενεργό· χρειάζεται import/χειροκίνητη εγγραφή. **Θέλει δικό του PR με tests, όχι ουρά σε άσχετο.**
+- **`mydata_marks` has no index for the provider-quota lookup (P2, perf on data we don't have).** The card's
+  query is `WHERE company_id = ? AND provider_key = ? AND remaining_invoices IS NOT NULL ORDER BY id DESC LIMIT 1`,
+  but the table carries only `index(invoice_id)` + `unique(company_id, legacy_id)` — so the planner walks the PK
+  backwards. Runs once per dashboard load (now including the not-yet-synced placeholder branch) and, in the same
+  shape, on the filing hot path (`GrProviderSubmitter::warnIfLowProviderQuota`). Fix = `index(['company_id',
+  'provider_key','id'])`. Deferred deliberately: current mark volumes are small and the PR that surfaced it was a
+  two-line dashboard tweak — not the place for a migration. Raised in the PR #518 review (round 3).
 - **EurobankReturnController parses the raw body twice (P2, micro).** `__invoke` parse_str's the body for the
   orderid; `record()` parse_str's it again for the raw provider status. Tiny (small body), and keeping `record()`
   self-contained is arguably cleaner than threading `$fields` through `reject()` → `record()`. Fold into a single

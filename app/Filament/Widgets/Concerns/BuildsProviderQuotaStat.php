@@ -25,12 +25,30 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
  */
 trait BuildsProviderQuotaStat
 {
+    /**
+     * THE predicate for «does this tenant get a quota card at all» — static so the
+     * fallback widget's static canView() and the ΦΠΑ row's instance code consult the
+     * SAME rule. Keeping it in one place is the point: two independent copies would
+     * let a future edit to one make the card vanish from both surfaces at once (the
+     * row skips it, the widget has already stood down).
+     */
+    public static function providerQuotaCardApplies(?Company $tenant): bool
+    {
+        return $tenant?->einvoice_provider === 'gr-provider';
+    }
+
     protected function providerQuotaStat(Company $tenant, string $label = 'Υπόλοιπο εκδόσεων'): Stat
     {
         // Scope to the tenant's ACTIVE provider (einvoice_provider_key === the
         // transport key that stamps provider_key on its PROVIDER_INSERT marks), so a
         // tenant migrated between providers reads the current account's quota, not a
         // stale reading left by the old one.
+        // NOTE: reads the raw column, exactly as this query did before it moved here. A
+        // key carrying stray whitespace would miss every mark — but that is a
+        // pre-existing, repo-wide asymmetry (the registry trims before the transport
+        // stamps the mark) whose root fix is normalising on WRITE, and whose worst site
+        // silently wipes the provider API token. Filed in docs/BACKLOG.md; deliberately
+        // NOT half-fixed here.
         $latest = MyDataMark::query()
             ->where('company_id', $tenant->id)
             ->where('provider_key', (string) $tenant->einvoice_provider_key)

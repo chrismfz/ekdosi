@@ -126,6 +126,35 @@ class ProviderQuotaStatsTest extends TestCase
             ->assertSee('Επαρκές υπόλοιπο');
     }
 
+    public function test_the_card_keeps_the_headline_row_even_with_breakdown_extras(): void
+    {
+        // The PLACEMENT is the whole point of the change, so assert it: the quota card
+        // must come before the «Τρίμηνο — …» breakdown extras, and the grid must stay
+        // 4-across so the three ΦΠΑ cards + the quota really share the top row (and so
+        // the ΦΠΑ cards don't re-flow just because a breakdown line exists).
+        $c = $this->readingProviderTenant();
+        VatPictureCache::put($c, 'quarter', new MyDataVatPicture(
+            outputNet: 1000, outputVat: 240, outputGross: 1240, outputCount: 4,
+            fetchedAt: now()->toIso8601String(),
+            breakdown: ['payroll' => ['label' => 'Μισθοδοσία', 'net' => 800.0, 'vat' => 0.0, 'count' => 2]],
+        ));
+        $this->mark($c, 983);
+        Filament::setTenant($c);
+
+        $html = Livewire::test(MyDataPictureStats::class)->html();
+
+        $quota = strpos($html, 'Πάροχος — Υπόλοιπο εκδόσεων');
+        $breakdown = strpos($html, 'Τρίμηνο — Μισθοδοσία');
+        $this->assertNotFalse($quota, 'Η κάρτα υπολοίπου παρόχου λείπει από τη σειρά ΦΠΑ.');
+        $this->assertNotFalse($breakdown, 'Η αναλυτική κάρτα (μισθοδοσία) λείπει.');
+        $this->assertLessThan($breakdown, $quota, 'Το υπόλοιπο παρόχου πρέπει να προηγείται των αναλυτικών καρτών.');
+
+        $this->assertMatchesRegularExpression(
+            '/--cols-cxl: repeat\(4,/', $html,
+            'Το πλέγμα πρέπει να μένει 4 στηλών ώστε οι 3 κάρτες ΦΠΑ + το υπόλοιπο να είναι σε μία γραμμή.'
+        );
+    }
+
     public function test_the_card_shows_even_before_the_first_vat_snapshot(): void
     {
         // No VatPictureCache yet (scheduler never ran): the ΦΠΑ row falls back to its
@@ -149,12 +178,19 @@ class ProviderQuotaStatsTest extends TestCase
             'mydata_aade_id_sandbox' => 'SANDUSER',
             'mydata_subscription_key_sandbox' => 'SANDKEY',
         ]);
+        // Cache populated so this exercises the MAIN getStats() path, not the
+        // placeholder branch — otherwise the absence proves nothing about the append.
+        VatPictureCache::put($c, 'quarter', new MyDataVatPicture(
+            outputNet: 1000, outputVat: 240, outputGross: 1240, outputCount: 4,
+            fetchedAt: now()->toIso8601String(),
+        ));
         Filament::setTenant($c);
 
         $this->assertTrue(MyDataPictureStats::canView());
 
         Livewire::test(MyDataPictureStats::class)
-            ->assertDontSee('Υπόλοιπο εκδόσεων');
+            ->assertSee('Τρίμηνο — Καθαρό ΦΠΑ')   // the ΦΠΑ stats really rendered…
+            ->assertDontSee('Υπόλοιπο εκδόσεων'); // …and no provider card came with them
     }
 
     public function test_placeholder_before_the_first_provider_filing(): void

@@ -32,7 +32,9 @@ class ProviderQuotaStats extends StatsOverviewWidget
 
     public static function canView(): bool
     {
-        return Filament::getTenant()?->einvoice_provider === 'gr-provider'
+        // Same predicate the ΦΠΑ row uses to decide whether to append the card, so the
+        // two can't drift apart and drop it from both surfaces.
+        return self::providerQuotaCardApplies(Filament::getTenant())
             // Don't double-render: when the ΦΠΑ row is visible it carries the card.
             && ! MyDataPictureStats::canView();
     }
