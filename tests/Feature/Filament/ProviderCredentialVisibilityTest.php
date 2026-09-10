@@ -15,7 +15,17 @@ use Tests\TestCase;
 /**
  * «Να ξέρουμε ότι είναι εκεί»: a pre-filled masked input is visually identical to an
  * empty one, so the provider-credential fields state in words whether something is
- * actually stored — and, for a secret, WHICH one (last 4 chars only).
+ * actually stored — and, for a secret, WHICH one (a last-4 fingerprint).
+ *
+ * NOTE on what these tests do NOT assert: the form pre-fills the credential inputs with
+ * the real values (that is what ->revealable() reveals), so the full secret IS in the
+ * page by design. The fingerprint is an identification aid, not a confidentiality
+ * control — do not add `assertDontSee($plaintext)` here and read it as proof of
+ * non-disclosure: Livewire's assertDontSee strips the initial-data snapshot before
+ * matching, so it would pass while the secret sits in `wire:snapshot`. Confidentiality
+ * rests on CompanyResource being super_admin-only, which TenantStandardRolesTest pins
+ * (company_admin/operator get no ViewAny:Company); Gate::before below is only so these
+ * tests can reach the form at all.
  */
 class ProviderCredentialVisibilityTest extends TestCase
 {
@@ -28,6 +38,13 @@ class ProviderCredentialVisibilityTest extends TestCase
         $this->actingAs(User::create([
             'name' => 'Admin', 'email' => 'a-'.uniqid().'@test.local', 'password' => bcrypt('x'),
         ]));
+    }
+
+    protected function tearDown(): void
+    {
+        // provider() sets the ambient tenant; don't leak it into later tests.
+        Filament::setTenant(null);
+        parent::tearDown();
     }
 
     private function provider(array $config = []): Company
@@ -75,8 +92,8 @@ class ProviderCredentialVisibilityTest extends TestCase
         $c = $this->provider(['token' => $secret]);
 
         Livewire::test(EditCompany::class, ['record' => $c->getRouteKey()])
-            ->assertSee('(••••)')      // masked outright, no tail
-            ->assertDontSee(mb_substr($secret, -4));
+            ->assertSee('(••••)')                             // masked outright…
+            ->assertDontSee('••••'.mb_substr($secret, -4));   // …no tail emitted by the helper
     }
 
     public function test_it_does_not_vouch_for_another_providers_stored_value(): void
@@ -89,7 +106,9 @@ class ProviderCredentialVisibilityTest extends TestCase
         Livewire::test(EditCompany::class, ['record' => $c->getRouteKey()])
             ->set('data.send_channel', 'sbz-sandbox')
             ->assertSee('Δεν έχει αποθηκευτεί για αυτόν τον πάροχο')
-            ->assertDontSee('https://old-provider.gr');
+            // …and it warns that saving DELETES the old provider's credentials, rather
+            // than the softer «δεν μεταφέρονται» which understated an irreversible write.
+            ->assertSee('διαγράφονται');
     }
 
     public function test_parking_on_a_mydata_channel_and_returning_keeps_the_credentials(): void

@@ -44,6 +44,12 @@ class ProviderKeyNormalisationTest extends TestCase
             'name' => 'Πάροχος', 'slug' => 'prov-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
             'einvoice_provider_mode' => 'sandbox',
+            // Both environments filled: the go-live gate now delegates to
+            // ProviderPreflight, which checks the ACTIVE environment's credentials.
+            'einvoice_provider_config' => [
+                'base_url' => 'https://api.invosign.gr', 'token' => 'PROD-TOKEN',
+                'demo_base_url' => 'https://demo.invosign.gr', 'demo_token' => 'DEMO-TOKEN',
+            ],
         ], $attrs));
     }
 
@@ -73,17 +79,37 @@ class ProviderKeyNormalisationTest extends TestCase
         $this->assertArrayHasKey($channel, SendChannel::options(['invosign' => 'InvoSign']));
     }
 
-    public function test_a_row_written_before_the_mutator_makes_the_form_unsaveable(): void
+    public function test_a_row_written_before_the_mutator_stays_editable_and_self_repairs(): void
     {
-        // Documents the ACTUAL damage, so the migration below has something to fix.
-        // Seeded with a raw UPDATE because Company::create() now trims.
+        // This used to brick the form: the composed channel fell outside the Select's
+        // options, so EVERY save failed validation — including edits with nothing to do
+        // with e-invoicing. The channel is now re-injected (flagged) so the form stays
+        // editable, and the write mutator normalises the key on the way through, so the
+        // save itself repairs the row. Seeded with a raw UPDATE because create() trims.
         $c = $this->provider();
         DB::table('companies')->where('id', $c->id)->update(['einvoice_provider_key' => ' invosign ']);
         Filament::setTenant($c->fresh());
 
         Livewire::test(EditCompany::class, ['record' => $c->getRouteKey()])
             ->call('save')
-            ->assertHasFormErrors(['send_channel']);
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('invosign', DB::table('companies')->where('id', $c->id)->value('einvoice_provider_key'));
+    }
+
+    public function test_a_provider_that_is_no_longer_offered_does_not_brick_the_form(): void
+    {
+        // The non-whitespace half of the same bug: a clean key that isn't in
+        // provider_labels (ETL row, or a provider we decided not to ship) composes a
+        // channel outside the options just the same.
+        $c = $this->provider();
+        DB::table('companies')->where('id', $c->id)->update(['einvoice_provider_key' => 'retired-provider']);
+        Filament::setTenant($c->fresh());
+
+        Livewire::test(EditCompany::class, ['record' => $c->getRouteKey()])
+            ->assertSee('άγνωστος πάροχος')
+            ->call('save')
+            ->assertHasNoFormErrors();
     }
 
     public function test_after_the_migration_that_same_row_saves_untouched(): void
@@ -152,6 +178,20 @@ class ProviderKeyNormalisationTest extends TestCase
         $this->assertSame('invosign', $key($dirty), 'το κλειδί με κενά δεν καθαρίστηκε');
         $this->assertNull($key($blank), 'το κενό κλειδί δεν έγινε NULL');
         $this->assertSame('invosign', $key($clean), 'το ήδη καθαρό κλειδί δεν πρέπει να πειραχτεί');
+    }
+
+    public function test_the_go_live_gate_fails_a_provider_with_no_credentials(): void
+    {
+        // The false green this PR closes: key resolves, mode is production, but the
+        // credential blob is empty — the tenant cannot authenticate and will fail on
+        // its first real invoice. The gate delegates to ProviderPreflight for this.
+        $c = $this->provider(['einvoice_provider_mode' => 'production', 'einvoice_provider_config' => []]);
+
+        $gate = collect(app(GoLiveCheckReport::class)->build($c)['gates'] ?? [])
+            ->firstWhere('key', 'provider_live');
+
+        $this->assertSame('fail', $gate['status'] ?? null);
+        $this->assertStringContainsString('Στοιχεία παρόχου', $gate['detail'] ?? '');
     }
 
     public function test_the_bridge_keeps_credentials_when_the_stored_key_needed_trimming(): void

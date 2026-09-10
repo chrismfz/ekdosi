@@ -9,9 +9,8 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
-use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Services\EInvoice\ProviderPreflight;
 use App\Services\EInvoice\Transports\InvoSignDocument;
-use App\Services\EInvoice\Transports\NullProviderTransport;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyData\Codes;
 use App\Support\OperatorHealth\OperatorHealthReport;
@@ -309,32 +308,46 @@ class GoLiveCheckReport
         if ($mode === 'off') {
             return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', 'einvoice_provider_mode = off');
         }
-        $key = (string) $tenant->einvoice_provider_key;
-        if (trim($key) === '') {
+
+        $key = trim((string) $tenant->einvoice_provider_key);
+        if ($key === '') {
             return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', 'δεν έχει οριστεί provider (einvoice_provider_key)');
         }
 
-        // A key that is merely NON-EMPTY is not a filing tenant: an unregistered (or
-        // whitespace-carrying) key resolves to NullProviderTransport, which cannot
-        // file at all — and a cutover gate reporting «pass» for it is a false green
-        // on the one check that is supposed to catch exactly this.
-        // for(), not keys(): keys() is a bare array_keys() of the map and skips the
-        // class_exists()/is_subclass_of() checks, so a provider listed but not yet
-        // implemented would pass the gate and then fall to the Null transport at filing
-        // time — the exact false green this check exists to close. for() logs a warning
-        // for an unresolvable key, which on a cutover report is a feature, not noise:
-        // it fires only for a genuinely unfilable tenant.
-        if (app(ProviderTransportRegistry::class)->for($key) instanceof NullProviderTransport) {
-            return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', "άγνωστος provider «{$key}» — δεν αντιστοιχεί σε ενεργό transport");
+        // DELEGATE to ProviderPreflight::transportReadiness() rather than re-implement:
+        // it already checks that the key resolves to a real transport AND that the
+        // credentials for the ACTIVE environment are present (demo_* vs production split)
+        // AND that the endpoint is a safe public https host. Re-doing only the first of
+        // those here is what let a tenant with an EMPTY credential blob read as
+        // cutover-ready — the same class of false green this gate exists to close — and a
+        // second copy would drift from the Console's verdict on the same tenant.
+        //
+        // transportReadiness(), not audit(): audit() also covers issuer ΑΦΜ, issuer
+        // fields and document types, each of which is ALREADY its own go-live gate —
+        // swallowing them here would report another gate's failure under this one's name.
+        //
+        // One deliberate difference, not a drift: preflight calls mode=off «staged»
+        // (warn); for a CUTOVER gate it is a fail, handled above before we get here.
+        $failed = array_values(array_filter(
+            app(ProviderPreflight::class)->transportReadiness($tenant),
+            fn (array $check): bool => $check['status'] === 'fail',
+        ));
+
+        if ($failed !== []) {
+            return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail',
+                implode(' · ', array_map(fn (array $c): string => $c['label'].': '.$c['detail'], $failed)));
         }
 
         // Sandbox is not cutover-ready: the documents go to the provider's DEMO
         // environment and never reach the real ΑΑΔΕ. Mirrors the mydata_mode gate,
         // which already warns for sandbox — the provider path had no signal at all
-        // and reported a green «ready».
+        // and reported a green «ready». The MODE IS NAMED so an invalid value
+        // ('prod', 'live' — the column is a plain string with no enum cast, and
+        // ProviderCredentials silently downgrades anything ≠ 'production' to sandbox)
+        // is distinguishable from a tenant legitimately still on sandbox.
         if ($mode !== 'production') {
             return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'warn',
-                "{$key} — δοκιμαστικό περιβάλλον παρόχου· τα παραστατικά δεν φτάνουν στην πραγματική ΑΑΔΕ");
+                "{$key} (mode={$mode}) — δοκιμαστικό περιβάλλον παρόχου· τα παραστατικά δεν φτάνουν στην πραγματική ΑΑΔΕ");
         }
 
         return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'pass', "{$key} ({$mode})");

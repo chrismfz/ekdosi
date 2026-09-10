@@ -232,6 +232,13 @@ class GoLiveCheckTest extends TestCase
             'name' => 'Provider Live OE', 'slug' => 'pvl-'.uniqid(), 'country_code' => 'GR',
             'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
             'einvoice_provider_key' => 'invosign', 'mydata_mode' => 'off',
+            // «configured» now means it too: the provider_live gate delegates to
+            // ProviderPreflight::transportReadiness(), so an EMPTY credential blob is a
+            // fail. It used to pass — a tenant that cannot authenticate read as
+            // cutover-ready, which is the false green this asserts against.
+            'einvoice_provider_config' => [
+                'base_url' => 'https://api.invosign.gr', 'token' => 'PROD-TOKEN',
+            ],
             'business_activity_type' => 'services', 'afm' => '800561849',
             // PROV-005: the full issuer identity InvoSign's extension requires.
             'kad_primary' => '6201', 'tax_office' => 'Α΄ ΑΘΗΝΩΝ',

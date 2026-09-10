@@ -25,8 +25,6 @@ class ProviderPreflight
     /** @return list<array{status:string, label:string, detail:string}> */
     public function audit(Company $tenant): array
     {
-        $checks = [];
-
         if ($tenant->einvoice_provider !== 'gr-provider') {
             return [[
                 'status' => 'warn',
@@ -35,7 +33,82 @@ class ProviderPreflight
             ]];
         }
 
-        $key = (string) $tenant->einvoice_provider_key;
+        $checks = $this->transportReadiness($tenant);
+
+        // Issuer AFM (the AADE payload needs it). blank() — a whitespace-only ΑΦΜ is
+        // as missing as an empty one (consistent with the issuer-field checks below).
+        $checks[] = filled($tenant->afm)
+            ? ['status' => 'ok', 'label' => 'ΑΦΜ εκδότη', 'detail' => (string) $tenant->afm]
+            : ['status' => 'fail', 'label' => 'ΑΦΜ εκδότη', 'detail' => 'Λείπει το ΑΦΜ της εταιρείας.'];
+
+        // PROV-005: InvoSign's <API_Issuer> extension requires the FULL issuer
+        // identity, not just the ΑΦΜ (επωνυμία, ΚΑΔ, ΔΟΥ, οδός, Τ.Κ., πόλη). A tenant
+        // missing any passes this preflight today and is rejected by the provider at
+        // the wire on the first real document — the false green this closes. Single
+        // source = InvoSignDocument::ISSUER_FIELDS (exactly what the payload carries).
+        $missingIssuer = InvoSignDocument::missingIssuerLabels($tenant);
+        $checks[] = $missingIssuer['required'] === []
+            ? ['status' => 'ok', 'label' => 'Στοιχεία εκδότη (πάροχος)', 'detail' => 'Πλήρη (επωνυμία, ΚΑΔ, ΔΟΥ, διεύθυνση).']
+            : ['status' => 'fail', 'label' => 'Στοιχεία εκδότη (πάροχος)', 'detail' => 'Λείπουν υποχρεωτικά πεδία που απαιτεί ο πάροχος: '.implode(', ', $missingIssuer['required']).'.'];
+
+        // Contact fields (email/phone) are NOT required for acceptance, but the
+        // provider likely uses them to deliver the document to the customer — nudge,
+        // don't block. Shown only when actually missing.
+        if ($missingIssuer['recommended'] !== []) {
+            $checks[] = ['status' => 'warn', 'label' => 'Επικοινωνία εκδότη', 'detail' => 'Λείπει: '.implode(', ', $missingIssuer['recommended']).' — δεν εμποδίζει την έκδοση, αλλά ο πάροχος πιθανώς το χρησιμοποιεί για να στείλει το παραστατικό στον πελάτη.'];
+        }
+
+        // myDATA read-path creds — provider tenants still reconcile via myDATA.
+        // Validate a COMPLETE pair (aade-id + subscription-key) for the ACTIVE read
+        // environment (mydataReadMode), not a sandbox-id + prod-key mash-up that reads
+        // green but cannot actually read (PROV-005). Stays a WARN: reconciliation is
+        // not a filing blocker.
+        $readMode = $tenant->mydataReadMode();
+        if ($readMode === null) {
+            $checks[] = ['status' => 'warn', 'label' => 'myDATA (έλεγχος/συμφωνία)', 'detail' => 'Δεν έχει οριστεί περιβάλλον/aade-id ανάγνωσης — η διασταύρωση/reconciliation δεν θα δουλεύει.'];
+        } else {
+            [, $readKey] = $tenant->mydataCredentials($readMode);
+            $env = $readMode === MyDataMode::Production ? 'παραγωγής' : 'δοκιμαστικού';
+            // filled(), not empty(): a whitespace-only key must not read green (and the
+            // aade-id half is already guaranteed present by mydataReadMode()).
+            // mydataReadMode() only returns a mode whose aade-id is filled, so the
+            // missing half here is always the subscription-key.
+            $checks[] = filled($readKey)
+                ? ['status' => 'ok', 'label' => 'myDATA (έλεγχος/συμφωνία)', 'detail' => "Πλήρες ζεύγος διαπιστευτηρίων {$env}."]
+                : ['status' => 'warn', 'label' => 'myDATA (έλεγχος/συμφωνία)', 'detail' => "Ελλιπές ζεύγος διαπιστευτηρίων {$env} (λείπει subscription-key) — η διασταύρωση δεν θα δουλεύει."];
+        }
+
+        // At least one invoice type mapped to a myDATA type.
+        $typed = InvoiceType::query()->where('company_id', $tenant->id)->whereNotNull('mydata_type')->count();
+        $checks[] = $typed > 0
+            ? ['status' => 'ok', 'label' => 'Είδη παραστατικών', 'detail' => "{$typed} με mydata_type."]
+            : ['status' => 'fail', 'label' => 'Είδη παραστατικών', 'detail' => 'Κανένα είδος παραστατικού με mydata_type — δεν μπορεί να εκδοθεί.'];
+
+        return $checks;
+    }
+
+    /**
+     * The TRANSPORT-scoped half of the preflight: can this tenant physically reach its
+     * provider — key set, transport registered, environment, credentials for the ACTIVE
+     * environment, endpoint safety.
+     *
+     * Split out so the cutover gate (GoLiveCheckReport::providerLiveGate) reuses exactly
+     * these instead of re-implementing a subset and drifting: checking only «is the
+     * transport registered» is what let a tenant with an EMPTY credential blob read as
+     * cutover-ready. The issuer/ΑΦΜ/document checks that follow in audit() are separate
+     * go-live gates in their own right, so they deliberately stay out of here.
+     *
+     * @return list<array{status:string, label:string, detail:string}>
+     */
+    public function transportReadiness(Company $tenant): array
+    {
+        $checks = [];
+
+        // Trim like ProviderTransportRegistry::for() does: an untrimmed key resolves its
+        // transport fine but misses config("…provider_fields.{$key}"), which would leave
+        // the credential check with no fields to look at and report a FAIL with an empty
+        // detail — a tenant that files fine reading as not-ready.
+        $key = trim((string) $tenant->einvoice_provider_key);
         $checks[] = [
             'status' => $key !== '' ? 'ok' : 'fail',
             'label' => 'Πάροχος',
@@ -93,55 +166,6 @@ class ProviderPreflight
                 $checks[] = ['status' => 'fail', 'label' => 'URL παρόχου', 'detail' => $e->getMessage()];
             }
         }
-
-        // Issuer AFM (the AADE payload needs it). blank() — a whitespace-only ΑΦΜ is
-        // as missing as an empty one (consistent with the issuer-field checks below).
-        $checks[] = filled($tenant->afm)
-            ? ['status' => 'ok', 'label' => 'ΑΦΜ εκδότη', 'detail' => (string) $tenant->afm]
-            : ['status' => 'fail', 'label' => 'ΑΦΜ εκδότη', 'detail' => 'Λείπει το ΑΦΜ της εταιρείας.'];
-
-        // PROV-005: InvoSign's <API_Issuer> extension requires the FULL issuer
-        // identity, not just the ΑΦΜ (επωνυμία, ΚΑΔ, ΔΟΥ, οδός, Τ.Κ., πόλη). A tenant
-        // missing any passes this preflight today and is rejected by the provider at
-        // the wire on the first real document — the false green this closes. Single
-        // source = InvoSignDocument::ISSUER_FIELDS (exactly what the payload carries).
-        $missingIssuer = InvoSignDocument::missingIssuerLabels($tenant);
-        $checks[] = $missingIssuer['required'] === []
-            ? ['status' => 'ok', 'label' => 'Στοιχεία εκδότη (πάροχος)', 'detail' => 'Πλήρη (επωνυμία, ΚΑΔ, ΔΟΥ, διεύθυνση).']
-            : ['status' => 'fail', 'label' => 'Στοιχεία εκδότη (πάροχος)', 'detail' => 'Λείπουν υποχρεωτικά πεδία που απαιτεί ο πάροχος: '.implode(', ', $missingIssuer['required']).'.'];
-
-        // Contact fields (email/phone) are NOT required for acceptance, but the
-        // provider likely uses them to deliver the document to the customer — nudge,
-        // don't block. Shown only when actually missing.
-        if ($missingIssuer['recommended'] !== []) {
-            $checks[] = ['status' => 'warn', 'label' => 'Επικοινωνία εκδότη', 'detail' => 'Λείπει: '.implode(', ', $missingIssuer['recommended']).' — δεν εμποδίζει την έκδοση, αλλά ο πάροχος πιθανώς το χρησιμοποιεί για να στείλει το παραστατικό στον πελάτη.'];
-        }
-
-        // myDATA read-path creds — provider tenants still reconcile via myDATA.
-        // Validate a COMPLETE pair (aade-id + subscription-key) for the ACTIVE read
-        // environment (mydataReadMode), not a sandbox-id + prod-key mash-up that reads
-        // green but cannot actually read (PROV-005). Stays a WARN: reconciliation is
-        // not a filing blocker.
-        $readMode = $tenant->mydataReadMode();
-        if ($readMode === null) {
-            $checks[] = ['status' => 'warn', 'label' => 'myDATA (έλεγχος/συμφωνία)', 'detail' => 'Δεν έχει οριστεί περιβάλλον/aade-id ανάγνωσης — η διασταύρωση/reconciliation δεν θα δουλεύει.'];
-        } else {
-            [, $readKey] = $tenant->mydataCredentials($readMode);
-            $env = $readMode === MyDataMode::Production ? 'παραγωγής' : 'δοκιμαστικού';
-            // filled(), not empty(): a whitespace-only key must not read green (and the
-            // aade-id half is already guaranteed present by mydataReadMode()).
-            // mydataReadMode() only returns a mode whose aade-id is filled, so the
-            // missing half here is always the subscription-key.
-            $checks[] = filled($readKey)
-                ? ['status' => 'ok', 'label' => 'myDATA (έλεγχος/συμφωνία)', 'detail' => "Πλήρες ζεύγος διαπιστευτηρίων {$env}."]
-                : ['status' => 'warn', 'label' => 'myDATA (έλεγχος/συμφωνία)', 'detail' => "Ελλιπές ζεύγος διαπιστευτηρίων {$env} (λείπει subscription-key) — η διασταύρωση δεν θα δουλεύει."];
-        }
-
-        // At least one invoice type mapped to a myDATA type.
-        $typed = InvoiceType::query()->where('company_id', $tenant->id)->whereNotNull('mydata_type')->count();
-        $checks[] = $typed > 0
-            ? ['status' => 'ok', 'label' => 'Είδη παραστατικών', 'detail' => "{$typed} με mydata_type."]
-            : ['status' => 'fail', 'label' => 'Είδη παραστατικών', 'detail' => 'Κανένα είδος παραστατικού με mydata_type — δεν μπορεί να εκδοθεί.'];
 
         return $checks;
     }
