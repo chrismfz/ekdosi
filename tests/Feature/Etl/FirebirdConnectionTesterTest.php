@@ -176,6 +176,20 @@ class FirebirdConnectionTesterTest extends TestCase
         $this->assertStringContainsString('κρατά ήδη άλλος πελάτης', (string) $result->afmSummary());
     }
 
+    public function test_the_probe_judges_the_source_under_the_keeper_the_operator_typed(): void
+    {
+        $pdo = $this->fakePdoWithCustomers([[41, '123456789', 'ΕΤΑΙΡΕΙΑ ΑΕ'], [87, '123456789', 'ΥΠΟΚΑΤΑΣΤΗΜΑ']]);
+
+        $this->assertTrue($this->tester($pdo)->test('h', 3050, '/db.fdb', 'u', 'p')->afmBlocks());
+
+        // …and once «41» is in the form field, a re-test agrees with what the
+        // import will actually do instead of repeating the same refusal.
+        $resolved = $this->tester($pdo)->test('h', 3050, '/db.fdb', 'u', 'p', null, [41]);
+
+        $this->assertFalse($resolved->afmBlocks());
+        $this->assertStringContainsString('επιλυμένα', (string) $resolved->afmSummary());
+    }
+
     public function test_the_probe_stays_silent_when_the_afm_check_cannot_run(): void
     {
         // An older snapshot without the columns must not turn a working

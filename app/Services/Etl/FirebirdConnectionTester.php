@@ -50,8 +50,11 @@ class FirebirdConnectionTester
      * @param  int|null  $companyId  target tenant — enables the «already held in
      *                               ekdosi» half of the ΑΦΜ check. Null checks only
      *                               the duplicates INSIDE the legacy source.
+     * @param  list<int>  $afmKeep  the CUST_IDs the operator already decided keep
+     *                              their ΑΦΜ, so a probe re-run after filling the
+     *                              field agrees with what the import will do.
      */
-    public function test(string $host, int $port, string $database, string $user, string $password, ?int $companyId = null): FirebirdProbeResult
+    public function test(string $host, int $port, string $database, string $user, string $password, ?int $companyId = null, array $afmKeep = []): FirebirdProbeResult
     {
         if ($this->connectionFactory === null && ! extension_loaded('pdo_firebird')) {
             return FirebirdProbeResult::failure('driver_missing',
@@ -64,7 +67,7 @@ class FirebirdConnectionTester
             return FirebirdProbeResult::failure($this->classify($e), $e->getMessage());
         }
 
-        return $this->probe($pdo, $companyId);
+        return $this->probe($pdo, $companyId, $afmKeep);
     }
 
     /** `firebird:dbname=HOST:PATH` (default port) or `HOST/PORT:PATH`. */
@@ -84,7 +87,7 @@ class FirebirdConnectionTester
         return new PDO($dsn, $user, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     }
 
-    private function probe(PDO $pdo, ?int $companyId = null): FirebirdProbeResult
+    private function probe(PDO $pdo, ?int $companyId = null, array $afmKeep = []): FirebirdProbeResult
     {
         $counts = [];
         $missing = [];
@@ -106,7 +109,7 @@ class FirebirdConnectionTester
                 .'ή ο χρήστης δεν έχει δικαίωμα ανάγνωσης σε αυτούς τους πίνακες.');
         }
 
-        return FirebirdProbeResult::success($counts, $missing, $this->afmReport($pdo, $companyId, $counts['CUSTOMER'] ?? null));
+        return FirebirdProbeResult::success($counts, $missing, $this->afmReport($pdo, $companyId, $counts['CUSTOMER'] ?? null, $afmKeep));
     }
 
     /**
@@ -115,7 +118,7 @@ class FirebirdConnectionTester
      * connection test into a failure: the authoritative check is the import's own
      * guard, this is the early warning.
      */
-    private function afmReport(PDO $pdo, ?int $companyId, ?int $customerCount): ?LegacyAfmConflictReport
+    private function afmReport(PDO $pdo, ?int $companyId, ?int $customerCount, array $afmKeep = []): ?LegacyAfmConflictReport
     {
         // This runs inside a synchronous Livewire request, so it reads the whole
         // CUSTOMER table exactly once and only while that is cheap. Past the cap
@@ -137,6 +140,7 @@ class FirebirdConnectionTester
         return $conflicts->find(
             $conflicts->mapLegacyRows($rows, fn (array $r, string $k): ?string => $this->clean($r[$k] ?? null)),
             $companyId,
+            $afmKeep,
         );
     }
 

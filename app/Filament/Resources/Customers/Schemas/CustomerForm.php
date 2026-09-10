@@ -85,6 +85,16 @@ class CustomerForm
                                             return; // blank / placeholder = no identity to collide on
                                         }
 
+                                        // A PARKED row (the legacy υποκατάστημα twin the ETL
+                                        // imported keyless — see customers.afm_key_parked)
+                                        // deliberately shares its ΑΦΜ with the holder, so
+                                        // handing it back its OWN ΑΦΜ is not a duplicate;
+                                        // refusing it would make the row uneditable. Any OTHER
+                                        // value is checked normally.
+                                        if ($record?->afm_key_parked && Afm::uniqueKey($record->afm) === Afm::uniqueKey($value)) {
+                                            return;
+                                        }
+
                                         $other = Customer::afmOwnerQuery((int) Filament::getTenant()?->getKey(), $value)
                                             ->when($record, fn ($q) => $q->whereKeyNot($record->getKey()))
                                             ->first();

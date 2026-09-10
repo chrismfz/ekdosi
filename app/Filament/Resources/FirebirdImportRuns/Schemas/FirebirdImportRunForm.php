@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\FirebirdImportRuns\Schemas;
 
+use App\Models\FirebirdImportRun;
 use App\Services\Etl\FirebirdConnectionTester;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
@@ -247,6 +248,10 @@ class FirebirdImportRunForm
                                                     trim((string) $get('fb_live_user')) ?: 'EKDOSI',
                                                     (string) $get('fb_live_password'),
                                                     Filament::getTenant()?->getKey(),
+                                                    // Judge the source under the decision the
+                                                    // operator has ALREADY typed, so a re-test
+                                                    // after filling the field agrees with the import.
+                                                    FirebirdImportRun::parseAfmKeep($get('afm_keep')),
                                                 );
 
                                                 if ($result->ok) {
@@ -262,7 +267,7 @@ class FirebirdImportRunForm
                                                                 e($body).'<br><strong>'.e((string) $result->afmSummary()).'</strong><br>'
                                                                 .nl2br(e(self::firstLines($result->afm->describe(), 8)))
                                                                 .'<br>'.e($result->afm->howTo())
-                                                                .'<br><em>'.e('Από εδώ: συμπλήρωσε τα CUST_ID στο «Διπλά ΑΦΜ πελατών» (καρτέλα Firebird) πριν την εισαγωγή.').'</em>'
+                                                                .'<br><em>'.e('Από εδώ: συμπλήρωσε/διόρθωσε τα CUST_ID στο «Διπλά ΑΦΜ πελατών» (καρτέλα Firebird) και ξανακάνε «Έλεγχος σύνδεσης».').'</em>'
                                                             ))
                                                             ->warning()->persistent()->send();
 

@@ -2,13 +2,18 @@
 
 namespace Tests\Feature\Customers;
 
+use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\User;
 use App\Services\Customers\CustomerAfmDuplicates;
 use App\Services\Customers\MergeCustomers;
+use Filament\Facades\Filament;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
+use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
@@ -66,6 +71,35 @@ class CustomerAfmParkedTest extends TestCase
         $this->assertSame('123456789', $holder->fresh()->afm_key);
         // The ΑΦΜ itself is untouched — it still prints on the customer's documents.
         $this->assertSame('123456789', $twin->fresh()->afm);
+    }
+
+    public function test_the_edit_form_lets_a_parked_row_keep_its_own_afm(): void
+    {
+        $company = $this->tenant();
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
+        Gate::before(fn () => true);
+        $this->actingAs($user);
+        Filament::setTenant($company);
+
+        Customer::create(['company_id' => $company->id, 'name' => 'ΕΤΑΙΡΕΙΑ ΑΕ', 'afm' => '123456789']);
+        $twin = $this->parkedTwin($company);
+
+        // The whole point of the flag: the ΑΦΜ uniqueness rule must not refuse a
+        // parked row its OWN ΑΦΜ back, or the row can never be saved from the panel.
+        Livewire::test(EditCustomer::class, ['record' => $twin->getKey()])
+            ->fillForm(['phone1' => '2101234567'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $this->assertSame('2101234567', $twin->fresh()->phone1);
+        $this->assertNull($twin->fresh()->afm_key);
+
+        // …but a parked row is no licence to take a THIRD customer's ΑΦΜ.
+        Customer::create(['company_id' => $company->id, 'name' => 'ΤΡΙΤΟΣ', 'afm' => '094123456']);
+        Livewire::test(EditCustomer::class, ['record' => $twin->getKey()])
+            ->fillForm(['afm' => 'EL 094 123 456'])
+            ->call('save')
+            ->assertHasFormErrors(['afm']);
     }
 
     public function test_a_parked_row_reclaims_its_identity_once_the_afm_stops_colliding(): void

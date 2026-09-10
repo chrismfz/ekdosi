@@ -1111,8 +1111,10 @@ class CompanyImporter
     {
         // deleted_at is lifecycle, not identity: a locally soft-deleted row must
         // still match its bundle twin (else merge inserts a live duplicate).
-        // afm_key is DERIVED (pre-release bundles lack it) — never part of identity.
-        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at', 'afm_key'] as $col) {
+        // afm_key is DERIVED (pre-release bundles lack it) — never part of identity;
+        // afm_key_parked is the flag that suppresses it, equally not identity (a
+        // pre-PR bundle carries neither, and must still match its upgraded twin).
+        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at', 'afm_key', 'afm_key_parked'] as $col) {
             unset($row[$col]);
         }
         ksort($row);

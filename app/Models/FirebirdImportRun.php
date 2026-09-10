@@ -69,7 +69,18 @@ class FirebirdImportRun extends Model
      */
     public function afmKeepIds(): array
     {
-        $ids = array_map('intval', preg_split('/[^0-9]+/', (string) $this->afm_keep, -1, PREG_SPLIT_NO_EMPTY) ?: []);
+        return self::parseAfmKeep($this->afm_keep);
+    }
+
+    /**
+     * The same parse, for the form (where there is no run row yet) — «Έλεγχος
+     * σύνδεσης» must judge the source under exactly the ids the import will use.
+     *
+     * @return list<int>
+     */
+    public static function parseAfmKeep(?string $typed): array
+    {
+        $ids = array_map('intval', preg_split('/[^0-9]+/', (string) $typed, -1, PREG_SPLIT_NO_EMPTY) ?: []);
 
         return array_values(array_unique(array_filter($ids, fn (int $id): bool => $id > 0)));
     }

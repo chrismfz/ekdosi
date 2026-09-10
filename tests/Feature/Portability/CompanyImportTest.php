@@ -53,6 +53,22 @@ class CompanyImportTest extends TestCase
         return app(CompanyExporter::class)->build($company, 'passphrase', 'p@ss');
     }
 
+    public function test_row_signature_ignores_the_derived_afm_columns(): void
+    {
+        // The content-signature fallback identifies a row with no natural key. A
+        // PRE-PR bundle carries neither afm_key nor afm_key_parked; if either
+        // counted as content, such a row would stop matching its local twin on an
+        // upgraded target and be inserted a second time.
+        $importer = app(CompanyImporter::class);
+        $method = (new \ReflectionClass(CompanyImporter::class))->getMethod('rowSignature');
+        $row = ['name' => 'Λιανική', 'afm' => '000000000', 'city' => 'Αθήνα'];
+
+        $this->assertSame(
+            $method->invoke($importer, $row),
+            $method->invoke($importer, $row + ['afm_key' => null, 'afm_key_parked' => false]),
+        );
+    }
+
     public function test_a_parked_afm_twin_survives_a_bundle_round_trip(): void
     {
         $company = $this->sourceCompany();

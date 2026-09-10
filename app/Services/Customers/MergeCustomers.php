@@ -68,7 +68,7 @@ class MergeCustomers
      */
     public const NOT_COMPARED = [
         'id', 'company_id', 'created_at', 'updated_at', 'deleted_at',
-        'afm_key', 'sort_order', 'referred_by_customer_id', 'whmcs_reseller_routes',
+        'afm_key', 'afm_key_parked', 'sort_order', 'referred_by_customer_id', 'whmcs_reseller_routes',
     ];
 
     /** Greek labels for the columns an operator would recognise (fallback: the column name). */

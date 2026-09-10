@@ -98,7 +98,11 @@ final class LegacyAfmConflictReport
 
         $parts = [];
         if ($this->groups !== []) {
-            $parts[] = count($this->groups).' διπλά ΑΦΜ μέσα στη legacy βάση';
+            $unresolved = count($this->unresolvedGroups());
+            $parts[] = $unresolved > 0
+                ? $unresolved.' διπλά ΑΦΜ μέσα στη legacy βάση'
+                : count($this->groups).' διπλά ΑΦΜ μέσα στη legacy βάση (επιλυμένα με --afm-keep — '
+                    .count($this->parked()).' χωρίς ταυτότητα ΑΦΜ)';
         }
         if ($this->localOwners !== []) {
             $parts[] = count($this->localOwners).' ΑΦΜ που κρατά ήδη άλλος πελάτης στο ekdosi';
