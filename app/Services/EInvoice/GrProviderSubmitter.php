@@ -447,8 +447,9 @@ class GrProviderSubmitter implements EInvoiceSubmitter
      * PROV-009: warn when the provider account's remaining quota runs low. The count
      * arrives free on every issue response (InvoSign `remaining_invoices`), so this
      * needs no polling. A log line (surfaces via ops:health / log_tail); the running
-     * count lives in the ProviderQuotaStats dashboard widget. Never throws — a filing
-     * already succeeded.
+     * count lives in the dashboard quota card (the «Εικόνα από myDATA — ΦΠΑ» row, or
+     * the ProviderQuotaStats fallback widget). Never throws — a filing already
+     * succeeded.
      *
      * Fires only when this reading crosses into a WORSE band than the previous
      * reading for the same tenant+provider — not on every filing while already in the

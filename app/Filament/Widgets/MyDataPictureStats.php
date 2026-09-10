@@ -2,7 +2,9 @@
 
 namespace App\Filament\Widgets;
 
+use App\Filament\Widgets\Concerns\BuildsProviderQuotaStat;
 use App\Filament\Widgets\Concerns\FormatsDashboardValues;
+use App\Models\Company;
 use App\Services\MyData\MyDataVatPicture;
 use App\Support\MyData\VatPictureCache;
 use Carbon\Carbon;
@@ -24,9 +26,15 @@ use Filament\Widgets\StatsOverviewWidget\Stat;
  * Any tenant that can READ from myDATA — direct gr-mydata OR a gr-provider
  * tenant reading its own AADE picture with its own subscription (the provider
  * only files; the documents are still the tenant's).
+ *
+ * A gr-provider tenant ALSO gets the «Πάροχος — Υπόλοιπο εκδόσεων» card appended
+ * here (BuildsProviderQuotaStat), so the provider quota rides this high row instead
+ * of its own widget near the bottom of the dashboard. ProviderQuotaStats stands down
+ * whenever this widget is visible, so the card shows exactly once.
  */
 class MyDataPictureStats extends StatsOverviewWidget
 {
+    use BuildsProviderQuotaStat;
     use FormatsDashboardValues;
 
     protected static ?int $sort = 3;
@@ -49,13 +57,14 @@ class MyDataPictureStats extends StatsOverviewWidget
         $month = VatPictureCache::get($tenant, 'month');
 
         if ($quarter === null) {
-            // Not refreshed yet (no scheduler run / first install).
-            return [
+            // Not refreshed yet (no scheduler run / first install). The provider quota
+            // is unrelated to the AADE snapshot, so it still shows.
+            return $this->withProviderQuota($tenant, [
                 Stat::make('Εικόνα από myDATA', '—')
                     ->description('Δεν έχει συγχρονιστεί ακόμη — εκτελέστε «mydata:refresh-vat-picture».')
                     ->descriptionIcon('heroicon-m-cloud-arrow-down')
                     ->color('gray'),
-            ];
+            ]);
         }
 
         $netQuarter = $quarter->netVat();
@@ -94,6 +103,13 @@ class MyDataPictureStats extends StatsOverviewWidget
                 ->color($quarter->isPayable() ? 'danger' : 'success'),
         ];
 
+        // 4th card for provider tenants: the ΥΠΑΗΕΣ issuance quota. Placed before the
+        // optional breakdown extras so it sits right after the three headline ΦΠΑ
+        // cards rather than trailing a variable number of «Τρίμηνο — …» ones.
+        // getColumns() below pins the grid to 4 so that position really is the top
+        // row, whatever the breakdown count.
+        $stats = $this->withProviderQuota($tenant, $stats);
+
         // Self-declared transmitted docs that are NOT sales (μισθοδοσία,
         // ενδοκοινοτικά, ΑΛΠ…) — broken out so they don't inflate Έσοδα.
         foreach ($quarter->breakdown as $b) {
@@ -107,6 +123,42 @@ class MyDataPictureStats extends StatsOverviewWidget
                 ->descriptionIcon('heroicon-m-information-circle')
                 ->color('gray');
         }
+
+        return $stats;
+    }
+
+    /**
+     * Pin the grid to 4 columns once the quota card rides along, instead of leaving it
+     * to Filament's count heuristic (4 across only when count % 3 === 1, else 3).
+     *
+     * Two reasons. The card is meant to SHARE the headline row with the three ΦΠΑ
+     * cards — under the heuristic that only held for 0 or 3 breakdown extras. And
+     * without pinning, adding this card RE-FLOWS the pre-existing ΦΠΑ cards: a tenant
+     * with exactly one breakdown line went 4 stats (4-across) → 5 (3-across), so three
+     * untouched cards visibly resize because of a fourth. Everyone else keeps
+     * Filament's default.
+     */
+    protected function getColumns(): int|array|null
+    {
+        return self::providerQuotaCardApplies(Filament::getTenant()) && count($this->getCachedStats()) >= 4
+            ? ['@xl' => 4, '!@lg' => 4]
+            : parent::getColumns();
+    }
+
+    /**
+     * Append the provider-quota card for a gr-provider tenant; a no-op for everyone
+     * else (a direct gr-mydata tenant has no provider account, hence no quota).
+     *
+     * @param  array<int, Stat>  $stats
+     * @return array<int, Stat>
+     */
+    private function withProviderQuota(Company $tenant, array $stats): array
+    {
+        if (! self::providerQuotaCardApplies($tenant)) {
+            return $stats;
+        }
+
+        $stats[] = $this->providerQuotaStat($tenant, 'Πάροχος — Υπόλοιπο εκδόσεων');
 
         return $stats;
     }
@@ -140,6 +192,9 @@ class MyDataPictureStats extends StatsOverviewWidget
             return null;
         }
 
-        return 'Στοιχεία ΑΑΔΕ — ενημερώθηκε '.Carbon::parse($picture->fetchedAt)->diffForHumans();
+        // «(ΦΠΑ)» is load-bearing: the row can also carry the provider-quota card,
+        // whose age is the last FILING, not this AADE snapshot. Scoping the note to
+        // the ΦΠΑ figures stops it from vouching for a number it doesn't cover.
+        return 'Στοιχεία ΑΑΔΕ (ΦΠΑ) — ενημερώθηκε '.Carbon::parse($picture->fetchedAt)->diffForHumans();
     }
 }

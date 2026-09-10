@@ -414,8 +414,10 @@ return [
         | (InvoSign) return the account's REMAINING QUOTA on every issue response
         | (`remaining_invoices`), so we track it for free. At or below this many
         | remaining filings a warning is logged on each new filing, and the
-        | ProviderQuotaStats dashboard widget turns warning/danger — nudging the
-        | operator to top up before the account runs dry mid-day.
+        | dashboard quota card turns warning/danger — nudging the operator to top
+        | up before the account runs dry mid-day. That card rides the «Εικόνα από
+        | myDATA — ΦΠΑ» row (MyDataPictureStats), falling back to the standalone
+        | ProviderQuotaStats widget when the tenant can't read myDATA.
         */
         'provider_low_quota_threshold' => (int) env('EKDOSI_PROVIDER_LOW_QUOTA_THRESHOLD', 50),
 
