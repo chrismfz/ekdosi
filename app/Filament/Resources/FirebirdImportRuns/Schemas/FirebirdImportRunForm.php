@@ -142,9 +142,19 @@ class FirebirdImportRunForm
                                         TextInput::make('afm_keep')
                                             ->label('CUST_ID που κρατούν το ΑΦΜ')
                                             ->placeholder('π.χ. 41, 87')
+                                            // Prefilled from the last import that carried a decision:
+                                            // the parallel-run week re-imports daily against the SAME
+                                            // legacy duplicates, and a blank field means every one of
+                                            // those runs refuses in the queue until it is retyped.
+                                            ->default(fn (): ?string => FirebirdImportRun::query()
+                                                ->where('company_id', Filament::getTenant()?->getKey())
+                                                ->whereNotNull('afm_keep')
+                                                ->where('afm_keep', '<>', '')
+                                                ->latest('id')
+                                                ->value('afm_keep'))
                                             ->maxLength(255)
                                             ->rule('regex:/^[0-9\s,]*$/')
-                                            ->helperText('Ένα CUST_ID ανά διπλό ΑΦΜ, χωρισμένα με κόμμα. Ο άλλος πελάτης μπαίνει κανονικά — με ΑΦΜ, παραστατικά και ιστορικό — αλλά χωρίς την ταυτότητα ΑΦΜ, και τον τακτοποιείς μετά μέσα στο ekdosi (συγχώνευση ή υποκατάστημα ανά παραστατικό). Ισχύει και για τη «Ζωντανή σύνδεση».')
+                                            ->helperText('Ένα CUST_ID ανά διπλό ΑΦΜ, χωρισμένα με κόμμα. Προσυμπληρώνεται από την τελευταία εισαγωγή που είχε απόφαση. Ο άλλος πελάτης μπαίνει κανονικά — με ΑΦΜ, παραστατικά και ιστορικό — αλλά χωρίς την ταυτότητα ΑΦΜ, και τον τακτοποιείς μετά μέσα στο ekdosi (συγχώνευση ή υποκατάστημα ανά παραστατικό). Ισχύει και για τη «Ζωντανή σύνδεση».')
                                             ->columnSpanFull(),
                                     ]),
 

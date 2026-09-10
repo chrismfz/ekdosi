@@ -112,6 +112,9 @@ class LegacyAfmConflictsTest extends TestCase
         $this->assertFalse($report->hasBlockers());
         $this->assertSame([999], $report->unusedKeepers);
         $this->assertStringContainsString('--afm-keep=999', $report->describe());
+        // isEmpty() is about CONFLICTS — the preflight checks unusedKeepers
+        // separately so it can't print a clean ✅ over an ignored instruction.
+        $this->assertTrue($report->isEmpty());
     }
 
     public function test_a_local_customer_holding_the_afm_blocks_when_this_run_would_not_release_it(): void

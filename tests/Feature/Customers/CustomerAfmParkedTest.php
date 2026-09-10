@@ -131,6 +131,20 @@ class CustomerAfmParkedTest extends TestCase
         $this->assertTrue($twin->fresh()->afm_key_parked);
     }
 
+    public function test_the_parked_flag_does_not_outlive_the_afm_that_caused_it(): void
+    {
+        $company = $this->tenant();
+        Customer::create(['company_id' => $company->id, 'name' => 'ΕΤΑΙΡΕΙΑ ΑΕ', 'afm' => '123456789']);
+        $twin = $this->parkedTwin($company);
+
+        // The operator's other legitimate resolution: this row never had that ΑΦΜ.
+        $twin->update(['afm' => '000000000']);
+
+        $this->assertNull($twin->fresh()->afm_key);
+        $this->assertFalse((bool) $twin->fresh()->afm_key_parked, 'a flag nothing can surface any more');
+        $this->assertTrue(app(CustomerAfmDuplicates::class)->findParked((int) $company->id)->isEmpty());
+    }
+
     public function test_parking_is_not_something_an_operator_can_ask_for(): void
     {
         $company = $this->tenant();

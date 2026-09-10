@@ -143,7 +143,19 @@ class Customer extends Model
     {
         $key = Afm::uniqueKey($customer->afm);
 
-        if ($key === null || ! $customer->afm_key_parked) {
+        if ($key === null) {
+            // No identity left to suppress (ΑΦΜ blanked or corrected to a
+            // placeholder) — drop the flag too, or it lingers on a row nothing
+            // can surface any more. Touched only when actually set, so a
+            // partially-selected model is never given a phantom attribute.
+            if ($customer->afm_key_parked) {
+                $customer->afm_key_parked = false;
+            }
+
+            return null;
+        }
+
+        if (! $customer->afm_key_parked) {
             return $key;
         }
 

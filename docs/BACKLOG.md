@@ -1418,6 +1418,16 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   - **Bulk/UI για parked πελάτες.** Σήμερα το `--afm-keep` είναι CLI-only και το parked state φαίνεται
     μόνο στο `customers:afm-duplicates`. Αν ποτέ βρεθεί βάση με δεκάδες τέτοια: επιλογή keeper μέσα από
     τη φόρμα εισαγωγής + badge «χωρίς ταυτότητα ΑΦΜ» στη λίστα πελατών.
+  - **Οι parked πελάτες δεν φαίνονται μετά από ΕΠΙΤΥΧΗ εισαγωγή από το panel** _(P2, 3ος γύρος
+    review)._ Τα ⚠ «μπαίνει ΧΩΡΙΣ ταυτότητα ΑΦΜ» βγαίνουν στο stdout του `migrate:firebird`, που το
+    `RunFirebirdImport` διαβάζει μόνο σε αποτυχία. Ο χειριστής βλέπει την ΑΠΟΦΑΣΗ (το `afm_keep` στη
+    σελίδα της εισαγωγής) αλλά όχι ΠΟΙΕΣ γραμμές πάρκαραν — θέλει `php artisan customers:afm-duplicates`.
+    Σωστή λύση: badge «χωρίς ταυτότητα ΑΦΜ» + φίλτρο στη λίστα πελατών (panel-native), όχι άλλη στήλη
+    στο `firebird_import_runs`.
+  - **Το ΑΦΜ probe διαβάζει έως 50.000 γραμμές CUSTOMER μέσα σε σύγχρονο Livewire request** _(P2,
+    3ος γύρος review)._ Το `AFM_PROBE_MAX_ROWS` φράζει το πλήθος, όχι τον χρόνο μεταφοράς σε αργό WAN
+    (≈3 MB στο μέγιστο· οι πραγματικοί tenants είναι μερικές χιλιάδες). Αν ποτέ κολλήσει: μέτρησε
+    πρώτα `COUNT(DISTINCT AFM)` server-side ή κάνε το probe queued job με ειδοποίηση.
   - **`customers:merge --branch=N`** — όταν ο parked δίδυμος είναι όντως υποκατάστημα και ο χειριστής
     θέλει να τον συγχωνεύσει, τα παραστατικά που μεταφέρονται θα μπορούσαν να πάρουν
     `counterpart_branch=N`. **Προσοχή**: ΜΟΝΟ για μη-υποβεβλημένα — ένα ήδη filed παραστατικό στην ΑΑΔΕ

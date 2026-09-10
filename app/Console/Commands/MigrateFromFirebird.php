@@ -270,7 +270,9 @@ class MigrateFromFirebird extends Command
 
         $report = $this->afmConflicts($this->fbAll('SELECT * FROM CUSTOMER'), $companyId);
 
-        if ($report->isEmpty()) {
+        // An --afm-keep that matched nothing is part of the answer: the preflight
+        // must not report a clean source while quietly dropping half the input.
+        if ($report->isEmpty() && $report->unusedKeepers === []) {
             $this->info('✅ '.$report->summary());
 
             return self::SUCCESS;
@@ -287,7 +289,9 @@ class MigrateFromFirebird extends Command
             return self::FAILURE;
         }
 
-        $this->info('✅ Το import θα προχωρήσει — '.count($report->parked()).' πελάτης/ες θα μπουν χωρίς ταυτότητα ΑΦΜ.');
+        $this->info($report->parked() === []
+            ? '✅ Το import θα προχωρήσει.'
+            : '✅ Το import θα προχωρήσει — '.count($report->parked()).' πελάτης/ες θα μπουν χωρίς ταυτότητα ΑΦΜ.');
 
         return self::SUCCESS;
     }
