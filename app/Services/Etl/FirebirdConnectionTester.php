@@ -13,8 +13,14 @@ use Throwable;
  * a handful of core legacy tables so the operator sees «✅ 1.240 πελάτες, 8.900
  * τιμολόγια» (or a precise error) BEFORE committing to an import.
  *
- * Never writes — only SELECT COUNT(*). The PDO factory is injectable so the
- * probe/error-mapping is unit-testable without a real Firebird server.
+ * It also runs the ΑΦΜ preflight (LegacyAfmConflicts) when the CUSTOMER table is
+ * readable, so «δύο πελάτες με το ίδιο ΑΦΜ» surfaces HERE — before a gbak restore
+ * and an import that would refuse — instead of minutes later. Same rule, same
+ * answer as the import itself.
+ *
+ * Never writes — only SELECTs (the legacy database stays a pristine archive). The
+ * PDO factory is injectable so the probe/error-mapping is unit-testable without a
+ * real Firebird server.
  */
 class FirebirdConnectionTester
 {
@@ -32,7 +38,12 @@ class FirebirdConnectionTester
         $this->connectionFactory = $connectionFactory;
     }
 
-    public function test(string $host, int $port, string $database, string $user, string $password): FirebirdProbeResult
+    /**
+     * @param  int|null  $companyId  target tenant — enables the «already held in
+     *                               ekdosi» half of the ΑΦΜ check. Null checks only
+     *                               the duplicates INSIDE the legacy source.
+     */
+    public function test(string $host, int $port, string $database, string $user, string $password, ?int $companyId = null): FirebirdProbeResult
     {
         if ($this->connectionFactory === null && ! extension_loaded('pdo_firebird')) {
             return FirebirdProbeResult::failure('driver_missing',
@@ -45,7 +56,7 @@ class FirebirdConnectionTester
             return FirebirdProbeResult::failure($this->classify($e), $e->getMessage());
         }
 
-        return $this->probe($pdo);
+        return $this->probe($pdo, $companyId);
     }
 
     /** `firebird:dbname=HOST:PATH` (default port) or `HOST/PORT:PATH`. */
@@ -65,7 +76,7 @@ class FirebirdConnectionTester
         return new PDO($dsn, $user, $password, [PDO::ATTR_ERRMODE => PDO::ERRMODE_EXCEPTION]);
     }
 
-    private function probe(PDO $pdo): FirebirdProbeResult
+    private function probe(PDO $pdo, ?int $companyId = null): FirebirdProbeResult
     {
         $counts = [];
         $missing = [];
@@ -87,7 +98,40 @@ class FirebirdConnectionTester
                 .'ή ο χρήστης δεν έχει δικαίωμα ανάγνωσης σε αυτούς τους πίνακες.');
         }
 
-        return FirebirdProbeResult::success($counts, $missing);
+        return FirebirdProbeResult::success($counts, $missing, $this->afmReport($pdo, $companyId));
+    }
+
+    /**
+     * The ΑΦΜ conflict report, or null when it could not be established — an older
+     * `.fbk` without one of the columns, or no read rights. Never turns a working
+     * connection test into a failure: the authoritative check is the import's own
+     * guard, this is the early warning.
+     */
+    private function afmReport(PDO $pdo, ?int $companyId): ?LegacyAfmConflictReport
+    {
+        try {
+            $rows = $pdo->query('SELECT CUST_ID, AFM, NAME FROM CUSTOMER')->fetchAll(PDO::FETCH_ASSOC);
+        } catch (Throwable) {
+            return null;
+        }
+
+        $conflicts = app(LegacyAfmConflicts::class);
+
+        return $conflicts->find(
+            $conflicts->mapLegacyRows($rows, fn (array $r, string $k): ?string => $this->clean($r[$k] ?? null)),
+            $companyId,
+        );
+    }
+
+    /** Drop any stray non-UTF-8 byte (the WIN1253 source is transliterated on read). */
+    private function clean(?string $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        $value = trim((string) iconv('UTF-8', 'UTF-8//IGNORE', $value));
+
+        return $value === '' ? null : $value;
     }
 
     private function classify(Throwable $e): string

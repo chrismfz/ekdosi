@@ -108,6 +108,7 @@ class Customer extends Model
             'needs_invoice_before_payment' => 'boolean',
             'auto_email_invoices' => 'boolean',
             'is_active' => 'boolean',
+            'afm_key_parked' => 'boolean',
             'is_favorite' => 'boolean',
             'show_balance_on_pdf' => 'boolean',
             'whmcs_reseller_routes' => 'integer',
@@ -120,10 +121,47 @@ class Customer extends Model
         // UNIQUE(company_id, afm_key) constraint — derived on every save, never
         // typed. Query-builder writers (ETL, importer) set it themselves.
         static::saving(function (self $customer): void {
-            $customer->afm_key = Afm::uniqueKey($customer->afm);
+            $customer->afm_key = self::deriveAfmKey($customer);
 
             IsoCountry::syncCountryCode($customer);
         });
+    }
+
+    /**
+     * The identity this row holds on save — `Afm::uniqueKey($afm)` for everyone
+     * except a PARKED row (`afm_key_parked`, set only by the Firebird ETL for the
+     * legacy υποκατάστημα twin that shares an ΑΦΜ with the row the operator chose
+     * to keep it — see the 2026_09_17 migration).
+     *
+     * A parked row stays keyless only while the ΑΦΜ actually still collides: once
+     * the holder is merged away or this row's ΑΦΜ is corrected, it reclaims its
+     * identity and un-parks itself. So parking can never silently outlive the
+     * conflict that caused it, and a normal edit of a parked row (fixing a phone)
+     * no longer dead-ends on the unique index.
+     */
+    private static function deriveAfmKey(self $customer): ?string
+    {
+        $key = Afm::uniqueKey($customer->afm);
+
+        if ($key === null || ! $customer->afm_key_parked) {
+            return $key;
+        }
+
+        $stillHeld = static::query()
+            ->withoutGlobalScopes()
+            ->withTrashed()
+            ->where('company_id', $customer->company_id)
+            ->where('afm_key', $key)
+            ->when($customer->exists, fn (Builder $q) => $q->whereKeyNot($customer->getKey()))
+            ->exists();
+
+        if ($stillHeld) {
+            return null;
+        }
+
+        $customer->afm_key_parked = false;
+
+        return $key;
     }
 
     /**

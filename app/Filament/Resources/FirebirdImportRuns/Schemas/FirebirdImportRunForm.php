@@ -232,13 +232,31 @@ class FirebirdImportRunForm
                                                     $db,
                                                     trim((string) $get('fb_live_user')) ?: 'EKDOSI',
                                                     (string) $get('fb_live_password'),
+                                                    Filament::getTenant()?->getKey(),
                                                 );
 
                                                 if ($result->ok) {
+                                                    $body = $result->message
+                                                        .($result->missing !== [] ? ' — (λείπουν: '.implode(', ', $result->missing).')' : '');
+
+                                                    // The ΑΦΜ preflight: say it HERE, while the operator is still
+                                                    // configuring — not after a gbak restore and a refused import.
+                                                    if ($result->afmBlocks()) {
+                                                        Notification::make()
+                                                            ->title('⚠ Σύνδεση OK — αλλά η εισαγωγή θα σταματήσει')
+                                                            ->body(new HtmlString(
+                                                                e($body).'<br><strong>'.e((string) $result->afmSummary()).'</strong><br>'
+                                                                .nl2br(e(self::firstLines($result->afm->describe(), 8)))
+                                                                .'<br>'.e($result->afm->howTo())
+                                                            ))
+                                                            ->warning()->persistent()->send();
+
+                                                        return;
+                                                    }
+
                                                     Notification::make()
                                                         ->title('✅ Σύνδεση OK')
-                                                        ->body($result->message
-                                                            .($result->missing !== [] ? ' — (λείπουν: '.implode(', ', $result->missing).')' : ''))
+                                                        ->body($body.(($afm = $result->afmSummary()) !== null ? ' — '.$afm : ''))
                                                         ->success()->send();
 
                                                     return;
@@ -259,6 +277,17 @@ class FirebirdImportRunForm
                             ]),
                     ]),
             ]);
+    }
+
+    /** Cap a multi-line report so one pathological database can't flood the toast. */
+    private static function firstLines(string $text, int $max): string
+    {
+        $lines = explode("\n", $text);
+        if (count($lines) <= $max) {
+            return $text;
+        }
+
+        return implode("\n", array_slice($lines, 0, $max))."\n… (+".(count($lines) - $max).' ακόμη — δες «migrate:firebird --dry-run»)';
     }
 
     /** True when the operator is configuring a live connection (a DB path typed). */

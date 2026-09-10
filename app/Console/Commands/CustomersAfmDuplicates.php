@@ -8,6 +8,7 @@ use App\Services\Customers\CustomerAfmDuplicates;
 use App\Services\Customers\MergeCustomers;
 use App\Services\Customers\MergeCustomersResult;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
@@ -123,14 +124,18 @@ class CustomersAfmDuplicates extends Command
         }
 
         $groups = $duplicates->find($companyId);
+        $parked = $duplicates->findParked($companyId);
+
+        $names = Company::query()
+            ->whereIn('id', $groups->pluck('company_id')->merge($parked->pluck('company_id'))->unique())
+            ->pluck('name', 'id');
 
         if ($groups->isEmpty()) {
             $this->info('Κανένας διπλός ΑΦΜ.');
+            $this->reportParked($parked, $names);
 
             return self::SUCCESS;
         }
-
-        $names = Company::query()->whereIn('id', $groups->pluck('company_id')->unique())->pluck('name', 'id');
 
         $rows = [];
         $hints = [];
@@ -174,6 +179,47 @@ class CustomersAfmDuplicates extends Command
             $this->line($hint);
         }
 
+        $this->reportParked($parked, $names);
+
         return self::FAILURE;
+    }
+
+    /**
+     * Customers that carry a real ΑΦΜ but hold NO identity — the legacy
+     * υποκατάστημα twins the ETL parked with `--afm-keep`. The UNIQUE index
+     * permits them, so they are NOT a failure; they are listed so a deliberate
+     * park can never quietly become forgotten state.
+     *
+     * @param  Collection<int, array{company_id:int, afm_key:string, holder:?Customer, parked:Collection<int, Customer>}>  $parked
+     * @param  Collection<int, string>  $names
+     */
+    private function reportParked(Collection $parked, Collection $names): void
+    {
+        if ($parked->isEmpty()) {
+            return;
+        }
+
+        $rows = [];
+        foreach ($parked as $g) {
+            $holder = $g['holder'];
+            foreach ($g['parked'] as $c) {
+                /** @var Customer $c */
+                $rows[] = [
+                    $names[$g['company_id']] ?? $g['company_id'],
+                    $g['afm_key'],
+                    $c->id.' '.$c->name.($c->trashed() ? ' [ΔΙΑΓΡΑΜΜΕΝΟΣ]' : ''),
+                    $holder !== null ? $holder->id.' '.$holder->name : '— (κανείς)',
+                    $this->hangingOff($c),
+                ];
+            }
+        }
+
+        $this->newLine();
+        $this->warn(count($rows).' πελάτης/ες με ΑΦΜ αλλά ΧΩΡΙΣ ταυτότητα ΑΦΜ (parked από το ETL — --afm-keep):');
+        $this->table(['Εταιρεία', 'ΑΦΜ', 'Χωρίς ταυτότητα', 'Την κρατά', 'Κρέμονται'], $rows);
+        $this->line('  Κρατούν ΑΦΜ, παραστατικά και ιστορικό — απλώς δεν κρατούν την ταυτότητα ΑΦΜ. Δύο σωστές καταλήξεις:');
+        $this->line('   • ίδιο πρόσωπο → php artisan customers:merge <την κρατά> <χωρίς ταυτότητα> --dry-run');
+        $this->line('   • υποκατάστημα → κράτα ΕΝΑΝ πελάτη (την έδρα) και δήλωσε «Εγκατάσταση πελάτη (myDATA)» στο παραστατικό·');
+        $this->line('     τον παλιό τον αφήνεις ανενεργό ως αρχείο (τα ήδη υποβεβλημένα παραστατικά ΔΕΝ πειράζονται).');
     }
 }

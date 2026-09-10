@@ -5,6 +5,8 @@ namespace App\Console\Commands;
 use App\Models\Company;
 use App\Models\User;
 use App\Services\Etl\BackupNoteSync;
+use App\Services\Etl\LegacyAfmConflictReport;
+use App\Services\Etl\LegacyAfmConflicts;
 use App\Services\Etl\TenantRowUpserter;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
@@ -46,7 +48,9 @@ class MigrateFromFirebird extends Command
         {--host=127.0.0.1 : Firebird host}
         {--fbuser=EKDOSI : Firebird user}
         {--fbpass= : Firebird password}
-        {--counts-out= : Optional path. If set, the per-table row-count summary is written here as JSON on success.}';
+        {--counts-out= : Optional path. If set, the per-table row-count summary is written here as JSON on success.}
+        {--afm-keep=* : CUST_ID που κρατά το ΑΦΜ όταν δύο legacy πελάτες το μοιράζονται (π.χ. έδρα vs υποκατάστημα). Επαναλαμβανόμενο, ένα ανά διπλό ΑΦΜ. Οι υπόλοιποι μπαίνουν χωρίς ταυτότητα ΑΦΜ.}
+        {--dry-run : READ-ONLY preflight: ελέγχει μόνο τις συγκρούσεις ΑΦΜ πελατών και βγαίνει. Δεν γράφει τίποτα και δεν δημιουργεί εταιρεία.}';
 
     protected $description = 'Import a legacy Firebird ekdosi database into the multi-tenant MariaDB schema (re-run-safe)';
 
@@ -78,7 +82,11 @@ class MigrateFromFirebird extends Command
         //   - UI-driven (PR #30 job):        --company-id= (must already exist)
         // --fdb and --fbpass are always required.
         $useCompanyId = (bool) $this->option('company-id');
-        $required = $useCompanyId ? ['fdb', 'fbpass'] : ['company', 'slug', 'fdb', 'fbpass'];
+        // A dry run creates nothing, so it needs no tenant identity at all — just
+        // the source. (`--slug`, if given, adds the ekdosi-side half of the check.)
+        $required = ($useCompanyId || $this->option('dry-run'))
+            ? ['fdb', 'fbpass']
+            : ['company', 'slug', 'fdb', 'fbpass'];
         foreach ($required as $req) {
             if (! $this->option($req)) {
                 $this->error("Missing required --{$req}");
@@ -88,6 +96,14 @@ class MigrateFromFirebird extends Command
         }
 
         $this->connectFirebird();
+
+        // READ-ONLY preflight — before anything is created or written. Deliberately
+        // BEFORE resolveCompany(): a dry run must not conjure a tenant as a side
+        // effect (and an unknown slug simply means «nothing local to collide with»).
+        if ($this->option('dry-run')) {
+            return $this->dryRunAfmCheck($useCompanyId);
+        }
+
         $this->companyId = $useCompanyId
             ? $this->resolveCompanyById((int) $this->option('company-id'))
             : $this->resolveCompany();
@@ -225,6 +241,57 @@ class MigrateFromFirebird extends Command
         return self::SUCCESS;
     }
 
+    /**
+     * `--dry-run`: the ΑΦΜ guard on its own, read-only on BOTH sides — the legacy
+     * database is only SELECTed (it stays a pristine archive) and nothing is
+     * written to MariaDB. Run it before a cutover import (or before a `.fbk`
+     * upload, which pays for a gbak restore first) to learn about conflicts in
+     * seconds instead of minutes.
+     *
+     * Exit code: 0 = clean, 1 = the real import would refuse.
+     */
+    private function dryRunAfmCheck(bool $useCompanyId): int
+    {
+        // Never CREATE a tenant on a dry run. With --company-id the tenant must
+        // exist (same strictness as a real UI import); with --slug we look it up
+        // and, if it is not there yet, skip the ekdosi-side half and say so.
+        $companyId = null;
+        if ($useCompanyId) {
+            $companyId = $this->resolveCompanyById((int) $this->option('company-id'));
+        } elseif ($slug = $this->option('slug')) {
+            $companyId = Company::query()->where('slug', $slug)->value('id');
+            $companyId = $companyId !== null ? (int) $companyId : null;
+        }
+
+        $this->info('Dry run — έλεγχος ΑΦΜ πελατών μόνο. Δεν γράφεται τίποτα.');
+        if ($companyId === null) {
+            $this->line('  (η εταιρεία δεν υπάρχει ακόμη — ελέγχονται μόνο τα διπλά ΜΕΣΑ στη legacy βάση)');
+        }
+
+        $report = $this->afmConflicts($this->fbAll('SELECT * FROM CUSTOMER'), $companyId);
+
+        if ($report->isEmpty()) {
+            $this->info('✅ '.$report->summary());
+
+            return self::SUCCESS;
+        }
+
+        $this->newLine();
+        $this->line($report->describe());
+        $this->newLine();
+
+        if ($report->hasBlockers()) {
+            $this->error('Το import ΘΑ ΑΡΝΗΘΕΙ: '.$report->summary());
+            $this->line($report->howTo());
+
+            return self::FAILURE;
+        }
+
+        $this->info('✅ Το import θα προχωρήσει — '.count($report->parked()).' πελάτης/ες θα μπουν χωρίς ταυτότητα ΑΦΜ.');
+
+        return self::SUCCESS;
+    }
+
     // ---------------------------------------------------------------- infra
 
     private function connectFirebird(): void
@@ -336,79 +403,62 @@ class MigrateFromFirebird extends Command
     }
 
     /**
+     * The fail-closed ΑΦΜ guard, run BEFORE a single customer row is written (and
+     * the whole import is one transaction anyway, so a refusal writes nothing).
+     *
+     * Delegates to App\Services\Etl\LegacyAfmConflicts — the same check the
+     * read-only preflight (`--dry-run`, «Έλεγχος σύνδεσης») runs, so the operator
+     * never gets a different answer from the probe than from the real import.
+     *
      * @param  list<array<string, mixed>>  $rows  legacy CUSTOMER rows
+     * @return array<int, array{key:string, keeper:int, name:?string}> CUST_IDs importing WITHOUT the ΑΦΜ identity
      */
-    private function assertNoDuplicateLegacyAfm(array $rows): void
+    private function assertNoDuplicateLegacyAfm(array $rows): array
     {
-        // One pass: key → source rows (for the in-source duplicate check) and
-        // CUST_ID → key (for the target check). Keys stay STRINGS (a numeric
-        // array key would bind as int against the varchar index).
-        $byKey = [];
-        $keyByCustId = [];
-        $sourceIds = [];
-        foreach ($rows as $r) {
-            $sourceIds[(int) $r['CUST_ID']] = true;
-            $key = Afm::uniqueKey($this->fld($r, 'AFM'));
-            if ($key !== null) {
-                $byKey[(string) $key][] = (int) $r['CUST_ID'].' '.($this->fld($r, 'NAME') ?? '');
-                $keyByCustId[(int) $r['CUST_ID']] = (string) $key;
-            }
+        $report = $this->afmConflicts($rows, $this->companyId);
+
+        if ($report->hasBlockers()) {
+            throw new RuntimeException(
+                "Σύγκρουση ΑΦΜ πελατών — τίποτα δεν γράφτηκε:\n"
+                .$report->describe()."\n".$report->howTo()
+            );
         }
 
-        $lines = [];
-        $inSource = 0;
-        foreach (array_filter($byKey, fn (array $ids): bool => count($ids) > 1) as $key => $ids) {
-            $lines[] = "  ΑΦΜ {$key} (μέσα στη legacy βάση): ".implode(' | ', $ids);
-            $inSource++;
+        foreach ($report->unusedKeepers as $id) {
+            $this->warn("  ⚠ το --afm-keep={$id} δεν αντιστοιχεί σε κανένα διπλό ΑΦΜ — αγνοήθηκε");
         }
 
-        // The TARGET side (the parallel-run week): a local row that owns one of
-        // the source ΑΦΜ and would NOT be released by this run — i.e. it has no
-        // legacy_id (made in the panel) or its legacy_id no longer exists in the
-        // source. Rows that ARE in the source get their afm_key released before
-        // the upserts (see copyCustomers), so moves and swaps are fine.
-        if ($keyByCustId !== []) {
-            foreach (array_chunk(array_map('strval', array_keys($byKey)), 500) as $keys) {
-                $owners = DB::table('customers')
-                    ->where('company_id', $this->companyId)
-                    ->whereIn('afm_key', $keys)
-                    ->get(['id', 'name', 'afm_key', 'legacy_id', 'deleted_at']);
-                foreach ($owners as $o) {
-                    $ownerLegacy = $o->legacy_id !== null ? (int) $o->legacy_id : null;
-                    // Any row this run rewrites (its legacy_id is in the source — keyed
-                    // or not, e.g. corrected to a placeholder) gets its key released first.
-                    if ($ownerLegacy !== null && isset($sourceIds[$ownerLegacy])) {
-                        continue;
-                    }
-                    $claimant = array_search((string) $o->afm_key, $keyByCustId, true);
-                    $lines[] = "  ΑΦΜ {$o->afm_key}: υπάρχει ήδη στο ekdosi ως #{$o->id} «{$o->name}»"
-                        .($ownerLegacy !== null ? " (legacy_id {$ownerLegacy} — δεν υπάρχει πια στην πηγή)" : ' (χωρίς legacy_id — φτιάχτηκε στο panel)')
-                        .($o->deleted_at ? ' [ΔΙΑΓΡΑΜΜΕΝΟΣ]' : '')
-                        ." — η πηγή το δίνει σε CUST_ID {$claimant}";
-                }
-            }
+        // A parked row imports whole (ΑΦΜ text, documents, history) — it just does
+        // not hold the identity. Say so loudly: it is a legally significant choice
+        // the operator made on the command line, not a detail to bury.
+        foreach ($report->parked() as $custId => $parked) {
+            $this->warn(sprintf(
+                '  ⚠ ΑΦΜ %s: το CUST_ID %d «%s» μπαίνει ΧΩΡΙΣ ταυτότητα ΑΦΜ (την κρατά το %d) — '
+                .'δες «php artisan customers:afm-duplicates --tenant=%s»',
+                $parked['key'],
+                $custId,
+                $parked['name'] ?? '',
+                $parked['keeper'],
+                (string) $this->option('slug'),
+            ));
         }
 
-        if ($lines === []) {
-            return;
-        }
+        return $report->parked();
+    }
 
-        // Be precise about WHERE each kind is fixed: an in-source duplicate can
-        // only be resolved in the legacy Firebird DB (merge the two CUST_IDs, or
-        // blank/correct one ΑΦΜ there — the legacy app is still live until
-        // cutover); a target-side owner is resolved in ekdosi. The ETL never
-        // picks a winner on its own — the choice is legally significant.
-        $howTo = [];
-        if ($inSource > 0) {
-            $howTo[] = 'τα διπλά ΜΕΣΑ στη legacy βάση διορθώνονται ΣΤΗ LEGACY (συγχώνευση CUST_IDs ή διόρθωση/κένωση του ενός ΑΦΜ εκεί)';
-        }
-        if (count($lines) > $inSource) {
-            $howTo[] = 'οι τοπικοί κάτοχοι διορθώνονται στο ekdosi (php artisan customers:afm-duplicates)';
-        }
+    /**
+     * Build the ΑΦΜ conflict report for a set of legacy CUSTOMER rows.
+     *
+     * @param  list<array<string, mixed>>  $rows
+     */
+    private function afmConflicts(array $rows, ?int $companyId): LegacyAfmConflictReport
+    {
+        $conflicts = app(LegacyAfmConflicts::class);
 
-        throw new RuntimeException(
-            "Σύγκρουση ΑΦΜ πελατών — τίποτα δεν γράφτηκε:\n".implode("\n", $lines)
-            ."\n".ucfirst(implode('· ', $howTo)).' και ξανατρέξε — ο στόχος επιβάλλει UNIQUE(company_id, afm_key).'
+        return $conflicts->find(
+            $conflicts->mapLegacyRows($rows, fn (array $r, string $k): ?string => $this->fld($r, $k)),
+            $companyId,
+            array_map('intval', (array) $this->option('afm-keep')),
         );
     }
 
@@ -573,9 +623,10 @@ class MigrateFromFirebird extends Command
 
         // UNIQUE(company_id, afm_key) on the target: two legacy customers with
         // the same real ΑΦΜ would make the second upsert fail mid-run. Stop
-        // BEFORE writing, with the list, so the operator merges them in the
-        // legacy DB (placeholders like 000000000 are not identities and pass).
-        $this->assertNoDuplicateLegacyAfm($rows);
+        // BEFORE writing, with the list — unless the operator named the keeper
+        // with --afm-keep, in which case the others import PARKED (keyless).
+        // Placeholders like 000000000 are not identities and never collide.
+        $parked = $this->assertNoDuplicateLegacyAfm($rows);
 
         // Release every ΑΦΜ held by a row this run will rewrite (inside the
         // import transaction): an ΑΦΜ that moved between CUST_IDs — or swapped —
@@ -597,7 +648,12 @@ class MigrateFromFirebird extends Command
                     'type' => $this->fld($r, 'TYPE'),
                     'afm' => $this->fld($r, 'AFM'),
                     // Query-builder write → the model hook doesn't run; derive here.
-                    'afm_key' => Afm::uniqueKey($this->fld($r, 'AFM')),
+                    // A parked twin (--afm-keep chose the other row) keeps its ΑΦΜ
+                    // TEXT and everything hanging off it, but holds no identity.
+                    'afm_key' => isset($parked[(int) $r['CUST_ID']])
+                        ? null
+                        : Afm::uniqueKey($this->fld($r, 'AFM')),
+                    'afm_key_parked' => isset($parked[(int) $r['CUST_ID']]),
                     'name' => $this->fld($r, 'NAME') ?? '(no name)',
                     'address1' => $this->fld($r, 'ADDRESS1'),
                     'address2' => $this->fld($r, 'ADDRESS2'),
