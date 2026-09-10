@@ -1051,6 +1051,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **`WhmcsReceiptRecorder`: `transaction_id` = πραγματικό vPOS ref → ο syncer δεν το «βλέπει» στη στενή credit-term γωνία (P2, accepted tradeoff).**
+  Κρατάμε σκόπιμα το πραγματικό acquirer/vPOS ref ως «Κωδ. συναλλαγής» (operator προτίμηση). Ο recorder μένει
+  πλήρως idempotent (dedup withTrashed στο ίδιο id). Ο `WhmcsPaymentSyncer` όμως κάνει dedup στο σταθερό
+  `whmcs-paid:{id}`, οπότε ΔΕΝ αναγνωρίζει μια recorder-γραμμή με vPOS id. **Αδιάφορο για την πραγματική
+  περίπτωση** (Eurobank vPOS = cash-term· ο syncer εξ ορισμού αγνοεί cash-term). Στενή γωνία που μένει
+  ανοιχτή: credit-term WHMCS τιμολόγιο πληρωμένο-στην-έκδοση → refund της είσπραξης → sweep → ο syncer
+  ξαναγράφει (whmcs-paid key). Αν ποτέ ενοχλήσει: ο recorder να κρατά ΚΑΙ το whmcs-paid key (χωρίς να
+  πειράζει το «Κωδ. συναλλαγής») — π.χ. ο syncer να κάνει και έναν per-invoice έλεγχο ύπαρξης WHMCS-είσπραξης.
 - **`WhmcsReceiptRecorder`: το ποσό είσπραξης = δικό μας owed, ΟΧΙ το ευρώ που εισέπραξε το WHMCS (P2, by design).**
   Ακολουθούμε το trail του WHMCS id, κρατώντας το ΔΙΚΟ μας παραστατικό netted-to-zero. Στο `file()` path ο
   `WhmcsFilingGuard::assertTotalsReconcile` ήδη εγγυάται ότι το gross ταιριάζει με το WHMCS total· στο

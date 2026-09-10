@@ -101,13 +101,12 @@ class WhmcsReceiptOnIssueTest extends TestCase
 
         $payment = Payment::query()->where('invoice_id', $invoice->id)->sole();
         $this->assertSame('124.00', (string) $payment->amount);
-        // Stable WHMCS key in transaction_id (shared with the syncer's dedup); the
-        // real vPOS ref lives in the note so both reach the Καρτέλα.
-        $this->assertSame('whmcs-paid:8888', $payment->transaction_id);
-        $this->assertStringContainsString('VPOS-84213', (string) $payment->notes, 'the real vPOS ref, in the note');
+        // The real vPOS ref is the visible «Κωδ. συναλλαγής»; WHMCS #id + gateway in the note.
+        $this->assertSame('VPOS-84213', $payment->transaction_id);
+        $this->assertStringContainsString('WHMCS #8888', (string) $payment->notes);
+        $this->assertStringContainsString('eurobank', (string) $payment->notes);
         $this->assertSame('2026-05-21', $payment->pay_date->toDateString());
         $this->assertSame($this->cash->id, $payment->payment_method_id, 'inherits the invoice payment method');
-        $this->assertStringContainsString('WHMCS #8888', (string) $payment->notes);
 
         // Cash-term invoice now tracked from the real row → paid in full, no phantom.
         $data = app(InvoiceBalance::class)->for($invoice->fresh());
