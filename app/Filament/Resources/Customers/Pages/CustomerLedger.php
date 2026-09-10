@@ -37,6 +37,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -548,6 +549,8 @@ class CustomerLedger extends Page implements HasTable
     /** @var array<int, array{invcode: string, balance: float}>|null */
     private ?array $openInvoiceRowsCache = null;
 
+    private ?float $receiptAbsorbableTotalCache = null;
+
     /**
      * This customer's available on-account credit (unallocated money). Memoised
      * per request: the apply-credit action reads it from visible() + the modal
@@ -562,10 +565,11 @@ class CustomerLedger extends Page implements HasTable
     /**
      * OPEN, live, credit-term, non-credit-note invoices for this customer, each
      * as ['invcode' => …, 'balance' => …] keyed by id (only positive balances,
-     * oldest first). The SINGLE source for both the allocation pickers
-     * (openInvoiceOptions) and the «Είσπραξη (έμβασμα)» guard total
-     * (openCreditTermBalanceTotal) — so the guard can never drift from what the
-     * FIFO allocator will actually target. Balance from the cached money columns
+     * oldest first). Feeds the apply-credit / manual-allocation PICKERS only
+     * (those target credit-term receivables → the due_days>0 filter). NOT the
+     * «Είσπραξη (έμβασμα)» guard — that must mirror the allocator's OWN selection,
+     * which is wider (any live invoice with a real balance), so it uses
+     * receiptAbsorbableTotal() instead. Balance from the cached money columns
      * (paid_total already nets refunds). Memoised per request (a private prop is
      * not Livewire-hydrated, so it resets fresh each round-trip — no staleness).
      *
@@ -618,16 +622,38 @@ class CustomerLedger extends Page implements HasTable
     }
 
     /**
-     * Σ of the open credit-term balances — how much an «Είσπραξη (έμβασμα)» can
-     * actually ABSORB before the remainder falls to on-account credit. When this
-     * is 0 (no open credit-term invoices) every cent of a customer-level receipt
-     * becomes credit/προκαταβολή and the customer shows as πιστωτικός — the
-     * footgun the record_receipt guard warns about. Reuses openInvoiceRows() so
-     * it can't diverge from the picker.
+     * How much an «Είσπραξη (έμβασμα)» can actually ABSORB before the remainder
+     * falls to on-account credit — computed by MIRRORING PaymentAllocator::allocate()
+     * EXACTLY: the SAME invoice set (live + issued/active + non-credit-note, NO
+     * due_days filter) and the SAME live balanceData()->balance it settles against
+     * (not the cache columns / not the credit-term-only picker). So a receipt of X
+     * parks max(X − this, 0) on-account, and the guard's warning can never claim a
+     * different outcome than the write path produces (a cash-term invoice that
+     * carries a recorded payment, or a withholding invoice, is counted here iff the
+     * allocator would settle it). Memoised: the balances don't move while the modal
+     * is open, so the balanceData() loop runs once, not per keystroke.
      */
-    private function openCreditTermBalanceTotal(): float
+    private function receiptAbsorbableTotal(): float
     {
-        return round(array_sum(array_column($this->openInvoiceRows(), 'balance')), 2);
+        if ($this->receiptAbsorbableTotalCache !== null) {
+            return $this->receiptAbsorbableTotalCache;
+        }
+
+        $q = InvoiceScope::live(Invoice::query())
+            ->where('company_id', $this->record->company_id)
+            ->where('customer_id', $this->record->getKey())
+            ->where('local_status', 'active');
+        InvoiceScope::excludeCreditNotes($q);
+
+        $total = 0.0;
+        foreach ($q->get() as $invoice) {
+            $balance = round((float) $invoice->balanceData()->balance, 2);
+            if ($balance > 0.005) {
+                $total += $balance;
+            }
+        }
+
+        return $this->receiptAbsorbableTotalCache = round($total, 2);
     }
 
     /** Tenant's payment methods as id => description (shared by the action schemas). */
@@ -669,27 +695,30 @@ class CustomerLedger extends Page implements HasTable
                     ->color('success')
                     ->modalHeading('Είσπραξη / Έμβασμα')
                     ->modalDescription(function (): string {
-                        // Guard the footgun: an «Είσπραξη (έμβασμα)» allocates FIFO to
-                        // OPEN credit-term invoices only; whatever's left becomes
-                        // on-account credit. With NO open credit-term invoices the
-                        // WHOLE amount becomes credit and the customer shows as
-                        // πιστωτικός — the "money went on top" surprise. Say so, and
-                        // point at the per-invoice action for a cash-term document.
-                        $open = $this->openCreditTermBalanceTotal();
-                        if ($open <= 0.005) {
-                            return '⚠ Ο πελάτης ΔΕΝ έχει ανοιχτά επί-πιστώσει τιμολόγια. Ό,τι καταχωρήσεις εδώ '
-                                .'θα μείνει ΟΛΟ ως πίστωση/προκαταβολή και ο πελάτης θα εμφανιστεί πιστωτικός. Για '
-                                .'είσπραξη ΣΥΓΚΕΚΡΙΜΕΝΟΥ τιμολογίου (και τοις μετρητοίς), άνοιξέ το → tab «Πληρωμές» '
-                                .'→ «Καταχώριση πληρωμής».';
+                        // Guard the footgun: the allocator settles the receipt FIFO
+                        // against this customer's OPEN invoices (any live invoice with
+                        // a real balance — receiptAbsorbableTotal mirrors it exactly)
+                        // and parks the rest as on-account credit. With nothing open to
+                        // absorb it the WHOLE amount becomes credit and the customer
+                        // shows as πιστωτικός — the "money went on top" surprise. State
+                        // the absorbable capacity; the checkbox below fires when the
+                        // amount would overflow into credit.
+                        $absorbable = $this->receiptAbsorbableTotal();
+                        if ($absorbable <= 0.005) {
+                            return '⚠ Ο πελάτης ΔΕΝ έχει ανοιχτά (ανεξόφλητα) τιμολόγια να απορροφήσουν την '
+                                .'είσπραξη. Ό,τι καταχωρήσεις εδώ θα μείνει ΟΛΟ ως πίστωση/προκαταβολή και ο πελάτης '
+                                .'θα εμφανιστεί πιστωτικός. Για είσπραξη ΣΥΓΚΕΚΡΙΜΕΝΟΥ τιμολογίου (και τοις '
+                                .'μετρητοίς), άνοιξέ το → tab «Πληρωμές» → «Καταχώριση πληρωμής».';
                         }
 
                         return 'Το ποσό κατανέμεται αυτόματα στα ανοιχτά τιμολόγια (παλαιότερα πρώτα, έως '
-                            .$this->fmtMoney($open).'). Ό,τι περισσέψει μένει ως πίστωση/προκαταβολή στον πελάτη.';
+                            .$this->fmtMoney($absorbable).'). Ό,τι περισσέψει μένει ως πίστωση/προκαταβολή στον πελάτη.';
                     })
                     ->modalSubmitActionLabel('Καταχώριση')
                     ->schema([
                         TextInput::make('amount')
-                            ->label('Ποσό είσπραξης (€)')->numeric()->minValue(0.01)->required(),
+                            ->label('Ποσό είσπραξης (€)')->numeric()->minValue(0.01)->required()
+                            ->live(onBlur: true),
                         DatePicker::make('pay_date')
                             ->label('Ημερομηνία')->required()->default(now()),
                         Select::make('payment_method_id')
@@ -702,14 +731,18 @@ class CustomerLedger extends Page implements HasTable
                             ->helperText('Προαιρετικό — Stripe/PayPal txn ή ref εμβάσματος τράπεζας. Μπαίνει σε όλες τις γραμμές του εμβάσματος.'),
                         Textarea::make('notes')
                             ->label('Σημειώσεις')->rows(2),
-                        // Speed bump for the πιστωτικός footgun: with NO open
-                        // credit-term invoices to absorb the amount, force an explicit
-                        // acknowledgement that the whole receipt becomes on-account
-                        // credit. Hidden (and not validated) in the normal case, so a
-                        // genuine έμβασμα against open receivables stays one click.
+                        // Speed bump for the πιστωτικός footgun: fires EXACTLY when the
+                        // entered amount exceeds what the allocator can settle
+                        // (receiptAbsorbableTotal) — i.e. some/all of it will be parked
+                        // as on-account credit, whether the customer has NO open
+                        // invoices or just fewer than the amount. Hidden (and not
+                        // validated) otherwise, so an έμβασμα that fully lands on open
+                        // invoices stays one click.
                         Checkbox::make('acknowledge_credit')
-                            ->label('Το γνωρίζω — να καταχωρηθεί ΟΛΟ ως πίστωση/προκαταβολή στον πελάτη')
-                            ->visible(fn (): bool => $this->openCreditTermBalanceTotal() <= 0.005)
+                            ->label('Το γνωρίζω — το πλεόνασμα θα καταχωρηθεί ως πίστωση/προκαταβολή στον πελάτη')
+                            ->helperText(fn (Get $get): string => 'Θα μείνει ως πίστωση: '
+                                .$this->fmtMoney(max((float) ($get('amount') ?? 0) - $this->receiptAbsorbableTotal(), 0)).'.')
+                            ->visible(fn (Get $get): bool => ((float) ($get('amount') ?? 0)) - $this->receiptAbsorbableTotal() > 0.005)
                             ->accepted(),
                     ])
                     ->action(function (array $data) {

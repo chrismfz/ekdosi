@@ -13,16 +13,18 @@ use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
+use Livewire\Features\SupportTesting\Testable;
 use Livewire\Livewire;
 use Tests\TestCase;
 
 /**
- * Guard on the customer-level «Είσπραξη (έμβασμα)» action: it FIFO-allocates only
- * to OPEN credit-term invoices, so on a customer with none, the whole amount
- * silently becomes on-account credit and the customer shows as πιστωτικός (the
- * real footgun that bit us — a cash-term receipt belongs on the invoice's own
- * «Πληρωμές» tab, not here). The guard forces an explicit acknowledgement in that
- * case and stays out of the way when there ARE open receivables to absorb it.
+ * Guard on the customer-level «Είσπραξη (έμβασμα)» action: it FIFO-allocates over
+ * the customer's OPEN invoices and parks any remainder as on-account credit, so a
+ * receipt bigger than the open balance (or a customer with nothing open at all)
+ * silently makes the customer πιστωτικός — the real footgun that bit us (a
+ * cash-term receipt belongs on the invoice's own «Πληρωμές» tab, not here). The
+ * guard forces an explicit acknowledgement exactly when some of the amount would
+ * overflow into credit, and stays out of the way when it all lands on invoices.
  */
 class CustomerLedgerReceiptGuardTest extends TestCase
 {
@@ -89,7 +91,7 @@ class CustomerLedgerReceiptGuardTest extends TestCase
         return $inv;
     }
 
-    private function page(): \Livewire\Features\SupportTesting\Testable
+    private function page(): Testable
     {
         return Livewire::test(CustomerLedger::class, ['record' => $this->customer->id]);
     }
@@ -143,5 +145,34 @@ class CustomerLedgerReceiptGuardTest extends TestCase
 
         $payment = Payment::query()->where('customer_id', $this->customer->id)->sole();
         $this->assertSame($inv->id, $payment->invoice_id);
+    }
+
+    public function test_receipt_requires_acknowledgement_when_amount_overshoots_open_balance(): void
+    {
+        // €50 open credit-term invoice, but a €500 receipt → €450 will be parked
+        // on-account. The overflow must be acknowledged even though SOME lands on
+        // an invoice (the guard fires on the remainder, not only on zero-open).
+        $inv = $this->invoice($this->credit, 50);
+
+        $this->page()
+            ->callAction('record_receipt', [
+                'amount' => 500,
+                'pay_date' => now()->toDateString(),
+            ])
+            ->assertHasActionErrors(['acknowledge_credit']);
+
+        // With the acknowledgement it proceeds: €50 onto the invoice + €450 on-account.
+        $this->page()
+            ->callAction('record_receipt', [
+                'amount' => 500,
+                'pay_date' => now()->toDateString(),
+                'acknowledge_credit' => true,
+            ])
+            ->assertHasNoActionErrors();
+
+        $onInvoice = Payment::query()->where('customer_id', $this->customer->id)->where('invoice_id', $inv->id)->sole();
+        $this->assertSame('50.00', (string) $onInvoice->amount);
+        $onAccount = Payment::query()->where('customer_id', $this->customer->id)->whereNull('invoice_id')->sole();
+        $this->assertSame('450.00', (string) $onAccount->amount);
     }
 }
