@@ -47,7 +47,7 @@ class WhmcsReceiptOnIssueTest extends TestCase
         ]);
         VatCategory::create(['company_id' => $this->tenant->id, 'name' => '24%', 'rate' => 24.00, 'is_default' => true]);
         $this->cash = PaymentMethod::create([
-            'company_id' => $this->tenant->id, 'name' => 'Ηλεκτρονικά', 'due_days' => 0, 'is_active' => true,
+            'company_id' => $this->tenant->id, 'description' => 'Ηλεκτρονικά', 'due_days' => 0,
         ]);
         $this->type = InvoiceType::create([
             'company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1,

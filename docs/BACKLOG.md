@@ -1059,6 +1059,11 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   ανοιχτή: credit-term WHMCS τιμολόγιο πληρωμένο-στην-έκδοση → refund της είσπραξης → sweep → ο syncer
   ξαναγράφει (whmcs-paid key). Αν ποτέ ενοχλήσει: ο recorder να κρατά ΚΑΙ το whmcs-paid key (χωρίς να
   πειράζει το «Κωδ. συναλλαγής») — π.χ. ο syncer να κάνει και έναν per-invoice έλεγχο ύπαρξης WHMCS-είσπραξης.
+- **`WhmcsReceiptRecorder`: πολλαπλές εισροές (installments) → το «Κωδ. συναλλαγής» δείχνει μόνο τη μία (P2, display-only).**
+  Το `provenance()` διαλέγει το transaction με το μεγαλύτερο `amountin` για το ref· αν το WHMCS εισέπραξε το
+  τιμολόγιο με ≥2 captures (π.χ. 60€+64€), καταγράφεται ΜΙΑ πληρωμή για το πλήρες owed με το transid ΜΟΝΟ
+  του ενός. Καθαρά display/audit (μηδέν επίπτωση στο υπόλοιπο)· τα υπόλοιπα refs φαίνονται ούτως ή άλλως στο
+  WHMCS. Αν χρειαστεί: όλα τα transids στη «Σημείωση».
 - **`WhmcsReceiptRecorder`: το ποσό είσπραξης = δικό μας owed, ΟΧΙ το ευρώ που εισέπραξε το WHMCS (P2, by design).**
   Ακολουθούμε το trail του WHMCS id, κρατώντας το ΔΙΚΟ μας παραστατικό netted-to-zero. Στο `file()` path ο
   `WhmcsFilingGuard::assertTotalsReconcile` ήδη εγγυάται ότι το gross ταιριάζει με το WHMCS total· στο
