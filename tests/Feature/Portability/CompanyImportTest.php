@@ -4,6 +4,7 @@ namespace Tests\Feature\Portability;
 
 use App\Models\BankAccount;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\DistributionAim;
 use App\Models\DomainRegistrarConnection;
 use App\Models\InvoiceType;
@@ -50,6 +51,52 @@ class CompanyImportTest extends TestCase
     private function bundle(Company $company): array
     {
         return app(CompanyExporter::class)->build($company, 'passphrase', 'p@ss');
+    }
+
+    public function test_row_signature_ignores_the_derived_afm_columns(): void
+    {
+        // The content-signature fallback identifies a row with no natural key. A
+        // PRE-PR bundle carries neither afm_key nor afm_key_parked; if either
+        // counted as content, such a row would stop matching its local twin on an
+        // upgraded target and be inserted a second time.
+        $importer = app(CompanyImporter::class);
+        $method = (new \ReflectionClass(CompanyImporter::class))->getMethod('rowSignature');
+        $row = ['name' => 'Λιανική', 'afm' => '000000000', 'city' => 'Αθήνα'];
+
+        $this->assertSame(
+            $method->invoke($importer, $row),
+            $method->invoke($importer, $row + ['afm_key' => null, 'afm_key_parked' => false]),
+        );
+    }
+
+    public function test_a_parked_afm_twin_survives_a_bundle_round_trip(): void
+    {
+        $company = $this->sourceCompany();
+        // The shape the Firebird ETL produces for a legacy υποκατάστημα: two rows,
+        // one ΑΦΜ, only one of them holding the identity.
+        Customer::create(['company_id' => $company->id, 'legacy_id' => 41, 'name' => 'ΕΤΑΙΡΕΙΑ ΑΕ', 'afm' => '123456789']);
+        DB::table('customers')->insert([
+            'company_id' => $company->id, 'legacy_id' => 87, 'name' => 'ΕΤΑΙΡΕΙΑ ΑΕ ΥΠΟΚ', 'afm' => '123456789',
+            'afm_key' => null, 'afm_key_parked' => true, 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        // Customers ride the FULL bundle only.
+        $bundle = app(CompanyExporter::class)->build($company->fresh(), 'passphrase', 'p@ss', true);
+
+        // Simulate another VM: drop the source so the slug is free.
+        Company::where('slug', 'src')->forceDelete();
+        app(CompanyImporter::class)->run($bundle, ['new' => true, 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $target = Company::where('slug', 'src')->firstOrFail();
+        $imported = Customer::withoutGlobalScopes()->where('company_id', $target->id)->orderBy('legacy_id')->get();
+
+        // Both rows travel — the parked one is NOT merged into the holder, and it
+        // does not fight it for the identity either.
+        $this->assertSame([41, 87], $imported->pluck('legacy_id')->map('intval')->all());
+        $this->assertSame('123456789', $imported->firstWhere('legacy_id', 41)->afm_key);
+        $this->assertNull($imported->firstWhere('legacy_id', 87)->afm_key);
+        $this->assertTrue((bool) $imported->firstWhere('legacy_id', 87)->afm_key_parked);
+        $this->assertSame('123456789', $imported->firstWhere('legacy_id', 87)->afm);
     }
 
     public function test_import_new_recreates_settings_setup_and_rewires_fks(): void

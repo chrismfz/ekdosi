@@ -166,6 +166,9 @@ php artisan shield:generate                              # (re)sync resource per
 # ETL — one tenant per legacy DB, re-runnable (needs pdo_firebird on the artisan host)
 php artisan migrate:firebird --company="MyIP" --slug=myip \
     --fdb="/opt/Data/ekdosi-myip.fdb" --host=10.23.22.5 --fbuser=EKDOSI --fbpass=<FB_PASSWORD>
+php artisan migrate:firebird --dry-run --fdb=... --fbpass=...    # READ-ONLY preflight: μόνο οι συγκρούσεις ΑΦΜ (0/1)
+#   ίδιο ΑΦΜ σε δύο legacy CUST_IDs (legacy «υποκατάστημα» hack) → --afm-keep=CUST_ID ανά ΑΦΜ·
+#   ο άλλος μπαίνει parked (afm_key NULL, `customers.afm_key_parked`). Η legacy ΔΕΝ πειράζεται ποτέ.
 php artisan invoices:recompute-balances --company=myip   # backfill money cache after import
 
 # myDATA ops (also on the scheduler — routes/console.php; safe to run manually anytime)

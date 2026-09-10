@@ -606,7 +606,8 @@ class CompanyImporter
             $update = 0;
             foreach ($rows as $row) {
                 $hit = isset($index[$this->naturalKey($table, $row)])
-                    || ($afmIndex !== [] && isset($afmIndex[Afm::uniqueKey($row['afm'] ?? null) ?? '']));
+                    || ($afmIndex !== [] && ! self::rowIsParked($row)
+                        && isset($afmIndex[Afm::uniqueKey($row['afm'] ?? null) ?? '']));
                 $hit ? $update++ : $insert++;
             }
             $plan[$table] = ['insert' => $insert, 'update' => $update];
@@ -881,9 +882,13 @@ class CompanyImporter
         }
 
         // customers.afm_key is derived, never trusted from a bundle (older
-        // bundles lack the column entirely).
+        // bundles lack the column entirely) — EXCEPT for a parked row, which must
+        // stay keyless: re-deriving would make the legacy υποκατάστημα twin claim
+        // an identity the source tenant deliberately gave to the other row (and
+        // then collide with it). Parking only ever WEAKENS a row's claim, so
+        // honouring the flag can't be used to smuggle an identity in.
         if ($table === 'customers') {
-            $row['afm_key'] = Afm::uniqueKey($row['afm'] ?? null);
+            $row['afm_key'] = self::rowIsParked($row) ? null : Afm::uniqueKey($row['afm'] ?? null);
         }
 
         $row['created_at'] = now();
@@ -938,6 +943,18 @@ class CompanyImporter
     }
 
     /**
+     * A bundle customer row that holds NO ΑΦΜ identity on purpose — the legacy
+     * υποκατάστημα twin the Firebird ETL parked with `--afm-keep`. Older bundles
+     * predate the column, so a missing value simply means «not parked».
+     *
+     * @param  array<string,mixed>  $row
+     */
+    private static function rowIsParked(array $row): bool
+    {
+        return (bool) ($row['afm_key_parked'] ?? false);
+    }
+
+    /**
      * What cannot be written is refused up-front — the SAME check in plan()
      * and in importTable(), so the dry-run reports exactly what execute would
      * refuse, and nothing is ever refused mid-transaction:
@@ -965,9 +982,9 @@ class CompanyImporter
     {
         $seen = [];
         foreach ($rows as $row) {
-            $afmKey = Afm::uniqueKey($row['afm'] ?? null);
+            $afmKey = self::rowIsParked($row) ? null : Afm::uniqueKey($row['afm'] ?? null);
             if ($afmKey === null) {
-                continue;
+                continue;   // no identity (placeholder/blank), or deliberately parked
             }
             $name = (string) ($row['name'] ?? '?');
 
@@ -1094,8 +1111,10 @@ class CompanyImporter
     {
         // deleted_at is lifecycle, not identity: a locally soft-deleted row must
         // still match its bundle twin (else merge inserts a live duplicate).
-        // afm_key is DERIVED (pre-release bundles lack it) — never part of identity.
-        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at', 'afm_key'] as $col) {
+        // afm_key is DERIVED (pre-release bundles lack it) — never part of identity;
+        // afm_key_parked is the flag that suppresses it, equally not identity (a
+        // pre-PR bundle carries neither, and must still match its upgraded twin).
+        foreach ([...self::DROP_COLUMNS, 'legacy_id', 'deleted_at', 'afm_key', 'afm_key_parked'] as $col) {
             unset($row[$col]);
         }
         ksort($row);

@@ -119,6 +119,39 @@ class FirebirdImportRunTest extends TestCase
      * RunFirebirdImport + its dispatch test). This test enforces the narrower
      * invariant that no DOMAIN column ever holds it.
      */
+    public function test_afm_keep_ids_are_parsed_from_what_the_operator_typed(): void
+    {
+        $run = fn (?string $typed): FirebirdImportRun => new FirebirdImportRun(['afm_keep' => $typed]);
+
+        $this->assertSame([41, 87], $run('41, 87')->afmKeepIds());
+        $this->assertSame([41, 87], $run('41 87')->afmKeepIds());
+        $this->assertSame([41, 87], $run(' 41,,87, ')->afmKeepIds());
+        $this->assertSame([41], $run('41, 41')->afmKeepIds());
+        // Nothing usable in it → no option at all, and the import refuses with
+        // the list rather than acting on a half-understood instruction.
+        $this->assertSame([], $run('χχχ')->afmKeepIds());
+        $this->assertSame([], $run('0')->afmKeepIds());
+        $this->assertSame([], $run('')->afmKeepIds());
+        $this->assertSame([], $run(null)->afmKeepIds());
+    }
+
+    public function test_the_import_job_passes_each_afm_keep_to_the_artisan_command(): void
+    {
+        $run = FirebirdImportRun::create([
+            'company_id' => $this->tenant->id,
+            'file_name' => 'x.fbk', 'file_size' => 1, 'file_sha256' => str_repeat('b', 64),
+            'status' => FirebirdImportRun::STATUS_UPLOADED,
+            'fb_host' => '127.0.0.1', 'fb_user' => 'SYSDBA',
+            'afm_keep' => '41, 87',
+        ]);
+
+        $args = (new \ReflectionClass(RunFirebirdImport::class))
+            ->getMethod('afmKeepArgs')
+            ->invoke(new RunFirebirdImport($run->id, 'pw'), $run);
+
+        $this->assertSame(['--afm-keep=41', '--afm-keep=87'], $args);
+    }
+
     public function test_dispatch_does_not_serialize_password_into_the_run_row(): void
     {
         Bus::fake();

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\FirebirdImportRuns\Schemas;
 
+use App\Models\FirebirdImportRun;
 use App\Services\Etl\FirebirdConnectionTester;
 use Filament\Actions\Action as FormAction;
 use Filament\Facades\Filament;
@@ -133,6 +134,30 @@ class FirebirdImportRunForm
                                             ->columnSpanFull(),
                                     ]),
 
+                                Section::make('Διπλά ΑΦΜ πελατών')
+                                    ->collapsible()
+                                    ->collapsed()
+                                    ->description('Η παλιά εφαρμογή δεν είχε πεδίο υποκαταστήματος, οπότε ένα υποκατάστημα ήταν ΔΕΥΤΕΡΟΣ πελάτης με το ίδιο ΑΦΜ. Το ekdosi κρατά έναν πελάτη ανά ΑΦΜ, οπότε η εισαγωγή σταματά και ρωτά ποιος κρατά την ταυτότητα. Συμπλήρωσέ το ΜΟΝΟ αν το «Έλεγχος σύνδεσης» (ή η εισαγωγή) σου το ζητήσει. Η παλιά βάση ΔΕΝ πειράζεται ποτέ — μόνο διαβάζεται.')
+                                    ->schema([
+                                        TextInput::make('afm_keep')
+                                            ->label('CUST_ID που κρατούν το ΑΦΜ')
+                                            ->placeholder('π.χ. 41, 87')
+                                            // Prefilled from the last import that carried a decision:
+                                            // the parallel-run week re-imports daily against the SAME
+                                            // legacy duplicates, and a blank field means every one of
+                                            // those runs refuses in the queue until it is retyped.
+                                            ->default(fn (): ?string => FirebirdImportRun::query()
+                                                ->where('company_id', Filament::getTenant()?->getKey())
+                                                ->whereNotNull('afm_keep')
+                                                ->where('afm_keep', '<>', '')
+                                                ->latest('id')
+                                                ->value('afm_keep'))
+                                            ->maxLength(255)
+                                            ->rule('regex:/^[0-9\s,]*$/')
+                                            ->helperText('Ένα CUST_ID ανά διπλό ΑΦΜ, χωρισμένα με κόμμα. Προσυμπληρώνεται από την τελευταία εισαγωγή που είχε απόφαση. Ο άλλος πελάτης μπαίνει κανονικά — με ΑΦΜ, παραστατικά και ιστορικό — αλλά χωρίς την ταυτότητα ΑΦΜ, και τον τακτοποιείς μετά μέσα στο ekdosi (συγχώνευση ή υποκατάστημα ανά παραστατικό). Ισχύει και για τη «Ζωντανή σύνδεση».')
+                                            ->columnSpanFull(),
+                                    ]),
+
                                 Section::make('Or import via the artisan command')
                                     ->collapsible()
                                     ->collapsed()
@@ -232,13 +257,36 @@ class FirebirdImportRunForm
                                                     $db,
                                                     trim((string) $get('fb_live_user')) ?: 'EKDOSI',
                                                     (string) $get('fb_live_password'),
+                                                    Filament::getTenant()?->getKey(),
+                                                    // Judge the source under the decision the
+                                                    // operator has ALREADY typed, so a re-test
+                                                    // after filling the field agrees with the import.
+                                                    FirebirdImportRun::parseAfmKeep($get('afm_keep')),
                                                 );
 
                                                 if ($result->ok) {
+                                                    $body = $result->message
+                                                        .($result->missing !== [] ? ' — (λείπουν: '.implode(', ', $result->missing).')' : '');
+
+                                                    // The ΑΦΜ preflight: say it HERE, while the operator is still
+                                                    // configuring — not after a gbak restore and a refused import.
+                                                    if ($result->afmBlocks()) {
+                                                        Notification::make()
+                                                            ->title('⚠ Σύνδεση OK — αλλά η εισαγωγή θα σταματήσει')
+                                                            ->body(new HtmlString(
+                                                                e($body).'<br><strong>'.e((string) $result->afmSummary()).'</strong><br>'
+                                                                .nl2br(e(self::firstLines($result->afm->describe(), 8)))
+                                                                .'<br>'.e($result->afm->howTo())
+                                                                .'<br><em>'.e('Από εδώ: συμπλήρωσε/διόρθωσε τα CUST_ID στο «Διπλά ΑΦΜ πελατών» (καρτέλα Firebird) και ξανακάνε «Έλεγχος σύνδεσης».').'</em>'
+                                                            ))
+                                                            ->warning()->persistent()->send();
+
+                                                        return;
+                                                    }
+
                                                     Notification::make()
                                                         ->title('✅ Σύνδεση OK')
-                                                        ->body($result->message
-                                                            .($result->missing !== [] ? ' — (λείπουν: '.implode(', ', $result->missing).')' : ''))
+                                                        ->body($body.(($afm = $result->afmSummary()) !== null ? ' — '.$afm : ''))
                                                         ->success()->send();
 
                                                     return;
@@ -259,6 +307,17 @@ class FirebirdImportRunForm
                             ]),
                     ]),
             ]);
+    }
+
+    /** Cap a multi-line report so one pathological database can't flood the toast. */
+    private static function firstLines(string $text, int $max): string
+    {
+        $lines = explode("\n", $text);
+        if (count($lines) <= $max) {
+            return $text;
+        }
+
+        return implode("\n", array_slice($lines, 0, $max))."\n… (+".(count($lines) - $max).' ακόμη — δες «migrate:firebird --dry-run»)';
     }
 
     /** True when the operator is configuring a live connection (a DB path typed). */

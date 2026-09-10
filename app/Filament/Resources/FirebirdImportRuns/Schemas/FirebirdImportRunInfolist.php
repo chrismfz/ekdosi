@@ -145,6 +145,13 @@ class FirebirdImportRunInfolist
 
                         TextEntry::make('fb_user')
                             ->label('Firebird user'),
+
+                        // The ΑΦΜ identity decision this run was made under —
+                        // «ποιος κρατά το ΑΦΜ» when two legacy customers shared one.
+                        TextEntry::make('afm_keep')
+                            ->label('CUST_ID που κράτησαν το ΑΦΜ')
+                            ->visible(fn ($record): bool => filled($record?->afm_keep))
+                            ->helperText('Οι υπόλοιποι πελάτες του ίδιου ΑΦΜ μπήκαν χωρίς ταυτότητα ΑΦΜ — δες «php artisan customers:afm-duplicates».'),
                     ]),
             ])
             // Auto-poll while non-terminal so the badge flips without

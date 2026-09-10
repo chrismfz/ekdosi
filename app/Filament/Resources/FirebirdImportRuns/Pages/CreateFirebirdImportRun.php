@@ -108,6 +108,8 @@ class CreateFirebirdImportRun extends CreateRecord
             'status' => FirebirdImportRun::STATUS_UPLOADED,
             'fb_host' => $data['fb_host'],
             'fb_user' => $data['fb_user'],
+            // Which CUST_ID keeps the ΑΦΜ when two legacy customers share one.
+            'afm_keep' => $data['afm_keep'] ?? null,
         ]);
 
         // Surface the SHA dedup hint as a notification (non-blocking)
@@ -183,6 +185,8 @@ class CreateFirebirdImportRun extends CreateRecord
             'fb_host' => $fbHost,
             'fb_user' => trim((string) ($data['fb_live_user'] ?? '')) ?: 'EKDOSI',
             'fb_database' => (string) $data['fb_live_database'],
+            // The field lives on the Firebird tab but applies to a live run too.
+            'afm_keep' => $data['afm_keep'] ?? null,
         ]);
 
         RunFirebirdImport::dispatch($run->id, (string) ($data['fb_live_password'] ?? ''));

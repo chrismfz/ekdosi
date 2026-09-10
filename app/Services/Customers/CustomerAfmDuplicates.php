@@ -90,6 +90,62 @@ class CustomerAfmDuplicates
     }
 
     /**
+     * The other half of the picture: rows that carry a REAL ΑΦΜ but hold NO
+     * identity (`afm_key IS NULL`) — the legacy υποκατάστημα twins the ETL parked
+     * with `--afm-keep`, plus any anomaly that produced the same shape. The UNIQUE
+     * index allows them (NULLs never collide), so `find()` — which reports only
+     * genuine constraint violations, and is what the migration gates on — cannot
+     * see them and they would otherwise be invisible forever.
+     *
+     * Reported, never auto-fixed: whether the pair is one party to merge or a real
+     * branch to keep (→ `invoices.counterpart_branch`) is the operator's call.
+     *
+     * @return Collection<int, array{company_id:int, afm_key:string, holder:?Customer, parked:Collection<int, Customer>}>
+     */
+    public function findParked(?int $companyId = null): Collection
+    {
+        if (! Schema::hasColumn('customers', 'afm_key')) {
+            return collect();
+        }
+
+        $byKey = [];
+        DB::table('customers')
+            ->select('id', 'company_id', 'afm')
+            ->whereNull('afm_key')
+            ->whereNotNull('afm')
+            ->when($companyId !== null, fn ($q) => $q->where('company_id', $companyId))
+            ->orderBy('id')
+            ->chunkById(1000, function ($rows) use (&$byKey): void {
+                foreach ($rows as $row) {
+                    $key = Afm::uniqueKey($row->afm);
+                    if ($key !== null) {
+                        $byKey[(int) $row->company_id][$key][] = (int) $row->id;
+                    }
+                }
+            });
+
+        $groups = collect();
+        ksort($byKey);
+        foreach ($byKey as $cid => $keys) {
+            ksort($keys);
+            foreach ($keys as $key => $ids) {
+                $groups->push([
+                    'company_id' => $cid,
+                    'afm_key' => (string) $key,
+                    // (string) — a numeric PHP array key comes back as an INT and
+                    // would bind numerically against the varchar index.
+                    'holder' => Customer::query()->withoutGlobalScopes()->withTrashed()
+                        ->where('company_id', $cid)->where('afm_key', (string) $key)->orderBy('id')->first(),
+                    'parked' => Customer::query()->withoutGlobalScopes()->withTrashed()
+                        ->whereIn('id', $ids)->orderBy('id')->get(),
+                ]);
+            }
+        }
+
+        return $groups;
+    }
+
+    /**
      * Plain-text rendering (migration error message / CLI).
      *
      * @param  Collection<int, array{company_id:int, afm_key:string, customers:Collection<int, Customer>}>  $groups
