@@ -165,4 +165,17 @@ class WhmcsReceiptOnIssueTest extends TestCase
         $this->assertSame(0.0, $again, 'the whmcs-paid key still exists → no duplicate receipt');
         $this->assertSame(1, Payment::query()->where('invoice_id', $invoice->id)->where('kind', 'payment')->count());
     }
+
+    public function test_a_deleted_auto_receipt_is_not_resurrected(): void
+    {
+        // withTrashed dedup: an operator who DELETED the auto-receipt meant it — a
+        // re-run (or the syncer) must not silently re-add it.
+        $pending = $this->makePending(self::PAID);
+        $invoice = $this->file($pending);
+        Payment::query()->where('invoice_id', $invoice->id)->sole()->delete();
+
+        $again = app(WhmcsReceiptRecorder::class)->recordIfPaid($pending->fresh(), $invoice->fresh());
+        $this->assertSame(0.0, $again);
+        $this->assertSame(0, Payment::query()->where('invoice_id', $invoice->id)->count(), 'stays deleted');
+    }
 }

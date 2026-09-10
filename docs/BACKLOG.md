@@ -1051,6 +1051,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **`WhmcsReceiptRecorder`: το ποσό είσπραξης = δικό μας owed, ΟΧΙ το ευρώ που εισέπραξε το WHMCS (P2, by design).**
+  Ακολουθούμε το trail του WHMCS id, κρατώντας το ΔΙΚΟ μας παραστατικό netted-to-zero. Στο `file()` path ο
+  `WhmcsFilingGuard::assertTotalsReconcile` ήδη εγγυάται ότι το gross ταιριάζει με το WHMCS total· στο
+  **draft-first** path (createDraft — σκόπιμα ΧΩΡΙΣ reconcile, ώστε ο χειριστής να διορθώνει γραμμές) αν ο
+  χειριστής αλλάξει το σύνολο, η αυτόματη είσπραξη μηδενίζει στο νέο owed και μια τυχόν διαφορά με το WHMCS
+  δεν επιφαίνεται ως over/under-payment. Αποδεκτό: η είσπραξη είναι editable/deletable money-trail, όχι
+  reconciliation· αν ποτέ χρειαστεί, βάλε ένα προαιρετικό reconcile-warning στο draft-issue.
 - **`WhmcsReceiptRecorder`: το draft-first μονοπάτι δεν αυτο-καταγράφει σε off-mode tenant (P2, non-prod edge).**
   Ο recorder καλείται (α) στο `WhmcsInvoiceFiler::file()` (τρέχει πάντα, ακόμη κι off-mode — pending=FILED)
   και (β) στο `WhmcsWritebackService::syncFiledFromLifecycle()` για το draft-first. Το (β) καλείται από τον

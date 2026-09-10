@@ -188,7 +188,9 @@ class WhmcsPaymentSyncer
 
     private function alreadyRecorded(Company $tenant, string $txnId): bool
     {
-        return Payment::query()
+        // withTrashed: dedup on the whmcs-paid id ONCE, ever — a receipt an operator
+        // deliberately DELETED (soft) must not be resurrected on the next sweep.
+        return Payment::withTrashed()
             ->where('company_id', $tenant->id)
             ->where('transaction_id', $txnId)
             ->exists();

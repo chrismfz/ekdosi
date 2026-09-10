@@ -84,10 +84,12 @@ class WhmcsReceiptRecorder
             // Dedup, re-checked under the lock — two independent guards:
             //  (a) our own receipt already recorded (keyed on the SHARED whmcs-paid
             //      id, so it holds even after a later refund nets payments to 0, and
-            //      the WhmcsPaymentSyncer keyed on the same id won't double us); OR
+            //      the WhmcsPaymentSyncer keyed on the same id won't double us).
+            //      withTrashed: once recorded, NEVER resurrect it — an operator who
+            //      DELETED the auto-receipt meant it (don't auto-re-add); OR
             //  (b) ANY real payment already on the invoice (a manual entry / the
             //      syncer) — never stack an auto-receipt on top of it.
-            if (Payment::query()->where('invoice_id', $locked->id)->where('transaction_id', $txnKey)->exists()) {
+            if (Payment::withTrashed()->where('invoice_id', $locked->id)->where('transaction_id', $txnKey)->exists()) {
                 return 0.0;
             }
             $paidSoFar = round((float) DB::table('payments')
@@ -147,7 +149,10 @@ class WhmcsReceiptRecorder
             $rows = array_is_list($txns) ? $txns : [$txns];
             $best = null;
             foreach ($rows as $row) {
-                if (is_array($row) && ($best === null || (float) ($row['amountin'] ?? 0) > (float) ($best['amountin'] ?? 0))) {
+                // Only INCOMING money (amountin > 0) — never label the receipt with a
+                // refund/adjustment (amountout) transaction's id.
+                if (is_array($row) && (float) ($row['amountin'] ?? 0) > 0
+                    && ($best === null || (float) ($row['amountin'] ?? 0) > (float) ($best['amountin'] ?? 0))) {
                     $best = $row;
                 }
             }
