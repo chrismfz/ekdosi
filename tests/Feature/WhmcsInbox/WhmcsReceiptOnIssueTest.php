@@ -101,7 +101,10 @@ class WhmcsReceiptOnIssueTest extends TestCase
 
         $payment = Payment::query()->where('invoice_id', $invoice->id)->sole();
         $this->assertSame('124.00', (string) $payment->amount);
-        $this->assertSame('VPOS-84213', $payment->transaction_id, 'the real vPOS ref, visible in «Κωδ. συναλλαγής»');
+        // Stable WHMCS key in transaction_id (shared with the syncer's dedup); the
+        // real vPOS ref lives in the note so both reach the Καρτέλα.
+        $this->assertSame('whmcs-paid:8888', $payment->transaction_id);
+        $this->assertStringContainsString('VPOS-84213', (string) $payment->notes, 'the real vPOS ref, in the note');
         $this->assertSame('2026-05-21', $payment->pay_date->toDateString());
         $this->assertSame($this->cash->id, $payment->payment_method_id, 'inherits the invoice payment method');
         $this->assertStringContainsString('WHMCS #8888', (string) $payment->notes);
@@ -142,5 +145,24 @@ class WhmcsReceiptOnIssueTest extends TestCase
         $again = app(WhmcsReceiptRecorder::class)->recordIfPaid($pending->fresh(), $invoice->fresh());
         $this->assertSame(0.0, $again);
         $this->assertSame(1, Payment::query()->where('invoice_id', $invoice->id)->count());
+    }
+
+    public function test_no_second_receipt_even_after_the_auto_receipt_is_refunded(): void
+    {
+        // The dedup is keyed on the shared whmcs-paid id, NOT on the net-paid sum —
+        // so a fully-refunded auto-receipt (net back to 0) still can't be re-added
+        // (guards finding #3 + the WhmcsPaymentSyncer double after a refund).
+        $pending = $this->makePending(self::PAID);
+        $invoice = $this->file($pending);
+
+        // Operator refunds the auto-receipt → payments net to 0 on the invoice.
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $invoice->id, 'kind' => 'refund', 'amount' => 124, 'pay_date' => now(),
+        ]);
+
+        $again = app(WhmcsReceiptRecorder::class)->recordIfPaid($pending->fresh(), $invoice->fresh());
+        $this->assertSame(0.0, $again, 'the whmcs-paid key still exists → no duplicate receipt');
+        $this->assertSame(1, Payment::query()->where('invoice_id', $invoice->id)->where('kind', 'payment')->count());
     }
 }

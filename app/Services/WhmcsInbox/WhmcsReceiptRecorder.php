@@ -5,7 +5,7 @@ namespace App\Services\WhmcsInbox;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
-use Illuminate\Support\Carbon;
+use App\Services\Whmcs\WhmcsPaidReceipt;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -31,13 +31,15 @@ use Illuminate\Support\Facades\DB;
  *    credit note — never a still-drafted document (guards on the pending status,
  *    not local_status, so it works for off-mode tenants too, whose issued
  *    invoices keep local_status='draft').
- *  - Records the COLLECTIBLE still owed (payable − credited), NOT the synthetic
- *    cash-term balance (which is 0 at issue) — so the invoice flips from
- *    settled-at-issue to real tracking and nets back to zero (same reason the
- *    invoice «Πληρωμές» tab records owed, not balance).
- *  - Idempotent: skips if the invoice already carries any real payment (net > 0),
- *    so a re-issue never doubles; and since a full receipt drives the balance to
- *    0, the only-if-open WhmcsPaymentSyncer stays a no-op on it too.
+ *  - Records the COLLECTIBLE owed (InvoiceBalance owed = payable − credited), NOT
+ *    the synthetic cash-term balance (0 at issue) and deliberately NOT the WHMCS-
+ *    charged € — we follow the WHMCS id trail while keeping OUR invoice netted to
+ *    zero. Taking owed straight from InvoiceBalance keeps it from drifting.
+ *  - Idempotent + syncer-coordinated: stamps `transaction_id` with the SHARED
+ *    `WhmcsPaidReceipt::transactionKey()` and skips if a row with that key already
+ *    exists — so a re-issue never doubles AND the WhmcsPaymentSyncer (keyed on the
+ *    same id) never double-records, even if a later refund reopens the balance.
+ *    Also skips when ANY real payment is already on the invoice.
  *  - Serialised under a lockForUpdate on the invoice so a concurrent recorder /
  *    manual payment can't both pass the dedup check.
  */
@@ -59,7 +61,7 @@ class WhmcsReceiptRecorder
         }
 
         $payload = $pending->payload;
-        if (! is_array($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0) {
+        if (! WhmcsPaidReceipt::isPaid($payload)) {
             return 0.0;
         }
 
@@ -70,15 +72,24 @@ class WhmcsReceiptRecorder
             return 0.0;
         }
 
-        return DB::transaction(function () use ($pending, $invoice, $payload): float {
+        $whmcsInvoiceId = (int) $pending->whmcs_invoice_id;
+        $txnKey = WhmcsPaidReceipt::transactionKey($whmcsInvoiceId);
+
+        return DB::transaction(function () use ($invoice, $payload, $txnKey, $whmcsInvoiceId): float {
             $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();
             if ($locked === null) {
                 return 0.0;
             }
 
-            // Idempotency: any real recorded payment (net of refunds) means this is
-            // already handled (a re-issue, a manual entry, or the syncer) — never
-            // stack a second auto-receipt on top.
+            // Dedup, re-checked under the lock — two independent guards:
+            //  (a) our own receipt already recorded (keyed on the SHARED whmcs-paid
+            //      id, so it holds even after a later refund nets payments to 0, and
+            //      the WhmcsPaymentSyncer keyed on the same id won't double us); OR
+            //  (b) ANY real payment already on the invoice (a manual entry / the
+            //      syncer) — never stack an auto-receipt on top of it.
+            if (Payment::query()->where('invoice_id', $locked->id)->where('transaction_id', $txnKey)->exists()) {
+                return 0.0;
+            }
             $paidSoFar = round((float) DB::table('payments')
                 ->where('invoice_id', $locked->id)
                 ->whereNull('deleted_at')
@@ -88,16 +99,14 @@ class WhmcsReceiptRecorder
                 return 0.0;
             }
 
-            // The collectible still to record = payable − credited (a fresh invoice
-            // → the full payable). Uses payableTotal(), NOT the synthetic cash-term
-            // balance, which is 0 at issue.
-            $credited = round((float) $locked->balanceData()->credited, 2);
-            $toRecord = round($locked->payableTotal() - $credited, 2);
-            if ($toRecord <= self::EPS) {
+            // The collectible still owed — the same figure the invoice's «Πληρωμές»
+            // tab records (NOT the synthetic cash-term balance, which is 0 at issue).
+            $owed = round((float) $locked->balanceData()->owed, 2);
+            if ($owed <= self::EPS) {
                 return 0.0;
             }
 
-            [$txnId, $gateway] = self::provenance($payload, (int) $pending->whmcs_invoice_id);
+            [$ref, $gateway] = self::provenance($payload);
 
             Payment::create([
                 'company_id' => $locked->company_id,
@@ -107,27 +116,28 @@ class WhmcsReceiptRecorder
                 // The WHMCS gateway already resolved to this invoice's payment method
                 // during mapping — inherit it so the receipt's «Τρόπος» matches.
                 'payment_method_id' => $locked->payment_method_id,
-                'amount' => $toRecord,
-                'pay_date' => self::payDate($payload),
-                'transaction_id' => $txnId,
-                'notes' => self::note((int) $pending->whmcs_invoice_id, $gateway),
+                'amount' => $owed,
+                'pay_date' => WhmcsPaidReceipt::payDate($payload),
+                // Stable WHMCS key (shared with the syncer's dedup, above); the real
+                // acquirer/vPOS ref lives in the note so both reach the Καρτέλα.
+                'transaction_id' => $txnKey,
+                'notes' => self::note($whmcsInvoiceId, $gateway, $ref),
             ]);
 
-            return $toRecord;
+            return $owed;
         });
     }
 
     /**
-     * The receipt's provenance from the WHMCS payload: the acquirer transaction id
-     * (the real vPOS/gateway ref, shown in «Κωδ. συναλλαγής») and the gateway name.
-     * Reads the largest incoming transaction; falls back to a deterministic
-     * `whmcs-paid:{id}` id and the invoice-level `paymentmethod` when the payload
-     * carries no transaction detail (shape varies native vs bridge).
+     * Gateway name + acquirer/vPOS ref from the WHMCS payload, for the note. Reads
+     * the largest incoming transaction; falls back to the invoice-level
+     * `paymentmethod` for the gateway and no ref when the payload carries no
+     * transaction detail (shape varies native vs bridge).
      *
      * @param  array<string, mixed>  $payload
-     * @return array{0: string, 1: ?string} [transactionId, gateway]
+     * @return array{0: ?string, 1: ?string} [ref, gateway]
      */
-    private static function provenance(array $payload, int $whmcsInvoiceId): array
+    private static function provenance(array $payload): array
     {
         $gateway = ($g = trim((string) ($payload['paymentmethod'] ?? ''))) !== '' ? $g : null;
 
@@ -145,36 +155,25 @@ class WhmcsReceiptRecorder
                 if (($bg = trim((string) ($best['gateway'] ?? ''))) !== '') {
                     $gateway = $bg;
                 }
-                if (($id = trim((string) ($best['transid'] ?? ''))) !== '') {
-                    return [$id, $gateway];
-                }
+                $ref = trim((string) ($best['transid'] ?? ''));
+
+                return [$ref !== '' ? $ref : null, $gateway];
             }
         }
 
-        return ['whmcs-paid:'.$whmcsInvoiceId, $gateway];
-    }
-
-    /** Human-readable trail for the «Σημείωση» column. */
-    private static function note(int $whmcsInvoiceId, ?string $gateway): string
-    {
-        return 'Είσπραξη από WHMCS #'.$whmcsInvoiceId
-            .($gateway !== null && $gateway !== '' ? ' · '.$gateway : '')
-            .' (αυτόματη καταγραφή).';
+        return [null, $gateway];
     }
 
     /**
-     * WHMCS `datepaid` (Y-m-d part) when present + real; else today. Guards the
-     * WHMCS zero-date sentinel ('0000-00-00 …'). Mirrors WhmcsPaymentSyncer.
-     *
-     * @param  array<string, mixed>  $payload
+     * Human-readable trail for the «Σημείωση» column — the WHMCS invoice id, the
+     * gateway, and the real acquirer/vPOS ref (which the stable transaction_id key
+     * doesn't carry).
      */
-    private static function payDate(array $payload): string
+    private static function note(int $whmcsInvoiceId, ?string $gateway, ?string $ref): string
     {
-        $date = substr((string) ($payload['datepaid'] ?? ''), 0, 10);
-        if ($date === '' || str_starts_with($date, '0000')) {
-            return Carbon::now()->toDateString();
-        }
-
-        return $date;
+        return 'Είσπραξη από WHMCS #'.$whmcsInvoiceId
+            .($gateway !== null && $gateway !== '' ? ' · '.$gateway : '')
+            .($ref !== null && $ref !== '' ? ' · ref '.$ref : '')
+            .' (αυτόματη καταγραφή).';
     }
 }

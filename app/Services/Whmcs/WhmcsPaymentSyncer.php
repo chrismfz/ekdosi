@@ -7,7 +7,6 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\InvoiceBalance;
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -146,7 +145,7 @@ class WhmcsPaymentSyncer
         }
 
         $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
-        if (! is_array($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0) {
+        if (! WhmcsPaidReceipt::isPaid($payload)) {
             return 0.0;
         }
 
@@ -197,21 +196,12 @@ class WhmcsPaymentSyncer
 
     private static function transactionId(int $whmcsInvoiceId): string
     {
-        return 'whmcs-paid:'.$whmcsInvoiceId;
+        return WhmcsPaidReceipt::transactionKey($whmcsInvoiceId);
     }
 
-    /**
-     * WHMCS `datepaid` (Y-m-d part) when present + real; else today. Guards the
-     * WHMCS zero-date sentinel ('0000-00-00 …') which is not a valid date.
-     */
+    /** @param  array<string, mixed>  $payload */
     private static function payDate(array $payload): string
     {
-        $raw = (string) ($payload['datepaid'] ?? '');
-        $date = substr($raw, 0, 10);
-        if ($date === '' || str_starts_with($date, '0000')) {
-            return Carbon::now()->toDateString();
-        }
-
-        return $date;
+        return WhmcsPaidReceipt::payDate($payload);
     }
 }
