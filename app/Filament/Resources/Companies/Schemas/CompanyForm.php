@@ -1253,17 +1253,97 @@ class CompanyForm
                     });
                 }
 
-                if ($meta['secret'] ?? false) {
+                $isSecret = (bool) ($meta['secret'] ?? false);
+
+                if ($isSecret) {
                     $input->password()
                         ->revealable()
                         ->dehydrated(fn (?string $state): bool => filled($state));
                 }
+
+                // Say out loud whether something IS stored. A masked input that is
+                // pre-filled looks EXACTLY like an empty one, so «τα κουκκάκια» left
+                // the operator guessing whether the token was saved, still there, or
+                // about to be wiped by this save. For a secret the last 4 chars are
+                // shown (Stripe/AWS convention) so two tokens can be told apart
+                // without revealing either.
+                $input->helperText(fn (?Company $record): HtmlString => self::credentialStatus($record, $key, $name, $isSecret));
 
                 $fields[] = $input;
             }
         }
 
         return $fields;
+    }
+
+    /**
+     * «Είναι όντως αποθηκευμένο;» for one provider-credential field, read from the
+     * record's stored config (not from form state — the point is what is ON DISK).
+     */
+    private static function credentialStatus(?Company $record, string $providerKey, string $field, bool $secret): HtmlString
+    {
+        if ($record === null) {
+            return new HtmlString('<span class="fi-color-gray">Νέα εταιρεία — τίποτα αποθηκευμένο ακόμη.</span>');
+        }
+
+        // The config blob is FLAT and belongs to the record's CURRENT provider. When the
+        // operator has switched the channel to a different provider, a shared field name
+        // (base_url exists on more than one) would otherwise make us announce the OLD
+        // provider's value as safely stored — while dehydrate() starts that provider's
+        // blob empty on save. Say what will actually happen instead.
+        $currentKey = trim((string) $record->einvoice_provider_key);
+        $config = is_array($record->einvoice_provider_config) ? $record->einvoice_provider_config : [];
+        $stored = $config[$field] ?? null;
+
+        // Switching to a DIFFERENT provider: the stored blob is the old one's and is not
+        // carried over — say so rather than announcing it as this provider's.
+        if ($currentKey !== '' && $currentKey !== $providerKey) {
+            return new HtmlString(
+                '<strong>⚠ Δεν έχει αποθηκευτεί για αυτόν τον πάροχο.</strong> '
+                .'Τα στοιχεία του προηγούμενου παρόχου ΔΕΝ μεταφέρονται.'
+            );
+        }
+
+        // No provider currently selected on the record (π.χ. «Καθόλου»): the blob is kept
+        // but nothing records WHOSE it is, so don't vouch for it either way.
+        if ($currentKey === '' && is_string($stored) && $stored !== '') {
+            return new HtmlString(
+                '<strong>Υπάρχει αποθηκευμένη τιμή από προηγούμενη ρύθμιση</strong> ('
+                .($secret ? self::maskSecret($stored) : e(mb_strimwidth($stored, 0, 60, '…')))
+                .'). Έλεγξέ την πριν αποθηκεύσεις.'
+            );
+        }
+
+        if (! is_string($stored) || $stored === '') {
+            return new HtmlString('<strong>⚠ Δεν έχει αποθηκευτεί.</strong> Συμπλήρωσέ το και πάτα «Αποθήκευση».');
+        }
+
+        $shown = $secret
+            ? self::maskSecret($stored)
+            : e(mb_strimwidth($stored, 0, 60, '…'));
+
+        // States what is ON DISK right now — deliberately no promise about what this
+        // save will do, because the helper can't see a replacement the operator has
+        // just typed into the input and would otherwise say «δεν το πειράζει» about a
+        // value that is being replaced.
+        return new HtmlString('<strong>✓ Αποθηκευμένο</strong> ('.$shown.').');
+    }
+
+    /**
+     * A short fingerprint — enough to tell two tokens apart, never enough to rebuild one.
+     *
+     * The tail is at most 4 chars AND at most half the secret, and anything under 8
+     * chars is masked outright: a flat "last 4" would have disclosed 4 of the 7
+     * characters of a demo token like `test123`.
+     */
+    private static function maskSecret(string $secret): string
+    {
+        $length = mb_strlen($secret);
+        $reveal = min(4, intdiv($length, 2));
+
+        return $length < 8 || $reveal < 1
+            ? str_repeat('•', 4)
+            : '••••'.e(mb_substr($secret, -$reveal));
     }
 
     private static function providerTestAction(): FormAction

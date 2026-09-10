@@ -9,7 +9,9 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\InvoSignDocument;
+use App\Services\EInvoice\Transports\NullProviderTransport;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyData\Codes;
 use App\Support\OperatorHealth\OperatorHealthReport;
@@ -307,11 +309,35 @@ class GoLiveCheckReport
         if ($mode === 'off') {
             return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', 'einvoice_provider_mode = off');
         }
-        if (empty($tenant->einvoice_provider_key)) {
+        $key = (string) $tenant->einvoice_provider_key;
+        if (trim($key) === '') {
             return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', 'δεν έχει οριστεί provider (einvoice_provider_key)');
         }
 
-        return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'pass', "{$tenant->einvoice_provider_key} ({$mode})");
+        // A key that is merely NON-EMPTY is not a filing tenant: an unregistered (or
+        // whitespace-carrying) key resolves to NullProviderTransport, which cannot
+        // file at all — and a cutover gate reporting «pass» for it is a false green
+        // on the one check that is supposed to catch exactly this.
+        // for(), not keys(): keys() is a bare array_keys() of the map and skips the
+        // class_exists()/is_subclass_of() checks, so a provider listed but not yet
+        // implemented would pass the gate and then fall to the Null transport at filing
+        // time — the exact false green this check exists to close. for() logs a warning
+        // for an unresolvable key, which on a cutover report is a feature, not noise:
+        // it fires only for a genuinely unfilable tenant.
+        if (app(ProviderTransportRegistry::class)->for($key) instanceof NullProviderTransport) {
+            return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'fail', "άγνωστος provider «{$key}» — δεν αντιστοιχεί σε ενεργό transport");
+        }
+
+        // Sandbox is not cutover-ready: the documents go to the provider's DEMO
+        // environment and never reach the real ΑΑΔΕ. Mirrors the mydata_mode gate,
+        // which already warns for sandbox — the provider path had no signal at all
+        // and reported a green «ready».
+        if ($mode !== 'production') {
+            return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'warn',
+                "{$key} — δοκιμαστικό περιβάλλον παρόχου· τα παραστατικά δεν φτάνουν στην πραγματική ΑΑΔΕ");
+        }
+
+        return $this->gate('provider_live', 'Πάροχος ΥΠΑΗΕΣ (live)', 'pass', "{$key} ({$mode})");
     }
 
     /**
