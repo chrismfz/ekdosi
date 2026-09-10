@@ -249,6 +249,18 @@ surfaced in the open-items sections further down.
 ---
 
 ## ✅ Done recently (so we don't re-pick them)
+- **`einvoice_provider_key` κανονικοποιείται στο ΓΡΑΨΙΜΟ (mutator στο `Company`) + data-fix migration.**
+  Ο `ProviderTransportRegistry::for()` κάνει `trim()`, άρα η ΥΠΟΒΟΛΗ δούλευε με κλειδί που κουβαλά κενά, ενώ
+  κάθε σύγκριση της ωμής στήλης αστοχούσε. **Μετρημένα** συμπτώματα (probes, όχι εικασία): η φόρμα εταιρείας
+  γινόταν ΑΔΥΝΑΤΟ να αποθηκευτεί (το συντιθέμενο channel δεν υπήρχε στα options → validation error σε κάθε
+  save, ακόμη και για άσχετη αλλαγή)· το preview payload στο ViewInvoice + το `einvoice:provider-test-submit`
+  έδειχναν **μη-augmented** XML ενώ η πραγματική υποβολή ήταν augmented· η κάρτα υπολοίπου έλεγε «καμία
+  υποβολή ακόμη»· το `go-live-check` έγραφε **pass** για κλειδί που έπεφτε σε `NullProviderTransport`.
+  **ΔΙΟΡΘΩΣΗ του προηγούμενου σημειώματος:** είχε καταγραφεί ότι «η αποθήκευση της φόρμας μηδενίζει το
+  `einvoice_provider_config`». **Δεν ισχύει** — probe στην πραγματική ροή Livewire: χωρίς αλλαγή channel το
+  save μπλοκάρεται από validation (τίποτα δεν γράφεται)· με επιλογή του σωστού channel το `->live()` Select
+  εμφανίζει το προ-συμπληρωμένο πεδίο και το token επιβιώνει. Το wipe εμφανιζόταν μόνο σε συνθετικό array
+  κατευθείαν στο bridge, που το UI δεν παράγει ποτέ. Το bridge σκληρύνθηκε πάντως (σύγκριση normalised).
 - **PEPPOL Phase 1** (PR #253) — provider-independent BIS 3.0 UBL builder + `peppol:test-submit`.
 - **DR / «work without APP_KEY»** (PR #254) — `MaybeEncrypted` cast + `secrets:reencrypt`; default plaintext.
 - **`$hidden` on secret models** (PR #255).
@@ -1039,23 +1051,18 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
-- **🔴 `einvoice_provider_key` δεν κανονικοποιείται στο ΓΡΑΨΙΜΟ — ένα κλειδί με κενά σβήνει τα
-  credentials του παρόχου (P1, latent).** Ο `ProviderTransportRegistry::for()` κάνει `trim()` πριν στήσει το
-  transport, άρα η ΥΠΟΒΟΛΗ δουλεύει και το `mydata_marks.provider_key` γράφεται καθαρό — αλλά κάθε σημείο που
-  ΣΥΓΚΡΙΝΕΙ την ωμή στήλη αστοχεί. Σημεία (audit από το review του PR #518):
-  - `SendChannelFormBridge` — `$sameProvider` βγαίνει false, οπότε **η αποθήκευση της φόρμας εταιρείας
-    μηδενίζει το `einvoice_provider_config`** (το API token του παρόχου). Αυτό είναι το σοβαρό.
-    Επίσης η `SendChannel::fromCompany()` συνθέτει channel εκτός `options()` → το Select βγαίνει κενό.
-  - `GoLiveCheckReport` — `empty($key)` είναι false για `' '`, άρα το gate γράφει **pass/exit 0** για tenant
-    που στην πράξη πέφτει σε `NullProviderTransport` και δεν μπορεί να υποβάλει καθόλου.
-  - `ViewInvoice` (preview payload) + `EInvoiceProviderTestSubmit` — `=== 'invosign'` αστοχεί → δείχνουν
-    **μη-augmented** AADE XML ενώ η πραγματική υποβολή ΕΙΝΑΙ augmented.
-  - `BuildsProviderQuotaStat` — η κάρτα λέει «καμία υποβολή ακόμη» ενώ ο tenant εκδίδει καθημερινά.
-  **Root fix = κανονικοποίηση στο WRITE** (mutator/cast στο `Company`) + data-fix migration για υπάρχουσες
-  γραμμές — ΟΧΙ `trim()` σε N readers (δοκιμάστηκε στο #518 και αφέθηκε: μισο-φτιαγμένο κρύβει τα υπόλοιπα
-  σημεία). Προσοχή στο όνομα: μια μέθοδος `einvoiceProviderKey()` είναι ακριβώς το όνομα που ψάχνει ο Laravel
-  για mutator της στήλης. Δεν παράγεται από το UI (το πεδίο οδηγείται από Select) — γι' αυτό latent, όχι
-  ενεργό· χρειάζεται import/χειροκίνητη εγγραφή. **Θέλει δικό του PR με tests, όχι ουρά σε άσχετο.**
+- **Το blob `einvoice_provider_config` δεν καταγράφει ΣΕ ΠΟΙΟΝ πάροχο ανήκει (P2, residual).** Είναι επίπεδο
+  (`base_url`, `token`, …) και ο ιδιοκτήτης συνάγεται από το `companies.einvoice_provider_key` — που όμως
+  ΜΗΔΕΝΙΖΕΤΑΙ όταν ο tenant παρκάρει σε κανάλι myDATA («Καθόλου»), ενώ το blob κρατιέται σκόπιμα. Έτσι στη
+  διαδρομή «πάροχος Α → Καθόλου → πάροχος Β» ο Β κληρονομεί τα κοινώνυμα πεδία του Α (`base_url` υπάρχει σε
+  invosign ΚΑΙ sbz). Η απευθείας «Α → Β» ΕΧΕΙ διορθωθεί. Δεν κλείστηκε εδώ γιατί η προφανής λύση (μη
+  προ-συμπλήρωση όταν ο ιδιοκτήτης είναι άγνωστος) **σβήνει οριστικά κρυπτογραφημένο token** στη διαδρομή
+  «πάροχος → Καθόλου → ΙΔΙΟΣ πάροχος», που είναι και η συχνή — δοκιμάστηκε και αναιρέθηκε. Σωστή λύση:
+  να καταγράφεται ο ιδιοκτήτης (στήλη ή κλειδί μέσα στο blob) → schema αλλαγή, όχι tweak στη φόρμα.
+  **Η σημερινή συμπεριφορά είναι καρφωμένη** από το
+  `ProviderCredentialVisibilityTest::test_the_parked_route_still_carries_shared_fields_across_known_residual`
+  — αν το κλείσεις, αυτό το test θα κοκκινίσει· ενημέρωσε ΚΑΙ το σχόλιο στο `SendChannelFormBridge::hydrate()`.
+  Πρακτικά latent σήμερα: μόνο ο `invosign` είναι wired (το `sbz` transport δεν υπάρχει ακόμη).
 - **`mydata_marks` has no index for the provider-quota lookup (P2, perf on data we don't have).** The card's
   query is `WHERE company_id = ? AND provider_key = ? AND remaining_invoices IS NOT NULL ORDER BY id DESC LIMIT 1`,
   but the table carries only `index(invoice_id)` + `unique(company_id, legacy_id)` — so the planner walks the PK

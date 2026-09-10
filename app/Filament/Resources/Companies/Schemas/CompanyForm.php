@@ -100,7 +100,7 @@ class CompanyForm
                                 // page hooks + SendChannelFormBridge. No raw columns/JSON.
                                 Select::make('send_channel')
                                     ->label('Τρόπος αποστολής παραστατικών')
-                                    ->options(SendChannel::options(config('ekdosi.einvoice.provider_labels', [])))
+                                    ->options(fn (?Company $record): array => self::sendChannelOptions($record))
                                     ->default(SendChannel::FALLBACK)
                                     ->required()
                                     ->live()
@@ -1253,17 +1253,134 @@ class CompanyForm
                     });
                 }
 
-                if ($meta['secret'] ?? false) {
+                $isSecret = (bool) ($meta['secret'] ?? false);
+
+                if ($isSecret) {
                     $input->password()
                         ->revealable()
                         ->dehydrated(fn (?string $state): bool => filled($state));
                 }
+
+                // Say out loud whether something IS stored. A masked input that is
+                // pre-filled looks EXACTLY like an empty one, so «τα κουκκάκια» left
+                // the operator guessing whether the token was saved, still there, or
+                // about to be wiped by this save. For a secret the last 4 chars are
+                // shown (Stripe/AWS convention) so two tokens can be told apart
+                // without revealing either.
+                $input->helperText(fn (?Company $record): HtmlString => self::credentialStatus($record, $key, $name, $isSecret));
 
                 $fields[] = $input;
             }
         }
 
         return $fields;
+    }
+
+    /**
+     * The channel dropdown, plus the record's CURRENT channel re-injected (flagged) when
+     * it is no longer one of the offered options.
+     *
+     * Filament validates a Select against its own options, so a stored channel outside
+     * them fails validation on EVERY save — bricking the whole Company form for edits
+     * that have nothing to do with e-invoicing, with no way to repair it through the UI.
+     * A `einvoice_provider_key` that no longer appears in `provider_labels` reaches that
+     * state without any whitespace at all: an ETL/hand-edited row, or simply deciding not
+     * to ship a provider that some tenant is already on.
+     *
+     * Same idiom as whmcsDefaultTypeOptions() below: show the operator what the record
+     * actually holds instead of a silent blank, and let them change it. Nothing here
+     * makes an unknown provider usable — go-live-check and the filing path still refuse
+     * it; this only keeps the form editable.
+     *
+     * @return array<string, string>
+     */
+    private static function sendChannelOptions(?Company $record): array
+    {
+        $options = SendChannel::options(config('ekdosi.einvoice.provider_labels', []));
+
+        if ($record === null) {
+            return $options;
+        }
+
+        $current = SendChannel::fromCompany($record);
+        if ($current !== '' && ! isset($options[$current])) {
+            $options[$current] = $current.' — άγνωστος πάροχος (μη έγκυρος· διάλεξε άλλον)';
+        }
+
+        return $options;
+    }
+
+    /**
+     * «Είναι όντως αποθηκευμένο;» for one provider-credential field, read from the
+     * record's stored config (not from form state — the point is what is ON DISK).
+     */
+    private static function credentialStatus(?Company $record, string $providerKey, string $field, bool $secret): HtmlString
+    {
+        if ($record === null) {
+            return new HtmlString('Νέα εταιρεία — τίποτα αποθηκευμένο ακόμη.');
+        }
+
+        // The config blob is FLAT and belongs to the record's CURRENT provider. When the
+        // operator has switched the channel to a different provider, a shared field name
+        // (base_url exists on more than one) would otherwise make us announce the OLD
+        // provider's value as safely stored — while dehydrate() starts that provider's
+        // blob empty on save. Say what will actually happen instead.
+        $currentKey = trim((string) $record->einvoice_provider_key);
+        $config = is_array($record->einvoice_provider_config) ? $record->einvoice_provider_config : [];
+        $stored = $config[$field] ?? null;
+
+        // Switching to a DIFFERENT provider: the stored blob is the old one's and is not
+        // carried over — say so rather than announcing it as this provider's.
+        if ($currentKey !== '' && $currentKey !== $providerKey) {
+            return new HtmlString(
+                '<strong>⚠ Δεν έχει αποθηκευτεί για αυτόν τον πάροχο.</strong> '
+                .'Με την αποθήκευση τα στοιχεία του προηγούμενου παρόχου <strong>διαγράφονται '
+                .'οριστικά</strong> (δεν κρατιέται αντίγραφο) — κράτα τα αλλού αν τα χρειάζεσαι.'
+            );
+        }
+
+        $shown = is_string($stored) && $stored !== ''
+            ? ($secret ? self::maskSecret($stored) : e(mb_strimwidth($stored, 0, 60, '…')))
+            : null;
+
+        // No provider currently selected on the record (π.χ. «Καθόλου»): the blob is kept
+        // but nothing records WHOSE it is, so don't vouch for it either way.
+        if ($currentKey === '' && $shown !== null) {
+            return new HtmlString(
+                '<strong>Υπάρχει αποθηκευμένη τιμή από προηγούμενη ρύθμιση</strong> ('
+                .$shown.'). Έλεγξέ την πριν αποθηκεύσεις.'
+            );
+        }
+
+        if ($shown === null) {
+            return new HtmlString('<strong>⚠ Δεν έχει αποθηκευτεί.</strong> Συμπλήρωσέ το και πάτα «Αποθήκευση».');
+        }
+
+        // States what is ON DISK right now — deliberately no promise about what this
+        // save will do, because the helper can't see a replacement the operator has
+        // just typed into the input and would otherwise say «δεν το πειράζει» about a
+        // value that is being replaced.
+        return new HtmlString('<strong>✓ Αποθηκευμένο</strong> ('.$shown.').');
+    }
+
+    /**
+     * A short fingerprint so two tokens can be told apart at a glance.
+     *
+     * NOT a confidentiality control, and it must not be described as one: this form
+     * pre-fills the credential inputs with the real values (that is what makes
+     * ->revealable() work), so the full secret is already in the page for anyone who
+     * can open it. The fingerprint exists to answer «ποιο token είναι αυτό;» in the
+     * helper line, not to hide anything. Confidentiality here rests entirely on the
+     * screen being super_admin-only (ADMIN_FORBIDDEN_RESOURCES).
+     *
+     * Short secrets are masked outright anyway, so the line never reads as if it were
+     * showing a meaningful part of a tiny value.
+     */
+    private static function maskSecret(string $secret): string
+    {
+        return mb_strlen($secret) < 8
+            ? str_repeat('•', 4)
+            : '••••'.e(mb_substr($secret, -4));
     }
 
     private static function providerTestAction(): FormAction

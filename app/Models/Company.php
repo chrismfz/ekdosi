@@ -343,6 +343,34 @@ class Company extends Model
     }
 
     /**
+     * Normalise `einvoice_provider_key` ON WRITE — the ONE place the key is cleaned.
+     *
+     * `ProviderTransportRegistry::for()` trims before resolving, and the resolved
+     * transport is what stamps `mydata_marks.provider_key` — so a key stored with
+     * stray whitespace FILES fine while every place that compares the raw column
+     * disagrees with it. Measured consequences of a `' invosign '` row:
+     *   - `SendChannel::fromCompany()` composes `' invosign -sandbox'`, which is not
+     *     in the dropdown's options → the Company form is UNSAVEABLE (the Select
+     *     renders blank and fails validation on every save, even for unrelated edits);
+     *   - `ViewInvoice`'s payload preview and `einvoice:provider-test-submit` compare
+     *     `=== 'invosign'` and miss → they show un-augmented AADE XML while the REAL
+     *     filing is augmented (the preview lies);
+     *   - the dashboard quota card queries `mydata_marks.provider_key` with the raw
+     *     value and finds nothing → «καμία υποβολή ακόμη» for a tenant filing daily.
+     * Normalising here fixes all of them at once, instead of trimming at N readers
+     * (tried in PR #518 and backed out — a half-normalised codebase hides the rest).
+     *
+     * Empty → null, so `empty()`/`filled()` gates read a whitespace-only key as
+     * «δεν έχει οριστεί πάροχος» rather than as a configured one.
+     */
+    protected function einvoiceProviderKey(): Attribute
+    {
+        return Attribute::make(
+            set: fn (?string $value): ?string => ($trimmed = trim((string) $value)) === '' ? null : $trimmed,
+        );
+    }
+
+    /**
      * Typed accessor for mydata_mode. The column stores the raw string
      * for backward compatibility with ETL / artisan / DB-direct paths
      * (and so a new value added to MyDataMode doesn't break older rows);
