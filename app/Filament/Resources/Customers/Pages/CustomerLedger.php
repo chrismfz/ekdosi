@@ -623,37 +623,21 @@ class CustomerLedger extends Page implements HasTable
 
     /**
      * How much an «Είσπραξη (έμβασμα)» can actually ABSORB before the remainder
-     * falls to on-account credit — computed by MIRRORING PaymentAllocator::allocate()
-     * EXACTLY: the SAME invoice set (live + issued/active + non-credit-note, NO
-     * due_days filter) and the SAME live balanceData()->balance it settles against
-     * (not the cache columns / not the credit-term-only picker). So a receipt of X
-     * parks max(X − this, 0) on-account, and the guard's warning can never claim a
-     * different outcome than the write path produces (a cash-term invoice that
-     * carries a recorded payment, or a withholding invoice, is counted here iff the
-     * allocator would settle it). Memoised: the balances don't move while the modal
-     * is open, so the balanceData() loop runs once, not per keystroke.
+     * falls to on-account credit. Delegates to PaymentAllocator::absorbableTotal()
+     * — the SAME code the write path uses — so the guard's warning can never claim
+     * a different outcome than the allocation produces. Memoised per request (the
+     * balances don't move while the modal is open, so the per-invoice balance sweep
+     * runs once, not once per amount-onBlur within a render).
      */
     private function receiptAbsorbableTotal(): float
     {
-        if ($this->receiptAbsorbableTotalCache !== null) {
-            return $this->receiptAbsorbableTotalCache;
-        }
+        return $this->receiptAbsorbableTotalCache ??= app(PaymentAllocator::class)->absorbableTotal($this->record);
+    }
 
-        $q = InvoiceScope::live(Invoice::query())
-            ->where('company_id', $this->record->company_id)
-            ->where('customer_id', $this->record->getKey())
-            ->where('local_status', 'active');
-        InvoiceScope::excludeCreditNotes($q);
-
-        $total = 0.0;
-        foreach ($q->get() as $invoice) {
-            $balance = round((float) $invoice->balanceData()->balance, 2);
-            if ($balance > 0.005) {
-                $total += $balance;
-            }
-        }
-
-        return $this->receiptAbsorbableTotalCache = round($total, 2);
+    /** €s of a receipt of $amount that would overflow past the open invoices into on-account credit. */
+    private function receiptCreditOverflow(float $amount): float
+    {
+        return round(max($amount - $this->receiptAbsorbableTotal(), 0), 2);
     }
 
     /** Tenant's payment methods as id => description (shared by the action schemas). */
@@ -741,8 +725,8 @@ class CustomerLedger extends Page implements HasTable
                         Checkbox::make('acknowledge_credit')
                             ->label('Το γνωρίζω — το πλεόνασμα θα καταχωρηθεί ως πίστωση/προκαταβολή στον πελάτη')
                             ->helperText(fn (Get $get): string => 'Θα μείνει ως πίστωση: '
-                                .$this->fmtMoney(max((float) ($get('amount') ?? 0) - $this->receiptAbsorbableTotal(), 0)).'.')
-                            ->visible(fn (Get $get): bool => ((float) ($get('amount') ?? 0)) - $this->receiptAbsorbableTotal() > 0.005)
+                                .$this->fmtMoney($this->receiptCreditOverflow((float) ($get('amount') ?? 0))).'.')
+                            ->visible(fn (Get $get): bool => $this->receiptCreditOverflow((float) ($get('amount') ?? 0)) > 0.005)
                             ->accepted(),
                     ])
                     ->action(function (array $data) {

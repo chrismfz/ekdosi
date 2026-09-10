@@ -9,6 +9,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Support\InvoiceScope;
 use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 
@@ -48,21 +49,11 @@ class PaymentAllocator
             $remaining = $amount;
             $allocations = [];
 
-            // Live (not cancelled / not AADE-cancelled), ISSUED (active — never a
-            // draft: a receipt must not land on a not-yet-issued document), and
-            // non-credit-note invoices, oldest first. Cash-term & already-paid
+            // The FIFO target set (shared with absorbableTotal so a guard/preview
+            // can never disagree with this write path). Cash-term & already-paid
             // invoices have balance 0 → skipped below. A draft's amount flows to
             // the on-account remainder instead.
-            $open = InvoiceScope::live(Invoice::query())
-                ->where('company_id', $customer->company_id)
-                ->where('customer_id', $customer->id)
-                ->where('local_status', 'active')
-                ->orderBy('issued_at')
-                ->orderBy('id');
-            // MON-9: exclude credit notes (correlated AND standalone legacy is_credit)
-            // — a payment must never auto-allocate onto a ΠΙΣ.
-            InvoiceScope::excludeCreditNotes($open);
-            $open = $open->get();
+            $open = $this->openInvoicesQuery($customer)->get();
 
             foreach ($open as $invoice) {
                 if ($remaining <= 0.005) {
@@ -114,6 +105,48 @@ class PaymentAllocator
 
             return new PaymentAllocationResult($ref, $amount, $allocations, $onAccount);
         });
+    }
+
+    /**
+     * The FIFO target set for a customer-level receipt: live (not cancelled /
+     * AADE-cancelled), ISSUED (active — never a draft), non-credit-note invoices
+     * (MON-9: a payment must never auto-allocate onto a ΠΙΣ), oldest first. The
+     * SINGLE source shared by allocate() (the write) and absorbableTotal() (the
+     * read-only preview), so a guard built on the latter can never target a
+     * different set than the former settles.
+     */
+    private function openInvoicesQuery(Customer $customer): Builder
+    {
+        $q = InvoiceScope::live(Invoice::query())
+            ->where('company_id', $customer->company_id)
+            ->where('customer_id', $customer->id)
+            ->where('local_status', 'active')
+            ->orderBy('issued_at')
+            ->orderBy('id');
+        InvoiceScope::excludeCreditNotes($q);
+
+        return $q;
+    }
+
+    /**
+     * READ-ONLY preview of how much a customer-level receipt (allocate()) can settle
+     * onto invoices before the remainder is parked on-account — i.e. Σ of the open
+     * balances the FIFO sweep would absorb. Reuses openInvoicesQuery() and the SAME
+     * live balanceData()->balance + 0.005 tolerance as allocate(), so a UI guard
+     * built on it can never disagree with what the write actually does. Cost is one
+     * balance read per open invoice (same as allocate()); callers should memoise.
+     */
+    public function absorbableTotal(Customer $customer): float
+    {
+        $total = 0.0;
+        foreach ($this->openInvoicesQuery($customer)->with('paymentMethod')->get() as $invoice) {
+            $balance = round((float) $invoice->balanceData()->balance, 2);
+            if ($balance > 0.005) {
+                $total += $balance;
+            }
+        }
+
+        return round($total, 2);
     }
 
     /**

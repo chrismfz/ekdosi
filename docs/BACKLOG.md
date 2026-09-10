@@ -1051,6 +1051,15 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **`PaymentAllocator::absorbableTotal()` = N balance reads (P2, perf on data we don't have).** Ο guard της
+  «Είσπραξη (έμβασμα)» στην Καρτέλα (και ό,τι preview το χρησιμοποιεί) καλεί `balanceData()` ανά live+active
+  τιμολόγιο του πελάτη — 2 aggregate queries + eager `paymentMethod` το καθένα — και ξανα-τρέχει σε κάθε
+  `amount` onBlur round-trip (μνημονεύεται μόνο εντός ενός request). Ασήμαντο για πελάτη με λίγα ανοιχτά·
+  αργό αν κάποιος έχει δεκάδες/εκατοντάδες ανοιχτά. Deferred συνειδητά: το ίδιο κόστος πληρώνει ήδη το
+  write-path (`allocate()`), και η φθηνή εναλλακτική (άθροισμα από cache columns) ξανα-εισάγει το
+  cache-vs-live divergence που θέλαμε να αποφύγουμε. Σωστή λύση αν χρειαστεί: ένα aggregate που διπλώνει
+  paid/credited ανά πελάτη (όπως το `Customer::withOutstandingBalance`) και live-confirm μόνο στα λίγα
+  υποψήφια. Καρφωμένη συμπεριφορά: `CustomerLedgerReceiptGuardTest`.
 - **Το blob `einvoice_provider_config` δεν καταγράφει ΣΕ ΠΟΙΟΝ πάροχο ανήκει (P2, residual).** Είναι επίπεδο
   (`base_url`, `token`, …) και ο ιδιοκτήτης συνάγεται από το `companies.einvoice_provider_key` — που όμως
   ΜΗΔΕΝΙΖΕΤΑΙ όταν ο tenant παρκάρει σε κανάλι myDATA («Καθόλου»), ενώ το blob κρατιέται σκόπιμα. Έτσι στη
