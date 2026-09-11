@@ -19,6 +19,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Έλεγχος ενημερώσεων: αποθετήριο + token από το UI** («Ρυθμίσεις συστήματος» → «AI & Ενημερώσεις»). Το
+  `owner/repo` και ένα **read-only GitHub PAT** ρυθμίζονται πλέον από τη σελίδα (DB override· env μένει το
+  default), ώστε ο read-only έλεγχος να δουλεύει σε **ιδιωτικό** repo χωρίς επεξεργασία `.env`. Το token είναι
+  secret: **δεν εμφανίζεται ποτέ** στη φόρμα (κενό = «μένει ως έχει»), αποθηκεύεται **κρυπτογραφημένο** όταν
+  `ekdosi.secrets.encrypt_at_rest` είναι on (ίδιο posture με τα άλλα secrets, μέσω `MaybeEncrypted`), ποτέ στο
+  audit log· action «Καθαρισμός token» επαναφέρει σε `.env`/ανώνυμο. Ο `UpdateChecker` διαβάζει repo/token από
+  το override (fallback στο `.env`). Καθαρά read-only — **καμία** in-app εφαρμογή ενημέρωσης (μένει στο
+  `deploy/update.sh`).
 - **Χρονοπρογραμματιστής: 3 flags που ζούσαν μόνο στο `.env` απέκτησαν διακόπτη στο UI** — `whmcs_fetch_unpaid`
   (άντληση ΑΠΛΗΡΩΤΩΝ), `tickets_poll_imap` (polling email υποστήριξης), `domain_sync`. Το `routes/console.php`
   ήδη διάβαζε το DB override, οπότε οι διακόπτες είναι πραγματικοί (on/off + χρονισμός, με το «βοήθεια» του

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Pages;
 
+use App\Casts\MaybeEncrypted;
 use App\Filament\Clusters\SettingsCluster;
 use App\Models\Company;
 use App\Services\TenantRoleProvisioner;
@@ -18,6 +19,7 @@ use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Support\Facades\Crypt;
 
 /**
  * «Ρυθμίσεις συστήματος» (the «Σύστημα» area) — the deploy-wide global knobs that
@@ -111,6 +113,14 @@ class GeneralSettings extends Page implements HasForms
             'Read-only σύγκριση του build με το τελευταίο GitHub release (φαίνεται στην Υγεία συστήματος). Ποτέ δεν εφαρμόζει ενημέρωση.',
             'bool',
         ],
+        'update_repo' => [
+            'ekdosi.updates.repo',
+            'Αποθετήριο ενημερώσεων (owner/repo)',
+            'GitHub αποθετήριο του ελέγχου εκδόσεων, π.χ. «chrismfz/ekdosi». Κενό = χρησιμοποιείται το EKDOSI_UPDATE_REPO του .env.',
+            'string',
+        ],
+        // NOTE: the update TOKEN is a secret — handled OUTSIDE this KNOBS map (it must
+        // never be rendered into the form or compared as plaintext). See mount()/save().
     ];
 
     public function mount(): void
@@ -122,6 +132,8 @@ class GeneralSettings extends Page implements HasForms
                 ? $settings->bool("system.{$key}", (bool) config($configPath))
                 : (string) $settings->string("system.{$key}", config($configPath) ?? '');
         }
+        // The token is a secret — NEVER pre-fill it. Empty means «keep as-is» on save.
+        $state['update_token'] = '';
         $this->form->fill($state);
         $this->loadInfo();
     }
@@ -129,6 +141,7 @@ class GeneralSettings extends Page implements HasForms
     /** Read-only posture: secrets at-rest mode + global/per-tenant mailer picture. */
     private function loadInfo(): void
     {
+        $settings = app(SystemSettings::class);
         $globalMailer = (string) config('mail.default');
         $this->info = [
             'encrypt_at_rest' => (bool) config('ekdosi.secrets.encrypt_at_rest', false),
@@ -136,6 +149,10 @@ class GeneralSettings extends Page implements HasForms
             'global_mailer_host' => (string) config("mail.mailers.{$globalMailer}.host", ''),
             'global_mailer_sends' => ! in_array($globalMailer, ['log', 'array', 'null'], true),
             'tenants_with_smtp' => Company::query()->whereNotNull('mail_smtp_host')->where('mail_smtp_host', '!=', '')->count(),
+            // Is an update token available (UI override OR .env)? Drives the token
+            // field's helper + the «clear» action — WITHOUT ever exposing the value.
+            'update_token_set' => filled($settings->string('system.update_token', config('ekdosi.updates.token'))),
+            'update_token_overridden' => $settings->has('system.update_token'),
         ];
     }
 
@@ -191,17 +208,35 @@ class GeneralSettings extends Page implements HasForms
                             ->minValue(1)
                             ->maxValue(1440),
                     ])->columns(1),
-                Section::make('AI & Ενημερώσεις')
+                Section::make('AI Βοηθός')
                     ->schema([
                         Toggle::make('ai_enabled')
                             ->label(self::KNOBS['ai_enabled'][1])
                             ->helperText(self::KNOBS['ai_enabled'][2])
                             ->onColor('warning')
                             ->inline(false),
+                    ])->columns(1),
+                Section::make('Ενημερώσεις')
+                    ->description('Read-only έλεγχος έκδοσης έναντι GitHub — φαίνεται στην «Υγεία συστήματος». ΔΕΝ εφαρμόζει ποτέ ενημέρωση (αυτό μένει στο deploy/update.sh).')
+                    ->schema([
                         Toggle::make('update_check_enabled')
                             ->label(self::KNOBS['update_check_enabled'][1])
                             ->helperText(self::KNOBS['update_check_enabled'][2])
                             ->inline(false),
+                        TextInput::make('update_repo')
+                            ->label(self::KNOBS['update_repo'][1])
+                            ->helperText(self::KNOBS['update_repo'][2])
+                            ->placeholder('chrismfz/ekdosi')
+                            ->maxLength(200),
+                        TextInput::make('update_token')
+                            ->label('Token ενημερώσεων (GitHub PAT, read-only)')
+                            ->helperText(fn (): string => ($this->info['update_token_set'] ?? false)
+                                ? 'Υπάρχει αποθηκευμένο token — άφησέ το κενό για να μείνει ως έχει, ή γράψε νέο για αντικατάσταση. Χρειάζεται ΜΟΝΟ για ΙΔΙΩΤΙΚΟ repo (read-only PAT, contents:read).'
+                                : 'Κανένα token — χρειάζεται ΜΟΝΟ για ΙΔΙΩΤΙΚΟ repo (read-only PAT, contents:read). Δημόσιο repo δουλεύει χωρίς.')
+                            ->password()
+                            ->revealable(false)
+                            ->autocomplete(false)
+                            ->maxLength(255),
                     ])->columns(1),
             ])
             ->statePath('data');
@@ -239,6 +274,27 @@ class GeneralSettings extends Page implements HasForms
                 ->label('Αποθήκευση')
                 ->icon('heroicon-o-check')
                 ->action(fn () => $this->save()),
+
+            // Drop the stored update-token override → the check falls back to
+            // EKDOSI_UPDATE_TOKEN (.env) or anonymous. Only shown when an override
+            // actually exists (the .env value can't be cleared from the UI).
+            Action::make('clearUpdateToken')
+                ->label('Καθαρισμός token ενημερώσεων')
+                ->icon('heroicon-o-key')
+                ->color('gray')
+                ->visible(fn (): bool => (bool) ($this->info['update_token_overridden'] ?? false))
+                ->requiresConfirmation()
+                ->modalDescription('Θα αφαιρεθεί το αποθηκευμένο token ενημερώσεων. Ο έλεγχος θα πέσει πίσω στο EKDOSI_UPDATE_TOKEN (.env) ή σε ανώνυμο (δημόσιο repo).')
+                ->action(function (): void {
+                    app(SystemSettings::class)->forget('system.update_token');
+                    activity('system_settings')
+                        ->causedBy(auth()->user())
+                        ->withProperties(['changes' => ['update_token' => ['from' => '••••', 'to' => null]]])
+                        ->event('updated')
+                        ->log('Ενημέρωση ρυθμίσεων συστήματος');
+                    $this->loadInfo();
+                    Notification::make()->title('Το token αφαιρέθηκε')->success()->send();
+                }),
         ];
     }
 
@@ -268,6 +324,21 @@ class GeneralSettings extends Page implements HasForms
             }
         }
 
+        // Secret update token — outside the KNOBS loop so it is NEVER rendered back
+        // and an EMPTY field means «keep the existing value», not «clear it». Stored
+        // encrypted when ekdosi.secrets.encrypt_at_rest is on (same posture as every
+        // other secret); the value is NEVER put in the audit log.
+        $token = trim((string) ($state['update_token'] ?? ''));
+        if ($token !== '') {
+            $settings->set(
+                'system.update_token',
+                MaybeEncrypted::shouldEncrypt() ? Crypt::encryptString($token) : $token,
+                'string',
+                $userId,
+            );
+            $changes['update_token'] = ['from' => '••••', 'to' => '•••• (ενημερώθηκε)'];
+        }
+
         if ($changes !== []) {
             activity('system_settings')
                 ->causedBy(auth()->user())
@@ -276,6 +347,8 @@ class GeneralSettings extends Page implements HasForms
                 ->log('Ενημέρωση ρυθμίσεων συστήματος');
         }
 
+        // Never leave the typed secret sitting in the form state after a save.
+        $this->data['update_token'] = '';
         $this->loadInfo();
 
         Notification::make()
