@@ -37,10 +37,30 @@ class UpdateChecker
         return app(SystemSettings::class)->bool('system.update_check_enabled', (bool) config('ekdosi.updates.enabled', true));
     }
 
-    /** Repo «owner/name»: the UI override wins over EKDOSI_UPDATE_REPO. */
+    /**
+     * Repo «owner/name»: a NON-EMPTY UI override wins over EKDOSI_UPDATE_REPO.
+     * A blank override is ignored (treated as «no override»), so it can never
+     * shadow a non-empty env/config default and break the check.
+     */
     private function repo(): string
     {
-        return trim((string) app(SystemSettings::class)->string('system.update_repo', (string) config('ekdosi.updates.repo', '')));
+        $override = trim((string) app(SystemSettings::class)->string('system.update_repo', ''));
+
+        return $override !== '' ? $override : trim((string) config('ekdosi.updates.repo', ''));
+    }
+
+    /**
+     * Drop the cached result so the NEXT check re-fetches — called when the repo/
+     * token/enable settings change, so a non-fresh read (scheduler, SystemHealth
+     * mount) doesn't keep comparing against the OLD repo for up to cache_hours.
+     */
+    public function forgetCache(): void
+    {
+        try {
+            Cache::forget(self::CACHE_KEY);
+        } catch (Throwable) {
+            // ignore — a missing cache store just means the next check fetches anyway
+        }
     }
 
     /**

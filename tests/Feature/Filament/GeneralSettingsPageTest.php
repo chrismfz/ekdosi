@@ -236,4 +236,35 @@ class GeneralSettingsPageTest extends TestCase
 
         $this->assertDatabaseMissing('system_settings', ['key' => 'system.update_token']);
     }
+
+    #[Test]
+    public function clearing_the_repo_reverts_to_the_default_not_a_blank_override(): void
+    {
+        $this->makeSuperAdmin();
+        config(['ekdosi.updates.repo' => 'chrismfz/ekdosi']); // non-empty default
+        app(SystemSettings::class)->set('system.update_repo', 'acme/app', 'string', $this->user->id);
+
+        // Operator clears the field (helper says «κενό = .env default»).
+        Livewire::test(GeneralSettings::class)
+            ->set('data.update_repo', '')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        // A blank must NOT persist as an override — it would shadow the non-empty
+        // default and break the check. The row is dropped → env default is used.
+        $this->assertDatabaseMissing('system_settings', ['key' => 'system.update_repo']);
+    }
+
+    #[Test]
+    public function a_malformed_repo_is_rejected(): void
+    {
+        $this->makeSuperAdmin();
+
+        Livewire::test(GeneralSettings::class)
+            ->set('data.update_repo', 'https://github.com/chrismfz/ekdosi') // full URL, not owner/repo
+            ->call('save')
+            ->assertHasErrors('data.update_repo');
+
+        $this->assertDatabaseMissing('system_settings', ['key' => 'system.update_repo']);
+    }
 }

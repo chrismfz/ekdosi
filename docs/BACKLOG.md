@@ -203,6 +203,12 @@ domestic-services tenants**. Not deleted — parked with the trigger that reacti
   provisioned, green (`ops:health`). Product-quality for the *next* installation.
 - **The whole UPD-* family** — already DISARMED; `deploy/update.sh <tag>` is the path.
   Re-arming needs UPD-001…004 closed first (see `versioning-and-updates.md`).
+  - **Όταν ξ-αρματωθεί: το apply path να διαβάζει repo/token από το UI override, όχι σκέτο `config()`.** Ο
+    read-only `UpdateChecker` πλέον διαβάζει `system.update_repo`/`system.update_token` (UI) με fallback στο
+    `.env`. Ο `SelfUpdate` (git fetch) και το `SystemHealth::applyAvailable()` ΑΚΟΜΑ διαβάζουν μόνο `config()`,
+    οπότε ένας tenant που έβαλε token ΜΟΝΟ στο UI θα κάνει ανώνυμο git fetch σε private repo όταν αρματωθεί το
+    in-app apply. Ακίνδυνο σήμερα (apply OFF). Fix όταν αρματωθεί: κοινός resolver repo/token (override→env) και
+    για τα δύο μονοπάτια.
 
 ---
 

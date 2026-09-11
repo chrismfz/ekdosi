@@ -6,8 +6,10 @@ use App\Casts\MaybeEncrypted;
 use App\Filament\Clusters\SettingsCluster;
 use App\Models\Company;
 use App\Services\TenantRoleProvisioner;
+use App\Services\Updates\UpdateChecker;
 use App\Support\Settings\SystemSettings;
 use BackedEnum;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
@@ -227,7 +229,14 @@ class GeneralSettings extends Page implements HasForms
                             ->label(self::KNOBS['update_repo'][1])
                             ->helperText(self::KNOBS['update_repo'][2])
                             ->placeholder('chrismfz/ekdosi')
-                            ->maxLength(200),
+                            ->maxLength(200)
+                            // «owner/repo» only — reject a pasted full URL / extra path
+                            // segment (blank is allowed = «use the .env default»).
+                            ->rule(static fn (): Closure => static function (string $attr, mixed $value, Closure $fail): void {
+                                if ($value !== '' && ! preg_match('#^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$#', (string) $value)) {
+                                    $fail('Μορφή «owner/repo» (π.χ. chrismfz/ekdosi) — όχι πλήρες URL.');
+                                }
+                            }),
                         TextInput::make('update_token')
                             ->label('Token ενημερώσεων (GitHub PAT, read-only)')
                             ->helperText(fn (): string => ($this->info['update_token_set'] ?? false)
@@ -287,6 +296,7 @@ class GeneralSettings extends Page implements HasForms
                 ->modalDescription('Θα αφαιρεθεί το αποθηκευμένο token ενημερώσεων. Ο έλεγχος θα πέσει πίσω στο EKDOSI_UPDATE_TOKEN (.env) ή σε ανώνυμο (δημόσιο repo).')
                 ->action(function (): void {
                     app(SystemSettings::class)->forget('system.update_token');
+                    app(UpdateChecker::class)->forgetCache();
                     activity('system_settings')
                         ->causedBy(auth()->user())
                         ->withProperties(['changes' => ['update_token' => ['from' => '••••', 'to' => null]]])
@@ -312,15 +322,21 @@ class GeneralSettings extends Page implements HasForms
                 ? $settings->bool("system.{$key}", $default)
                 : (string) $settings->string("system.{$key}", $default);
 
-            // Equal to the env/config default → drop the override (track env); else store.
-            if ($chosen === $default) {
+            // Drop the override (track the env/config default) when the chosen value
+            // EQUALS the default OR is a BLANK string. Blank means «no override → use
+            // the default», never «store an empty string» — otherwise a cleared
+            // update_repo (default 'chrismfz/ekdosi') would persist '' and shadow the
+            // non-empty default, breaking the check.
+            if ($chosen === $default || ($type === 'string' && $chosen === '')) {
                 $settings->forget("system.{$key}");
+                $effective = $default;
             } else {
                 $settings->set("system.{$key}", $chosen, $type, $userId);
+                $effective = $chosen;
             }
 
-            if ($chosen !== $before) {
-                $changes[$key] = ['from' => $before, 'to' => $chosen];
+            if ($effective !== $before) {
+                $changes[$key] = ['from' => $before, 'to' => $effective];
             }
         }
 
@@ -345,6 +361,13 @@ class GeneralSettings extends Page implements HasForms
                 ->withProperties(['changes' => $changes])
                 ->event('updated')
                 ->log('Ενημέρωση ρυθμίσεων συστήματος');
+        }
+
+        // A repo/token/enable change must invalidate the cached check result, so a
+        // non-fresh read (scheduler, SystemHealth mount) stops serving the OLD repo's
+        // comparison for up to cache_hours.
+        if (isset($changes['update_repo']) || isset($changes['update_token']) || isset($changes['update_check_enabled'])) {
+            app(UpdateChecker::class)->forgetCache();
         }
 
         // Never leave the typed secret sitting in the form state after a save.
