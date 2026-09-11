@@ -71,6 +71,31 @@ class ScheduleSettingsPageTest extends TestCase
     }
 
     #[Test]
+    public function the_newly_surfaced_flags_are_togglable_and_default_off(): void
+    {
+        $this->makeSuperAdmin();
+
+        // whmcs_fetch_unpaid / tickets_poll_imap / domain_sync used to live ONLY in
+        // .env — now they have a toggle here (routes/console already reads the
+        // override). All three default OFF in config → filled false.
+        Livewire::test(ScheduleSettings::class)
+            ->assertSuccessful()
+            ->assertSee('Υποστήριξη & domains') // the new section heading renders
+            ->assertSet('data.whmcs_fetch_unpaid_enabled', false)
+            ->assertSet('data.tickets_poll_imap_enabled', false)
+            ->assertSet('data.domain_sync_enabled', false)
+            // turn one on → override row persists (the switch is REAL, not cosmetic)
+            ->set('data.tickets_poll_imap_enabled', true)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertDatabaseHas('system_settings', [
+            'key' => 'schedule.tickets_poll_imap_enabled', 'value' => '1', 'updated_by' => $this->user->id,
+        ]);
+        $this->assertTrue(app(SystemSettings::class)->bool('schedule.tickets_poll_imap_enabled', false));
+    }
+
+    #[Test]
     public function it_links_to_the_health_backups_section(): void
     {
         $this->makeSuperAdmin();
