@@ -125,6 +125,17 @@ class GeneralSettings extends Page implements HasForms
         // never be rendered into the form or compared as plaintext). See mount()/save().
     ];
 
+    /**
+     * String knobs where a BLANK field means «no override → use the default», not a
+     * stored empty string. Only for knobs whose empty value is never meaningful
+     * (update_repo — a cleared field must fall back to the .env repo, not persist ''
+     * which would shadow the non-empty default). The email knobs are deliberately
+     * NOT here: an explicit empty override IS meaningful there.
+     *
+     * @var list<string>
+     */
+    private const BLANK_REVERTS_TO_DEFAULT = ['update_repo'];
+
     public function mount(): void
     {
         $settings = app(SystemSettings::class);
@@ -233,7 +244,11 @@ class GeneralSettings extends Page implements HasForms
                             // «owner/repo» only — reject a pasted full URL / extra path
                             // segment (blank is allowed = «use the .env default»).
                             ->rule(static fn (): Closure => static function (string $attr, mixed $value, Closure $fail): void {
-                                if ($value !== '' && ! preg_match('#^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$#', (string) $value)) {
+                                $v = (string) $value;
+                                // «owner/repo» only — reject blankless malformed input, a pasted
+                                // full URL / extra path segment, AND any «..» dot-segment (real
+                                // GitHub names can't contain it; keeps it out of the API path).
+                                if ($v !== '' && (! preg_match('#^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$#', $v) || str_contains($v, '..'))) {
                                     $fail('Μορφή «owner/repo» (π.χ. chrismfz/ekdosi) — όχι πλήρες URL.');
                                 }
                             }),
@@ -323,11 +338,14 @@ class GeneralSettings extends Page implements HasForms
                 : (string) $settings->string("system.{$key}", $default);
 
             // Drop the override (track the env/config default) when the chosen value
-            // EQUALS the default OR is a BLANK string. Blank means «no override → use
-            // the default», never «store an empty string» — otherwise a cleared
-            // update_repo (default 'chrismfz/ekdosi') would persist '' and shadow the
-            // non-empty default, breaking the check.
-            if ($chosen === $default || ($type === 'string' && $chosen === '')) {
+            // EQUALS the default, OR is blank for a knob where blank is NOT a
+            // meaningful value (BLANK_REVERTS_TO_DEFAULT — e.g. update_repo: you
+            // always need a repo, so a cleared field means «use the default», never a
+            // stored '' that would shadow the non-empty default and break the check).
+            // For the email knobs blank IS meaningful (override to «no recipients»),
+            // so their empty override is kept.
+            $blankReverts = $chosen === '' && in_array($key, self::BLANK_REVERTS_TO_DEFAULT, true);
+            if ($chosen === $default || $blankReverts) {
                 $settings->forget("system.{$key}");
                 $effective = $default;
             } else {
@@ -346,6 +364,12 @@ class GeneralSettings extends Page implements HasForms
         // other secret); the value is NEVER put in the audit log.
         $token = trim((string) ($state['update_token'] ?? ''));
         if ($token !== '') {
+            // Plaintext by default (DR: keyless mysqldump restore), APP_KEY-encrypted
+            // when ekdosi.secrets.encrypt_at_rest is on — same decision as the
+            // MaybeEncrypted cast. CAVEAT: this KV secret is NOT swept by
+            // `secrets:reencrypt` (that command is model/cast-driven), so after an
+            // encrypt→plain migration on a NEW APP_KEY it must be re-entered. Low
+            // impact (read-only PAT). Tracked in docs/BACKLOG.md.
             $settings->set(
                 'system.update_token',
                 MaybeEncrypted::shouldEncrypt() ? Crypt::encryptString($token) : $token,

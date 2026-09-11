@@ -265,6 +265,12 @@ class GeneralSettingsPageTest extends TestCase
             ->call('save')
             ->assertHasErrors('data.update_repo');
 
+        // A «..» dot-segment passes the char-class but must be rejected (traversal).
+        Livewire::test(GeneralSettings::class)
+            ->set('data.update_repo', 'chrismfz/..')
+            ->call('save')
+            ->assertHasErrors('data.update_repo');
+
         $this->assertDatabaseMissing('system_settings', ['key' => 'system.update_repo']);
     }
 }

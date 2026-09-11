@@ -1057,6 +1057,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **`system.update_token` (UI update token) δεν σαρώνεται από `secrets:reencrypt` (P2, DR edge).** Αποθηκεύεται
+  στο `system_settings` κρυπτογραφημένο όταν `ekdosi.secrets.encrypt_at_rest` είναι on (ίδια απόφαση με το
+  `MaybeEncrypted`). Όμως το `secrets:reencrypt` είναι model/cast-driven (σαρώνει MODELS + `isSecretCast`
+  στήλες), οπότε ΔΕΝ πιάνει αυτό το KV secret. Συνέπεια: μετά από encrypt→plain migration σε ΝΕΟ APP_KEY, το
+  token μένει αδιάβαστο ciphertext → πρέπει να ξαναμπεί από το UI. Χαμηλό impact (read-only PAT· default deploy
+  = plaintext, keyless restore μια χαρά). Fix αν χρειαστεί: να σαρώνει το reencrypt και αυτό το κλειδί, ή να
+  μεταφερθεί σε model column με cast.
 - **`WhmcsReceiptRecorder`: `transaction_id` = πραγματικό vPOS ref → ο syncer δεν το «βλέπει» στη στενή credit-term γωνία (P2, accepted tradeoff).**
   Κρατάμε σκόπιμα το πραγματικό acquirer/vPOS ref ως «Κωδ. συναλλαγής» (operator προτίμηση). Ο recorder μένει
   πλήρως idempotent (dedup withTrashed στο ίδιο id). Ο `WhmcsPaymentSyncer` όμως κάνει dedup στο σταθερό
