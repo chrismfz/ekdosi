@@ -2,6 +2,7 @@
 
 namespace App\Services\Updates;
 
+use App\Casts\MaybeEncrypted;
 use App\Support\BuildInfo;
 use App\Support\Settings\SystemSettings;
 use Illuminate\Http\Client\Response;
@@ -34,6 +35,48 @@ class UpdateChecker
     private function updatesEnabled(): bool
     {
         return app(SystemSettings::class)->bool('system.update_check_enabled', (bool) config('ekdosi.updates.enabled', true));
+    }
+
+    /**
+     * Repo «owner/name»: a NON-EMPTY UI override wins over EKDOSI_UPDATE_REPO.
+     * A blank override is ignored (treated as «no override»), so it can never
+     * shadow a non-empty env/config default and break the check.
+     */
+    private function repo(): string
+    {
+        $override = trim((string) app(SystemSettings::class)->string('system.update_repo', ''));
+
+        return $override !== '' ? $override : trim((string) config('ekdosi.updates.repo', ''));
+    }
+
+    /**
+     * Drop the cached result so the NEXT check re-fetches — called when the repo/
+     * token/enable settings change, so a non-fresh read (scheduler, SystemHealth
+     * mount) doesn't keep comparing against the OLD repo for up to cache_hours.
+     */
+    public function forgetCache(): void
+    {
+        try {
+            Cache::forget(self::CACHE_KEY);
+        } catch (Throwable) {
+            // ignore — a missing cache store just means the next check fetches anyway
+        }
+    }
+
+    /**
+     * The GitHub token: the UI override (stored via GeneralSettings, encrypted at
+     * rest when ekdosi.secrets.encrypt_at_rest is on) wins over EKDOSI_UPDATE_TOKEN.
+     * decryptIfPossible reads BOTH an encrypted override AND a plaintext .env value
+     * transparently. Null/empty → an anonymous request (public repo).
+     */
+    private function token(): ?string
+    {
+        $raw = app(SystemSettings::class)->string('system.update_token', config('ekdosi.updates.token'));
+        if (! is_string($raw) || $raw === '') {
+            return null;
+        }
+
+        return MaybeEncrypted::decryptIfPossible($raw);
     }
 
     /**
@@ -87,9 +130,9 @@ class UpdateChecker
     /** @return array<string, mixed> */
     private function fetch(): array
     {
-        $repo = trim((string) config('ekdosi.updates.repo', ''));
+        $repo = $this->repo();
         if ($repo === '') {
-            return $this->base(['error' => 'Δεν έχει οριστεί αποθετήριο (EKDOSI_UPDATE_REPO).']);
+            return $this->base(['error' => 'Δεν έχει οριστεί αποθετήριο (Ρυθμίσεις συστήματος → Ενημερώσεις, ή EKDOSI_UPDATE_REPO).']);
         }
 
         try {
@@ -201,7 +244,7 @@ class UpdateChecker
 
     private function request(string $url): ?Response
     {
-        $token = config('ekdosi.updates.token');
+        $token = $this->token();
         $http = Http::withHeaders([
             'User-Agent' => 'ekdosi-update-check',
             'Accept' => 'application/vnd.github+json',

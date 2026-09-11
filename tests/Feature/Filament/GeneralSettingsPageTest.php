@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Casts\MaybeEncrypted;
 use App\Filament\Pages\GeneralSettings;
 use App\Models\Company;
 use App\Models\User;
@@ -9,6 +10,7 @@ use App\Services\TenantRoleProvisioner;
 use App\Support\Settings\SystemSettings;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use PHPUnit\Framework\Attributes\Test;
@@ -140,7 +142,8 @@ class GeneralSettingsPageTest extends TestCase
         Livewire::test(GeneralSettings::class)
             ->assertSuccessful()
             ->assertSee('Ειδοποιήσεις σφαλμάτων (Ops)')
-            ->assertSee('AI & Ενημερώσεις')
+            ->assertSee('AI Βοηθός')
+            ->assertSee('Ενημερώσεις')
             ->assertSet('data.error_alerts_enabled', (bool) config('ekdosi.error_alerts.enabled', true))
             ->assertSet('data.ai_enabled', (bool) config('ekdosi.ai.enabled'))
             ->assertSet('data.update_check_enabled', (bool) config('ekdosi.updates.enabled', true));
@@ -173,5 +176,101 @@ class GeneralSettingsPageTest extends TestCase
         $this->assertDatabaseHas('system_settings', ['key' => 'system.error_alert_throttle_minutes', 'value' => '45', 'type' => 'string']);
         $this->assertDatabaseHas('system_settings', ['key' => 'system.ai_enabled', 'value' => '1', 'type' => 'bool']);
         $this->assertDatabaseHas('system_settings', ['key' => 'system.update_check_enabled', 'value' => '0', 'type' => 'bool']);
+    }
+
+    #[Test]
+    public function the_update_repo_and_token_are_settable_from_the_ui(): void
+    {
+        $this->makeSuperAdmin();
+        config(['ekdosi.updates.repo' => 'chrismfz/ekdosi']); // pin the default so 'acme/app' is a real deviation
+
+        Livewire::test(GeneralSettings::class)
+            ->assertSuccessful()
+            ->assertSet('data.update_token', '')            // secret is NEVER pre-filled
+            ->set('data.update_repo', 'acme/app')
+            ->set('data.update_token', 'ghp_secret_pat')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        // Repo override stored plainly.
+        $this->assertDatabaseHas('system_settings', [
+            'key' => 'system.update_repo', 'value' => 'acme/app', 'type' => 'string',
+        ]);
+
+        // Token stored (plaintext here — encrypt_at_rest is OFF in tests) and reads
+        // back through the same decrypt-or-plaintext helper the checker uses.
+        $stored = app(SystemSettings::class)->string('system.update_token');
+        $this->assertSame('ghp_secret_pat', MaybeEncrypted::decryptIfPossible((string) $stored));
+
+        // The raw token must NEVER land in the audit log (properties are redacted).
+        foreach (DB::table('activity_log')->pluck('properties') as $props) {
+            $this->assertStringNotContainsString('ghp_secret_pat', (string) $props);
+        }
+    }
+
+    #[Test]
+    public function an_empty_token_field_keeps_the_existing_token(): void
+    {
+        $this->makeSuperAdmin();
+        app(SystemSettings::class)->set('system.update_token', 'keep_me', 'string', $this->user->id);
+
+        // Save WITHOUT touching the token field (stays '') → existing token survives.
+        Livewire::test(GeneralSettings::class)
+            ->assertSet('data.update_token', '')
+            ->set('data.require_2fa', true)
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('keep_me', app(SystemSettings::class)->string('system.update_token'));
+    }
+
+    #[Test]
+    public function clearing_the_token_forgets_the_override(): void
+    {
+        $this->makeSuperAdmin();
+        app(SystemSettings::class)->set('system.update_token', 'drop_me', 'string', $this->user->id);
+
+        Livewire::test(GeneralSettings::class)
+            ->callAction('clearUpdateToken')
+            ->assertHasNoActionErrors();
+
+        $this->assertDatabaseMissing('system_settings', ['key' => 'system.update_token']);
+    }
+
+    #[Test]
+    public function clearing_the_repo_reverts_to_the_default_not_a_blank_override(): void
+    {
+        $this->makeSuperAdmin();
+        config(['ekdosi.updates.repo' => 'chrismfz/ekdosi']); // non-empty default
+        app(SystemSettings::class)->set('system.update_repo', 'acme/app', 'string', $this->user->id);
+
+        // Operator clears the field (helper says «κενό = .env default»).
+        Livewire::test(GeneralSettings::class)
+            ->set('data.update_repo', '')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        // A blank must NOT persist as an override — it would shadow the non-empty
+        // default and break the check. The row is dropped → env default is used.
+        $this->assertDatabaseMissing('system_settings', ['key' => 'system.update_repo']);
+    }
+
+    #[Test]
+    public function a_malformed_repo_is_rejected(): void
+    {
+        $this->makeSuperAdmin();
+
+        Livewire::test(GeneralSettings::class)
+            ->set('data.update_repo', 'https://github.com/chrismfz/ekdosi') // full URL, not owner/repo
+            ->call('save')
+            ->assertHasErrors('data.update_repo');
+
+        // A «..» dot-segment passes the char-class but must be rejected (traversal).
+        Livewire::test(GeneralSettings::class)
+            ->set('data.update_repo', 'chrismfz/..')
+            ->call('save')
+            ->assertHasErrors('data.update_repo');
+
+        $this->assertDatabaseMissing('system_settings', ['key' => 'system.update_repo']);
     }
 }
