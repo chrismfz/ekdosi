@@ -103,6 +103,16 @@ class SystemHealth extends Page
                 ->color('gray')
                 ->action(fn () => $this->refreshReport()),
 
+            // The table below only SHOWS what ran; the on/off + timing switches for
+            // each task live on the «Χρονοπρογραμματιστής» settings page — deep-link
+            // there so an operator isn't left hunting for where to flip them.
+            Action::make('scheduleSettings')
+                ->label('Ρυθμίσεις χρονοπρογραμματιστή')
+                ->icon('heroicon-o-clock')
+                ->color('gray')
+                ->visible(fn (): bool => ScheduleSettings::canAccess())
+                ->url(fn (): string => ScheduleSettings::getUrl()),
+
             // Read-only: force a fresh GitHub check (busts the 6h cache). Never
             // applies an update — the upgrade stays with deploy/update.sh.
             Action::make('checkUpdates')

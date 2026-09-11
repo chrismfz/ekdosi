@@ -63,6 +63,7 @@ class ScheduleSettings extends Page implements HasForms
         'resend_failed_emails_enabled' => ['Επαναποστολή αποτυχημένων email', 'Ξαναβάζει στην ουρά τιμολόγια που απέτυχαν. Άναψέ το αφού σταθεροποιηθεί το SMTP.', false],
         // WHMCS
         'whmcs_fetch_enabled' => ['WHMCS — άντληση εκκρεμών', 'Φέρνει πληρωμένα/αδήλωτα WHMCS τιμολόγια στο inbox (μόνο staging, ΔΕΝ δηλώνει στην ΑΑΔΕ).', false],
+        'whmcs_fetch_unpaid_enabled' => ['WHMCS — άντληση ΑΠΛΗΡΩΤΩΝ', 'Φέρνει ΑΠΛΗΡΩΤΑ WHMCS τιμολόγια πελατών «invoice-before-pay» (επί πιστώσει) στο inbox — μόνο staging.', false],
         'whmcs_auto_issue_enabled' => ['WHMCS — αυτόματη έκδοση', 'Δηλώνει ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ για πελάτες άμεσης τιμολόγησης σε οπλισμένους tenants. Διπλό κλειδί με την per-tenant ρύθμιση.', true],
         'whmcs_payment_sync_enabled' => ['WHMCS — συγχρονισμός πληρωμών', 'Όταν ένα επί-πιστώσει WHMCS τιμολόγιο πληρωθεί στο WHMCS, καταγράφει την πληρωμή στο ekdosi και κλείνει την οφειλή. Γράφει ΜΟΝΟ στο ekdosi (ποτέ στο WHMCS)· καταγράφει μόνο ανοιχτά υπόλοιπα.', false],
         'whmcs_payment_reconcile_enabled' => ['WHMCS — εντοπισμός πληρωμών (read-only)', 'Εντοπίζει ποια ανοιχτά επί-πιστώσει τιμολόγια πληρώθηκαν στο WHMCS και τα δείχνει στο dashboard + στη σελίδα «Συγχρονισμός πληρωμών» με ειδοποίηση. ΔΕΝ γράφει χρήμα — ο χειριστής τα κλείνει με ένα κλικ.', false],
@@ -81,6 +82,9 @@ class ScheduleSettings extends Page implements HasForms
         'leads_notify_due_enabled' => ['Leads — υπενθύμιση επόμενου βήματος', 'Καθημερινό «καμπανάκι» στον χειριστή για leads με επόμενο βήμα σήμερα ή ληξιπρόθεσμο (χωρίς email).', false],
         'service_renewals_enabled' => ['Ανανεώσεις υπηρεσιών (πρόχειρα)', 'Δημιουργεί ΠΡΟΧΕΙΡΑ τιμολόγια ανανέωσης για συμβόλαια που λήγουν. ΔΕΝ δηλώνει αυτόματα.', true],
         'service_dunning_enabled' => ['Dunning υπηρεσιών', 'Auto suspend/terminate ληξιπρόθεσμων συμβολαίων. Πραγματικός διακόπτης = το per-product dunning_enabled.', false],
+        // Υποστήριξη & domains
+        'tickets_poll_imap_enabled' => ['Υποστήριξη — polling email (IMAP)', 'Διαβάζει τα mailboxes των τμημάτων υποστήριξης (IMAP) και δρομολογεί εισερχόμενα email σε tickets.', false],
+        'domain_sync_enabled' => ['Συγχρονισμός domains', 'Συγχρονίζει καταστάσεις/λήξεις domains (νυχτερινό).', false],
     ];
 
     /**
@@ -90,10 +94,11 @@ class ScheduleSettings extends Page implements HasForms
      */
     private const SECTIONS = [
         'Email & ουρά εργασιών' => ['mail_sweep_enabled', 'queue_heartbeat_enabled', 'resend_failed_emails_enabled'],
-        'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
+        'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_fetch_unpaid_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
         'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_console_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled'],
+        'Υποστήριξη & domains' => ['tickets_poll_imap_enabled', 'domain_sync_enabled'],
     ];
 
     /**
@@ -107,6 +112,7 @@ class ScheduleSettings extends Page implements HasForms
     private const TIMINGS = [
         'resend_failed_emails_cron' => ['Επαναποστολή αποτυχημένων email', 'cron'],
         'whmcs_fetch_cron' => ['WHMCS — άντληση εκκρεμών', 'cron'],
+        'whmcs_fetch_unpaid_cron' => ['WHMCS — άντληση ΑΠΛΗΡΩΤΩΝ', 'cron'],
         'whmcs_auto_issue_cron' => ['WHMCS — αυτόματη έκδοση', 'cron'],
         'whmcs_payment_sync_cron' => ['WHMCS — συγχρονισμός πληρωμών', 'cron'],
         'whmcs_payment_reconcile_cron' => ['WHMCS — εντοπισμός πληρωμών', 'cron'],
@@ -122,6 +128,8 @@ class ScheduleSettings extends Page implements HasForms
         'backup_cleanup_cron' => ['Backup — καθαρισμός', 'cron'],
         'backup_monitor_cron' => ['Backup — παρακολούθηση', 'cron'],
         'company_backups_cron' => ['Backup ανά εταιρία', 'cron'],
+        'tickets_poll_imap_cron' => ['Υποστήριξη — polling email', 'cron'],
+        'domain_sync_cron' => ['Συγχρονισμός domains', 'cron'],
     ];
 
     public function mount(): void

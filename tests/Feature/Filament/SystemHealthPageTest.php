@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Filament;
 
+use App\Filament\Pages\ScheduleSettings;
 use App\Filament\Pages\SystemHealth;
 use App\Models\Company;
 use App\Models\ScheduledTaskRun;
@@ -96,6 +97,18 @@ class SystemHealthPageTest extends TestCase
             ->assertSee('Πρόσφατες εκτελέσεις')
             ->assertSee('WHMCS fetch')
             ->assertSet('report.recent_runs', fn ($v) => ! empty($v));
+    }
+
+    #[Test]
+    public function it_links_to_the_schedule_settings_page(): void
+    {
+        $this->makeSuperAdmin();
+
+        // The health table only shows WHAT ran; the on/off + timing switches live on
+        // «Χρονοπρογραμματιστής» — this deep-link is where the operator flips them.
+        Livewire::test(SystemHealth::class)
+            ->assertActionExists('scheduleSettings')
+            ->assertActionHasUrl('scheduleSettings', ScheduleSettings::getUrl());
     }
 
     #[Test]
