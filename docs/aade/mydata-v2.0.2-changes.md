@@ -71,13 +71,18 @@
 - **Ακόμη TODO:** το **provider μονοπάτι (PROV-002)** — ο `confirmReturn()` καλύπτει μόνο το
   direct-myDATA (firebed) transport· ο provider seam χρειάζεται δικό του wiring σε επόμενο slice.
 
-**A2. `DeliveryStatus::IN_TRANSIT_RETURN` (9)** — crash ήδη λυμένος (§1). Το **πλήρες
-return-state** (δικό του `delivery_state` αντί για «in_transit») είναι μέρος του epic. → Slice 2.
+**A2. `DeliveryStatus::IN_TRANSIT_RETURN` (9)** — crash ήδη λυμένος (§1).
+✅ **WIRED — Slice 2 (2026-09-12).** Πλέον δικό του `delivery_state` `'in_transit_return'`
+(όχι «in_transit»): το `deliveryStateFromAade()` το χαρτογραφεί ξεχωριστά, STATE_LABEL «Σε
+διακίνηση (επιστροφή)», ο `refreshStatus()` το αναδεικνύει, και το `confirmReturn()` επιτρέπεται
+ΚΑΙ από `in_transit_return` (όχι μόνο `in_transit`). Είναι **carrier-reported** — firebed ΔΕΝ
+εκθέτει submit action, μόνο το παρατηρούμε μέσω status query.
 
 **A3. `DeliveryEventType::CONFIRM_RETURN` / `REGISTER_TRANSFER_RETURN`** — *NEW event types.*
-- **ekdosi:** `DeliveryNoteEvent::summary()` τα πιάνει στο `default` arm (no crash) αλλά
-  χωρίς σωστό label/summary.
-- **Wire:** labels + summaries μαζί με το return lifecycle. → Slice 2.
+✅ **WIRED — Slice 2 (2026-09-12).** `DeliveryNoteEvent::summary()`: το `REGISTER_TRANSFER_RETURN`
+render-άρει το ίδιο transport summary με το `REGISTER_TRANSFER` (carrier-reported return leg)· το
+`CONFIRM_RETURN` δεν φέρει detail block → το type label «Επιβεβαίωση επιστροφής» (από το firebed)
+τα λέει όλα. Τα firebed Greek labels καλύπτουν ήδη `typeLabel()` και την κατάσταση.
 
 **A4. `RequestDeliveryNoteStatus::handleUsingQrUrl()`** — *NEW* εναλλακτικό lookup με `qrUrl`
 αντί για `mark`.
@@ -129,6 +134,8 @@ return-state** (δικό του `delivery_state` αντί για «in_transit»)
    μας (βλ. §A1). Το **provider μισό του PROV-002** μένει για επόμενο slice.
 2. **Slice 2 — Return-leg lifecycle** — `IN_TRANSIT_RETURN` ως δικό του state +
    `CONFIRM_RETURN`/`REGISTER_TRANSFER_RETURN` events + labels/UI.
+   ✅ **DONE (2026-09-12)** — observability slice (τα return-leg σήματα είναι carrier-reported·
+   firebed δεν εκθέτει submit action γι' αυτά, μόνο τα παρατηρούμε). Βλ. §A2/§A3.
 3. **Slice 3 — Combined ΤΔΑ / `supportsDeliveryNote` alignment** — gap-analysis + τύποι
    1.4/3.1/3.2/11.5 (μεγαλύτερο· δένει με το «Combined ΤΔΑ» BACKLOG).
 4. **Slice 4 (SCOPE-GATED) — Receiving Note 10.1/10.2** — μόνο αν οι tenants εκδίδουν

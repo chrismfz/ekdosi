@@ -209,9 +209,13 @@
 - **Lifecycle**: έκδοση → έναρξη διακίνησης → δήλωση παράδοσης **ή δήλωση επιστροφής** → έλεγχος
   κατάστασης → ακύρωση (`DeliveryLifecycleService` + `DeliveryNoteSubmitter`), §7.1 status cache.
 - **Δήλωση επιστροφής (ConfirmDeliveryReturn, myDATA v2.0.2)** — όταν ο μεταφορέας δεν παρέδωσε και
-  επέστρεψε τα αγαθά: `in_transit → returned`, η ΑΑΔΕ φέρνει `deliveryReturnMark` (cache
-  `delivery_notes.return_mark`, audit `CONFIRM_RETURN`). Τερματικό state (ο έλεγχος κατάστασης δεν το
-  πατάει πίσω). Direct-myDATA μονοπάτι· ο durable attempt-record που ξεκλείδωσε το DEP-001.
+  επέστρεψε τα αγαθά: `in_transit`/`in_transit_return → returned`, η ΑΑΔΕ φέρνει `deliveryReturnMark`
+  (cache `delivery_notes.return_mark`, audit `CONFIRM_RETURN`). Τερματικό state (ο έλεγχος κατάστασης
+  δεν το πατάει πίσω). Direct-myDATA μονοπάτι· ο durable attempt-record που ξεκλείδωσε το DEP-001.
+- **Σκέλος επιστροφής ορατό (v2.0.2)** — το `IN_TRANSIT_RETURN` (9) της ΑΑΔΕ είναι δικό του state
+  «Σε διακίνηση (επιστροφή)» (όχι συγχωνευμένο στο in_transit)· ο «Έλεγχος κατάστασης» το αναδεικνύει
+  και το ιστορικό δείχνει τα `RegisterTransferReturn`/`ConfirmReturn` events. **Carrier-reported**
+  (το firebed δεν εκθέτει submit action· μόνο παρατήρηση μέσω status query).
 - **lifecycleHistory** timeline (carrier/recipient events).
 - **Χώρα παραλήπτη (frozen)** — ο παραλήπτης μπορεί να είναι πελάτης/προμηθευτής/χειροκίνητος·
   η χώρα του παγώνει στο δελτίο (`recipient_country`, ISO-2) και είναι υποχρεωτική όταν υπάρχει

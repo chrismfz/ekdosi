@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\DeliveryNotes\Tables;
 
+use App\Services\Delivery\DeliveryLifecycleService;
 use App\Support\MyData\DeliveryCodes;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -63,6 +64,9 @@ class DeliveryNotesTable
 
                 TextColumn::make('delivery_state')
                     ->label('Διακίνηση')
+                    // Render the central Greek label (so e.g. 'in_transit_return'
+                    // shows «Σε διακίνηση (επιστροφή)», not the raw snake_case).
+                    ->formatStateUsing(fn (?string $state) => DeliveryLifecycleService::stateLabel($state) ?? '—')
                     ->placeholder('—')
                     ->toggleable(),
             ])

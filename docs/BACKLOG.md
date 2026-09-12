@@ -49,11 +49,13 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    with a 9.3 sandbox rehearsal. **Wired in 5.12.0:** `ConfirmDeliveryReturn` + `deliveryReturnMark`
    (MYD-026/PROV-002 durable attempt-record — the exact DEP-001 gate) ✅ **Slice 1 DONE** (direct-myDATA
    path: `confirmReturn()` + `return_mark` cache + `CONFIRM_RETURN` audit row + UI action; **provider
-   path PROV-002 still TODO**). **Still available in 5.12.0 to wire:**
-   `RequestDeliveryNoteStatus::handleUsingQrUrl()`, `TransportDetails::packingsDeclaration`,
-   `DeliveryStatus::IN_TRANSIT_RETURN`/`DeliveryEventType::CONFIRM_RETURN`; PLUS the **new Receiving
-   Note flow** (Δελτίο Ποσοτικής Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`,
-   `ReceivingNotePurpose`) if in scope; `supportsDeliveryNote()` now also allows 1.4/3.1/3.2/11.5.
+   path PROV-002 still TODO**). `DeliveryStatus::IN_TRANSIT_RETURN` + the `CONFIRM_RETURN`/
+   `REGISTER_TRANSFER_RETURN` event types ✅ **Slice 2 DONE** (own `in_transit_return` state +
+   refresh visibility + event labels/summaries; carrier-reported, no submit action). **Still
+   available in 5.12.0 to wire:** `RequestDeliveryNoteStatus::handleUsingQrUrl()`,
+   `TransportDetails::packingsDeclaration`; PLUS the **new Receiving Note flow** (Δελτίο Ποσοτικής
+   Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`, `ReceivingNotePurpose`) if in scope;
+   `supportsDeliveryNote()` now also allows 1.4/3.1/3.2/11.5.
 2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
    `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
    (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
