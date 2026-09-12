@@ -90,6 +90,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   access ή λειτουργία.
 
 ### Fixed
+- **Ψηφιακή διακίνηση: latent crash από το v2.0.2** — το firebed 5.12.0 πρόσθεσε το
+  `DeliveryStatus::IN_TRANSIT_RETURN` (9)· πριν ένα status 9 από την ΑΑΔΕ ήταν `tryFrom()=null`
+  (το `null` arm το έπιανε), τώρα resolve-άρει σε πραγματική enum τιμή, οπότε το `match` στο
+  `DeliveryLifecycleService::deliveryStateFromAade()` (χωρίς default) θα πετούσε `UnhandledMatchError`
+  στον «Έλεγχο κατάστασης» ενός return movement. Fix: explicit `IN_TRANSIT_RETURN → 'in_transit'` +
+  `default => null` (forward-safe για κάθε μελλοντική enum τιμή) + regression test totality. Ανάλυση
+  αλλαγών v2.0.2 + σχέδιο wiring: `docs/aade/mydata-v2.0.2-changes.md`.
 - **2FA enrolment QR: σπασμένο («δεν έβγαινε QR, μόνο το secret») σε hosts χωρίς `imagick` (η
   παραγωγή τρέχει gd-only).** Το Filament v5.8 ξανα-τύλιγε σε `data:image/svg+xml;base64,…` το ήδη
   data-URI που επιστρέφει το `google2fa-qrcode` v4, οπότε το `<img>` του QR αποκωδικοποιούσε ένα
