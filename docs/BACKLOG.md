@@ -1474,6 +1474,17 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   the lock — under a stale `$note` the diagnostic log and the audit row can disagree on the pre-sync
   state (the audit row is authoritative). Both fixable by having the winner branch return the applied
   outcome + the locked from-values; not worth the extra plumbing for a rare race.
+- **`refreshStatus()` downgrades the `'partial'`/`'failed'` delivery_state cache** _(P2, CONFIRMED,
+  pre-existing — surfaced by the Slice 1 review, NOT introduced by it)._ The refresh guard
+  (`DeliveryLifecycleService::refreshStatus`, ~L341) protects only `cancelled`/`CANCELLED`/`'returned'`
+  from being overwritten by the AADE-mapped state, but `deliveryStateFromAade()` can only emit
+  `registered/in_transit/delivered/failed/rejected/cancelled` — never `'partial'`. So a δελτίο left in
+  `'partial'` (or `'failed'`) by `confirmDelivery(PARTIAL/NONE)` has its cache silently flipped by any
+  later refresh (e.g. AADE `COMPLETED → 'delivered'`, or `IN_TRANSIT_RETURN(9) → 'in_transit'`) — the
+  same downgrade the `'returned'` clause now blocks. The authoritative outcome still lives in the
+  `CONFIRM_OUTCOME` `delivery_marks` row, so this is cache-fidelity only (no legal/money impact). Fix
+  when touched: treat the operator-declared outcome states (`partial`/`failed`/`delivered`) as terminal
+  in the same guard, or derive the guard from "is this state locally-authoritative" rather than listing.
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
   `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a
