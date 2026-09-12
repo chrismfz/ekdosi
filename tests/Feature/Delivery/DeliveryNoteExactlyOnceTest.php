@@ -232,7 +232,7 @@ class DeliveryNoteExactlyOnceTest extends TestCase
         // earlier POST genuinely never landed.
         $this->note->forceFill(['mydata_pending_since' => now()->subMinutes(30)])->save();
 
-        $sendXml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $sendXml = file_get_contents(base_path('tests/Fixtures/firebed/send-invoices-single-response.xml'));
         $mock = new MockHandler([$this->emptyTransmittedDocsMock(), new GuzzleResponse(200, [], $sendXml)]);
 
         (new DeliveryNoteSubmitter($this->tenant, $mock))->submit($this->note->fresh('lines'));

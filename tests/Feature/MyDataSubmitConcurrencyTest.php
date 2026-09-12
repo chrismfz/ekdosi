@@ -59,7 +59,7 @@ class MyDataSubmitConcurrencyTest extends TestCase
 
     private function successMock(): MockHandler
     {
-        $xml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $xml = file_get_contents(base_path('tests/Fixtures/firebed/send-invoices-single-response.xml'));
 
         return new MockHandler([new GuzzleResponse(200, [], $xml)]);
     }

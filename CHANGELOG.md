@@ -98,6 +98,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   access ή λειτουργία.
 
 ### Fixed
+- **CI πράσινο ξανά: τα tests δεν εξαρτώνται πια από export-ignored vendor stubs.** Το firebed 5.12.0
+  πρόσθεσε `/stubs export-ignore` στο δικό του `.gitattributes` («leaner package»), οπότε το
+  `composer install --prefer-dist` της CI **δεν** κατεβάζει πια το `vendor/firebed/aade-mydata/stubs/`.
+  6 reads σε 4 αρχεία (`MyDataSubmitterSafetyTest`, `MyDataSubmitInDoubtTest`,
+  `MyDataSubmitConcurrencyTest`, `DeliveryNoteExactlyOnceTest`) διάβαζαν από εκεί το
+  `send-invoices-single-response.xml` → `file_get_contents(...): No such file or directory` στη CI
+  (περνούσε locally μόνο λόγω source-install vendor — **false green**· το `main` ήταν ήδη κόκκινο).
+  Fix: δική μας τοπική fixture `tests/Fixtures/firebed/send-invoices-single-response.xml` (byte-identical
+  αντίγραφο) — τα tests δεν ακουμπούν ποτέ ξανά test-only αρχεία του vendor. Επαληθεύτηκε με το
+  `stubs/` κρυμμένο (ακριβής συνθήκη CI).
 - **Προφίλ χειριστή (`/admin/profile`): τέλος το 500.** Το item «Οι συνεδρίες μου» στο user menu
   προβάλλεται σε **ΚΑΘΕ** σελίδα του panel — και στις **tenant-less** (το built-in προφίλ, οι auth
   σελίδες). Το `MySessions` ζει σε tenant-scoped route (`admin/{tenant}/my-sessions`), οπότε το

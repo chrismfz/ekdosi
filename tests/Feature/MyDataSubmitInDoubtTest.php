@@ -280,7 +280,7 @@ class MyDataSubmitInDoubtTest extends TestCase
 
     public function test_a_successful_filing_clears_the_marker_it_armed(): void
     {
-        $sendXml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $sendXml = file_get_contents(base_path('tests/Fixtures/firebed/send-invoices-single-response.xml'));
         $mock = new MockHandler([new GuzzleResponse(200, [], $sendXml)]);
 
         (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
@@ -296,7 +296,7 @@ class MyDataSubmitInDoubtTest extends TestCase
         // nothing → the earlier POST is deemed lost, so we file normally.
         $this->markInDoubt(20);
 
-        $sendXml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $sendXml = file_get_contents(base_path('tests/Fixtures/firebed/send-invoices-single-response.xml'));
 
         // First the (empty) reconcile lookup, THEN a real SendInvoices filing.
         $mock = new MockHandler([
