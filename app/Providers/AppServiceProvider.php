@@ -63,12 +63,21 @@ class AppServiceProvider extends ServiceProvider
         // the password; fail-OPEN if the API is unreachable, so it can never lock
         // anyone out). Everything already validates with Password::defaults()
         // (operator Users, CustomerUsers, the portal reset), so defining it here
-        // upgrades them all at once. The breach check is skipped under the test
-        // runner to keep the suite offline and fast.
+        // upgrades them all at once.
+        //
+        // The breach check is a BLOCKING outbound call, so it's skipped under the
+        // test runner (offline suite) AND behind a config kill-switch — a deploy on
+        // a locked-down network (where pwnedpasswords is unreachable) can turn it
+        // off so every password op doesn't stall until the fail-open timeout.
+        // min(8) is always enforced locally regardless.
         Password::defaults(function (): Password {
             $rule = Password::min(8);
 
-            return $this->app->runningUnitTests() ? $rule : $rule->uncompromised();
+            if ($this->app->runningUnitTests() || ! config('ekdosi.password_breach_check', true)) {
+                return $rule;
+            }
+
+            return $rule->uncompromised();
         });
 
         /*

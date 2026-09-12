@@ -554,8 +554,7 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.
 - **Password policy** (`Password::defaults()`): min 8 **+ έλεγχος διαρροής** (HaveIBeenPwned k-anonymity,
   fail-open), σε χειριστές/CustomerUsers/portal-reset/create-user.
-- **Security headers** σε κάθε απόκριση (nosniff / Referrer-Policy / X-Frame-Options SAMEORIGIN) +
-  **secure session cookie** by default σε production.
+- **Security headers** σε κάθε απόκριση (nosniff / Referrer-Policy / X-Frame-Options SAMEORIGIN).
 - **«Οι συνεδρίες μου»** (user menu): λίστα ενεργών συνεδριών (συσκευή/IP/last-active) + per-session
   revoke + password-confirmed «Αποσύνδεση όλων των άλλων», guard-scoped στον web χειριστή.
 - **Portal login enumeration-resistant** (ίση χρονική απόκριση known/unknown + generic μήνυμα).

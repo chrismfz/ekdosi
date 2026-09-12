@@ -10,6 +10,7 @@ use Filament\Pages\Page;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -64,9 +65,6 @@ class MySessions extends Page
 
         return DB::table(config('session.table', 'sessions'))
             ->where('user_id', $userId)
-            // Only rows the session store would still accept — hide stale rows
-            // that outlived session.lifetime but haven't been garbage-collected.
-            ->where('last_activity', '>=', $this->minActiveTimestamp())
             ->orderByDesc('last_activity')
             ->get()
             ->filter(fn ($row): bool => $this->isWebGuardSession($row->payload ?? null))
@@ -158,12 +156,6 @@ class MySessions extends Page
         ];
     }
 
-    /** Oldest last_activity (unix ts) a session may have and still count as live. */
-    private function minActiveTimestamp(): int
-    {
-        return now()->subMinutes(max(1, (int) config('session.lifetime', 120)))->getTimestamp();
-    }
-
     /** Is this a session row belonging to the WEB guard (not the portal guard)? */
     private function isWebGuardSession(?string $payload): bool
     {
@@ -191,6 +183,17 @@ class MySessions extends Page
         $raw = base64_decode($payload, true);
         if ($raw === false) {
             return null;
+        }
+
+        // With SESSION_ENCRYPT on, the stored payload is ciphertext — decrypt it
+        // back to the serialized attribute string before decoding, or the guard
+        // check would silently fail for every row.
+        if (config('session.encrypt')) {
+            try {
+                $raw = Crypt::decrypt($raw, false);
+            } catch (\Throwable) {
+                return null;
+            }
         }
 
         $data = config('session.serialization', 'php') === 'json'

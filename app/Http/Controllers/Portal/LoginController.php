@@ -86,7 +86,14 @@ class LoginController extends Controller
      */
     private function equalizeFailedLoginTiming(string $email, string $password): void
     {
-        if (! CustomerUser::where('email', $email)->exists()) {
+        $user = CustomerUser::where('email', $email)->first();
+
+        // attempt() runs bcrypt only against a row that HAS a usable password
+        // hash. Spend one hash-check whenever it wouldn't have — no account, OR an
+        // invited-but-not-activated row with no password yet — so those cases
+        // don't answer faster than «wrong password on an active account» and stay
+        // indistinguishable.
+        if ($user === null || blank($user->password)) {
             Hash::check($password, self::TIMING_EQUALIZER_HASH);
         }
     }
