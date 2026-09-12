@@ -111,8 +111,20 @@ in four places that the contract must break (all verified in source):
 - **Audit model = polymorphic.** Make `delivery_marks` + `delivery_note_events` **`morphs('movable')`**
   (`movable_type`/`movable_id`) instead of `delivery_note_id`; migrate existing rows to
   `movable_type=DeliveryNote`. The movement audit is conceptually about the MOVEMENT, so one home for
-  both parents. (`delivery_marks` already has a nullable path for provider rows — extend, don't fork.)
-  This migration lives in **3a**.
+  both parents. This migration lives in **3a**, and it carries two easy-to-miss pieces (found in review):
+  - **Preserve the dedup unique.** `delivery_note_events` has `unique(['delivery_note_id','dedup_key'])`
+    (`create_delivery_note_events_table.php:37`) — it's what makes `syncLifecycleHistory`'s
+    `updateOrCreate` idempotent on re-poll. Dropping `delivery_note_id` drops the unique → **duplicate
+    lifecycle rows on every refresh**. 3a must recreate it as `unique(['movable_type','movable_id','dedup_key'])`
+    AND change the `updateOrCreate` first-arg to the morph keys. (`delivery_marks`'s unique is
+    `(company_id, legacy_id)`, not on the FK — safe.)
+  - **`FiledSeriesBackfill` reads `delivery_marks.delivery_note_id` directly** (`FiledSeriesBackfill.php:45,57`),
+    called by the re-runnable ETL (`MigrateFromFirebird.php:1103`) + a migration — NOT via the service.
+    Dropping the column throws mid-ETL. 3a must either keep `delivery_note_id` additively **or** teach
+    `FiledSeriesBackfill` the morph (`movable_type='DeliveryNote'` filter + `movable_id` join).
+  - Model conversions (impl detail): `DeliveryMark::deliveryNote()`/`DeliveryNoteEvent::deliveryNote()`
+    `belongsTo → morphTo`; `DeliveryNote::marks()/events()` `hasMany → morphMany`; both `$fillable` gain
+    `movable_*`; ~20 test/seed writers of `delivery_note_id` updated.
 - **`MovableDocument` contract** = every accessor + seam the service touches:
   `qrUrl`(`mydata_url`), `mydata_mark`, `mydata_state`, `delivery_state`, `transfer_mark`/`outcome_mark`/
   `return_mark`/`reject_mark`, `transport_type`, `vehicle_number`, `carrier_afm`, `local_status`,
@@ -197,14 +209,25 @@ drives RegisterTransfer/confirmDelivery/confirmReturn/refreshStatus on the ΤΔ�
 `qrUrl`, no lifecycle — the movement actions must be hidden for it.
 
 **Cancel is the exception — one owner (P1 fix):** a ΤΔΑ is ONE 1.1 document/MARK, so it cancels
-through the **monetary path** (`MyDataSubmitter::cancel`, the normal `ViewInvoice` «Ακύρωση»), NOT the
-movement `DeliveryLifecycleService::cancel`. Today those two choke-points diverge — the monetary cancel
-flips `mydata_state`/`local_status` + writes a `MyDataMark` but never touches `delivery_state` or
-reverses stock, while the movement cancel does the opposite. **The design:** extend the monetary cancel
-so that for an `is_delivery_note` invoice it also reconciles `delivery_state='cancelled'` and runs
-`reverseSaleForInvoice` (never the DN reversal, so stock moves once); the movement-lifecycle `cancel()`
-stays DeliveryNote-only and refuses/redirects for an invoice-backed movable. (This is a design decision,
-resolved here — not a sandbox question.)
+through the **monetary path** (`MyDataSubmitter::cancel` → its single `finaliseCancellation()` choke-point,
+the normal `ViewInvoice` «Ακύρωση»), NOT the movement `DeliveryLifecycleService::cancel`. **The design:**
+extend `finaliseCancellation` so that for an `is_delivery_note` invoice it also reconciles
+`delivery_state='cancelled'`. It need **not** call stock reversal explicitly — `InvoiceObserver`
+already runs `reverseSaleForInvoice` on the `local_status → cancelled` transition
+(`InvoiceObserver.php:280,299`), so stock moves once. The movement-lifecycle `cancel()` stays
+DeliveryNote-only and refuses/redirects for an invoice-backed movable.
+
+**Second cancel path — `refreshStatus` (the review's re-opener, must be handled too):** §12-3c
+generalises `refreshStatus` to ΤΔΑ invoices, but a remote (portal-side) cancellation there is applied by
+`applyRemoteCancellation()` (reached only from `refreshStatus`), which flips all three state fields,
+reverses stock, and writes a `STATE_SYNC` row **into `delivery_marks`** — i.e. a full cancel OUTSIDE the
+monetary choke-point, in the wrong audit table, and colliding with the monetary twin
+`App\Services\MyData\SyncInvoiceStateFromAade` (whose whole job is invoice remote-cancel detection).
+**The design:** for an invoice-backed movable, `refreshStatus`'s remote-cancel branch must delegate to
+`SyncInvoiceStateFromAade` (the monetary choke-point), NOT the DN-typed `applyRemoteCancellation`. This
+also resolves the §4 note about `reverseSaleForMovable()` — the only movement path that reverses stock is
+this one, and for a ΤΔΑ it routes through the invoice reversal instead. (Design decision — not a sandbox
+question.)
 
 ## 8. Type seed + legacy normalisation
 
@@ -250,9 +273,14 @@ resolved here — not a sandbox question.)
    the whole DGM stack's prior «NOT SANDBOX-VALIDATED» state.
 6. **Priority** — **No tenant issues ΤΔΑ today** (MCP: myip/nexon cut ΤΙΜ/ΤΠΥ/ΑΛΠ); nexon will need it
    after its fresh migration + for completeness → «real but not on fire».
-7. **Related Slice-2 gap (out of scope here, but adjacent):** DGM v2.0.2 §3.2.7 says ConfirmDeliveryReturn
-   is reachable from Rejected / DeliveredByCarrier(PARTIAL) / FailedDelivery / InTransit — wider than the
-   `in_transit`/`in_transit_return` guard Slice 2 shipped. Track as a Slice-2 follow-up (widen `requireStateIn`).
+7. **Related Slice-2 fix (adjacent, being done alongside):** DGM v2.0.2 §3.2.7 lists ConfirmDeliveryReturn
+   sources as Rejected / DeliveredByCarrier(PARTIAL) / FailedDelivery, and a bare InTransit ONLY for 9.2 or
+   9.3-`reverseDeliveryNote`. For our **plain 9.3** that's `{rejected, partial, failed}` — a **reconcile**,
+   not a clean «widen»: Slice 2's guard was `{in_transit, in_transit_return}` (overlap only at nothing the
+   spec lists — `in_transit_return` is not a spec source at all). The fix (this branch) sets
+   `CONFIRM_RETURN_FROM_STATES = {rejected, partial, failed, in_transit, in_transit_return}` — adds the 3
+   real sources and KEEPS `in_transit`/`in_transit_return` as fail-safe pending the sandbox rehearsal
+   (`docs/delivery-sandbox-rehearsal.md`), which will confirm whether AADE rejects them so we can prune.
 
 ## 12. Sub-slices (each: code → sandbox rehearsal → review → merge)
 
