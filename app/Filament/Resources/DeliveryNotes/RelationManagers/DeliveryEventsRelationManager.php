@@ -50,7 +50,9 @@ class DeliveryEventsRelationManager extends RelationManager
                     ->badge()
                     ->color(fn (?string $state) => match ($state) {
                         'RegisterTransfer' => 'info',
+                        'RegisterTransferReturn' => 'info',    // v2.0.2 return leg (carrier-reported)
                         'ConfirmOutcome' => 'success',
+                        'ConfirmReturn' => 'warning',          // v2.0.2 — matches the CONFIRM_RETURN mark badge
                         'Rejection' => 'danger',
                         default => 'gray',
                     })
