@@ -2,9 +2,11 @@
 
 **Πηγή:** επίσημη AADE προδιαγραφή v2.0.2 (Σεπτέμβριος 2026), όπως την υλοποιεί το
 `firebed/aade-mydata` **5.12.0** (αναβάθμιση από 5.10.4 — PR #525).
-**Επίσημα PDF (drop στο `docs/aade/` — το aade.gr μπλοκάρει το αυτόματο download):**
-- ERP: `myDATA API Documentation v2.0.2_official_erp` — **το βασικό για εμάς**.
-- Providers: `myDATA API Documentation Providers v2.0.2` — πληροφοριακό (βλ. §0).
+**Επίσημα specs in-repo** (στο `docs/aade/` — το aade.gr μπλοκάρει το αυτόματο download, τα
+ανέβασε ο owner):
+- `myDATA_API_Documentation_v2.0.2_official_erp.pdf` **+ `.md`** (full text) — **το βασικό για εμάς**.
+- `myDATA_API_Documentation_v2.0.2_official_providers.pdf` — πληροφοριακό (βλ. §0).
+- Αυτό το αρχείο (`mydata-v2.0.2-changes.md`) = το **actionable delta**: τι αλλάζει + τι κάνει το ekdosi.
 
 > **Backwards-compatible:** όλα τα νέα πεδία είναι optional· ο υπάρχων κώδικας
 > παράγει το ΙΔΙΟ myDATA XML. Καμία αλλαγή ροής δεν επιβλήθηκε από την αναβάθμιση —
