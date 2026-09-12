@@ -3,9 +3,11 @@
 namespace App\Http\Controllers\Portal;
 
 use App\Http\Controllers\Controller;
+use App\Models\CustomerUser;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
 use Illuminate\View\View;
 
@@ -17,6 +19,14 @@ use Illuminate\View\View;
  */
 class LoginController extends Controller
 {
+    /**
+     * A fixed bcrypt hash (cost 12 — the app default) that no real password
+     * matches. Used only to spend one hash-check on the «no such account» login
+     * path, so timing doesn't reveal which e-mails are registered (see
+     * equalizeFailedLoginTiming). Not a secret — it hashes a throwaway string.
+     */
+    private const TIMING_EQUALIZER_HASH = '$2y$12$GsBPTC0jX5KqQsIDPWHDWulDmxDSK27WSsY3M7SPVL1hdLKVqmV66';
+
     public function show(Request $request): View|RedirectResponse
     {
         if (Auth::guard('portal')->check()) {
@@ -39,6 +49,8 @@ class LoginController extends Controller
         // suspended, invited-without-password) — no account enumeration or status
         // disclosure. A null-password row can't match here anyway.
         if (! Auth::guard('portal')->attempt($credentials, $remember)) {
+            $this->equalizeFailedLoginTiming($credentials['email'], $credentials['password']);
+
             throw ValidationException::withMessages([
                 'email' => __('Λάθος email ή κωδικός.'),
             ]);
@@ -62,6 +74,28 @@ class LoginController extends Controller
         ])->saveQuietly();
 
         return redirect()->intended(route('portal.home'));
+    }
+
+    /**
+     * Close the account-enumeration timing gap on a failed login: Auth::attempt()
+     * runs bcrypt ONLY when the e-mail matches a row, so an unknown e-mail answers
+     * measurably faster and leaks which addresses are registered. When nothing
+     * matched, spend one equivalent hash-check so both the «wrong password» and
+     * the «no such account» paths cost ~one bcrypt. (Modest value behind the
+     * per-IP/route throttle + a CDN, but the gap is real and the fix is cheap.)
+     */
+    private function equalizeFailedLoginTiming(string $email, string $password): void
+    {
+        $user = CustomerUser::where('email', $email)->first();
+
+        // attempt() runs bcrypt only against a row that HAS a usable password
+        // hash. Spend one hash-check whenever it wouldn't have — no account, OR an
+        // invited-but-not-activated row with no password yet — so those cases
+        // don't answer faster than «wrong password on an active account» and stay
+        // indistinguishable.
+        if ($user === null || blank($user->password)) {
+            Hash::check($password, self::TIMING_EQUALIZER_HASH);
+        }
     }
 
     public function logout(Request $request): RedirectResponse

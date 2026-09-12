@@ -57,6 +57,25 @@ from `[Unreleased]`; `--major` explicit for milestones).
   filing), idempotent, δεμένη στο τιμολόγιο (κανένας phantom πιστωτικός), και editable/deletable στο tab
   «Πληρωμές» — απλή πληρωμή, όχι νομικό παραστατικό.
 
+### Security
+- **Ενιαία password policy παντού** (`Password::defaults()` = min 8 **+ έλεγχος έναντι γνωστών
+  διαρροών** μέσω HaveIBeenPwned k-anonymity — μόνο ένα SHA-1 prefix φεύγει, ποτέ ο κωδικός· fail-OPEN
+  αν το API δεν απαντά, ώστε να μην κλειδώνει κανέναν). Ισχύει σε χειριστές (Users create/reset),
+  CustomerUsers, portal password-reset και `portal:create-user`. Ο έλεγχος διαρροής παρακάμπτεται στο
+  test-suite (offline) και έχει **kill-switch** `EKDOSI_PASSWORD_BREACH_CHECK` (blocking outbound
+  call — κλείσ' το σε locked-down δίκτυο όπου το pwnedpasswords δεν φτάνει· το min-8 μένει).
+- **Security headers σε κάθε απόκριση** (`SecurityHeaders` middleware): `X-Content-Type-Options: nosniff`,
+  `Referrer-Policy: strict-origin-when-cross-origin`, `X-Frame-Options: SAMEORIGIN`. **Χωρίς CSP/HSTS
+  σκόπιμα** (CSP επικίνδυνο με Filament/Livewire· HSTS = απόφαση edge/ops).
+- **Portal login: αντίσταση σε account enumeration** — ίση χρονική απόκριση για «άγνωστο email»,
+  «invited χωρίς κωδικό» και «λάθος κωδικός» (ένα dummy hash-check όταν το `attempt()` δεν θα έτρεχε
+  bcrypt)· το generic μήνυμα ήδη ίσχυε.
+- **«Οι συνεδρίες μου»** (user menu, self-service): λίστα ενεργών συνεδριών του χειριστή (συσκευή/IP/
+  τελ. δραστηριότητα), per-session «Τερματισμός» + password-confirmed «Αποσύνδεση όλων των άλλων
+  συσκευών». **Guard-scoped**: μόνο οι δικές του **web-guard** συνεδρίες — ποτέ portal ή άλλου χρήστη
+  (ακόμη κι αν συμπίπτει το αριθμητικό id). Αποκωδικοποιεί το session payload σύμφωνα με το
+  `session.serialization` (json/php) + `session.encrypt`.
+
 ### Changed
 - **Μενού: «Εκκρεμείς πληρωμές πύλης» + «Log πύλης» μετακόμισαν από «Καθημερινά» στο group «Πύλη
   πελατών»** (όπου ήδη είναι οι «Χρήστες Πύλης»), ώστε όλα τα portal items να είναι μαζεμένα.

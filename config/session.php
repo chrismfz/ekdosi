@@ -169,6 +169,13 @@ return [
     |
     */
 
+    // Leave the DEFAULT null (not a hardcoded true): Symfony reads a null `secure`
+    // as ADAPTIVE — the cookie is marked Secure automatically when the request is
+    // HTTPS and left non-secure over plain HTTP (Cookie::isSecure() = secure ??
+    // secureDefault, where Laravel sets secureDefault from $request->isSecure()).
+    // That already secures the cookie on our HTTPS prod without risking a login
+    // loop on any HTTP-served instance (e.g. an internal or not-yet-HTTPS tenant).
+    // Set SESSION_SECURE_COOKIE=true to force it on regardless.
     'secure' => env('SESSION_SECURE_COOKIE'),
 
     /*

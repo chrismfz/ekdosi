@@ -17,6 +17,13 @@ return [
     // out mid-flight — enrol everyone first, then flip EKDOSI_REQUIRE_2FA=true.
     'require_2fa' => (bool) env('EKDOSI_REQUIRE_2FA', false),
 
+    // Password policy: check new passwords against known breaches (HaveIBeenPwned
+    // k-anonymity — only a SHA-1 prefix leaves, never the password; fail-open).
+    // It's a blocking outbound call, so turn it OFF on a locked-down/offline host
+    // where pwnedpasswords is unreachable (otherwise every password set/reset
+    // stalls until the fail-open timeout). The min-8 floor is unaffected.
+    'password_breach_check' => (bool) env('EKDOSI_PASSWORD_BREACH_CHECK', true),
+
     // Retention for the auth/security log (auth_events): rows older than this are
     // dropped by `model:prune` (scheduled below, gated). Keeps the table bounded
     // even under a sustained brute-force flood while leaving a long-enough trail

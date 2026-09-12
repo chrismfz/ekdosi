@@ -10,6 +10,7 @@ use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class UserForm
 {
@@ -38,12 +39,12 @@ class UserForm
                             ->password()
                             ->revealable()
                             ->maxLength(255)
-                            // SEC-2: enforce a minimum length (the helper text
-                            // already promised «At least 8 characters» but nothing
-                            // checked it). Gate the min on a FILLED value so a blank
-                            // edit (= keep current password) isn't wrongly rejected;
-                            // on CREATE the field is required so the min always fires.
-                            ->rules(fn (?string $state): array => filled($state) ? ['min:8'] : [])
+                            // SEC-2: enforce the app-wide password policy
+                            // (Password::defaults() — min 8 + breach check). Gate on
+                            // a FILLED value so a blank edit (= keep current password)
+                            // isn't wrongly rejected; on CREATE the field is required
+                            // so the policy always fires.
+                            ->rules(fn (?string $state): array => filled($state) ? [Password::defaults()] : [])
                             // Hash on save. Skip the column when the field is empty
                             // (edit page: blank password input = "don't change").
                             ->dehydrateStateUsing(fn (string $state): string => Hash::make($state))
