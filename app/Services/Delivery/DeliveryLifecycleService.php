@@ -700,18 +700,30 @@ class DeliveryLifecycleService
 
     // ---- internals ----------------------------------------------------
 
-    /** Map AADE §8.22 DeliveryStatus → our delivery_state cache string. */
+    /**
+     * Map AADE §8.22 DeliveryStatus → our delivery_state cache string.
+     *
+     * The `default => null` arm is load-bearing: myDATA v2.0.2 added
+     * DeliveryStatus::IN_TRANSIT_RETURN (9), and any future spec can add more.
+     * Before, an unknown code was `tryFrom() === null` and hit the null arm; now
+     * it resolves to a real enum case, so WITHOUT a default this match would throw
+     * UnhandledMatchError on a status refresh. Unknown/unmodelled statuses map to
+     * null → the caller leaves the cache unchanged (never crashes). The full
+     * return lifecycle (IN_TRANSIT_RETURN as its own state) is the delivery-note
+     * family epic; here it's treated as «still in transit».
+     */
     private function deliveryStateFromAade(?DeliveryStatus $status): ?string
     {
         return match ($status) {
             DeliveryStatus::REGISTERED => 'registered',
             DeliveryStatus::IN_TRANSIT => 'in_transit',
+            DeliveryStatus::IN_TRANSIT_RETURN => 'in_transit',
             DeliveryStatus::DELIVERED_BY_CARRIER => 'delivered',
             DeliveryStatus::COMPLETED => 'delivered',
             DeliveryStatus::FAILED_DELIVERY => 'failed',
             DeliveryStatus::REJECTED => 'rejected',
             DeliveryStatus::CANCELLED => 'cancelled',
-            null => null,
+            default => null,
         };
     }
 

@@ -150,6 +150,31 @@ class DeliveryLifecycleServiceTest extends TestCase
         return new DeliveryLifecycleService($this->tenant, $mock);
     }
 
+    // ---- AADE status → delivery_state mapping (totality) --------------
+
+    public function test_delivery_state_mapping_is_total_over_every_aade_status(): void
+    {
+        // firebed 5.12 (myDATA v2.0.2) added DeliveryStatus::IN_TRANSIT_RETURN (9).
+        // deliveryStateFromAade() must map EVERY enum case (present + future) to
+        // string|null WITHOUT throwing UnhandledMatchError — otherwise a status
+        // refresh on a return movement crashes. (Method uses no $this state, so a
+        // constructor-less instance is enough to exercise the match.)
+        $method = new \ReflectionMethod(DeliveryLifecycleService::class, 'deliveryStateFromAade');
+        $method->setAccessible(true);
+        $service = (new \ReflectionClass(DeliveryLifecycleService::class))->newInstanceWithoutConstructor();
+
+        foreach (DeliveryStatus::cases() as $case) {
+            $mapped = $method->invoke($service, $case);
+            $this->assertTrue(
+                $mapped === null || is_string($mapped),
+                "DeliveryStatus::{$case->name} must map to string|null, not throw."
+            );
+        }
+
+        $this->assertSame('in_transit', $method->invoke($service, DeliveryStatus::IN_TRANSIT_RETURN));
+        $this->assertNull($method->invoke($service, null));
+    }
+
     // ---- registerTransfer ---------------------------------------------
 
     public function test_register_transfer_moves_to_in_transit_and_stores_mark(): void
