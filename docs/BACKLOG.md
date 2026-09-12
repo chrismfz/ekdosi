@@ -1491,6 +1491,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `delivery_marks` rows + lifecycleHistory, so this is cache-fidelity only (no legal/money impact). Fix
   when touched: treat the operator-declared outcome states (`partial`/`failed`/`delivered`) as terminal
   in the same guard, or derive the guard from "is this state locally-authoritative" rather than listing.
+- **Slice-2 follow-up: `confirmReturn` reachable-from** _(CONFIRMED vs DGM v2.0.2 §3.2.7)._ ✅ **PARTLY
+  DONE** — `CONFIRM_RETURN_FROM_STATES` now adds the 3 real sources for plain 9.3 (`rejected/partial/failed`);
+  the operator-blocking gap is closed. **Still open (sandbox-gated):** `in_transit`/`in_transit_return` are
+  KEPT fail-safe but §3.2.7 gives a bare `InTransit` source only for 9.2 or 9.3-`reverseDeliveryNote`, so
+  for plain 9.3 they are probably invalid — **prune after the sandbox rehearsal** (`docs/delivery-sandbox-rehearsal.md`)
+  confirms AADE rejects them. Same rehearsal also answers whether AADE accepts **issuer-side PARTIAL**
+  (`confirmDelivery(PARTIAL)`) — v2.0.2 says PARTIAL is carrier-only; if rejected, gate it out (separate fix).
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
   `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a

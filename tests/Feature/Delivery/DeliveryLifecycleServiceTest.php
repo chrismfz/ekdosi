@@ -80,10 +80,15 @@ class DeliveryLifecycleServiceTest extends TestCase
     /** A note that has ALREADY been filed (Α' φάση done): VALID + registered + qrUrl. */
     private function makeFiledNote(array $cacheOverrides = []): DeliveryNote
     {
+        // Unique invcode/code per call so a test may create several notes (e.g. one
+        // per source state) without tripping unique(company_id, invcode).
+        static $seq = 0;
+        $seq++;
+
         $note = DeliveryNote::create([
             'company_id' => $this->tenant->id,
-            'invcode' => 'DA1',
-            'code' => 1,
+            'invcode' => 'DA'.$seq,
+            'code' => $seq,
             'delivery_type_id' => $this->deliveryType->id,
             'customer_id' => $this->recipient->id,
             'issued_at' => now(),
@@ -403,6 +408,40 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertSame('CONFIRM_RETURN', $mark->mydata_action);
         $this->assertSame('444444444444444', $note->fresh()->return_mark);
         $this->assertSame('returned', $note->fresh()->delivery_state);
+    }
+
+    /**
+     * Slice-2 follow-up: DGM v2.0.2 §3.2.7 lists the issuer's ConfirmDeliveryReturn
+     * sources as Rejected / DeliveredByCarrier(PARTIAL) / FailedDelivery → our
+     * rejected/partial/failed. These were previously blocked (guard was only
+     * in_transit/in_transit_return), so an operator could not close a return on a
+     * note the lifecycle had left rejected/partial/failed.
+     */
+    public function test_confirm_return_is_allowed_from_rejected_partial_failed(): void
+    {
+        foreach (['rejected', 'partial', 'failed'] as $from) {
+            $note = $this->makeFiledNote(['delivery_state' => $from]);
+
+            $mark = $this->service($this->confirmReturnResponse())->confirmReturn($note);
+
+            $this->assertSame('CONFIRM_RETURN', $mark->mydata_action, "from {$from}");
+            $this->assertSame('returned', $note->fresh()->delivery_state, "from {$from}");
+        }
+    }
+
+    public function test_confirm_return_still_rejects_states_outside_the_spec_set(): void
+    {
+        // registered (pre-transit) and delivered (fully completed) are NOT
+        // ConfirmDeliveryReturn sources — must still be refused.
+        foreach (['registered', 'delivered', 'cancelled'] as $from) {
+            $note = $this->makeFiledNote(['delivery_state' => $from]);
+            try {
+                $this->service($this->confirmReturnResponse())->confirmReturn($note);
+                $this->fail("confirmReturn should refuse from '{$from}'");
+            } catch (RuntimeException $e) {
+                $this->assertMatchesRegularExpression('/Δήλωση επιστροφής/u', $e->getMessage());
+            }
+        }
     }
 
     // ---- refreshStatus (read-only) ------------------------------------

@@ -167,15 +167,15 @@ class ViewDeliveryNote extends ViewRecord
                     'Δηλώθηκε το αποτέλεσμα παράδοσης',
                 )),
 
-            // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (myDATA v2.0.2): ο
-            // μεταφορέας επέστρεψε (μέρος των) αγαθών. in_transit | in_transit_return
-            // → returned (και από in_transit_return, όταν ο μεταφορέας έχει ήδη
-            // δηλώσει το σκέλος επιστροφής — carrier-reported).
+            // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (myDATA v2.0.2 §3.2.7): ο
+            // εκδότης κλείνει τη διακίνηση με επιστροφή. Πηγές (plain 9.3):
+            // rejected/partial/failed· in_transit/in_transit_return κρατιούνται
+            // pending sandbox (βλ. DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES).
             Action::make('confirm_return')
                 ->label('Δήλωση επιστροφής')
                 ->icon('heroicon-o-arrow-uturn-left')
                 ->color('warning')
-                ->visible(fn (DeliveryNote $record) => in_array($record->delivery_state, ['in_transit', 'in_transit_return'], true))
+                ->visible(fn (DeliveryNote $record) => in_array($record->delivery_state, DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES, true))
                 ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Δήλωση επιστροφής (myDATA)')

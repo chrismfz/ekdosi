@@ -59,7 +59,7 @@ use Throwable;
  *     in_transit ──confirmDelivery(FULL)────▶ delivered
  *     in_transit ──confirmDelivery(PARTIAL)─▶ partial
  *     in_transit ──confirmDelivery(NONE)────▶ failed
- *     in_transit / in_transit_return ──confirmReturn──▶ returned  (v2.0.2; AADE→Completed, deliveryReturnMark)
+ *     {rejected|partial|failed|in_transit|in_transit_return} ──confirmReturn──▶ returned  (v2.0.2 §3.2.7; AADE→Completed, deliveryReturnMark)
  *     in_transit ──(AADE reports IN_TRANSIT_RETURN via refresh)──▶ in_transit_return  (carrier-side return leg; we don't submit it)
  *     (any filed) ──cancel──▶ cancelled   (terminal; uses CancelInvoice by MARK)
  *     refreshStatus(): READ-ONLY reconcile against AADE §8.22 (no new mark row).
@@ -242,21 +242,38 @@ class DeliveryLifecycleService
     // ---- 2b. ConfirmDeliveryReturn (δήλωση επιστροφής) -----------------
 
     /**
-     * Δήλωση ολοκλήρωσης διακίνησης ΕΠΙ ΕΠΙΣΤΡΟΦΗΣ (myDATA v2.0.2): ο μεταφορέας
-     * δεν παρέδωσε το σύνολο των αγαθών και τα επέστρεψε στον εκδότη.
-     * in_transit | in_transit_return → returned. Keyed by the qrUrl· με επιτυχία η
-     * ΑΑΔΕ φέρνει το `deliveryReturnMark` και το δελτίο μεταβαίνει σε Completed.
-     * Αυτός είναι ο durable attempt-record που περίμενε το DEP-001 (βλ.
-     * docs/aade/mydata-v2.0.2-changes.md §A1). Επιτρέπεται και από in_transit_return:
-     * όταν ο μεταφορέας έχει ήδη ξεκινήσει το σκέλος επιστροφής (carrier-reported),
-     * ο εκδότης κλείνει τη διακίνηση με αυτή τη δήλωση.
+     * States the issuer's ConfirmDeliveryReturn may be called from (DGM v2.0.2
+     * §3.2.7 «Προηγούμενη Κατάσταση»). For a PLAIN 9.3 δελτίο (our case — not 9.2,
+     * not `reverseDeliveryNote`) the spec lists **Rejected / DeliveredByCarrier
+     * (PARTIAL) / FailedDelivery** → our `rejected`/`partial`/`failed`.
+     *
+     * `in_transit`/`in_transit_return` are KEPT here on purpose, pending sandbox
+     * confirmation: §3.2.7 lists a bare `InTransit` source ONLY for 9.2 or
+     * 9.3-reverse, so for a plain 9.3 they are probably NOT valid — but keeping
+     * them is fail-safe (a wrong source is rejected by AADE at `firstSuccessful`,
+     * never corrupts state), whereas dropping the three real sources blocks a
+     * legal operator action. The Β' Φάση sandbox rehearsal
+     * (`docs/delivery-sandbox-rehearsal.md`) tests each source empirically; prune
+     * `in_transit`/`in_transit_return` here once AADE confirms it rejects them.
+     *
+     * @var list<string>
+     */
+    public const CONFIRM_RETURN_FROM_STATES = ['rejected', 'partial', 'failed', 'in_transit', 'in_transit_return'];
+
+    /**
+     * Δήλωση ολοκλήρωσης διακίνησης ΕΠΙ ΕΠΙΣΤΡΟΦΗΣ (myDATA v2.0.2): ο εκδότης δηλώνει
+     * ότι η διακίνηση έκλεισε με επιστροφή (ο μεταφορέας δεν παρέδωσε όλα τα αγαθά).
+     * `{rejected|partial|failed|in_transit|in_transit_return} → returned` (βλ.
+     * CONFIRM_RETURN_FROM_STATES + DGM v2.0.2 §3.2.7). Keyed by the qrUrl· με επιτυχία
+     * η ΑΑΔΕ φέρνει το `deliveryReturnMark` και το δελτίο μεταβαίνει σε Completed.
+     * Αυτός είναι ο durable attempt-record που περίμενε το DEP-001.
      */
     public function confirmReturn(DeliveryNote $note): DeliveryMark
     {
         // MYD-022: filed under the tenant's ΑΦΜ + credentials, like every event.
         TenantCoherence::assertDeliveryNote($this->tenant, $note);
 
-        $this->requireStateIn($note, ['in_transit', 'in_transit_return'], 'Δήλωση επιστροφής');
+        $this->requireStateIn($note, self::CONFIRM_RETURN_FROM_STATES, 'Δήλωση επιστροφής');
 
         $deliveryReturn = (new DeliveryReturn)->setQrUrl($this->requireQrUrl($note));
 

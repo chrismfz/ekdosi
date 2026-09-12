@@ -11,6 +11,9 @@ docs this file points to.
 > implemented by `firebed/aade-mydata` 5.12.0. **Τι άλλαξε vs v2.0.1 + τι πρέπει να wire-άρει το
 > ekdosi → `docs/aade/mydata-v2.0.2-changes.md`** (actionable delta). Providers protocol:
 > `…_v2.0.2_official_providers.pdf` (πληροφοριακό — τι υλοποιεί ένας πάροχος, όχι εμείς).
+> **Ψηφιακή Διακίνηση (DGM) lifecycle — CURRENT: `…_DeliveryNote_v2.0.2_preofficial.md`** (§1.2 =
+> state machine, §3.2.7 = ConfirmDeliveryReturn reachable-from states, §4 = schemas) — the authority
+> for the movement lifecycle (the ERP md only gives the issue payload).
 > Older refs kept for the §-anchors they cite:
 > **`…_v2.0.0_preofficial_erp.md`** (§8 = code tables, §7.2 = the 101–280 business-error list) +
 > **`…_DeliveryNote_v2.0.1_preofficial.md`** (§7.1 = InvoiceDeliveryStatus, §7.2 = event types,

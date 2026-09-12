@@ -106,6 +106,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   access ή λειτουργία.
 
 ### Fixed
+- **Ψηφιακή διακίνηση — «Δήλωση επιστροφής» από τις σωστές καταστάσεις (DGM v2.0.2 §3.2.7).** Το DGM
+  v2.0.2 doc (πλέον στο repo) όρισε ρητά ότι η ConfirmDeliveryReturn του εκδότη καλείται από **Rejected /
+  μερική παράδοση (PARTIAL) / FailedDelivery** → `rejected/partial/failed`. Το Slice 2 επέτρεπε μόνο
+  `in_transit`/`in_transit_return`, οπότε ο χειριστής **δεν μπορούσε** να δηλώσει επιστροφή σε δελτίο που
+  ο κύκλος ζωής άφησε rejected/partial/failed. Fix: `CONFIRM_RETURN_FROM_STATES` (νέα const) προσθέτει τα
+  3 πραγματικά sources· τα `in_transit`/`in_transit_return` κρατιούνται fail-safe (η ΑΑΔΕ απορρίπτει άκυρο
+  source στην υποβολή — για plain 9.3 το §3.2.7 τα δίνει μόνο σε 9.2/9.3-reverse) εκκρεμεί επιβεβαίωση στο
+  **sandbox** (`docs/delivery-sandbox-rehearsal.md`, Β' Φάση live) για να κλαδευτούν αν χρειάζεται.
 - **CI πράσινο ξανά: τα tests δεν εξαρτώνται πια από export-ignored vendor stubs.** Το firebed 5.12.0
   πρόσθεσε `/stubs export-ignore` στο δικό του `.gitattributes` («leaner package»), οπότε το
   `composer install --prefer-dist` της CI **δεν** κατεβάζει πια το `vendor/firebed/aade-mydata/stubs/`.
