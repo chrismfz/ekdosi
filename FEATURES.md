@@ -552,7 +552,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 
 ## 15. Ασφάλεια & λειτουργικά
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.
-- **2FA** (TOTP) + `EKDOSI_REQUIRE_2FA`.
+- **2FA** (TOTP) + `EKDOSI_REQUIRE_2FA`. Self-service enrolment στο προφίλ (QR)· στους «Χρήστες»
+  στήλη κατάστασης «2FA» + φίλτρο + «Επαναφορά 2FA» (admin disable/reset — η ενεργοποίηση μένει
+  self-service).
 - **FK-aware delete guard** (`GuardedDeleteAction`) — μπλοκάρει διαγραφή lookup σε χρήση, σε **single + bulk +
   force** (η μαζική/οριστική διαγραφή παραλείπει τις σε-χρήση εγγραφές με σύνοψη «Διαγράφηκαν/Παραλείφθηκαν»).
 - **Off-site backup verification** (`ops:health` → `backup.companies`) — ανά tenant με

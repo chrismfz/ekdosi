@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\Users\Tables;
 
+use App\Filament\Resources\Users\Actions\ResetTwoFactorAction;
+use App\Models\User;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
@@ -13,6 +15,7 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Hash;
 
 class UsersTable
@@ -31,6 +34,18 @@ class UsersTable
                     ->label('Verified')
                     ->boolean()
                     ->sortable(),
+                // 2FA at a glance: green check = TOTP enrolled, red × = off.
+                // Not a real column — derived from the secret's presence. The
+                // MaybeEncrypted secret is non-null whenever enrolled (encrypted
+                // or plaintext), so the NULL check is correct either way.
+                IconColumn::make('two_factor')
+                    ->label('2FA')
+                    ->state(fn (User $record): bool => filled($record->app_authentication_secret))
+                    ->boolean()
+                    ->sortable(query: fn (Builder $query, string $direction): Builder => $query->orderByRaw(
+                        '(app_authentication_secret IS NOT NULL) '.($direction === 'desc' ? 'desc' : 'asc')
+                    ))
+                    ->tooltip(fn (User $record): string => filled($record->app_authentication_secret) ? 'Ενεργό' : 'Ανενεργό'),
                 TextColumn::make('companies_count')
                     ->label('Tenants')
                     ->counts('companies')
@@ -65,6 +80,16 @@ class UsersTable
                 TernaryFilter::make('email_verified_at')
                     ->label('Verified')
                     ->nullable(),
+                TernaryFilter::make('two_factor')
+                    ->label('2FA')
+                    ->placeholder('Όλοι')
+                    ->trueLabel('Με 2FA')
+                    ->falseLabel('Χωρίς 2FA')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->whereNotNull('app_authentication_secret'),
+                        false: fn (Builder $query): Builder => $query->whereNull('app_authentication_secret'),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
                 Filter::make('no_company')
                     ->label('Χωρίς εταιρεία (θα παίρνει 403)')
                     ->query(fn ($query) => $query->whereDoesntHave('companies')),
@@ -94,27 +119,9 @@ class UsersTable
                             ->success()
                             ->send();
                     }),
-                // Recovery path for a lost authenticator: without this an
-                // enrolled user who loses their device AND recovery codes is
-                // permanently locked out (only a manual DB UPDATE could fix it).
-                Action::make('reset_2fa')
-                    ->label('Επαναφορά 2FA')
-                    ->icon('heroicon-o-shield-exclamation')
-                    ->color('danger')
-                    ->visible(fn ($record): bool => filled($record->app_authentication_secret))
-                    ->requiresConfirmation()
-                    ->modalDescription(fn ($record) => "Θα αφαιρεθεί το 2FA του {$record->email} (TOTP + recovery codes). Θα ξανα-εγγραφεί στο επόμενο login.")
-                    ->action(function ($record): void {
-                        $record->forceFill([
-                            'app_authentication_secret' => null,
-                            'app_authentication_recovery_codes' => null,
-                        ])->save();
-
-                        Notification::make()
-                            ->title("Έγινε επαναφορά 2FA για {$record->email}")
-                            ->success()
-                            ->send();
-                    }),
+                // Recovery path for a lost authenticator (shared with the
+                // Edit-user page header) — see ResetTwoFactorAction.
+                ResetTwoFactorAction::make(),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

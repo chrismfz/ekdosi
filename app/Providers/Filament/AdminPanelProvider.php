@@ -7,8 +7,8 @@ use App\Filament\Pages\Dashboard;
 use App\Models\Company;
 use App\Support\BuildInfo;
 use App\Support\Settings\SystemSettings;
+use App\Support\TwoFactor\AppAuthentication;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
-use Filament\Auth\MultiFactor\App\AppAuthentication;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -39,7 +39,9 @@ class AdminPanelProvider extends PanelProvider
             // QR enrollment, recovery-code generation and disable/regenerate
             // all live on the profile page automatically. Opt-in per user by
             // default; set EKDOSI_REQUIRE_2FA=true to force enrolment on next
-            // login once the whole team is set up.
+            // login once the whole team is set up. Our App\Support\TwoFactor\
+            // AppAuthentication subclass patches the enrolment-QR double-encode
+            // bug on gd-only (non-imagick) hosts — see that class.
             ->multiFactorAuthentication(
                 [AppAuthentication::make()->recoverable()],
                 // DB override (set from «Ρυθμίσεις συστήματος») wins; env is the default.
