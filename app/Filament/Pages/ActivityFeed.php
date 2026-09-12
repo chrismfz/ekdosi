@@ -90,6 +90,20 @@ class ActivityFeed extends Page implements HasTable
         return $user instanceof User && $user->isSystemSuperAdmin();
     }
 
+    /**
+     * The tab actually in effect — 'security' only when selected AND allowed.
+     * Single source of truth for both table() and the blade tab highlight, so a
+     * forced ?activeTab=security (hydrated before updatedActiveTab() runs) can
+     * never show the security table to a non-super-admin, nor leave the tab bar
+     * with nothing highlighted.
+     */
+    public function effectiveActiveTab(): string
+    {
+        return ($this->activeTab === 'security' && $this->canSeeSecurityTab())
+            ? 'security'
+            : 'records';
+    }
+
     public function updatedActiveTab(): void
     {
         // Never let a non-super-admin land on the security table by forcing the
@@ -106,7 +120,7 @@ class ActivityFeed extends Page implements HasTable
 
     public function table(Table $table): Table
     {
-        return ($this->activeTab === 'security' && $this->canSeeSecurityTab())
+        return $this->effectiveActiveTab() === 'security'
             ? $this->securityTable($table)
             : $this->recordsTable($table);
     }

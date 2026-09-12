@@ -2,7 +2,7 @@
     <x-filament::tabs>
         <x-filament::tabs.item
             icon="heroicon-o-clock"
-            :active="$this->activeTab === 'records'"
+            :active="$this->effectiveActiveTab() === 'records'"
             wire:click="$set('activeTab', 'records')"
         >
             Εγγραφές
@@ -11,7 +11,7 @@
         @if ($this->canSeeSecurityTab())
             <x-filament::tabs.item
                 icon="heroicon-o-shield-check"
-                :active="$this->activeTab === 'security'"
+                :active="$this->effectiveActiveTab() === 'security'"
                 wire:click="$set('activeTab', 'security')"
             >
                 Συνδέσεις &amp; ασφάλεια
