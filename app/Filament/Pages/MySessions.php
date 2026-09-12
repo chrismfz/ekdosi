@@ -63,6 +63,11 @@ class MySessions extends Page
         $userId = Auth::guard('web')->id();
         $currentId = session()->getId();
 
+        // No last_activity/lifetime cut on purpose: the list must match exactly
+        // what «Τερματισμός»/«Αποσύνδεση όλων» act on (every row in the store),
+        // and lifetime doesn't apply cleanly when expire_on_close is on. The
+        // «Τελευταία δραστηριότητα» column surfaces staleness for the operator to
+        // judge — a row still in the store is a real, revocable artifact.
         return DB::table(config('session.table', 'sessions'))
             ->where('user_id', $userId)
             ->orderByDesc('last_activity')
@@ -187,10 +192,13 @@ class MySessions extends Page
 
         // With SESSION_ENCRYPT on, the stored payload is ciphertext — decrypt it
         // back to the serialized attribute string before decoding, or the guard
-        // check would silently fail for every row.
+        // check would silently fail for every row. EncryptedStore uses the
+        // encrypter's DEFAULT serialize=true (encrypt($data)/decrypt($data)), so
+        // decrypt with the default too — a `false` here would leave the value
+        // PHP-serialized and never decode.
         if (config('session.encrypt')) {
             try {
-                $raw = Crypt::decrypt($raw, false);
+                $raw = Crypt::decrypt($raw);
             } catch (\Throwable) {
                 return null;
             }

@@ -9,6 +9,7 @@ use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Auth\SessionGuard;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Crypt;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Validator;
@@ -126,6 +127,31 @@ class SecurityHardeningTest extends TestCase
         $this->assertContains('own-web', $ids);
         $this->assertNotContains('own-portal', $ids);
         $this->assertNotContains('other-web', $ids);
+    }
+
+    public function test_my_sessions_decodes_encrypted_payloads(): void
+    {
+        // With SESSION_ENCRYPT on, the payload is base64(encrypt(serialize(attrs)))
+        // — the decode must decrypt it (encrypter default serialize=true) before
+        // reading the guard key, or the whole page is silently empty in prod.
+        $me = User::create(['name' => 'Me', 'email' => 'enc-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $this->enterPanel($me);
+        config(['session.encrypt' => true]);
+
+        $key = 'login_web_'.sha1(SessionGuard::class);
+        $attrs = [$key => $me->id, '_token' => 'x'];
+        $serialized = config('session.serialization', 'php') === 'json' ? json_encode($attrs) : serialize($attrs);
+
+        DB::table('sessions')->insert([
+            'id' => 'enc-web',
+            'user_id' => $me->id,
+            'ip_address' => '203.0.113.9',
+            'user_agent' => 'Mozilla/5.0 Chrome/120',
+            'payload' => base64_encode(Crypt::encrypt($serialized)), // encrypter serialize=true
+            'last_activity' => time(),
+        ]);
+
+        $this->assertContains('enc-web', array_column((new MySessions)->sessions(), 'id'));
     }
 
     public function test_revoke_deletes_own_web_session_but_refuses_portal_and_foreign(): void
