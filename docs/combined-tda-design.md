@@ -15,19 +15,30 @@ A **ΤΔΑ is a monetary invoice, not a delivery note.** It is a myDATA **type `
 `qrUrl` the `1.1` submission returns — so it applies to a ΤΔΑ unchanged.
 
 **Recommended architecture:** `Invoice` gains the movement fields + lifecycle-cache columns and
-implements a small **`MovableDocument`** contract; `DeliveryLifecycleService` is generalised to that
-contract so it drives both `DeliveryNote` and a ΤΔΑ `Invoice`. **Money stays on `Invoice`
-(never duplicated); movement becomes shared.**
+implements a **`MovableDocument`** contract; `DeliveryLifecycleService` is generalised to that contract
+(a real refactor — NOT «reuse verbatim»: the audit tables must become polymorphic and the
+tenant/stock/cancel seams re-cut). **Money stays on `Invoice` (never duplicated); movement + its audit
+become shared; a ΤΔΑ cancel goes through the monetary path, not the movement one.**
 
-## 1. What a ΤΔΑ is — spec grounding (v2.0.2)
+## 1. What a ΤΔΑ is — spec grounding
 
-The v2.0.2 ERP spec is the enabling document — `isDeliveryNote` + the structured address header
-are **v2.0.2 additions** (`docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md`):
+**The combined ΤΔΑ is NOT new and NOT gated on v2.0.2.** The `InvoiceHeader` fields that make a 1.1
+also-a-delivery-note (`isDeliveryNote`, `otherDeliveryNoteHeader`, `otherMovePurposeTitle`,
+`thirdPartyCollection`, `OtherDeliveryNoteHeaderType`) landed in **v1.0.8 (12/2/2024)** — the ERP
+spec's own changelog (`…v2.0.2_official_erp.md` §"Έκδοση 1.0.8"), and firebed tags them
+`@version 1.0.8` (`InvoiceHeader.php:419/433`). So a combined ΤΔΑ has been submittable since Feb 2024;
+we simply never built the ekdosi side (MYD-002). v2.0.2 is just **the current spec we build against**,
+and it adds two things that DO touch this design: **`withoutDigitalTransportTracking`** (a genuine
+v2.0.2 `InvoiceHeader` field — lets a ΤΔΑ be issued with NO movement lifecycle, going straight to
+*Completed*) and the `supportsDeliveryNote()` extension to 1.4/3.1/3.2/11.5.
 
-- **§5.3 `InvoiceHeader`** (table, md L854–879) carries, all optional:
-  `isDeliveryNote` (boolean, L878), `dispatchDate`/`dispatchTime` (L860–861), `vehicleNumber`
-  (L862), `movePurpose` (int, L872), `otherDeliveryNoteHeader` (`OtherDeliveryNoteHeaderType`,
-  L877), `otherMovePurposeTitle` (L879, only when movePurpose=19).
+Fields from the ERP spec (`…v2.0.2_official_erp.md`, tables — the md is a PDF conversion so the tree
+diagrams are OCR-garbled; the field tables are reliable):
+
+- **§5.3 `InvoiceHeader`** (L854–879, all optional): `isDeliveryNote` (bool, L878),
+  `dispatchDate`/`dispatchTime` (L860–861), `vehicleNumber` (L862), `movePurpose` (int, L872),
+  `otherDeliveryNoteHeader` (`OtherDeliveryNoteHeaderType`, L877), `otherMovePurposeTitle` (L879, only
+  when movePurpose=19). Plus v2.0.2: `withoutDigitalTransportTracking`.
 - **Note 13 (L929–935)** — verbatim the ΤΔΑ: *«Το πεδίο isDeliveryNote ορίζει αν πρόκειται για
   τιμολόγιο που είναι και δελτίο αποστολής (π.χ. το παραστατικό τύπου 1.1 … εφόσον φέρει την ένδειξη
   isDeliveryNote = true, τότε είναι και δελτίο διακίνησης και θα πρέπει να αποσταλούν και επιπλέον
@@ -35,11 +46,12 @@ are **v2.0.2 additions** (`docs/aade/myDATA_API_Documentation_v2.0.2_official_er
 - **§5.3.2 `OtherDeliveryNoteHeaderType`** — `loadingAddress`, `deliveryAddress`,
   `startShippingBranch`, `completeShippingBranch` (the loading/delivery points of the combined doc).
 - **Note 9 (L1169)** — *«Το πεδίο qrUrl επιστρέφει μόνο στις υποβολές παραστατικών τύπου από 1.1 έως
-  11.5»*. So a ΤΔΑ-1.1 submission returns a **qrUrl** → the lifecycle key.
+  11.5»*. So a ΤΔΑ-1.1 submission returns a **qrUrl** → the lifecycle key (when tracking is on).
 - **Validation [280]** (L1470) — `dispatchDate` must be ≥ current date.
-- The **movement lifecycle methods** (RegisterTransfer/ConfirmDeliveryOutcome/…/ConfirmDeliveryReturn)
-  are specified in the SEPARATE AADE doc *«Ψηφιακό Δελτίο Αποστολής»* (we hold v2.0.1 of it). The ERP
-  md only gives the **issue payload**.
+- The **movement lifecycle methods** (RegisterTransfer/…/ConfirmDeliveryReturn) are in the SEPARATE
+  AADE *«Ψηφιακή Διακίνηση Αγαθών»* REST doc. **We must obtain the v2.0.2 version** (we hold only
+  v2.0.1); it is the authority for the state machine + which states each call is reachable from (see
+  §11-Q2 and the Slice-2 confirmReturn reachable-from check). The ERP md gives only the issue payload.
 
 **Scope of types:** v2.0.2 `supportsDeliveryNote()` also allows 1.4/3.1/3.2/11.5, but the **classic
 ΤΔΑ is `1.1`**. This design targets **1.1 only**; the rest are a later, trivial allowlist extension.
@@ -63,38 +75,71 @@ lifecycle generalisation).
 
 | Group | When | Fields | Where in myDATA |
 |---|---|---|---|
-| **Issue-time** (planned) | at ΤΔΑ filing (the 1.1 submission) | `isDeliveryNote=true`, `movePurpose`(+`otherMovePurposeTitle`), `dispatchDate`/`dispatchTime`, `vehicleNumber`, `otherDeliveryNoteHeader`(loading/delivery address + shipping branches), `thirdPartyCollection` | `InvoiceHeader` |
+| **Issue-time** (planned) | at ΤΔΑ filing (the 1.1 submission) | `isDeliveryNote=true`, `movePurpose`(+`otherMovePurposeTitle`), `dispatchDate`/`dispatchTime`, `vehicleNumber`, `otherDeliveryNoteHeader`(loading/delivery address + shipping branches); optionally `withoutDigitalTransportTracking` (→ no lifecycle) | `InvoiceHeader` |
 | **Lifecycle** (actual) | AFTER filing, keyed by `qrUrl` | `transportType` (1–7), `carrierVat`, `vehicleNumber` (actual) | RegisterTransfer `TransportDetails` (DGM), **not** the issue payload |
 
 So a ΤΔΑ `Invoice` needs BOTH the issue-time movement header AND (for the lifecycle) the same
 `transport_type`/`carrier_afm` + lifecycle-cache columns a `DeliveryNote` has.
 
+> **`thirdPartyCollection` is NOT a ΤΔΑ field** (dropped after review): the spec accepts it **only for
+> types 8.4/8.5** (POS-collection on behalf of third parties — a *payments* concept, `InvoiceHeader.php:470-475`).
+> ekdosi's `delivery_notes.third_party_collection` («παραλαβή από τρίτο/μεταφορέα») is a **name
+> collision** with a different meaning; do not carry it onto a 1.1 ΤΔΑ without sandbox confirmation.
+
+> **`withoutDigitalTransportTracking` = the fork** (v2.0.2): true → the ΤΔΑ files and goes straight to
+> *Completed*, no `qrUrl`/lifecycle. Default (tracking on) → `qrUrl` returned, full movement lifecycle
+> applies. The ΤΔΑ form needs this toggle; §7 lifecycle only applies when tracking is on.
+
 ## 4. Architecture — options
 
-### ✅ Option A1 (recommended) — `Invoice` is the movable document
-- Add movement + lifecycle-cache columns to `invoices` (§5).
-- Extract a **`MovableDocument`** contract = exactly what `DeliveryLifecycleService` reads/writes:
-  `qrUrl` (`mydata_url`), `mydata_mark`, `mydata_state`, `delivery_state`, `transfer_mark`/
-  `outcome_mark`/`return_mark`, `transport_type`, `vehicle_number`, `carrier_afm`, `local_status`,
-  `invcode`, `company_id`, `forceFill`/save. Both `DeliveryNote` and `Invoice` implement it.
-- Generalise `DeliveryLifecycleService` to type against `MovableDocument` instead of `DeliveryNote`.
-- **Pros:** one document = one MARK = one qrUrl; orthodox modelling; money stack untouched; lifecycle
-  code reused verbatim. **Cons:** touches the lifecycle service signatures + a migration on `invoices`
-  (net-new columns). Tests: the existing delivery-lifecycle tests must still pass against the contract.
+### ✅ Option A1 (recommended) — `Invoice` is the movable document, with a polymorphic audit
+`DeliveryLifecycleService` is **NOT reusable verbatim** — it is structurally bound to `DeliveryNote`
+in four places that the contract must break (all verified in source):
 
-### Option A3 (alternative, cleaner long-term, bigger) — polymorphic `document_movements` side table
-- A `document_movements` table (`movable_type`/`movable_id` + the movement header + lifecycle cache),
-  shared by `DeliveryNote` and ΤΔΑ `Invoice`. **Pros:** no movement columns on either parent; single
-  home. **Cons:** much bigger refactor (migrate `DeliveryNote`'s existing movement/cache columns into
-  it, or live with two storage shapes); not worth it just to unlock 1.1-ΤΔΑ. **Defer** unless we later
-  add many movable types.
+1. **Audit-row FK (the real blocker).** `persistEvent`/`persistCancellation`/`applyRemoteCancellation`
+   write `DeliveryMark::create(['delivery_note_id' => $note->id, …])` (`DeliveryLifecycleService.php:875,606,707`)
+   and `syncLifecycleHistory` writes `DeliveryNoteEvent` (`:403`). Both columns are a hard
+   **FK to `delivery_notes.id`** (`create_delivery_marks_table.php:22`, `create_delivery_note_events_table.php:24`).
+   **An `Invoice` cannot populate `delivery_note_id`.**
+2. **Tenant coherence** — `TenantCoherence::assertDeliveryNote($tenant, $note)` (`:121,202,257,295,463`), DeliveryNote-typed.
+3. **Stock** — cancel calls `reverseSaleForDeliveryNote($note)` (`:635,739`); an invoice reverses via
+   `reverseSaleForInvoice` (`InvoiceObserver.php:299`), so the DN hook is a no-op for a ΤΔΑ.
+4. **Concrete-model queries** — `DeliveryNote::query()->lockForUpdate()` (`:688`),
+   `DeliveryMark::query()->where('delivery_note_id', …)` (`:479`).
 
-### ❌ Option A2 (rejected) — shadow `DeliveryNote` linked to the ΤΔΑ invoice
+**The design (chosen, not deferred):**
+- **Audit model = polymorphic.** Make `delivery_marks` + `delivery_note_events` **`morphs('movable')`**
+  (`movable_type`/`movable_id`) instead of `delivery_note_id`; migrate existing rows to
+  `movable_type=DeliveryNote`. The movement audit is conceptually about the MOVEMENT, so one home for
+  both parents. (`delivery_marks` already has a nullable path for provider rows — extend, don't fork.)
+  This migration lives in **3a**.
+- **`MovableDocument` contract** = every accessor + seam the service touches:
+  `qrUrl`(`mydata_url`), `mydata_mark`, `mydata_state`, `delivery_state`, `transfer_mark`/`outcome_mark`/
+  `return_mark`/`reject_mark`, `transport_type`, `vehicle_number`, `carrier_afm`, `local_status`,
+  `invcode`, `company_id`, `issued_at`, `getKey()`, `forceFill`/save, the polymorphic `marks()`/`events()`
+  relations, a `assertTenantCoherence($tenant)` seam, and a `reverseSaleForMovable()` stock seam.
+  Both `DeliveryNote` and `Invoice` implement it.
+- Generalise the service to type against `MovableDocument`; replace the four DeliveryNote-typed seams above.
+- **Cancel is NOT part of this** — a ΤΔΑ cancels through the monetary path (§7), so the service's
+  `cancel()` stays DeliveryNote-only.
+- **Pros:** one document = one MARK = one qrUrl; money stack untouched; movement audit unified.
+  **Cons:** a polymorphic migration on two audit tables + a real (not cosmetic) refactor of the service
+  seams. Tests: the existing delivery-lifecycle suite must stay green against the contract.
+
+### Option A2 (rejected, but its one real merit noted) — shadow `DeliveryNote` linked to the ΤΔΑ invoice
 `delivery_notes.invoice_id` already exists, so a ΤΔΑ could spawn a linked `DeliveryNote` for its
-movement. **Rejected:** a ΤΔΑ is **ONE** myDATA document (one 1.1 submission, one MARK), but a real
-`DeliveryNote` files its own 9.x document — so the shadow would either double-file (wrong) or be a
-half-entity that must be taught never to submit and to borrow the invoice's MARK/qrUrl. More special
-cases than A1, for no benefit.
+movement. **Its ONE genuine advantage over A1:** the audit tables already FK `delivery_notes`, so a
+shadow note needs **zero** audit rework (no polymorphic migration). **Still rejected:** a ΤΔΑ is **ONE**
+myDATA document (one 1.1 submission, one MARK), but a real `DeliveryNote` files its own 9.x document — so
+the shadow must be taught to NEVER submit, to borrow the invoice's MARK/qrUrl, and to not double-count
+stock. That is a permanent half-entity plus a two-rows-one-truth invariant, versus A1's one-off
+polymorphic migration. A1 wins, but the tradeoff is closer than the first draft implied.
+
+### Option A3 (deferred) — polymorphic `document_movements` side table
+Move the whole movement header + cache off both parents into `document_movements` (`movable_*`).
+Cleanest long-term, but a much bigger refactor (migrate `DeliveryNote`'s existing movement columns too).
+Not worth it just to unlock 1.1-ΤΔΑ; **defer** unless many movable types arrive. Note A1's polymorphic
+audit is a step toward it.
 
 ## 5. Schema changes (A1)
 
@@ -106,13 +151,20 @@ New migration on **`invoices`** (all nullable; mirror `delivery_notes` names for
   `delivery_street/number/postcode/city`, `start_shipping_branch`/`complete_shipping_branch` (uint).
   (`recipient_*` already covered by the counterpart snapshot + `counterpart_branch`; confirm mapping.)
 - **Lifecycle:** `transport_type` (tinyint), `carrier_afm` (string 20); cache `delivery_state`
-  (string 30), `transfer_mark`/`outcome_mark`/`return_mark`/`reject_mark` (string 50). `mydata_url`
-  (qrUrl) — **check if `invoices` already stores qrUrl**; if not, add it (the lifecycle key).
-- **`invoice_types.is_delivery_note`** boolean default false — so a «ΤΔΑ» type pre-sets the flag
-  (convenience default), while the per-invoice column stays authoritative.
+  (string 30), `transfer_mark`/`outcome_mark`/`return_mark`/`reject_mark` (string 50).
+  **`invoices` ALREADY has `mydata_url` (qrUrl), `mydata_state`, `mydata_mark`** (`create_invoices_table.php:51-53`)
+  — so the net-new set is only the movement header + `delivery_state` + the four `*_mark` cache cols + `is_delivery_note`.
+- **`invoice_types.is_delivery_note`** boolean default false — a «ΤΔΑ» type pre-sets the flag; the
+  per-invoice column stays authoritative. **Extend the seeder's row-application code too:**
+  `INVOICE_TYPE_SEED` rows carry only `{code,name,mydata_type,income…,is_credit?,goods?}`
+  (`MyDataLookupSeeder.php:428-462`), so the new flag needs a new key + a line in the apply loop, not
+  just the array (3a scope).
+- **Audit tables → polymorphic** (the P1 fix, §4-A1): `delivery_marks` + `delivery_note_events`
+  gain `morphs('movable')` and existing `delivery_note_id` rows migrate to `movable_type=DeliveryNote`.
+  This is part of **3a**, not a later slice.
 
-Reversible `down()`. No destructive change. Backfill: none (new columns, existing invoices keep NULL
-/ false).
+Reversible `down()`. No destructive change to invoice data; the audit-table morph backfills existing
+rows deterministically. Backfill on `invoices`: none (new columns default NULL/false).
 
 ## 6. Issue payload — the combined 1.1 (`AadeInvoiceDocument`)
 
@@ -125,20 +177,34 @@ Reversible `down()`. No destructive change. Backfill: none (new columns, existin
   `Codes::isMovementOnlyType()` (9.x) — a ΤΔΑ is NOT movement-only (it is a 1.1), so it already passes
   the 9.x reject; the real work is EMITTING the movement header, not loosening the guard. Confirm no
   other gate blocks it.
-- **Fix `Codes::allowsItemDescr()`** (MYD-002 follow-up): gate on the `is_delivery_note` flag (a
-  combined 1.1 may carry `<itemDescr>`) instead of the bare 9.x type.
+- **Fix `Codes::allowsItemDescr()`** (MYD-002 follow-up) — **an API change:** it takes the type
+  *string* today (`Codes.php:853`, called with the type at `AadeInvoiceDocument.php:203`); it must gate
+  on the `is_delivery_note` flag (a combined 1.1 may carry `<itemDescr>`) — so pass the flag/invoice, not
+  just the code. The call site already anticipates this (`AadeInvoiceDocument.php:194-201`).
 - **Keep `<currency>`** (a ΤΔΑ is monetary — unlike pure 9.x which omits it and `isDeliveryNote`,
   `DeliveryNoteSubmitter.php:163–165`).
 - Submit via the **existing `MyDataSubmitter`** (monetary path) — a ΤΔΑ is filed once as a 1.1. The
   returned MARK + qrUrl persist on the invoice (the lifecycle key).
 
-## 7. Lifecycle (shared `MovableDocument` contract)
+## 7. Lifecycle + cancel ownership
 
-After a ΤΔΑ is filed (qrUrl present), the operator can run the movement lifecycle from the invoice:
-RegisterTransfer → in_transit → ConfirmDelivery / ConfirmReturn → refreshStatus, cancel. Reuse
-`DeliveryLifecycleService` verbatim via the contract (§4.A1). **Open:** whether AADE requires a
-separate RegisterTransfer for a ΤΔΑ or treats the filed 1.1-with-movement as the transfer start —
-**answer from the ΔΑ lifecycle doc + sandbox before building 7** (§11-Q2).
+**Tracking on (default):** a filed ΤΔΑ returns a `qrUrl` and enters the SAME state machine as a 9.3
+(DGM v2.0.2 §1.2: Registered → RegisterTransfer → InTransit → ConfirmDeliveryOutcome/Return →
+Completed). So the generalised `DeliveryLifecycleService` (§4-A1, via the contract — **not** verbatim)
+drives RegisterTransfer/confirmDelivery/confirmReturn/refreshStatus on the ΤΔΑ invoice.
+
+**Tracking off (`withoutDigitalTransportTracking=true`):** the ΤΔΑ files straight to *Completed*, no
+`qrUrl`, no lifecycle — the movement actions must be hidden for it.
+
+**Cancel is the exception — one owner (P1 fix):** a ΤΔΑ is ONE 1.1 document/MARK, so it cancels
+through the **monetary path** (`MyDataSubmitter::cancel`, the normal `ViewInvoice` «Ακύρωση»), NOT the
+movement `DeliveryLifecycleService::cancel`. Today those two choke-points diverge — the monetary cancel
+flips `mydata_state`/`local_status` + writes a `MyDataMark` but never touches `delivery_state` or
+reverses stock, while the movement cancel does the opposite. **The design:** extend the monetary cancel
+so that for an `is_delivery_note` invoice it also reconciles `delivery_state='cancelled'` and runs
+`reverseSaleForInvoice` (never the DN reversal, so stock moves once); the movement-lifecycle `cancel()`
+stays DeliveryNote-only and refuses/redirects for an invoice-backed movable. (This is a design decision,
+resolved here — not a sandbox question.)
 
 ## 8. Type seed + legacy normalisation
 
@@ -171,28 +237,38 @@ separate RegisterTransfer for a ΤΔΑ or treats the filed 1.1-with-movement as 
 
 ## 11. Open questions / risks
 
-1. **A1 vs A3** — recommend A1 now; revisit A3 only if more movable types arrive.
-2. **Is a separate RegisterTransfer required for a ΤΔΑ?** (does filing the 1.1-with-movement already
-   start the movement, or is the DGM ΕΝΑΡΞΗ still needed?) — **answer from the ΔΑ lifecycle doc +
-   sandbox first.** Gates §7.
+1. **A1 vs A3** — recommend A1 now (with polymorphic audit); revisit A3 only if more movable types arrive.
+2. ~~Is a separate RegisterTransfer required?~~ **RESOLVED** (DGM v2.0.2 §1.2, now in repo): a tracked
+   ΤΔΑ enters the same Registered→RegisterTransfer→… machine as a 9.3; `withoutDigitalTransportTracking=true`
+   skips it → *Completed*. See §7. Confirm on sandbox.
 3. **Types beyond 1.1** (1.4/3.1/3.2/11.5) — out of scope for v1; trivial allowlist add later.
-4. **recipient/loading vs counterpart address** — map the combined-doc addresses to existing
-   counterpart snapshot + the new loading/delivery fields without duplication.
-5. **Not sandbox-validated** — like the rest of the DGM lifecycle, validate the combined payload on the
-   AADE sandbox (dev creds available) before go-live. **No tenant issues ΤΔΑ today** (MCP: myip/nexon
-   cut ΤΙΜ/ΤΠΥ/ΑΛΠ) — nexon will need it after its fresh migration; build is for that + completeness,
-   so priority is «real but not on fire».
+4. **recipient/loading vs counterpart address** — map the combined-doc addresses (`otherDeliveryNoteHeader`
+   loading/delivery + branches) to the existing counterpart snapshot + the new loading/delivery fields
+   without duplication.
+5. **Sandbox NOW available** — the Β' Φάση DGM API is live in the AADE test env (2026-09, dev creds on
+   hand), so the combined payload + lifecycle can finally be round-tripped before go-live — a change from
+   the whole DGM stack's prior «NOT SANDBOX-VALIDATED» state.
+6. **Priority** — **No tenant issues ΤΔΑ today** (MCP: myip/nexon cut ΤΙΜ/ΤΠΥ/ΑΛΠ); nexon will need it
+   after its fresh migration + for completeness → «real but not on fire».
+7. **Related Slice-2 gap (out of scope here, but adjacent):** DGM v2.0.2 §3.2.7 says ConfirmDeliveryReturn
+   is reachable from Rejected / DeliveredByCarrier(PARTIAL) / FailedDelivery / InTransit — wider than the
+   `in_transit`/`in_transit_return` guard Slice 2 shipped. Track as a Slice-2 follow-up (widen `requireStateIn`).
 
 ## 12. Sub-slices (each: code → sandbox rehearsal → review → merge)
 
-1. **3a — Schema + type + flag:** migration (`invoices` movement/cache cols + `invoice_types.is_delivery_note`),
-   re-add ΤΔΑ to the seed, legacy normaliser. Tests: seeding, normaliser idempotency.
-2. **3b — Issue payload:** `AadeInvoiceDocument` emits the combined header for `is_delivery_note`;
-   `allowsItemDescr()` → flag; keep pure-9.x reject. Tests: golden combined-1.1 XML vs spec; MYD-003
-   still rejects pure 9.x. Sandbox: file a ΤΔΑ, confirm MARK + qrUrl.
-3. **3c — Lifecycle contract:** extract `MovableDocument`, generalise `DeliveryLifecycleService`,
-   implement on `Invoice`. Tests: existing delivery-lifecycle suite green against the contract + a ΤΔΑ
-   drives RegisterTransfer/refresh. (Blocked on Q2.)
+1. **3a — Schema + type + flag + audit morph:** migration for the `invoices` movement/cache cols +
+   `invoice_types.is_delivery_note` (+ seeder apply-loop) + the **polymorphic `morphs('movable')` on
+   `delivery_marks`/`delivery_note_events`** (backfill existing → DeliveryNote); re-add ΤΔΑ to the seed;
+   legacy normaliser. Tests: seeding, normaliser idempotency, existing delivery suite green post-morph.
+2. **3b — Issue payload:** `AadeInvoiceDocument` emits the combined header for `is_delivery_note`
+   (incl. the `withoutDigitalTransportTracking` fork); `allowsItemDescr()` → flag; keep pure-9.x reject.
+   Tests: golden combined-1.1 XML vs spec; MYD-003 still rejects pure 9.x. Sandbox: file a ΤΔΑ, confirm
+   MARK + qrUrl (or straight-to-Completed when tracking off).
+3. **3c — Lifecycle contract:** extract `MovableDocument` (incl. the audit/coherence/stock seams),
+   generalise `DeliveryLifecycleService`, implement on `Invoice`; wire the monetary cancel to reconcile
+   `delivery_state` + `reverseSaleForInvoice` (§7). Tests: existing delivery-lifecycle suite green against
+   the contract + a ΤΔΑ drives RegisterTransfer/refresh. **No longer blocked** (Q2 resolved); the DGM doc
+   only decides which actions surface (tracked vs `withoutDigitalTransportTracking`).
 4. **3d — UI/wizard:** the Παραστατικά toggle + movement sub-form + lifecycle actions on the invoice
    view; the Διακίνηση helper/tooltip; re-offer ΤΔΑ in the picker.
 5. **3e — Stock + polish:** confirm single stock event; PDF; docs (FEATURES/CHANGELOG); move MYD-002

@@ -1491,6 +1491,15 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `delivery_marks` rows + lifecycleHistory, so this is cache-fidelity only (no legal/money impact). Fix
   when touched: treat the operator-declared outcome states (`partial`/`failed`/`delivered`) as terminal
   in the same guard, or derive the guard from "is this state locally-authoritative" rather than listing.
+- **Slice-2 follow-up: `confirmReturn` reachable-from is too narrow** _(P2, CONFIRMED vs DGM v2.0.2 spec,
+  surfaced 2026-09-12 when the v2.0.2 DeliveryNote doc landed in the repo)._ Slice 2's `confirmReturn`
+  guard allows only `in_transit`/`in_transit_return`, but **`…_DeliveryNote_v2.0.2_preofficial.md §3.2.7`**
+  says ConfirmDeliveryReturn is reachable from **Rejected / DeliveredByCarrier(PARTIAL) / FailedDelivery /
+  InTransit** (the latter for 9.2 or 9.3-with-`reverseDeliveryNote`). So an issuer can't declare a return
+  on a note our lifecycle left in `rejected`/`partial`/`failed`. Not a regression (Slice 2 added the
+  action; the narrow guard is conservative, never wrong — it refuses a legal action, doesn't allow an
+  illegal one). Fix = widen `requireStateIn` to the spec set (small, its own PR + sandbox check now that
+  Β' Φάση is live). Verify each source state maps to our `delivery_state` strings first.
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
   `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a
