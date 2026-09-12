@@ -552,6 +552,13 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 
 ## 15. Ασφάλεια & λειτουργικά
 - **Secrets `$hidden`** (out of toArray/logs) + at-rest encryption optional.
+- **Password policy** (`Password::defaults()`): min 8 **+ έλεγχος διαρροής** (HaveIBeenPwned k-anonymity,
+  fail-open), σε χειριστές/CustomerUsers/portal-reset/create-user.
+- **Security headers** σε κάθε απόκριση (nosniff / Referrer-Policy / X-Frame-Options SAMEORIGIN) +
+  **secure session cookie** by default σε production.
+- **«Οι συνεδρίες μου»** (user menu): λίστα ενεργών συνεδριών (συσκευή/IP/last-active) + per-session
+  revoke + password-confirmed «Αποσύνδεση όλων των άλλων», guard-scoped στον web χειριστή.
+- **Portal login enumeration-resistant** (ίση χρονική απόκριση known/unknown + generic μήνυμα).
 - **2FA** (TOTP) + `EKDOSI_REQUIRE_2FA`. Self-service enrolment στο προφίλ (QR)· στους «Χρήστες»
   στήλη κατάστασης «2FA» + φίλτρο + «Επαναφορά 2FA» (admin disable/reset — η ενεργοποίηση μένει
   self-service).

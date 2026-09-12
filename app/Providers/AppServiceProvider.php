@@ -20,6 +20,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Validation\Rules\Password;
 use Laravel\Passport\Passport;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -56,6 +57,19 @@ class AppServiceProvider extends ServiceProvider
         // recon / brute-force (incl. against non-existent usernames). The
         // subscriber is fully best-effort and never blocks authentication.
         Event::subscribe(RecordAuthEvent::class);
+
+        // One password policy for the whole app: min 8 + not-found-in-a-known
+        // breach (HaveIBeenPwned k-anonymity — only a SHA-1 prefix is sent, never
+        // the password; fail-OPEN if the API is unreachable, so it can never lock
+        // anyone out). Everything already validates with Password::defaults()
+        // (operator Users, CustomerUsers, the portal reset), so defining it here
+        // upgrades them all at once. The breach check is skipped under the test
+        // runner to keep the suite offline and fast.
+        Password::defaults(function (): Password {
+            $rule = Password::min(8);
+
+            return $this->app->runningUnitTests() ? $rule : $rule->uncompromised();
+        });
 
         /*
          * Hard block on destructive DB commands (db:wipe, migrate:fresh,

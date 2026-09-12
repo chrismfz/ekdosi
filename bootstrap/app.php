@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Middleware\EnsureInstalled;
+use App\Http\Middleware\SecurityHeaders;
 use App\Support\ErrorAlerts\ExceptionNotifier;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
@@ -35,6 +36,11 @@ return Application::configure(basePath: dirname(__DIR__))
         // web installer BEFORE the session/cookie stack runs (no APP_KEY yet);
         // once installed it's an inert pass-through.
         $middleware->prepend(EnsureInstalled::class);
+
+        // Safe security response headers on every response (nosniff, Referrer-
+        // Policy, X-Frame-Options SAMEORIGIN). No CSP/HSTS here on purpose —
+        // see App\Http\Middleware\SecurityHeaders.
+        $middleware->append(SecurityHeaders::class);
 
         // Trust the reverse proxy / edge (CFM, nginx, a CDN) so request()->ip()
         // — and therefore the auth/security log + last-login IP — captures the

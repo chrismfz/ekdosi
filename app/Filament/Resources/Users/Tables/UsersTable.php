@@ -17,6 +17,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Validation\Rules\Password;
 
 class UsersTable
 {
@@ -120,7 +121,7 @@ class UsersTable
                             ->password()
                             ->revealable()
                             ->required()
-                            ->minLength(8)
+                            ->rule(Password::defaults())
                             ->helperText('Will be hashed on save.'),
                     ])
                     ->action(function (array $data, $record): void {

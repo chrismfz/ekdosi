@@ -169,7 +169,11 @@ return [
     |
     */
 
-    'secure' => env('SESSION_SECURE_COOKIE'),
+    // Default to secure cookies in production (prod is HTTPS-only) so forgetting
+    // the env var can't leave the session cookie sendable over plain HTTP. Still
+    // fully overridable via SESSION_SECURE_COOKIE; stays false in local/testing.
+    // (env() here is evaluated at config:cache time, when APP_ENV is set.)
+    'secure' => env('SESSION_SECURE_COOKIE', env('APP_ENV') === 'production'),
 
     /*
     |--------------------------------------------------------------------------

@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Pages\Assistant;
 use App\Filament\Pages\Dashboard;
+use App\Filament\Pages\MySessions;
 use App\Models\Company;
 use App\Support\BuildInfo;
 use App\Support\Settings\SystemSettings;
@@ -13,6 +14,7 @@ use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
 use Filament\Http\Middleware\DispatchServingFilamentEvent;
+use Filament\Navigation\MenuItem;
 use Filament\Panel;
 use Filament\PanelProvider;
 use Filament\Support\Colors\Color;
@@ -35,6 +37,14 @@ class AdminPanelProvider extends PanelProvider
             ->path('admin')
             ->login()
             ->profile()                       // adds "Edit profile" to the user menu (Filament built-in)
+            // «Οι συνεδρίες μου» — self-service session management in the user
+            // menu (kept off the sidebar to avoid nav clutter). See MySessions.
+            ->userMenuItems([
+                'my_sessions' => MenuItem::make()
+                    ->label('Οι συνεδρίες μου')
+                    ->icon('heroicon-o-device-phone-mobile')
+                    ->url(fn (): string => MySessions::getUrl()),
+            ])
             // TOTP two-factor (authenticator app) + recovery codes. The setup,
             // QR enrollment, recovery-code generation and disable/regenerate
             // all live on the profile page automatically. Opt-in per user by

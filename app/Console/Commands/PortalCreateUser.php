@@ -6,6 +6,7 @@ use App\Models\CustomerUser;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\Rules\Password;
 
 /**
  * Mint (or update) a customer-portal login by hand — the only way to create one
@@ -30,7 +31,7 @@ class PortalCreateUser extends Command
 
         $validator = Validator::make(
             ['email' => $email, 'password' => $password],
-            ['email' => ['required', 'email'], 'password' => ['required', 'string', 'min:8']],
+            ['email' => ['required', 'email'], 'password' => ['required', 'string', Password::defaults()]],
         );
         if ($validator->fails()) {
             foreach ($validator->errors()->all() as $error) {
