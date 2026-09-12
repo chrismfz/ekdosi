@@ -57,14 +57,19 @@
 ### A. Ψηφιακό ΔΑ — movement lifecycle (ERP, δικό μας έδαφος)
 
 **A1. `ConfirmDeliveryReturn` + `DeliveryReturn` + `Response::getDeliveryReturnMark()`** — *NEW.*
+✅ **WIRED — Slice 1 (2026-09-12).**
 Ο εκδότης δηλώνει ολοκλήρωση διακίνησης **επί επιστροφής**· η απόκριση φέρει
 `deliveryReturnMark`.
-- **ekdosi:** ΔΕΝ είναι wired. **Αυτός είναι ακριβώς ο durable attempt-record που περίμενε
-  το DEP-001** (MYD-026/PROV-002).
-- **Wire:** νέα lifecycle action `confirmReturn()` στο `DeliveryLifecycleService` (ίδιο
-  dispatch/persistEvent pattern με `registerTransfer`/`confirmOutcome`), νέα `DeliveryMark`
-  γραμμή (action π.χ. `CONFIRM_RETURN`), αποθήκευση `deliveryReturnMark`, UI action στο
-  `DeliveryNoteResource`, χειρισμός state. **→ Slice 1 (κορυφαία προτεραιότητα).**
+- **ekdosi:** **Αυτός ήταν ακριβώς ο durable attempt-record που περίμενε το DEP-001**
+  (MYD-026/PROV-002) — πλέον wired στο direct-myDATA μονοπάτι.
+- **Έγινε:** `DeliveryLifecycleService::confirmReturn()` (ίδιο dispatch/persistEvent pattern με
+  `registerTransfer`/`confirmDelivery`) → `CONFIRM_RETURN` γραμμή στο `delivery_marks` (κίτρινο
+  badge + request/response XML) + guarded cache στήλη `delivery_notes.return_mark` (forceFill,
+  δίπλα στα `transfer_mark`/`outcome_mark`) + state `in_transit → returned` (τερματικό· ο «Έλεγχος
+  κατάστασης» δεν το πατάει πίσω). UI action «Δήλωση επιστροφής» στο `ViewDeliveryNote`· rehearsal
+  flag `delivery:test-lifecycle --return`. Migration `2026_09_20_000001_add_return_mark_to_delivery_notes`.
+- **Ακόμη TODO:** το **provider μονοπάτι (PROV-002)** — ο `confirmReturn()` καλύπτει μόνο το
+  direct-myDATA (firebed) transport· ο provider seam χρειάζεται δικό του wiring σε επόμενο slice.
 
 **A2. `DeliveryStatus::IN_TRANSIT_RETURN` (9)** — crash ήδη λυμένος (§1). Το **πλήρες
 return-state** (δικό του `delivery_state` αντί για «in_transit») είναι μέρος του epic. → Slice 2.
@@ -120,7 +125,8 @@ return-state** (δικό του `delivery_state` αντί για «in_transit»)
 (+ `mydata:test-submit --execute`). Κανένα slice δεν merge-άρει χωρίς πράσινο sandbox.
 
 1. **Slice 1 — `ConfirmDeliveryReturn` / `deliveryReturnMark`** *(P1, ο λόγος που περιμέναμε).*
-   Ξεκλειδώνει DEP-001 / MYD-026 / PROV-002. Μικρό, καθαρά ERP, δικό μας.
+   ✅ **DONE (2026-09-12)** — ξεκλείδωσε DEP-001 / MYD-026 (direct-myDATA). Μικρό, καθαρά ERP, δικό
+   μας (βλ. §A1). Το **provider μισό του PROV-002** μένει για επόμενο slice.
 2. **Slice 2 — Return-leg lifecycle** — `IN_TRANSIT_RETURN` ως δικό του state +
    `CONFIRM_RETURN`/`REGISTER_TRANSFER_RETURN` events + labels/UI.
 3. **Slice 3 — Combined ΤΔΑ / `supportsDeliveryNote` alignment** — gap-analysis + τύποι

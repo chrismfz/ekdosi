@@ -167,6 +167,24 @@ class ViewDeliveryNote extends ViewRecord
                     'Δηλώθηκε το αποτέλεσμα παράδοσης',
                 )),
 
+            // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (myDATA v2.0.2): ο
+            // μεταφορέας επέστρεψε (μέρος των) αγαθών. in_transit → returned.
+            Action::make('confirm_return')
+                ->label('Δήλωση επιστροφής')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('warning')
+                ->visible(fn (DeliveryNote $record) => $record->delivery_state === 'in_transit')
+                ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Δήλωση επιστροφής (myDATA)')
+                ->modalDescription('Δηλώνεται ότι ο μεταφορέας δεν παρέδωσε το σύνολο των αγαθών και τα επέστρεψε στον εκδότη. Η διακίνηση ολοκληρώνεται ως «Επιστράφηκε».')
+                ->modalSubmitActionLabel('Δήλωση επιστροφής')
+                ->action(fn (DeliveryNote $record) => $this->runLifecycle(
+                    $record,
+                    fn (DeliveryLifecycleService $svc) => $svc->confirmReturn($record),
+                    'Δηλώθηκε η επιστροφή',
+                )),
+
             // «Έλεγχος κατάστασης (ΑΑΔΕ)» — RequestDeliveryNoteStatus (read-only).
             Action::make('refresh_status')
                 ->label('Έλεγχος κατάστασης (ΑΑΔΕ)')

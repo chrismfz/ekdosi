@@ -45,6 +45,7 @@ class DeliveryMarksRelationManager extends RelationManager
                         'INSERT', 'PROVIDER_INSERT' => 'success',           // έκδοση — MARK εκδόθηκε
                         'REGISTER_TRANSFER' => 'info',   // έναρξη διακίνησης
                         'CONFIRM_OUTCOME' => 'success',  // παράδοση
+                        'CONFIRM_RETURN' => 'warning',   // δήλωση επιστροφής (v2.0.2)
                         'CANCEL' => 'danger',            // ακύρωση
                         'STATE_SYNC' => 'warning',       // MYD-019: ακύρωση εκτός ekdosi, συγχρονίστηκε
                         'REJECTED', 'PROVIDER_REJECTED', 'PROVIDER_FAILED' => 'danger',          // αποτυχία με request/response forensic row

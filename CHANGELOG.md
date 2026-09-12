@@ -19,6 +19,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Ψηφιακή διακίνηση — Δήλωση επιστροφής (ConfirmDeliveryReturn, myDATA v2.0.2).** Νέα ενέργεια
+  «Δήλωση επιστροφής» στο δελτίο (`in_transit → returned`): ο μεταφορέας δεν παρέδωσε τα αγαθά και τα
+  επέστρεψε στον εκδότη· η ΑΑΔΕ φέρνει το **`deliveryReturnMark`** και το δελτίο περνά σε Completed. Είναι
+  ο durable attempt-record που περίμενε το **DEP-001** (βλ. `docs/BACKLOG.md`). Cache στήλη
+  `delivery_notes.return_mark` (guarded, γράφεται ΜΟΝΟ από τον `DeliveryLifecycleService` με `forceFill` —
+  δίπλα στα `transfer_mark`/`outcome_mark`)· η authoritative γραμμή μένει στο `delivery_marks` (action
+  `CONFIRM_RETURN`, κίτρινο badge, με request/response XML)· rehearsal flag `delivery:test-lifecycle
+  --return`. Ο «Έλεγχος κατάστασης» σέβεται πλέον το τερματικό `returned` (δεν το πατάει πίσω σε in_transit).
 - **Ορατότητα ασφάλειας: log συνδέσεων/αποτυχιών (recon/brute-force).** Νέος πίνακας `auth_events`
   καταγράφει κάθε **σύνδεση/αποσύνδεση/αποτυχία** και στα δύο panels (`/admin` χειριστές, `/user`
   πελάτες), μαζί με το IP, τον user-agent και το **επιχειρούμενο username — ακόμη και ανύπαρκτο**
@@ -90,6 +98,23 @@ from `[Unreleased]`; `--major` explicit for milestones).
   access ή λειτουργία.
 
 ### Fixed
+- **CI πράσινο ξανά: τα tests δεν εξαρτώνται πια από export-ignored vendor stubs.** Το firebed 5.12.0
+  πρόσθεσε `/stubs export-ignore` στο δικό του `.gitattributes` («leaner package»), οπότε το
+  `composer install --prefer-dist` της CI **δεν** κατεβάζει πια το `vendor/firebed/aade-mydata/stubs/`.
+  6 reads σε 4 αρχεία (`MyDataSubmitterSafetyTest`, `MyDataSubmitInDoubtTest`,
+  `MyDataSubmitConcurrencyTest`, `DeliveryNoteExactlyOnceTest`) διάβαζαν από εκεί το
+  `send-invoices-single-response.xml` → `file_get_contents(...): No such file or directory` στη CI
+  (περνούσε locally μόνο λόγω source-install vendor — **false green**· το `main` ήταν ήδη κόκκινο).
+  Fix: δική μας τοπική fixture `tests/Fixtures/firebed/send-invoices-single-response.xml` (byte-identical
+  αντίγραφο) — τα tests δεν ακουμπούν ποτέ ξανά test-only αρχεία του vendor. Επαληθεύτηκε με το
+  `stubs/` κρυμμένο (ακριβής συνθήκη CI).
+- **Προφίλ χειριστή (`/admin/profile`): τέλος το 500.** Το item «Οι συνεδρίες μου» στο user menu
+  προβάλλεται σε **ΚΑΘΕ** σελίδα του panel — και στις **tenant-less** (το built-in προφίλ, οι auth
+  σελίδες). Το `MySessions` ζει σε tenant-scoped route (`admin/{tenant}/my-sessions`), οπότε το
+  `MySessions::getUrl()` χωρίς ενεργό tenant πετούσε `UrlGenerationException` («Missing parameter:
+  tenant») και **όλη** η σελίδα προφίλ έσκαγε (regression από το session-management pack). Fix: το URL
+  closure πέφτει στο **default tenant του χρήστη** όταν δεν υπάρχει ενεργός (οι συνεδρίες είναι per-user —
+  κάθε tenant του δίνει την ίδια σελίδα)· regression test που χτίζει όλο το user menu χωρίς bound tenant.
 - **Ψηφιακή διακίνηση: latent crash από το v2.0.2** — το firebed 5.12.0 πρόσθεσε το
   `DeliveryStatus::IN_TRANSIT_RETURN` (9)· πριν ένα status 9 από την ΑΑΔΕ ήταν `tryFrom()=null`
   (το `null` arm το έπιανε), τώρα resolve-άρει σε πραγματική enum τιμή, οπότε το `match` στο

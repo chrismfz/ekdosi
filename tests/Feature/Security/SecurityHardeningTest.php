@@ -195,4 +195,36 @@ class SecurityHardeningTest extends TestCase
         $this->assertDatabaseHas('sessions', ['id' => 'me-portal']);     // my portal session → kept
         $this->assertDatabaseHas('sessions', ['id' => 'other-web']);     // someone else's → kept
     }
+
+    public function test_my_sessions_user_menu_item_resolves_on_tenant_less_pages(): void
+    {
+        // Regression (prod 500): the «Οι συνεδρίες μου» user-menu item is
+        // rendered on EVERY panel page, including the tenant-LESS built-in
+        // profile page (/admin/profile) and the auth pages. Building the menu
+        // converts each MenuItem toAction(), which EAGERLY evaluates its url
+        // closure. Before the fix that closure called MySessions::getUrl() with
+        // no tenant bound → UrlGenerationException («Missing parameter: tenant»)
+        // → HTTP 500 on /admin/profile. The closure must fall back to the
+        // operator's default tenant (sessions are per-user, so any of their
+        // tenants yields the same page).
+        $me = User::create(['name' => 'Me', 'email' => 'prof-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+        $tenant = $this->enterPanel($me);
+
+        // Reproduce the profile-page state: authenticated web user, but NO
+        // tenant bound to the panel (as on the tenant-less simple-layout pages).
+        Filament::setTenant(null);
+        $this->assertNull(Filament::getTenant());
+
+        // Must NOT throw — this builds the whole user menu, eagerly evaluating
+        // every item's url closure (the exact path that 500'd in prod).
+        $items = Filament::getPanel('admin')->getUserMenuItems();
+
+        $mine = collect($items)->first(fn ($item): bool => $item->getLabel() === 'Οι συνεδρίες μου');
+        $this->assertNotNull($mine, 'The «Οι συνεδρίες μου» user-menu item must be present.');
+
+        $url = $mine->getUrl();
+        $this->assertNotNull($url, 'It must resolve to a URL even with no tenant bound.');
+        $this->assertStringContainsString($tenant->slug, $url, 'It must fall back to the operator’s default tenant.');
+        $this->assertStringContainsString('my-sessions', $url);
+    }
 }

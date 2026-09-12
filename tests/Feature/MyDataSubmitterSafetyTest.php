@@ -85,7 +85,7 @@ class MyDataSubmitterSafetyTest extends TestCase
         $inv = $this->makeInvoice();
         $this->standardLine($inv);
 
-        $xml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $xml = file_get_contents(base_path('tests/Fixtures/firebed/send-invoices-single-response.xml'));
         $mock = new MockHandler([new GuzzleResponse(200, [], $xml)]);
 
         $mark = (new MyDataSubmitter($this->tenant, $mock))->submit($inv->fresh('lines'));
@@ -118,7 +118,7 @@ class MyDataSubmitterSafetyTest extends TestCase
         $this->standardLine($inv);
         $invcode = (string) $inv->invcode;
 
-        $xml = file_get_contents(base_path('vendor/firebed/aade-mydata/stubs/send-invoices-single-response.xml'));
+        $xml = file_get_contents(base_path('tests/Fixtures/firebed/send-invoices-single-response.xml'));
         $mock = new MockHandler([new GuzzleResponse(200, [], $xml)]);
 
         Log::spy();

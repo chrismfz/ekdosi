@@ -62,6 +62,7 @@ class DeliveryMark extends Model
             'PROVIDER_INSERT' => 'Καταχώρηση (πάροχος)',
             'REGISTER_TRANSFER' => 'Έναρξη διακίνησης',
             'CONFIRM_OUTCOME' => 'Δήλωση παράδοσης',
+            'CONFIRM_RETURN' => 'Δήλωση επιστροφής',
             'CANCEL' => 'Ακύρωση',
             // MYD-019: a terminal AADE cancellation detected & synced via
             // «Έλεγχος κατάστασης» — distinct from a CANCEL we initiated.

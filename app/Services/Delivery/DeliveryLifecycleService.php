@@ -21,12 +21,14 @@ use Firebed\AadeMyData\Exceptions\MyDataException;
 use Firebed\AadeMyData\Exceptions\MyDataTimeoutException;
 use Firebed\AadeMyData\Http\CancelInvoice;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\ConfirmDeliveryOutcome;
+use Firebed\AadeMyData\Http\DigitalGoodsMovement\ConfirmDeliveryReturn;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RegisterTransfer;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RequestDeliveryNoteStatus;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryEvent;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryNoteStatusResponse;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryOutcome;
+use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryReturn;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\Response as DgmResponse;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\ResponseDoc;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\Transport;
@@ -57,6 +59,7 @@ use Throwable;
  *     in_transit ──confirmDelivery(FULL)────▶ delivered
  *     in_transit ──confirmDelivery(PARTIAL)─▶ partial
  *     in_transit ──confirmDelivery(NONE)────▶ failed
+ *     in_transit ──confirmReturn──────────▶ returned  (v2.0.2; AADE→Completed, deliveryReturnMark)
  *     (any filed) ──cancel──▶ cancelled   (terminal; uses CancelInvoice by MARK)
  *     refreshStatus(): READ-ONLY reconcile against AADE §8.22 (no new mark row).
  *
@@ -88,6 +91,7 @@ class DeliveryLifecycleService
         'delivered' => 'Παραδόθηκε',
         'partial' => 'Μερική παράδοση',
         'failed' => 'Αποτυχία παράδοσης',
+        'returned' => 'Επιστράφηκε',
         'rejected' => 'Απορρίφθηκε',
         'cancelled' => 'Ακυρώθηκε',
     ];
@@ -228,6 +232,43 @@ class DeliveryLifecycleService
         );
     }
 
+    // ---- 2b. ConfirmDeliveryReturn (δήλωση επιστροφής) -----------------
+
+    /**
+     * Δήλωση ολοκλήρωσης διακίνησης ΕΠΙ ΕΠΙΣΤΡΟΦΗΣ (myDATA v2.0.2): ο μεταφορέας
+     * δεν παρέδωσε το σύνολο των αγαθών και τα επέστρεψε στον εκδότη. in_transit →
+     * returned. Keyed by the qrUrl· με επιτυχία η ΑΑΔΕ φέρνει το `deliveryReturnMark`
+     * και το δελτίο μεταβαίνει σε Completed. Αυτός είναι ο durable attempt-record
+     * που περίμενε το DEP-001 (βλ. docs/aade/mydata-v2.0.2-changes.md §A1).
+     */
+    public function confirmReturn(DeliveryNote $note): DeliveryMark
+    {
+        // MYD-022: filed under the tenant's ΑΦΜ + credentials, like every event.
+        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+
+        $this->requireState($note, 'in_transit', 'Δήλωση επιστροφής');
+
+        $deliveryReturn = (new DeliveryReturn)->setQrUrl($this->requireQrUrl($note));
+
+        $action = new ConfirmDeliveryReturn;
+        $response = $this->dispatch($note, 'confirm_return', fn () => $action->handle($deliveryReturn));
+        $first = $this->firstSuccessful($note, $response, 'Δήλωση επιστροφής');
+
+        $mark = $first->getDeliveryReturnMark();
+
+        return $this->persistEvent(
+            $note,
+            action: 'CONFIRM_RETURN',
+            mark: $mark !== null ? (string) $mark : null,
+            requestXml: $this->requestXml($action),
+            responseXml: $action->getResponseXML() ?? '',
+            cache: [
+                'delivery_state' => 'returned',
+                'return_mark' => $mark !== null ? (string) $mark : null,
+            ],
+        );
+    }
+
     // ---- 3. RequestDeliveryNoteStatus (έλεγχος κατάστασης) -------------
 
     /**
@@ -293,8 +334,13 @@ class DeliveryLifecycleService
             // NEVER resurrect a business-cancelled δελτίο. A note that is already
             // cancelled (locally or at AADE) must not have its terminal cache
             // overwritten by a stale non-terminal tracking status the feed still
-            // reports (MYD-019: "do not automatically resurrect").
-            if ($note->local_status !== 'cancelled' && $note->mydata_state !== 'CANCELLED') {
+            // reports (MYD-019: "do not automatically resurrect"). Same for a
+            // 'returned' note: AADE reports it as Completed, which maps to
+            // 'delivered' — but a return-completion is NOT a plain delivery, so
+            // its terminal cache must survive a refresh.
+            if ($note->local_status !== 'cancelled'
+                && $note->mydata_state !== 'CANCELLED'
+                && $note->delivery_state !== 'returned') {
                 $note->forceFill(['delivery_state' => $mappedState])->save();
                 $changed = true;
             }

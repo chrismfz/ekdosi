@@ -206,16 +206,20 @@
 ## 5. Διακίνηση / Δελτία αποστολής (Ψηφιακό ΔΑ)
 - **`DeliveryNoteResource`** invoice-grade (View/lines/Ιστορικό/Συνημμένα), αμφίδρομη
   σύνδεση δελτίο↔τιμολόγιο.
-- **Lifecycle**: έκδοση → έναρξη διακίνησης → δήλωση παράδοσης → έλεγχος κατάστασης →
-  ακύρωση (`DeliveryLifecycleService` + `DeliveryNoteSubmitter`), §7.1 status cache.
+- **Lifecycle**: έκδοση → έναρξη διακίνησης → δήλωση παράδοσης **ή δήλωση επιστροφής** → έλεγχος
+  κατάστασης → ακύρωση (`DeliveryLifecycleService` + `DeliveryNoteSubmitter`), §7.1 status cache.
+- **Δήλωση επιστροφής (ConfirmDeliveryReturn, myDATA v2.0.2)** — όταν ο μεταφορέας δεν παρέδωσε και
+  επέστρεψε τα αγαθά: `in_transit → returned`, η ΑΑΔΕ φέρνει `deliveryReturnMark` (cache
+  `delivery_notes.return_mark`, audit `CONFIRM_RETURN`). Τερματικό state (ο έλεγχος κατάστασης δεν το
+  πατάει πίσω). Direct-myDATA μονοπάτι· ο durable attempt-record που ξεκλείδωσε το DEP-001.
 - **lifecycleHistory** timeline (carrier/recipient events).
 - **Χώρα παραλήπτη (frozen)** — ο παραλήπτης μπορεί να είναι πελάτης/προμηθευτής/χειροκίνητος·
   η χώρα του παγώνει στο δελτίο (`recipient_country`, ISO-2) και είναι υποχρεωτική όταν υπάρχει
   ΑΦΜ παραλήπτη. Ξένος παραλήπτης **δεν δηλώνεται ποτέ ως GR**: χωρίς αναγνωρίσιμη χώρα η υποβολή
   απορρίπτεται· GR μόνο για ενδοδιακίνηση. Κοινός normaliser `Support\IsoCountry` (EL→GR, UK→GB)
   με το monetary invoice.
-- **Πάροχος vs direct**: έκδοση/ακύρωση μέσω παρόχου· έναρξη/παράδοση/έλεγχος direct
-  myDATA. Sandbox round-tripped.
+- **Πάροχος vs direct**: έκδοση/ακύρωση μέσω παρόχου· έναρξη/παράδοση/**επιστροφή**/έλεγχος direct
+  myDATA. Sandbox round-tripped. (Η επιστροφή μέσω παρόχου — PROV-002 — μένει για επόμενο slice.)
 - **CMR (διεθνής φορτωτική)** — αυτοτελές έγγραφο μεταφοράς (ΟΧΙ myDATA), στα Αγγλικά, για
   διασυνοριακές αποστολές. `CmrResource` (standalone «Νέο CMR») + action «Δημιουργία CMR» σε
   Τιμολόγιο/ΔΑ → **προσχέδιο** με μεταγραφή ΕΛΟΤ-743 (ελληνικά→λατινικά), editable πριν την
