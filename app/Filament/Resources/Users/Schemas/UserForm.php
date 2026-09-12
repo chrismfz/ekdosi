@@ -2,9 +2,11 @@
 
 namespace App\Filament\Resources\Users\Schemas;
 
+use App\Models\User;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
+use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Support\Facades\Hash;
@@ -66,6 +68,28 @@ class UserForm
                         DateTimePicker::make('email_verified_at')
                             ->label('Verified at')
                             ->hidden(),
+                    ]),
+
+                // Read-only 2FA status. Enabling is inherently self-service
+                // (the user scans the QR on THEIR OWN profile), so there is no
+                // «enable» button here — only the status + the «Επαναφορά 2FA»
+                // header action to disable/reset. Edit-only (no record on create).
+                Section::make('Two-factor authentication (2FA)')
+                    ->visibleOn('edit')
+                    ->schema([
+                        TextEntry::make('two_factor_status')
+                            ->label('Κατάσταση')
+                            ->state(fn (?User $record): string => filled($record?->app_authentication_secret) ? 'Ενεργό' : 'Ανενεργό')
+                            ->badge()
+                            ->color(fn (?User $record): string => filled($record?->app_authentication_secret) ? 'success' : 'gray')
+                            ->icon(fn (?User $record): string => filled($record?->app_authentication_secret)
+                                ? 'heroicon-o-shield-check'
+                                : 'heroicon-o-shield-exclamation'),
+                        TextEntry::make('two_factor_help')
+                            ->hiddenLabel()
+                            ->state('Η ενεργοποίηση γίνεται από τον ίδιο τον χρήστη στο προφίλ του (σάρωση QR). '
+                                .'Για απενεργοποίηση/επαναφορά, χρησιμοποίησε το «Επαναφορά 2FA» πάνω δεξιά.')
+                            ->color('gray'),
                     ]),
             ]);
     }

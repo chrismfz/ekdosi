@@ -26,9 +26,9 @@ class PaymentGatewayEventResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedInboxArrowDown;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Καθημερινά';
+    protected static string|UnitEnum|null $navigationGroup = 'Πύλη πελατών';
 
-    protected static ?int $navigationSort = 46;
+    protected static ?int $navigationSort = 30;
 
     protected static ?string $modelLabel = 'Εγγραφή Log πύλης';
 

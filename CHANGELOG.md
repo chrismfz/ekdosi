@@ -19,6 +19,22 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Ορατότητα ασφάλειας: log συνδέσεων/αποτυχιών (recon/brute-force).** Νέος πίνακας `auth_events`
+  καταγράφει κάθε **σύνδεση/αποσύνδεση/αποτυχία** και στα δύο panels (`/admin` χειριστές, `/user`
+  πελάτες), μαζί με το IP, τον user-agent και το **επιχειρούμενο username — ακόμη και ανύπαρκτο**
+  (best-effort listener `RecordAuthEvent`· ο κωδικός ΔΕΝ αποθηκεύεται ποτέ· δεν μπλοκάρει ποτέ το
+  login). Προβάλλεται σε **tab «Συνδέσεις & ασφάλεια» μέσα στη «Δραστηριότητα»** — system-level, άρα
+  **super-admin μόνο** (τα cross-tenant/ανύπαρκτα-username δεδομένα δεν διαρρέουν σε company_admin).
+  Το log κρατιέται φραγμένο με `model:prune` (retention `EKDOSI_AUTH_EVENTS_RETENTION_DAYS`=180,
+  scheduled/gated). Στη λίστα «Χρήστες» νέες στήλες **«Τελ. σύνδεση» + «IP»** (γράφονται στο Login).
+- **`TRUSTED_PROXIES`** (bootstrap): πίσω από reverse proxy/edge, ρύθμισε το/τα IP του proxy ώστε το
+  `request()->ip()` (και το log/«Τελ. σύνδεση») να δείχνει το **πραγματικό** IP πελάτη από το
+  `X-Forwarded-For`. Default = trust κανέναν (ασφαλές· direct-served ανεπηρέαστα, χωρίς spoofing).
+- **Ορατότητα/διαχείριση 2FA στους «Χρήστες» (Διαχείριση).** Νέα στήλη «2FA» στη λίστα (πράσινο ✓
+  ενεργό / κόκκινο ✗ ανενεργό) + φίλτρο «Με/Χωρίς 2FA»· στη σελίδα edit, ενότητα κατάστασης 2FA
+  και κουμπί «Επαναφορά 2FA» (ίδιο με τη λίστα, κοινό `ResetTwoFactorAction`). Η **ενεργοποίηση**
+  παραμένει self-service (ο χρήστης σαρώνει το QR στο δικό του προφίλ) — ο admin βλέπει την
+  κατάσταση και μπορεί να απενεργοποιήσει/επαναφέρει.
 - **Έλεγχος ενημερώσεων: αποθετήριο + token από το UI** («Ρυθμίσεις συστήματος» → «AI & Ενημερώσεις»). Το
   `owner/repo` και ένα **read-only GitHub PAT** ρυθμίζονται πλέον από τη σελίδα (DB override· env μένει το
   default), ώστε ο read-only έλεγχος να δουλεύει σε **ιδιωτικό** repo χωρίς επεξεργασία `.env`. Το token είναι
@@ -41,7 +57,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
   filing), idempotent, δεμένη στο τιμολόγιο (κανένας phantom πιστωτικός), και editable/deletable στο tab
   «Πληρωμές» — απλή πληρωμή, όχι νομικό παραστατικό.
 
+### Changed
+- **Μενού: «Εκκρεμείς πληρωμές πύλης» + «Log πύλης» μετακόμισαν από «Καθημερινά» στο group «Πύλη
+  πελατών»** (όπου ήδη είναι οι «Χρήστες Πύλης»), ώστε όλα τα portal items να είναι μαζεμένα.
+  Καθαρά εικαστικό — μόνο `$navigationGroup`/`$navigationSort` άλλαξαν· καμία αλλαγή σε δικαιώματα,
+  access ή λειτουργία.
+
 ### Fixed
+- **2FA enrolment QR: σπασμένο («δεν έβγαινε QR, μόνο το secret») σε hosts χωρίς `imagick` (η
+  παραγωγή τρέχει gd-only).** Το Filament v5.8 ξανα-τύλιγε σε `data:image/svg+xml;base64,…` το ήδη
+  data-URI που επιστρέφει το `google2fa-qrcode` v4, οπότε το `<img>` του QR αποκωδικοποιούσε ένα
+  *δεύτερο* data-URI αντί για SVG και έμενε κενό (φαινόταν μόνο το alt text). Νέο shim
+  `App\Support\TwoFactor\AppAuthentication` (subclass του Filament provider, wired στο
+  `AdminPanelProvider`) περνά το data-URI ως έχει — σωστό και σε imagick (PNG) και σε gd-only (SVG).
 - **Guard στην «Είσπραξη (έμβασμα)» της Καρτέλας: τέλος ο κατά-λάθος πιστωτικός πελάτης.** Η ενέργεια
   κατανέμει FIFO στα ανοιχτά τιμολόγια και ό,τι περισσεύει το αφήνει ως on-account πίστωση — οπότε σε
   πελάτη ΧΩΡΙΣ ανοιχτά (π.χ. μόνο τοις μετρητοίς), ή με ποσό μεγαλύτερο του ανοιχτού υπολοίπου, το

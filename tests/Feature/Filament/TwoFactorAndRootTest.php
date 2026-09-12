@@ -3,8 +3,10 @@
 namespace Tests\Feature\Filament;
 
 use App\Models\User;
+use App\Support\TwoFactor\AppAuthentication;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthentication;
 use Filament\Auth\MultiFactor\App\Contracts\HasAppAuthenticationRecovery;
+use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -46,6 +48,39 @@ class TwoFactorAndRootTest extends TestCase
     {
         // /admin ⟂ /user split: the root leaks neither surface, just a placeholder.
         $this->get('/')->assertOk()->assertDontSee('/admin')->assertDontSee('/user');
+    }
+
+    public function test_enrolment_qr_is_a_single_valid_data_uri_not_double_wrapped(): void
+    {
+        // Regression for the Filament v5.8 double-encode bug: on hosts WITHOUT
+        // the imagick extension (our prod runs gd-only), Filament re-wraps the
+        // data: URI that google2fa-qrcode v4 already returns, so the profile
+        // «Set up authenticator app» QR <img> decodes to another data-URI STRING
+        // instead of an image and renders blank (only alt text shows). Our
+        // App\Support\TwoFactor\AppAuthentication override must hand back ONE
+        // data: URI whose payload is the actual image markup.
+        $user = User::create([
+            'name' => 'Op', 'email' => 'qr-'.uniqid().'@test.local', 'password' => bcrypt('x'),
+        ]);
+        $this->actingAs($user);
+        Filament::setCurrentPanel(Filament::getPanel('admin'));
+
+        $provider = AppAuthentication::make();
+        $uri = $provider->generateQrCodeDataUri($provider->generateSecret());
+
+        $this->assertStringStartsWith('data:image/', $uri);
+
+        [, $base64] = explode(',', $uri, 2);
+        $payload = base64_decode($base64);
+
+        // The decoded payload must be real image markup — NOT another data: URI
+        // (which is precisely what the un-patched Filament path produced).
+        $this->assertStringNotContainsString('data:', $payload, 'QR data URI is double-wrapped');
+
+        // On this gd-only host the SVG back-end is used, so the payload is SVG.
+        if (! extension_loaded('imagick')) {
+            $this->assertStringContainsString('<svg', $payload, 'QR payload is not SVG markup');
+        }
     }
 
     public function test_mfa_secrets_are_hidden_from_serialization(): void
