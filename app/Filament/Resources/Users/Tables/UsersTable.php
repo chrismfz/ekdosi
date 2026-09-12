@@ -46,6 +46,20 @@ class UsersTable
                         '(app_authentication_secret IS NOT NULL) '.($direction === 'desc' ? 'desc' : 'asc')
                     ))
                     ->tooltip(fn (User $record): string => filled($record->app_authentication_secret) ? 'Ενεργό' : 'Ανενεργό'),
+                // Last-login snapshot (written on the Auth Login event). «Έστω το
+                // IP» — visible even after the fact; the full history lives in the
+                // «Συνδέσεις & ασφάλεια» tab of «Δραστηριότητα».
+                TextColumn::make('last_login_at')
+                    ->label('Τελ. σύνδεση')
+                    ->dateTime('d/m/Y H:i')
+                    ->placeholder('—')
+                    ->sortable()
+                    ->toggleable(),
+                TextColumn::make('last_login_ip')
+                    ->label('IP τελ. σύνδεσης')
+                    ->placeholder('—')
+                    ->copyable()
+                    ->toggleable(),
                 TextColumn::make('companies_count')
                     ->label('Tenants')
                     ->counts('companies')

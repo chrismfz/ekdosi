@@ -17,6 +17,12 @@ return [
     // out mid-flight — enrol everyone first, then flip EKDOSI_REQUIRE_2FA=true.
     'require_2fa' => (bool) env('EKDOSI_REQUIRE_2FA', false),
 
+    // Retention for the auth/security log (auth_events): rows older than this are
+    // dropped by `model:prune` (scheduled below, gated). Keeps the table bounded
+    // even under a sustained brute-force flood while leaving a long-enough trail
+    // to investigate a slow recon campaign.
+    'auth_events_retention_days' => (int) env('EKDOSI_AUTH_EVENTS_RETENTION_DAYS', 180),
+
     /*
     |--------------------------------------------------------------------------
     | Demo seed (SET-1)
@@ -111,6 +117,12 @@ return [
         // queue-worker heartbeat — scheduled dispatch of a tiny queued job.
         // The worker is considered healthy only after the job is handled.
         'queue_heartbeat_enabled' => env('EKDOSI_SCHEDULE_QUEUE_HEARTBEAT', true),
+
+        // model:prune of App\Models\AuthEvent — trim the auth/security log to
+        // `auth_events_retention_days`. Safe ON by default (no-op until rows age
+        // past the window); daily, off-peak. Inert on local/CI (no cron).
+        'prune_auth_events_enabled' => env('EKDOSI_SCHEDULE_PRUNE_AUTH_EVENTS', true),
+        'prune_auth_events_cron' => env('EKDOSI_PRUNE_AUTH_EVENTS_CRON', '20 3 * * *'),
 
         // ekdosi:self-update — apply a queued in-app update/rollback out-of-band.
         // No-op unless a run is actually queued, so it's safe ON by default; turn

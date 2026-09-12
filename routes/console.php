@@ -1,6 +1,7 @@
 <?php
 
 use App\Jobs\RecordQueueHeartbeat;
+use App\Models\AuthEvent;
 use App\Models\Company;
 use App\Models\UpdateRun;
 use App\Support\OperatorHealth\HealthRecorder;
@@ -112,6 +113,18 @@ $trackSchedule(
         ->when(fn () => $scheduleEnabled('resend_failed_emails_enabled'))
         ->withoutOverlapping(30),
     'resend_failed_emails'
+);
+
+// model:prune (App\Models\AuthEvent) — trim the auth/security log past its
+// retention window (ekdosi.auth_events_retention_days). No-op until rows age
+// out; daily, off-peak. Scoped to AuthEvent so it never touches other models.
+$trackSchedule(
+    Schedule::command('model:prune', ['--model' => [AuthEvent::class]])
+        ->cron($scheduleCron('prune_auth_events_cron', '20 3 * * *'))
+        ->name('prune-auth-events')
+        ->when(fn () => $scheduleEnabled('prune_auth_events_enabled'))
+        ->withoutOverlapping(30),
+    'prune_auth_events'
 );
 
 // whmcs:fetch-pending — stage paid+unfiled WHMCS invoices into the inbox,

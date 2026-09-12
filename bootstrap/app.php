@@ -35,6 +35,23 @@ return Application::configure(basePath: dirname(__DIR__))
         // web installer BEFORE the session/cookie stack runs (no APP_KEY yet);
         // once installed it's an inert pass-through.
         $middleware->prepend(EnsureInstalled::class);
+
+        // Trust the reverse proxy / edge (CFM, nginx, a CDN) so request()->ip()
+        // — and therefore the auth/security log + last-login IP — captures the
+        // REAL client IP from X-Forwarded-For, not the proxy's. This is what
+        // makes «να δούμε έστω το IP» actually show the attacker behind an edge.
+        //
+        // Default (TRUSTED_PROXIES unset) trusts NOBODY: direct-served hosts are
+        // unaffected, and X-Forwarded-For can't be spoofed into the log. Set it
+        // to the edge IP(s)/CIDR (comma-separated) — or '*' ONLY when the app is
+        // never reachable except through a trusted proxy (otherwise any client
+        // could forge its logged IP).
+        $trustedProxies = env('TRUSTED_PROXIES');
+        if (filled($trustedProxies)) {
+            $middleware->trustProxies(
+                at: $trustedProxies === '*' ? '*' : array_map('trim', explode(',', $trustedProxies)),
+            );
+        }
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // OPS-3: email the ops recipients when the app reports an unhandled

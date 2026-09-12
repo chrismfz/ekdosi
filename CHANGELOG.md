@@ -19,6 +19,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Ορατότητα ασφάλειας: log συνδέσεων/αποτυχιών (recon/brute-force).** Νέος πίνακας `auth_events`
+  καταγράφει κάθε **σύνδεση/αποσύνδεση/αποτυχία** και στα δύο panels (`/admin` χειριστές, `/user`
+  πελάτες), μαζί με το IP, τον user-agent και το **επιχειρούμενο username — ακόμη και ανύπαρκτο**
+  (best-effort listener `RecordAuthEvent`· ο κωδικός ΔΕΝ αποθηκεύεται ποτέ· δεν μπλοκάρει ποτέ το
+  login). Προβάλλεται σε **tab «Συνδέσεις & ασφάλεια» μέσα στη «Δραστηριότητα»** — system-level, άρα
+  **super-admin μόνο** (τα cross-tenant/ανύπαρκτα-username δεδομένα δεν διαρρέουν σε company_admin).
+  Το log κρατιέται φραγμένο με `model:prune` (retention `EKDOSI_AUTH_EVENTS_RETENTION_DAYS`=180,
+  scheduled/gated). Στη λίστα «Χρήστες» νέες στήλες **«Τελ. σύνδεση» + «IP»** (γράφονται στο Login).
+- **`TRUSTED_PROXIES`** (bootstrap): πίσω από reverse proxy/edge, ρύθμισε το/τα IP του proxy ώστε το
+  `request()->ip()` (και το log/«Τελ. σύνδεση») να δείχνει το **πραγματικό** IP πελάτη από το
+  `X-Forwarded-For`. Default = trust κανέναν (ασφαλές· direct-served ανεπηρέαστα, χωρίς spoofing).
 - **Έλεγχος ενημερώσεων: αποθετήριο + token από το UI** («Ρυθμίσεις συστήματος» → «AI & Ενημερώσεις»). Το
   `owner/repo` και ένα **read-only GitHub PAT** ρυθμίζονται πλέον από τη σελίδα (DB override· env μένει το
   default), ώστε ο read-only έλεγχος να δουλεύει σε **ιδιωτικό** repo χωρίς επεξεργασία `.env`. Το token είναι

@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Listeners\RecordAuthEvent;
 use App\Models\User;
 use App\Services\Leads\LeadMatcher;
 use App\Services\Support\Inbound\ImapMailbox;
@@ -49,6 +50,12 @@ class AppServiceProvider extends ServiceProvider
     public function boot(): void
     {
         LeadMatcher::listenForWrites();
+
+        // Security visibility (Πυλώνας ασφάλειας): record login/logout/failed
+        // attempts on BOTH panels into `auth_events` so a super-admin can spot
+        // recon / brute-force (incl. against non-existent usernames). The
+        // subscriber is fully best-effort and never blocks authentication.
+        Event::subscribe(RecordAuthEvent::class);
 
         /*
          * Hard block on destructive DB commands (db:wipe, migrate:fresh,

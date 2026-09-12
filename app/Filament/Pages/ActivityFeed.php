@@ -7,11 +7,13 @@ use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Resources\Payments\PaymentResource;
 use App\Models\Activity;
+use App\Models\AuthEvent;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\Payment;
+use App\Models\User;
 use BackedEnum;
 use Filament\Facades\Filament;
 use Filament\Pages\Page;
@@ -20,6 +22,7 @@ use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Livewire\Attributes\Url;
 use UnitEnum;
 
 /**
@@ -35,6 +38,15 @@ use UnitEnum;
 class ActivityFeed extends Page implements HasTable
 {
     use InteractsWithTable;
+
+    /**
+     * Which tab's table is showing: 'records' (business audit, tenant-scoped) or
+     * 'security' (auth log, system-level, super-admin only). URL-bound so a
+     * refresh / deep-link keeps the tab. The security tab is access-guarded in
+     * table() regardless of this value.
+     */
+    #[Url]
+    public string $activeTab = 'records';
 
     protected static string|BackedEnum|null $navigationIcon = 'heroicon-o-clock';
 
@@ -65,7 +77,113 @@ class ActivityFeed extends Page implements HasTable
             && (bool) auth()->user()?->can('View:ActivityFeed');
     }
 
+    /**
+     * The «Συνδέσεις & ασφάλεια» tab is super-admin only: the auth log is
+     * system-level (spans every tenant, incl. failed attempts on non-existent
+     * usernames that belong to no company), so a per-tenant company_admin must
+     * not see it.
+     */
+    public function canSeeSecurityTab(): bool
+    {
+        $user = auth()->user();
+
+        return $user instanceof User && $user->isSystemSuperAdmin();
+    }
+
+    public function updatedActiveTab(): void
+    {
+        // Never let a non-super-admin land on the security table by forcing the
+        // property (e.g. a hand-edited ?activeTab=security).
+        if ($this->activeTab === 'security' && ! $this->canSeeSecurityTab()) {
+            $this->activeTab = 'records';
+        }
+
+        // Different columns/filters per tab — clear carried-over filter/search
+        // state so a records-tab filter can't apply to the security query.
+        $this->resetTable();
+        $this->resetTableSearch();
+    }
+
     public function table(Table $table): Table
+    {
+        return ($this->activeTab === 'security' && $this->canSeeSecurityTab())
+            ? $this->securityTable($table)
+            : $this->recordsTable($table);
+    }
+
+    /** The auth/security log (system-level, super-admin only). */
+    private function securityTable(Table $table): Table
+    {
+        return $table
+            ->query(AuthEvent::query())
+            ->columns([
+                TextColumn::make('created_at')
+                    ->label('Πότε')
+                    ->dateTime('d/m/Y H:i:s')
+                    ->sortable(),
+
+                TextColumn::make('guard')
+                    ->label('Panel')
+                    ->badge()
+                    ->color(fn (AuthEvent $record): string => $record->guard === 'web' ? 'primary' : 'gray')
+                    ->formatStateUsing(fn (AuthEvent $record): string => $record->panelLabel()),
+
+                TextColumn::make('event')
+                    ->label('Ενέργεια')
+                    ->badge()
+                    ->color(fn (AuthEvent $record): string => match ($record->event) {
+                        'login' => 'success',
+                        'failed' => 'danger',
+                        'logout' => 'gray',
+                        default => 'warning',
+                    })
+                    ->formatStateUsing(fn (AuthEvent $record): string => match ($record->event) {
+                        'login' => 'Σύνδεση',
+                        'logout' => 'Αποσύνδεση',
+                        'failed' => 'Αποτυχία',
+                        default => $record->event,
+                    }),
+
+                TextColumn::make('email')
+                    ->label('Ταυτότητα')
+                    ->searchable()
+                    ->copyable()
+                    ->placeholder('—'),
+
+                TextColumn::make('ip_address')
+                    ->label('IP')
+                    ->searchable()
+                    ->copyable()
+                    ->placeholder('—'),
+
+                TextColumn::make('user_agent')
+                    ->label('User agent')
+                    ->wrap()
+                    ->limit(80)
+                    ->placeholder('—')
+                    ->toggleable(isToggledHiddenByDefault: true),
+            ])
+            ->filters([
+                SelectFilter::make('event')
+                    ->label('Ενέργεια')
+                    ->options([
+                        'login' => 'Σύνδεση',
+                        'logout' => 'Αποσύνδεση',
+                        'failed' => 'Αποτυχία',
+                    ]),
+                SelectFilter::make('guard')
+                    ->label('Panel')
+                    ->options([
+                        'web' => '/admin (χειριστές)',
+                        'portal' => '/user (πελάτες)',
+                    ]),
+            ])
+            ->defaultSort('created_at', 'desc')
+            ->deferLoading();
+    }
+
+    /** The business audit log (tenant-scoped) — the original feed. */
+    private function recordsTable(Table $table): Table
     {
         return $table
             ->query(
