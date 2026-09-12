@@ -24,9 +24,9 @@ class PaymentIntentResource extends Resource
 
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClock;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Καθημερινά';
+    protected static string|UnitEnum|null $navigationGroup = 'Πύλη πελατών';
 
-    protected static ?int $navigationSort = 45;
+    protected static ?int $navigationSort = 20;
 
     protected static ?string $modelLabel = 'Εκκρεμής πληρωμή';
 
