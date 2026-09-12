@@ -46,8 +46,10 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    `firebed/aade-mydata` 5.12.0 now ships v2.0.2). Before the ψηφιακή-διακίνηση deadline, NOT 1 Oct:
    MYD-023 strict-refusal + already-cancelled adoption on ΔΑ/provider paths (**P1**, ties to PROV-015)
    · MYD-019 · MYD-026 · PROV-002 · STOCK-001 follow-ups · unblock 9.1/9.2 + combined ΤΔΑ. One block
-   with a 9.3 sandbox rehearsal. **Newly available in 5.12.0 to wire:** `ConfirmDeliveryReturn` +
-   `DeliveryReturnMark` (MYD-026/PROV-002 durable attempt-record — the exact DEP-001 gate),
+   with a 9.3 sandbox rehearsal. **Wired in 5.12.0:** `ConfirmDeliveryReturn` + `deliveryReturnMark`
+   (MYD-026/PROV-002 durable attempt-record — the exact DEP-001 gate) ✅ **Slice 1 DONE** (direct-myDATA
+   path: `confirmReturn()` + `return_mark` cache + `CONFIRM_RETURN` audit row + UI action; **provider
+   path PROV-002 still TODO**). **Still available in 5.12.0 to wire:**
    `RequestDeliveryNoteStatus::handleUsingQrUrl()`, `TransportDetails::packingsDeclaration`,
    `DeliveryStatus::IN_TRANSIT_RETURN`/`DeliveryEventType::CONFIRM_RETURN`; PLUS the **new Receiving
    Note flow** (Δελτίο Ποσοτικής Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`,
@@ -152,10 +154,14 @@ the myDATA/Provider sections lower down — not repeated here.
 
 - **PROV-011 (P2/VERIFY)** — ask InvoSign for a **versioned/written** API contract; the
   cancellation-endpoint ambiguity is already resolved empirically (`[283]`). *Blocked on vendor.*
-- **DEP-001 (WATCH → ✅ SATISFIED 2026-09-12)** — AADE **v2.0.2** delivery-lifecycle spec gated a
-  durable attempt-record for MYD-026/PROV-002 (only a protocol-agnostic cache-lock was safe until
-  then). v2.0.2 has shipped and `firebed/aade-mydata` 5.12.0 exposes it (`ConfirmDeliveryReturn` →
-  `Response::getDeliveryReturnMark()`), so MYD-026/PROV-002 can now use the real durable mark.
+- **DEP-001 (WATCH → ✅ SATISFIED 2026-09-12 → ✅ WIRED 2026-09-12)** — AADE **v2.0.2**
+  delivery-lifecycle spec gated a durable attempt-record for MYD-026/PROV-002 (only a
+  protocol-agnostic cache-lock was safe until then). v2.0.2 shipped, `firebed/aade-mydata` 5.12.0
+  exposes it, and **Slice 1 wires it**: `DeliveryLifecycleService::confirmReturn()` drives
+  `ConfirmDeliveryReturn` → `Response::getDeliveryReturnMark()` → the guarded cache column
+  `delivery_notes.return_mark` + a `CONFIRM_RETURN` audit row (UI action «Δήλωση επιστροφής»,
+  `in_transit → returned`). The direct-myDATA path uses the real durable mark now; the **provider
+  path (PROV-002)** still needs its own wiring in a later slice.
 - **MYD-005 (P2)** — ordinary invoice XML omits the optional myDATA `measurementUnit`
   (data-fidelity enhancement; goods-tenant-conditional).
 - **SETUP-004 (P2)** — Estonian (EE) tenant skips even non-AADE neutral lookups.

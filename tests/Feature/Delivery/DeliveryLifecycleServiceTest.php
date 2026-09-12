@@ -349,6 +349,46 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->service($this->confirmOutcomeResponse())->confirmDelivery($note, 'BOGUS');
     }
 
+    // ---- confirmReturn (δήλωση επιστροφής, v2.0.2) ---------------------
+
+    public function test_confirm_return_completes_and_stores_return_mark(): void
+    {
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+
+        $mark = $this->service($this->confirmReturnResponse())->confirmReturn($note);
+
+        $this->assertSame('CONFIRM_RETURN', $mark->mydata_action);
+        $this->assertSame('444444444444444', $mark->mark);
+
+        $fresh = $note->fresh();
+        $this->assertSame('returned', $fresh->delivery_state);
+        $this->assertSame('444444444444444', $fresh->return_mark);
+    }
+
+    public function test_confirm_return_rejects_wrong_state(): void
+    {
+        // Still registered (not in_transit) → cannot declare a return.
+        $note = $this->makeFiledNote();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Δήλωση επιστροφής/u');
+
+        $this->service($this->confirmReturnResponse())->confirmReturn($note);
+    }
+
+    public function test_returned_state_survives_a_refresh_reporting_completed(): void
+    {
+        // A return-completion is NOT a plain delivery: AADE reports it as
+        // Completed (→ 'delivered' in the map), but refreshStatus must not
+        // downgrade our terminal 'returned' cache.
+        $note = $this->makeFiledNote(['delivery_state' => 'returned']);
+
+        $result = $this->service($this->statusResponse('COMPLETED'))->refreshStatus($note);
+
+        $this->assertSame('returned', $note->fresh()->delivery_state);
+        $this->assertFalse($result['changed']);
+    }
+
     // ---- refreshStatus (read-only) ------------------------------------
 
     public function test_refresh_status_maps_aade_state_and_forcefills(): void
@@ -791,6 +831,20 @@ XML;
 <ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <response>
         <deliveryOutcomeMark>333333333333333</deliveryOutcomeMark>
+        <statusCode>Success</statusCode>
+    </response>
+</ResponseDoc>
+XML;
+    }
+
+    /** ConfirmDeliveryReturn returns a ResponseDoc with deliveryReturnMark + Success (v2.0.2). */
+    private function confirmReturnResponse(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <deliveryReturnMark>444444444444444</deliveryReturnMark>
         <statusCode>Success</statusCode>
     </response>
 </ResponseDoc>

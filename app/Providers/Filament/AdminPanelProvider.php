@@ -10,6 +10,7 @@ use App\Support\BuildInfo;
 use App\Support\Settings\SystemSettings;
 use App\Support\TwoFactor\AppAuthentication;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
+use Filament\Facades\Filament;
 use Filament\Http\Middleware\Authenticate;
 use Filament\Http\Middleware\AuthenticateSession;
 use Filament\Http\Middleware\DisableBladeIconComponents;
@@ -43,7 +44,21 @@ class AdminPanelProvider extends PanelProvider
                 'my_sessions' => MenuItem::make()
                     ->label('Οι συνεδρίες μου')
                     ->icon('heroicon-o-device-phone-mobile')
-                    ->url(fn (): string => MySessions::getUrl()),
+                    // The user menu renders on EVERY panel page, including the
+                    // tenant-LESS ones (the built-in /admin/profile, auth pages).
+                    // MySessions lives on the tenant-scoped route
+                    // admin/{tenant}/my-sessions, so a bare MySessions::getUrl()
+                    // throws «Missing parameter: tenant» there → a 500 on profile.
+                    // Sessions are per-USER, so ANY of the operator's tenants
+                    // resolves the same page: use the bound tenant, else fall back
+                    // to the user's default tenant. (Null only for the degenerate
+                    // no-tenant user — the item then renders as a non-link, never 500.)
+                    ->url(function (): ?string {
+                        $tenant = Filament::getTenant()
+                            ?? (($user = Filament::auth()->user()) ? Filament::getUserDefaultTenant($user) : null);
+
+                        return $tenant ? MySessions::getUrl(tenant: $tenant) : null;
+                    }),
             ])
             // TOTP two-factor (authenticator app) + recovery codes. The setup,
             // QR enrollment, recovery-code generation and disable/regenerate

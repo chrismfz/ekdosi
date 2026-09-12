@@ -18,6 +18,7 @@ use Illuminate\Console\Command;
  *
  *   php artisan delivery:test-lifecycle <id>                       # show the plan
  *   php artisan delivery:test-lifecycle <id> --execute             # run register→confirm→status
+ *   php artisan delivery:test-lifecycle <id> --execute --return    # register→ΕΠΙΣΤΡΟΦΗ→status (v2.0.2)
  *   php artisan delivery:test-lifecycle <id> --execute --cancel    # + cancel
  */
 class DeliveryTestLifecycle extends Command
@@ -27,6 +28,7 @@ class DeliveryTestLifecycle extends Command
     protected $signature = 'delivery:test-lifecycle
         {note : DeliveryNote ID (numeric PK)}
         {--execute : Actually call AADE (default prints the plan only)}
+        {--return : Δήλωση επιστροφής (ConfirmDeliveryReturn) αντί για παράδοση (v2.0.2)}
         {--cancel : Also cancel the δελτίο at the end}
         {--report= : Report file path under storage/app}';
 
@@ -55,7 +57,8 @@ class DeliveryTestLifecycle extends Command
         if (! $this->option('execute')) {
             $this->section('ΣΧΕΔΙΟ (dry — δεν εκτελείται)');
             $this->kv('Έναρξη', $note->delivery_state === 'registered' ? 'ΘΑ ΤΡΕΞΕΙ' : 'παράλειψη (state ≠ registered)');
-            $this->kv('Παράδοση', 'ΘΑ ΤΡΕΞΕΙ μετά την έναρξη (FULL)');
+            $this->kv($this->option('return') ? 'Επιστροφή' : 'Παράδοση',
+                $this->option('return') ? 'ΘΑ ΤΡΕΞΕΙ μετά την έναρξη (ConfirmDeliveryReturn)' : 'ΘΑ ΤΡΕΞΕΙ μετά την έναρξη (FULL)');
             $this->kv('Έλεγχος', 'ΘΑ ΤΡΕΞΕΙ');
             $this->kv('Ακύρωση', $this->option('cancel') ? 'ΘΑ ΤΡΕΞΕΙ' : 'όχι (χωρίς --cancel)');
             $this->writeReport($this->option('report'));
@@ -71,7 +74,9 @@ class DeliveryTestLifecycle extends Command
             $ok = $this->step('ΕΝΑΡΞΗ ΔΙΑΚΙΝΗΣΗΣ (RegisterTransfer)', $note, fn () => $lifecycle->registerTransfer($note)) && $ok;
         }
         if ($note->fresh()->delivery_state === 'in_transit') {
-            $ok = $this->step('ΠΑΡΑΔΟΣΗ (ConfirmDeliveryOutcome / FULL)', $note, fn () => $lifecycle->confirmDelivery($note, 'FULL')) && $ok;
+            $ok = $this->option('return')
+                ? $this->step('ΕΠΙΣΤΡΟΦΗ (ConfirmDeliveryReturn)', $note, fn () => $lifecycle->confirmReturn($note)) && $ok
+                : $this->step('ΠΑΡΑΔΟΣΗ (ConfirmDeliveryOutcome / FULL)', $note, fn () => $lifecycle->confirmDelivery($note, 'FULL')) && $ok;
         }
         $ok = $this->step('ΕΛΕΓΧΟΣ ΚΑΤΑΣΤΑΣΗΣ (RequestDeliveryNoteStatus)', $note, fn () => $lifecycle->refreshStatus($note)) && $ok;
         if ($this->option('cancel')) {
