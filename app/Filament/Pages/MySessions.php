@@ -64,6 +64,9 @@ class MySessions extends Page
 
         return DB::table(config('session.table', 'sessions'))
             ->where('user_id', $userId)
+            // Only rows the session store would still accept — hide stale rows
+            // that outlived session.lifetime but haven't been garbage-collected.
+            ->where('last_activity', '>=', $this->minActiveTimestamp())
             ->orderByDesc('last_activity')
             ->get()
             ->filter(fn ($row): bool => $this->isWebGuardSession($row->payload ?? null))
@@ -82,6 +85,10 @@ class MySessions extends Page
     /** Revoke ONE other session of this operator (never the current one). */
     public function revoke(string $id): void
     {
+        if (config('session.driver') !== 'database') {
+            return;
+        }
+
         $userId = Auth::guard('web')->id();
 
         if ($id === session()->getId()) {
@@ -108,6 +115,7 @@ class MySessions extends Page
                 ->label('Αποσύνδεση όλων των άλλων συσκευών')
                 ->icon('heroicon-o-shield-exclamation')
                 ->color('danger')
+                ->visible(fn (): bool => config('session.driver') === 'database')
                 ->requiresConfirmation()
                 ->modalDescription('Θα αποσυνδεθούν όλες οι άλλες συσκευές/φυλλομετρητές εκτός από αυτόν. Επιβεβαίωσε με τον κωδικό σου.')
                 ->schema([
@@ -122,16 +130,20 @@ class MySessions extends Page
                     $currentId = session()->getId();
                     $table = config('session.table', 'sessions');
 
-                    // Authoritative: drop every OTHER web-guard session row.
-                    DB::table($table)
+                    // Authoritative: collect this operator's OTHER web-guard session
+                    // ids (the guard check needs per-row payload decoding) and drop
+                    // them in a single delete.
+                    $ids = DB::table($table)
                         ->where('user_id', $userId)
                         ->where('id', '!=', $currentId)
                         ->get()
-                        ->each(function ($row) use ($table, $userId): void {
-                            if ($this->isWebGuardSession($row->payload ?? null)) {
-                                DB::table($table)->where('id', $row->id)->where('user_id', $userId)->delete();
-                            }
-                        });
+                        ->filter(fn ($row): bool => $this->isWebGuardSession($row->payload ?? null))
+                        ->pluck('id')
+                        ->all();
+
+                    if ($ids !== []) {
+                        DB::table($table)->whereIn('id', $ids)->where('user_id', $userId)->delete();
+                    }
 
                     // Belt-and-suspenders: re-secure via the framework path so any
                     // row that survives a race is rejected by AuthenticateSession.
@@ -146,21 +158,46 @@ class MySessions extends Page
         ];
     }
 
+    /** Oldest last_activity (unix ts) a session may have and still count as live. */
+    private function minActiveTimestamp(): int
+    {
+        return now()->subMinutes(max(1, (int) config('session.lifetime', 120)))->getTimestamp();
+    }
+
     /** Is this a session row belonging to the WEB guard (not the portal guard)? */
     private function isWebGuardSession(?string $payload): bool
     {
+        $data = $this->decodeSessionPayload($payload);
+
+        return $data !== null && array_key_exists($this->webLoginKey(), $data);
+    }
+
+    /**
+     * Decode a session row's payload to its attribute array, honouring the
+     * CONFIGURED session serialization. Laravel defaults this app to 'json'
+     * (config/session.php), so decoding with unserialize() would fail on every
+     * real row — the payload is base64(json_encode(...)) there, base64(serialize
+     * (...)) only under the 'php' setting. Returns null when it can't decode.
+     * `allowed_classes => false` neutralises object-injection on the php path.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function decodeSessionPayload(?string $payload): ?array
+    {
         if ($payload === null || $payload === '') {
-            return false;
+            return null;
         }
 
         $raw = base64_decode($payload, true);
         if ($raw === false) {
-            return false;
+            return null;
         }
 
-        $data = @unserialize($raw, ['allowed_classes' => false]);
+        $data = config('session.serialization', 'php') === 'json'
+            ? json_decode($raw, true)
+            : @unserialize($raw, ['allowed_classes' => false]);
 
-        return is_array($data) && array_key_exists($this->webLoginKey(), $data);
+        return is_array($data) ? $data : null;
     }
 
     /** Laravel stores the logged-in user under this session key for the web guard. */

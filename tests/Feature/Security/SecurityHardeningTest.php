@@ -74,13 +74,21 @@ class SecurityHardeningTest extends TestCase
     private function insertSession(string $id, int $userId, string $guard): void
     {
         $key = 'login_'.$guard.'_'.sha1(SessionGuard::class);
+        $attrs = [$key => $userId, '_token' => 'x'];
+
+        // Encode the payload the SAME way the app's session store does (json by
+        // default per config/session.php) so the test exercises the real decode
+        // path — a serialize() fixture would mask a json/php mismatch in prod.
+        $payload = config('session.serialization', 'php') === 'json'
+            ? json_encode($attrs)
+            : serialize($attrs);
 
         DB::table('sessions')->insert([
             'id' => $id,
             'user_id' => $userId,
             'ip_address' => '203.0.113.5',
             'user_agent' => 'Mozilla/5.0 (Windows NT 10.0) Chrome/120',
-            'payload' => base64_encode(serialize([$key => $userId, '_token' => 'x'])),
+            'payload' => base64_encode($payload),
             'last_activity' => time(),
         ]);
     }
