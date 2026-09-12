@@ -25,10 +25,14 @@ class ExpenseClassificationTest extends TestCase
 
     public function test_codes_expense_classification_helpers(): void
     {
-        $this->assertCount(88, Codes::expenseClassTypeOptions());
+        // firebed v5.12 (myDATA v2.0.2) added the E3_881_001–004 codes
+        // (Πωλήσεις για λογαριασμό Τρίτων) that were missing from the enum, so the
+        // option count grew 88 → 92.
+        $this->assertCount(92, Codes::expenseClassTypeOptions());
         $this->assertCount(15, Codes::expenseClassCategoryOptions());
 
         $this->assertTrue(Codes::isValidExpenseClassType('E3_585_001'));
+        $this->assertTrue(Codes::isValidExpenseClassType('E3_881_001')); // v2.0.2 addition
         $this->assertTrue(Codes::isValidExpenseClassCategory('category2_3'));
         $this->assertFalse(Codes::isValidExpenseClassType('E3_BOGUS'));
         $this->assertFalse(Codes::isValidExpenseClassCategory('category9_9'));

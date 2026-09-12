@@ -6,10 +6,15 @@ docs this file points to.
 > **Full history** (dated inspection notes, per-PR review logs, review war-stories,
 > resolved deferred-findings): **`docs/CLAUDE-history.md`** — not auto-loaded, consult it
 > for the "why" behind a past decision.
-> **AADE spec**: **`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (§8 =
-> code tables, §7.2 = the 101–280 business-error list). **ΔΑ lifecycle spec**:
-> **`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`** (§7.1 =
-> InvoiceDeliveryStatus, §7.2 = event types, §6.2 = 800–824 errors).
+> **AADE spec — CURRENT: v2.0.2 official (Σεπ 2026)**:
+> **`docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md`** (full ERP text, + `.pdf`);
+> implemented by `firebed/aade-mydata` 5.12.0. **Τι άλλαξε vs v2.0.1 + τι πρέπει να wire-άρει το
+> ekdosi → `docs/aade/mydata-v2.0.2-changes.md`** (actionable delta). Providers protocol:
+> `…_v2.0.2_official_providers.pdf` (πληροφοριακό — τι υλοποιεί ένας πάροχος, όχι εμείς).
+> Older refs kept for the §-anchors they cite:
+> **`…_v2.0.0_preofficial_erp.md`** (§8 = code tables, §7.2 = the 101–280 business-error list) +
+> **`…_DeliveryNote_v2.0.1_preofficial.md`** (§7.1 = InvoiceDeliveryStatus, §7.2 = event types,
+> §6.2 = 800–824 errors).
 > **What's built → `FEATURES.md`** · **what's left/ideas → `docs/BACKLOG.md`** ·
 > **per-change → `CHANGELOG.md`**.
 

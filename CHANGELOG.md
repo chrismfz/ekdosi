@@ -77,12 +77,26 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `session.serialization` (json/php) + `session.encrypt`.
 
 ### Changed
+- **`firebed/aade-mydata` 5.10.4 → 5.12.0** (myDATA API **v2.0.2** support, backwards-compatible —
+  όλα τα νέα πεδία optional, ίδιο XML). Ξεκλειδώνει το DEP-001 / την «delivery-note family» (βλ.
+  `docs/BACKLOG.md`). Η κύρια ύλη αφορά **ψηφιακή διακίνηση** (ConfirmDeliveryReturn/deliveryReturnMark,
+  Receiving Note 10.1/10.2, packagings, IN_TRANSIT_RETURN, `supportsDeliveryNote()` 1.4/3.1/3.2/11.5)
+  — αλλά **όχι μόνο**: το enum `ExpenseClassificationType` απέκτησε τα **E3_881_001–004** (χαρακτηρισμός
+  εξόδων· `Codes::expenseClassTypeOptions()` 88→92) και το `FuelCode` κάλυψε 14/15/33–38 (διάβασμα
+  τιμολογίων καυσίμων). Καμία in-app αλλαγή ροής ακόμη — μόνο η αναβάθμιση + ένα test-count update.
 - **Μενού: «Εκκρεμείς πληρωμές πύλης» + «Log πύλης» μετακόμισαν από «Καθημερινά» στο group «Πύλη
   πελατών»** (όπου ήδη είναι οι «Χρήστες Πύλης»), ώστε όλα τα portal items να είναι μαζεμένα.
   Καθαρά εικαστικό — μόνο `$navigationGroup`/`$navigationSort` άλλαξαν· καμία αλλαγή σε δικαιώματα,
   access ή λειτουργία.
 
 ### Fixed
+- **Ψηφιακή διακίνηση: latent crash από το v2.0.2** — το firebed 5.12.0 πρόσθεσε το
+  `DeliveryStatus::IN_TRANSIT_RETURN` (9)· πριν ένα status 9 από την ΑΑΔΕ ήταν `tryFrom()=null`
+  (το `null` arm το έπιανε), τώρα resolve-άρει σε πραγματική enum τιμή, οπότε το `match` στο
+  `DeliveryLifecycleService::deliveryStateFromAade()` (χωρίς default) θα πετούσε `UnhandledMatchError`
+  στον «Έλεγχο κατάστασης» ενός return movement. Fix: explicit `IN_TRANSIT_RETURN → 'in_transit'` +
+  `default => null` (forward-safe για κάθε μελλοντική enum τιμή) + regression test totality. Ανάλυση
+  αλλαγών v2.0.2 + σχέδιο wiring: `docs/aade/mydata-v2.0.2-changes.md`.
 - **2FA enrolment QR: σπασμένο («δεν έβγαινε QR, μόνο το secret») σε hosts χωρίς `imagick` (η
   παραγωγή τρέχει gd-only).** Το Filament v5.8 ξανα-τύλιγε σε `data:image/svg+xml;base64,…` το ήδη
   data-URI που επιστρέφει το `google2fa-qrcode` v4, οπότε το `<img>` του QR αποκωδικοποιούσε ένα
