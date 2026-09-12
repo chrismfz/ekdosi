@@ -2351,16 +2351,16 @@
         },
         {
             "name": "firebed/aade-mydata",
-            "version": "v5.10.4",
+            "version": "v5.12.0",
             "source": {
                 "type": "git",
                 "url": "https://github.com/firebed/aade-mydata.git",
-                "reference": "6572afb6779cfcb31bdc8fb7cc2a7721eb7ace79"
+                "reference": "7ca47aa9a23dd3eeedce196b2695f8b76470aa69"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/firebed/aade-mydata/zipball/6572afb6779cfcb31bdc8fb7cc2a7721eb7ace79",
-                "reference": "6572afb6779cfcb31bdc8fb7cc2a7721eb7ace79",
+                "url": "https://api.github.com/repos/firebed/aade-mydata/zipball/7ca47aa9a23dd3eeedce196b2695f8b76470aa69",
+                "reference": "7ca47aa9a23dd3eeedce196b2695f8b76470aa69",
                 "shasum": ""
             },
             "require": {
@@ -2399,9 +2399,9 @@
             ],
             "support": {
                 "issues": "https://github.com/firebed/aade-mydata/issues",
-                "source": "https://github.com/firebed/aade-mydata/tree/v5.10.4"
+                "source": "https://github.com/firebed/aade-mydata/tree/v5.12.0"
             },
-            "time": "2026-04-21T12:45:11+00:00"
+            "time": "2026-09-12T14:45:56+00:00"
         },
         {
             "name": "fruitcake/php-cors",
@@ -13901,5 +13901,5 @@
         "ext-soap": "*"
     },
     "platform-dev": {},
-    "plugin-api-version": "2.9.0"
+    "plugin-api-version": "2.6.0"
 }

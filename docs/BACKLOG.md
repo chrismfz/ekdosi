@@ -34,16 +34,24 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
 > is the operators' routine, not a backlog task. Kept as a closed record under «Cutover gate».*
 
 > **Sequencing (owner, 2026-09-05):** the **delivery-note family is HELD until the myDATA
-> API v2.0.2** ships (DEP-001) — don't start it before then. **MYD-011 (country→ISO) ✅ DONE**
+> API v2.0.2** ships (DEP-001). ✅ **UNBLOCKED 2026-09-12** — v2.0.2 shipped and `firebed/aade-mydata`
+> **5.12.0** (bumped from 5.10.4) implements it (backwards-compatible; suite green). The HOLD is
+> lifted — the family can start. **MYD-011 (country→ISO) ✅ DONE**
 > and **PROV-005 ✅ CLOSED (won't-do)** — no actionable-now item remains in TIER 1. TIER 2 is
 > **not urgent** («δεν καιγόμαστε»). The **AI «Βοηθός» Phase 2c** is **✅ COMPLETE** (α read
 > tools · ε ai_usage · β record_payment · ζ knowledge_search).
 
 **TIER 1 — Real in-scope code work, next deadline (delivery-note family + provider):**
-1. **Delivery-note family** — ⏳ **HELD until myDATA API v2.0.2** (DEP-001). Before the
-   ψηφιακή-διακίνηση deadline, NOT 1 Oct: MYD-023 strict-refusal + already-cancelled
-   adoption on ΔΑ/provider paths (**P1**, ties to PROV-015) · MYD-019 · MYD-026 · PROV-002 ·
-   STOCK-001 follow-ups · unblock 9.1/9.2 + combined ΤΔΑ. One block with a 9.3 sandbox rehearsal.
+1. **Delivery-note family** — ✅ **UNBLOCKED 2026-09-12** (was HELD until myDATA API v2.0.2, DEP-001;
+   `firebed/aade-mydata` 5.12.0 now ships v2.0.2). Before the ψηφιακή-διακίνηση deadline, NOT 1 Oct:
+   MYD-023 strict-refusal + already-cancelled adoption on ΔΑ/provider paths (**P1**, ties to PROV-015)
+   · MYD-019 · MYD-026 · PROV-002 · STOCK-001 follow-ups · unblock 9.1/9.2 + combined ΤΔΑ. One block
+   with a 9.3 sandbox rehearsal. **Newly available in 5.12.0 to wire:** `ConfirmDeliveryReturn` +
+   `DeliveryReturnMark` (MYD-026/PROV-002 durable attempt-record — the exact DEP-001 gate),
+   `RequestDeliveryNoteStatus::handleUsingQrUrl()`, `TransportDetails::packingsDeclaration`,
+   `DeliveryStatus::IN_TRANSIT_RETURN`/`DeliveryEventType::CONFIRM_RETURN`; PLUS the **new Receiving
+   Note flow** (Δελτίο Ποσοτικής Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`,
+   `ReceivingNotePurpose`) if in scope; `supportsDeliveryNote()` now also allows 1.4/3.1/3.2/11.5.
 2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
    `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
    (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
@@ -144,8 +152,10 @@ the myDATA/Provider sections lower down — not repeated here.
 
 - **PROV-011 (P2/VERIFY)** — ask InvoSign for a **versioned/written** API contract; the
   cancellation-endpoint ambiguity is already resolved empirically (`[283]`). *Blocked on vendor.*
-- **DEP-001 (WATCH)** — AADE **v2.0.2** delivery-lifecycle spec gates a durable
-  attempt-record for MYD-026/PROV-002; only a protocol-agnostic cache-lock is safe until then.
+- **DEP-001 (WATCH → ✅ SATISFIED 2026-09-12)** — AADE **v2.0.2** delivery-lifecycle spec gated a
+  durable attempt-record for MYD-026/PROV-002 (only a protocol-agnostic cache-lock was safe until
+  then). v2.0.2 has shipped and `firebed/aade-mydata` 5.12.0 exposes it (`ConfirmDeliveryReturn` →
+  `Response::getDeliveryReturnMark()`), so MYD-026/PROV-002 can now use the real durable mark.
 - **MYD-005 (P2)** — ordinary invoice XML omits the optional myDATA `measurementUnit`
   (data-fidelity enhancement; goods-tenant-conditional).
 - **SETUP-004 (P2)** — Estonian (EE) tenant skips even non-AADE neutral lookups.

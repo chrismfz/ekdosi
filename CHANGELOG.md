@@ -77,6 +77,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `session.serialization` (json/php) + `session.encrypt`.
 
 ### Changed
+- **`firebed/aade-mydata` 5.10.4 → 5.12.0** (myDATA API **v2.0.2** support, backwards-compatible —
+  όλα τα νέα πεδία optional, ίδιο XML). Ξεκλειδώνει το DEP-001 / την «delivery-note family» (βλ.
+  `docs/BACKLOG.md`). Η κύρια ύλη αφορά **ψηφιακή διακίνηση** (ConfirmDeliveryReturn/deliveryReturnMark,
+  Receiving Note 10.1/10.2, packagings, IN_TRANSIT_RETURN, `supportsDeliveryNote()` 1.4/3.1/3.2/11.5)
+  — αλλά **όχι μόνο**: το enum `ExpenseClassificationType` απέκτησε τα **E3_881_001–004** (χαρακτηρισμός
+  εξόδων· `Codes::expenseClassTypeOptions()` 88→92) και το `FuelCode` κάλυψε 14/15/33–38 (διάβασμα
+  τιμολογίων καυσίμων). Καμία in-app αλλαγή ροής ακόμη — μόνο η αναβάθμιση + ένα test-count update.
 - **Μενού: «Εκκρεμείς πληρωμές πύλης» + «Log πύλης» μετακόμισαν από «Καθημερινά» στο group «Πύλη
   πελατών»** (όπου ήδη είναι οι «Χρήστες Πύλης»), ώστε όλα τα portal items να είναι μαζεμένα.
   Καθαρά εικαστικό — μόνο `$navigationGroup`/`$navigationSort` άλλαξαν· καμία αλλαγή σε δικαιώματα,
