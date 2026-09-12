@@ -63,7 +63,11 @@ class DeliveryNoteEvent extends Model
         $d = $this->details ?? [];
 
         return match ($this->event_type) {
-            DeliveryEventType::REGISTER_TRANSFER->value => trim(implode(' · ', array_filter([
+            // RegisterTransferReturn (v2.0.2) carries the same transportDetails block
+            // as RegisterTransfer — the carrier-reported return leg — so it renders
+            // identically (vehicle / type / carrier).
+            DeliveryEventType::REGISTER_TRANSFER->value,
+            DeliveryEventType::REGISTER_TRANSFER_RETURN->value => trim(implode(' · ', array_filter([
                 DeliveryCodes::transportTypeLabel($d['transport_type'] ?? null),
                 isset($d['vehicle_number']) ? 'Όχημα '.$d['vehicle_number'] : null,
                 isset($d['carrier_vat']) ? 'Μεταφορέας '.$d['carrier_vat'] : null,
@@ -73,6 +77,9 @@ class DeliveryNoteEvent extends Model
                 ($d['delivered_without_recipient'] ?? false) ? 'χωρίς παρουσία παραλήπτη' : null,
             ]))),
             DeliveryEventType::REJECTION->value => $d['reason'] ?? 'Απόρριψη',
+            // ConfirmReturn (v2.0.2) carries no detail block — the type label
+            // «Επιβεβαίωση επιστροφής» (typeLabel) already says everything.
+            DeliveryEventType::CONFIRM_RETURN->value => '',
             default => '',
         };
     }

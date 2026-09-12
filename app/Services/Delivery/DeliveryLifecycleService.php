@@ -59,9 +59,15 @@ use Throwable;
  *     in_transit ──confirmDelivery(FULL)────▶ delivered
  *     in_transit ──confirmDelivery(PARTIAL)─▶ partial
  *     in_transit ──confirmDelivery(NONE)────▶ failed
- *     in_transit ──confirmReturn──────────▶ returned  (v2.0.2; AADE→Completed, deliveryReturnMark)
+ *     in_transit / in_transit_return ──confirmReturn──▶ returned  (v2.0.2; AADE→Completed, deliveryReturnMark)
+ *     in_transit ──(AADE reports IN_TRANSIT_RETURN via refresh)──▶ in_transit_return  (carrier-side return leg; we don't submit it)
  *     (any filed) ──cancel──▶ cancelled   (terminal; uses CancelInvoice by MARK)
  *     refreshStatus(): READ-ONLY reconcile against AADE §8.22 (no new mark row).
+ *
+ * Return leg (v2.0.2): REGISTER_TRANSFER_RETURN / IN_TRANSIT_RETURN are
+ * CARRIER-REPORTED — firebed exposes no submit action for them, so we only
+ * OBSERVE them via refreshStatus (→ in_transit_return state + a timeline event).
+ * The issuer closes a return with confirmReturn (ConfirmDeliveryReturn, → returned).
  *
  * NOT SANDBOX-VALIDATED. Like the DeliveryNoteSubmitter 9.3 payload, the whole
  * DGM lifecycle (RegisterTransfer / ConfirmDeliveryOutcome / GetDeliveryNoteStatus
@@ -88,6 +94,7 @@ class DeliveryLifecycleService
     public const STATE_LABELS = [
         'registered' => 'Εκδόθηκε',
         'in_transit' => 'Σε διακίνηση',
+        'in_transit_return' => 'Σε διακίνηση (επιστροφή)', // v2.0.2 DeliveryStatus::IN_TRANSIT_RETURN (9)
         'delivered' => 'Παραδόθηκε',
         'partial' => 'Μερική παράδοση',
         'failed' => 'Αποτυχία παράδοσης',
@@ -236,17 +243,20 @@ class DeliveryLifecycleService
 
     /**
      * Δήλωση ολοκλήρωσης διακίνησης ΕΠΙ ΕΠΙΣΤΡΟΦΗΣ (myDATA v2.0.2): ο μεταφορέας
-     * δεν παρέδωσε το σύνολο των αγαθών και τα επέστρεψε στον εκδότη. in_transit →
-     * returned. Keyed by the qrUrl· με επιτυχία η ΑΑΔΕ φέρνει το `deliveryReturnMark`
-     * και το δελτίο μεταβαίνει σε Completed. Αυτός είναι ο durable attempt-record
-     * που περίμενε το DEP-001 (βλ. docs/aade/mydata-v2.0.2-changes.md §A1).
+     * δεν παρέδωσε το σύνολο των αγαθών και τα επέστρεψε στον εκδότη.
+     * in_transit | in_transit_return → returned. Keyed by the qrUrl· με επιτυχία η
+     * ΑΑΔΕ φέρνει το `deliveryReturnMark` και το δελτίο μεταβαίνει σε Completed.
+     * Αυτός είναι ο durable attempt-record που περίμενε το DEP-001 (βλ.
+     * docs/aade/mydata-v2.0.2-changes.md §A1). Επιτρέπεται και από in_transit_return:
+     * όταν ο μεταφορέας έχει ήδη ξεκινήσει το σκέλος επιστροφής (carrier-reported),
+     * ο εκδότης κλείνει τη διακίνηση με αυτή τη δήλωση.
      */
     public function confirmReturn(DeliveryNote $note): DeliveryMark
     {
         // MYD-022: filed under the tenant's ΑΦΜ + credentials, like every event.
         TenantCoherence::assertDeliveryNote($this->tenant, $note);
 
-        $this->requireState($note, 'in_transit', 'Δήλωση επιστροφής');
+        $this->requireStateIn($note, ['in_transit', 'in_transit_return'], 'Δήλωση επιστροφής');
 
         $deliveryReturn = (new DeliveryReturn)->setQrUrl($this->requireQrUrl($note));
 
@@ -646,9 +656,10 @@ class DeliveryLifecycleService
      *
      * cancellation_mark is left NULL on purpose: RequestDeliveryNoteStatus exposes
      * no cancellation MARK, and the lifecycle history carries no cancellation event
-     * (DeliveryEventType has only RegisterTransfer/ConfirmOutcome/Rejection), so we
-     * genuinely have none here. Recording null is honest evidence — never a faked
-     * MARK (MYD-023). The audit row's text records WHERE the terminal state came from.
+     * (DeliveryEventType is RegisterTransfer/ConfirmOutcome/Rejection/ConfirmReturn/
+     * RegisterTransferReturn — none is a cancellation), so we genuinely have none
+     * here. Recording null is honest evidence — never a faked MARK (MYD-023). The
+     * audit row's text records WHERE the terminal state came from.
      */
     private function applyRemoteCancellation(DeliveryNote $note): bool
     {
@@ -754,16 +765,16 @@ class DeliveryLifecycleService
      * Before, an unknown code was `tryFrom() === null` and hit the null arm; now
      * it resolves to a real enum case, so WITHOUT a default this match would throw
      * UnhandledMatchError on a status refresh. Unknown/unmodelled statuses map to
-     * null → the caller leaves the cache unchanged (never crashes). The full
-     * return lifecycle (IN_TRANSIT_RETURN as its own state) is the delivery-note
-     * family epic; here it's treated as «still in transit».
+     * null → the caller leaves the cache unchanged (never crashes). IN_TRANSIT_RETURN
+     * (9) maps to its OWN 'in_transit_return' state (Slice 2) so the carrier-side
+     * return leg is visible to the operator rather than collapsed into 'in_transit'.
      */
     private function deliveryStateFromAade(?DeliveryStatus $status): ?string
     {
         return match ($status) {
             DeliveryStatus::REGISTERED => 'registered',
             DeliveryStatus::IN_TRANSIT => 'in_transit',
-            DeliveryStatus::IN_TRANSIT_RETURN => 'in_transit',
+            DeliveryStatus::IN_TRANSIT_RETURN => 'in_transit_return',
             DeliveryStatus::DELIVERED_BY_CARRIER => 'delivered',
             DeliveryStatus::COMPLETED => 'delivered',
             DeliveryStatus::FAILED_DELIVERY => 'failed',
@@ -775,11 +786,23 @@ class DeliveryLifecycleService
 
     private function requireState(DeliveryNote $note, string $expected, string $op): void
     {
-        if ($note->delivery_state !== $expected) {
+        $this->requireStateIn($note, [$expected], $op);
+    }
+
+    /**
+     * Assert the note is in ONE OF $expected delivery_states, else a Greek refusal
+     * naming the allowed states (the multi-state twin of requireState — e.g.
+     * confirmReturn accepts both in_transit and in_transit_return).
+     *
+     * @param  list<string>  $expected
+     */
+    private function requireStateIn(DeliveryNote $note, array $expected, string $op): void
+    {
+        if (! in_array($note->delivery_state, $expected, true)) {
+            $allowed = implode(' / ', array_map(fn (string $s): string => self::stateLabel($s) ?? $s, $expected));
             throw new RuntimeException(
                 "{$op}: το δελτίο {$note->invcode} είναι σε κατάσταση '"
-                .(self::stateLabel($note->delivery_state) ?? '—')."' και όχι '"
-                .(self::stateLabel($expected) ?? $expected)."'. Η ενέργεια δεν επιτρέπεται."
+                .(self::stateLabel($note->delivery_state) ?? '—')."' και όχι '{$allowed}'. Η ενέργεια δεν επιτρέπεται."
             );
         }
     }

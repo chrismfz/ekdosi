@@ -49,11 +49,13 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    with a 9.3 sandbox rehearsal. **Wired in 5.12.0:** `ConfirmDeliveryReturn` + `deliveryReturnMark`
    (MYD-026/PROV-002 durable attempt-record — the exact DEP-001 gate) ✅ **Slice 1 DONE** (direct-myDATA
    path: `confirmReturn()` + `return_mark` cache + `CONFIRM_RETURN` audit row + UI action; **provider
-   path PROV-002 still TODO**). **Still available in 5.12.0 to wire:**
-   `RequestDeliveryNoteStatus::handleUsingQrUrl()`, `TransportDetails::packingsDeclaration`,
-   `DeliveryStatus::IN_TRANSIT_RETURN`/`DeliveryEventType::CONFIRM_RETURN`; PLUS the **new Receiving
-   Note flow** (Δελτίο Ποσοτικής Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`,
-   `ReceivingNotePurpose`) if in scope; `supportsDeliveryNote()` now also allows 1.4/3.1/3.2/11.5.
+   path PROV-002 still TODO**). `DeliveryStatus::IN_TRANSIT_RETURN` + the `CONFIRM_RETURN`/
+   `REGISTER_TRANSFER_RETURN` event types ✅ **Slice 2 DONE** (own `in_transit_return` state +
+   refresh visibility + event labels/summaries; carrier-reported, no submit action). **Still
+   available in 5.12.0 to wire:** `RequestDeliveryNoteStatus::handleUsingQrUrl()`,
+   `TransportDetails::packingsDeclaration`; PLUS the **new Receiving Note flow** (Δελτίο Ποσοτικής
+   Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`, `ReceivingNotePurpose`) if in scope;
+   `supportsDeliveryNote()` now also allows 1.4/3.1/3.2/11.5.
 2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
    `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
    (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
@@ -1480,9 +1482,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   from being overwritten by the AADE-mapped state, but `deliveryStateFromAade()` can only emit
   `registered/in_transit/delivered/failed/rejected/cancelled` — never `'partial'`. So a δελτίο left in
   `'partial'` (or `'failed'`) by `confirmDelivery(PARTIAL/NONE)` has its cache silently flipped by any
-  later refresh (e.g. AADE `COMPLETED → 'delivered'`, or `IN_TRANSIT_RETURN(9) → 'in_transit'`) — the
-  same downgrade the `'returned'` clause now blocks. The authoritative outcome still lives in the
-  `CONFIRM_OUTCOME` `delivery_marks` row, so this is cache-fidelity only (no legal/money impact). Fix
+  later refresh (e.g. AADE `COMPLETED → 'delivered'`) — the same downgrade the `'returned'` clause now
+  blocks. (`IN_TRANSIT_RETURN(9)` maps to `'in_transit_return'` since Slice 2 — that state is NOT in
+  this bucket: it is AADE/carrier-reported and non-terminal, so it SHOULD follow refresh.) Related
+  pre-existing edge: a return leg the operator never closes with `confirmReturn` but the carrier
+  completes → refresh reports `COMPLETED → 'delivered'` («Παραδόθηκε»), misrepresenting a returned
+  shipment. The authoritative outcome still lives in the `CONFIRM_OUTCOME`/`CONFIRM_RETURN`
+  `delivery_marks` rows + lifecycleHistory, so this is cache-fidelity only (no legal/money impact). Fix
   when touched: treat the operator-declared outcome states (`partial`/`failed`/`delivered`) as terminal
   in the same guard, or derive the guard from "is this state locally-authoritative" rather than listing.
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._

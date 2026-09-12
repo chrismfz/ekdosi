@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
+use App\Models\DeliveryNoteEvent;
 use App\Models\DeliveryNoteLine;
 use App\Models\InvoiceType;
 use App\Models\Product;
@@ -171,7 +172,8 @@ class DeliveryLifecycleServiceTest extends TestCase
             );
         }
 
-        $this->assertSame('in_transit', $method->invoke($service, DeliveryStatus::IN_TRANSIT_RETURN));
+        // Slice 2: IN_TRANSIT_RETURN (9) maps to its OWN state, not 'in_transit'.
+        $this->assertSame('in_transit_return', $method->invoke($service, DeliveryStatus::IN_TRANSIT_RETURN));
         $this->assertNull($method->invoke($service, null));
     }
 
@@ -389,7 +391,35 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertFalse($result['changed']);
     }
 
+    public function test_confirm_return_is_allowed_from_in_transit_return(): void
+    {
+        // Slice 2: when the carrier has already started the return leg (AADE
+        // reports IN_TRANSIT_RETURN → our 'in_transit_return'), the issuer can
+        // still close it with a return declaration.
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit_return']);
+
+        $mark = $this->service($this->confirmReturnResponse())->confirmReturn($note);
+
+        $this->assertSame('CONFIRM_RETURN', $mark->mydata_action);
+        $this->assertSame('444444444444444', $note->fresh()->return_mark);
+        $this->assertSame('returned', $note->fresh()->delivery_state);
+    }
+
     // ---- refreshStatus (read-only) ------------------------------------
+
+    public function test_refresh_maps_in_transit_return_to_its_own_state(): void
+    {
+        // Slice 2: a carrier-reported return leg surfaces as its own state, not
+        // collapsed into 'in_transit' — so the operator sees goods are coming back.
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+
+        $result = $this->service($this->statusResponse('IN_TRANSIT_RETURN'))->refreshStatus($note);
+
+        $this->assertSame(DeliveryStatus::IN_TRANSIT_RETURN, $result['aade_status']);
+        $this->assertSame('in_transit_return', $result['mapped_state']);
+        $this->assertSame('in_transit_return', $note->fresh()->delivery_state);
+        $this->assertTrue($result['changed']);
+    }
 
     public function test_refresh_status_maps_aade_state_and_forcefills(): void
     {
@@ -805,8 +835,28 @@ XML;
     public function test_state_label_is_greek(): void
     {
         $this->assertSame('Σε διακίνηση', DeliveryLifecycleService::stateLabel('in_transit'));
+        $this->assertSame('Σε διακίνηση (επιστροφή)', DeliveryLifecycleService::stateLabel('in_transit_return'));
         $this->assertSame('Παραδόθηκε', DeliveryLifecycleService::stateLabel('delivered'));
         $this->assertNull(DeliveryLifecycleService::stateLabel(null));
+    }
+
+    // ---- v2.0.2 return event types (A3) -------------------------------
+
+    public function test_return_event_types_render_label_and_summary(): void
+    {
+        // RegisterTransferReturn carries the SAME transportDetails as RegisterTransfer
+        // → renders the transport summary and the firebed Greek label.
+        $registerReturn = new DeliveryNoteEvent([
+            'event_type' => 'RegisterTransferReturn',
+            'details' => ['vehicle_number' => 'ABC1234', 'transport_type' => 2, 'carrier_vat' => '777777777'],
+        ]);
+        $this->assertSame('Επιστροφή διακίνησης', $registerReturn->typeLabel());
+        $this->assertStringContainsString('Όχημα ABC1234', $registerReturn->summary());
+
+        // ConfirmReturn carries no detail block → its type label says it all.
+        $confirmReturn = new DeliveryNoteEvent(['event_type' => 'ConfirmReturn', 'details' => null]);
+        $this->assertSame('Επιβεβαίωση επιστροφής', $confirmReturn->typeLabel());
+        $this->assertSame('', $confirmReturn->summary());
     }
 
     // ---- response stubs (mirror firebed's DGM vendor stubs) -----------
