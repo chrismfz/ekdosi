@@ -301,26 +301,38 @@ question.)
    existing writer/reader/test changes; `Invoice`/`InvoiceType` gain the flag + movement fillable/casts.
    Validated: full delivery + coherence + seeder suites green; migration up/down round-trips.
    **Re-scoped OUT of 3a** (each moved to the slice that first needs it — keeps 3a additive + safe):
-   the ΤΔΑ **seed row** + **legacy normaliser** → **3b** (a selectable ΤΔΑ type must NOT exist before the
-   builder emits the header, or it mis-files as a plain 1.1); the **dedup-unique swap to the morph keys**,
+   the ΤΔΑ **seed row** + **legacy normaliser** → **3d** (a selectable ΤΔΑ type must NOT exist before the
+   3d FORM sets `invoice.is_delivery_note` + collects the movement data, else an operator picks ΤΔΑ, the
+   flag stays false, and it mis-files as a plain 1.1); the **dedup-unique swap to the morph keys**,
    **`events.delivery_note_id` NULLABLE**, **`FiledSeriesBackfill` morph**, and the **read-relation flip to
    `movable`** → **3c** (only needed once Invoice-backed audit rows exist).
-2. **3b — Issue payload + ΤΔΑ type:** `AadeInvoiceDocument` emits the combined header for
-   `is_delivery_note` (incl. the `withoutDigitalTransportTracking` fork); `allowsItemDescr()` → flag; keep
-   pure-9.x reject; **re-add ΤΔΑ to the seed + apply-loop + legacy normaliser** (now safe — it files
-   correctly). Tests: golden combined-1.1 XML vs spec; MYD-003 still rejects pure 9.x; seeding +
-   normaliser idempotency. Sandbox: file a ΤΔΑ, confirm MARK + qrUrl (or straight-to-Completed when
-   tracking off).
+2. **3b — Issue payload (✅ BUILT):** `AadeInvoiceDocument` emits the combined movement header on the 1.1
+   when `is_delivery_note` (setIsDeliveryNote + movePurpose(+title) + dispatchDate/Time + vehicleNumber +
+   otherDeliveryNoteHeader loading/delivery Address + branches), plus the v2.0.2
+   `withoutDigitalTransportTracking` fork (new nullable column); `Codes::allowsItemDescr()` gains the flag
+   (a ΤΔΑ may carry `<itemDescr>`); the pure-9.x reject (MYD-003) is untouched — a 1.1 passes it. **NO seed
+   here** — the ΤΔΑ type stays out of the picker until the 3d form makes it usable (else mis-files as a
+   plain 1.1). Tests: golden combined-1.1 XML (movement header + itemDescr + tracking-off) + plain-1.1
+   stays byte-identical + MYD-003 still rejects pure 9.x. Sandbox test uses a tinker-constructed ΤΔΑ (no
+   picker needed yet): file it, confirm MARK + qrUrl (or straight-to-Completed when tracking off).
 3. **3c — Lifecycle contract:** extract `MovableDocument` (incl. the audit/coherence/stock seams),
    generalise `DeliveryLifecycleService`, implement on `Invoice`; make `events.delivery_note_id` nullable
    + move the dedup unique to the morph keys + teach `FiledSeriesBackfill` the morph + flip the read
-   relations to `movable`; wire the monetary cancel to reconcile `delivery_state` + `reverseSaleForInvoice`
+   relations to `movable`; **extract a SHARED movement-header builder** — `DeliveryNoteSubmitter` and
+   `AadeInvoiceDocument::applyMovementHeader` (3b) both build the issue-time movement header (movePurpose
+   +purpose-19 title, dispatchDate/Time, vehicle, otherDeliveryNoteHeader), so keyed on `MovableDocument`
+   one builder keeps both in lockstep (3b review flagged the duplication as the root of a dispatchTime
+   `H:i` vs `H:i:s` drift — fixed by matching for now); wire the monetary cancel to reconcile
+   `delivery_state` + `reverseSaleForInvoice`
    (§7). Tests: existing delivery-lifecycle suite green against the contract + a ΤΔΑ drives
    RegisterTransfer/refresh. **No longer blocked** (Q2 resolved); the DGM doc only decides which actions
    surface (tracked vs `withoutDigitalTransportTracking`).
-4. **3d — UI/wizard:** the Παραστατικά toggle + movement sub-form + lifecycle actions on the invoice
-   view; the Διακίνηση helper/tooltip; re-offer ΤΔΑ in the picker.
+4. **3d — UI/wizard + seed:** the Παραστατικά toggle (sets `invoice.is_delivery_note`) + movement
+   sub-form + lifecycle actions on the invoice view; the Διακίνηση helper/tooltip; **re-add the ΤΔΑ seed
+   row + apply-loop + legacy normaliser and re-offer ΤΔΑ in the picker** — safe now that the form fills the
+   flag + movement data. Tests: seeding + normaliser idempotency.
 5. **3e — Stock + polish:** confirm single stock event; PDF; docs (FEATURES/CHANGELOG); move MYD-002
    BACKLOG → FEATURES.
 
-Each sub-slice is independently mergeable; 3a/3b deliver value (a filed ΤΔΑ) even before 3c lands.
+Each sub-slice is independently mergeable; 3a/3b are the invisible foundation (schema + payload), 3c wires
+the lifecycle, and 3d makes a ΤΔΑ operator-issuable.

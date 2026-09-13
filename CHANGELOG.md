@@ -19,6 +19,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Combined ΤΔΑ — issue payload (Slice 3b).** Ο monetary builder (`AadeInvoiceDocument`) εκπέμπει πλέον
+  το **movement header πάνω στο ίδιο 1.1** όταν το invoice έχει `is_delivery_note=true`: `isDeliveryNote`,
+  σκοπός διακίνησης (+τίτλος για 19), dispatch date/time, όχημα, και `otherDeliveryNoteHeader`
+  (διευθύνσεις φόρτωσης/παράδοσης + υποκαταστήματα). Νέο fork v2.0.2 `withoutDigitalTransportTracking`
+  (νέα στήλη) → το ΤΔΑ φιλάρεται κατευθείαν *Completed* χωρίς qrUrl/lifecycle. Το `Codes::allowsItemDescr`
+  δέχεται πλέον το flag (ένα ΤΔΑ, ως δελτίο, μπορεί να φέρει `<itemDescr>`). Το MYD-003 reject των καθαρών
+  9.x μένει ως έχει· ένα απλό 1.1 μένει byte-identical. Χωρίς seed/UI ακόμα — ο τύπος ΤΔΑ μπαίνει στον
+  picker στο 3d (μαζί με τη φόρμα). Golden XML tests.
 - **Combined ΤΔΑ — schema foundation (Slice 3a).** Προετοιμασία για το Τιμολόγιο–Δελτίο Αποστολής (ένα
   monetary 1.1 με `isDeliveryNote=true` + movement header — ζει με τα άλλα Παραστατικά, όχι στην Ψηφιακή
   Διακίνηση): νέες στήλες κίνησης στα `invoices` (`is_delivery_note`, σκοπός/dispatch/όχημα, διευθύνσεις
