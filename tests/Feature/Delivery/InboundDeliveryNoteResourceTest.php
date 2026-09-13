@@ -87,6 +87,17 @@ class InboundDeliveryNoteResourceTest extends TestCase
             ->assertActionVisible('refresh_status');
     }
 
+    public function test_view_hides_reject_when_the_aade_status_is_already_terminal(): void
+    {
+        // Locally still «new», but AADE already reports COMPLETED (8) — reject is moot.
+        $row = $this->row(['aade_delivery_status' => 8]);
+
+        Livewire::test(ViewInboundDeliveryNote::class, ['record' => $row->getKey()])
+            ->assertSuccessful()
+            ->assertActionHidden('reject')
+            ->assertActionVisible('refresh_status');
+    }
+
     public function test_acknowledge_action_is_driven_end_to_end(): void
     {
         $row = $this->row();

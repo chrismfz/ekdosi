@@ -2,9 +2,9 @@
 
 namespace App\Services\Delivery;
 
-use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\InboundDeliveryNote;
+use App\Services\MyData\FirebedCredentials;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
@@ -12,7 +12,6 @@ use Firebed\AadeMyData\Exceptions\MyDataException;
 use Firebed\AadeMyData\Exceptions\MyDataTimeoutException;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RejectDeliveryNote;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RequestDeliveryNoteStatus;
-use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryNoteStatusResponse;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\Response as DgmResponse;
 use GuzzleHttp\Handler\MockHandler;
@@ -205,20 +204,15 @@ class InboundDeliveryService
         return implode('; ', $messages) ?: ($response->getStatusCode() ?? 'unknown');
     }
 
+    /**
+     * Prime firebed via the SAME single source the fetcher uses — read-mode
+     * credentials + env override + DecryptException translation. Reject/refresh
+     * operate on the very feed the fetcher stages, so they must use the same
+     * mode (mydataReadMode), not the submission mode.
+     */
     private function initFirebed(): void
     {
-        $mode = $this->tenant->mydata_mode_enum;
-
-        [$aadeId, $subKey] = $this->tenant->mydataCredentials($mode);
-
-        if (empty($aadeId) || empty($subKey)) {
-            throw new RuntimeException(
-                'Τα διαπιστευτήρια myDATA δεν είναι ρυθμισμένα για αυτή την εταιρεία ('.$mode->value.').'
-            );
-        }
-
-        MyDataRequest::init($aadeId, $subKey, $mode === MyDataMode::Production ? 'prod' : 'dev');
-        MyDataRequest::setHandler($this->mockHandler);
+        FirebedCredentials::init($this->tenant, $this->mockHandler);
     }
 
     private function logFailure(InboundDeliveryNote $row, string $kind, Throwable $e): void

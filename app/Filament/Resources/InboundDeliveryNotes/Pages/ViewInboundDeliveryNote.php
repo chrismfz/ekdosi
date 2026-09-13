@@ -3,12 +3,15 @@
 namespace App\Filament\Resources\InboundDeliveryNotes\Pages;
 
 use App\Filament\Resources\InboundDeliveryNotes\InboundDeliveryNoteResource;
+use App\Models\Company;
 use App\Models\InboundDeliveryNote;
 use App\Services\Delivery\InboundDeliveryService;
 use Filament\Actions\Action;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use RuntimeException;
 use Throwable;
 
 /**
@@ -36,7 +39,9 @@ class ViewInboundDeliveryNote extends ViewRecord
                 ->label('Απόρριψη')
                 ->icon('heroicon-o-x-circle')
                 ->color('danger')
-                ->visible(fn (InboundDeliveryNote $record): bool => ! $record->isTerminal() && ! empty($record->mydata_mark))
+                ->visible(fn (InboundDeliveryNote $record): bool => ! $record->isTerminal()
+                    && ! $record->aadeIsTerminal()
+                    && ! empty($record->mydata_mark))
                 ->authorize(fn (InboundDeliveryNote $record): bool => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Απόρριψη εισερχόμενης διακίνησης')
@@ -49,7 +54,7 @@ class ViewInboundDeliveryNote extends ViewRecord
                 ])
                 ->action(function (InboundDeliveryNote $record, array $data): void {
                     try {
-                        (new InboundDeliveryService($record->company))->reject($record, $data['reason'] ?? null);
+                        $this->service()->reject($record, $data['reason'] ?? null);
 
                         Notification::make()
                             ->title('Το εισερχόμενο απορρίφθηκε')
@@ -69,10 +74,13 @@ class ViewInboundDeliveryNote extends ViewRecord
                 ->icon('heroicon-o-arrow-path')
                 ->color('gray')
                 ->visible(fn (InboundDeliveryNote $record): bool => ! empty($record->mydata_mark))
-                ->authorize(fn (InboundDeliveryNote $record): bool => auth()->user()?->can('view', $record) ?? false)
+                // Gated on UPDATE (not view): refresh WRITES — it persists the AADE
+                // status/lifecycle and can flip local_state to a terminal
+                // cancelled_by_issuer. Same class as the «Λήψη νέων» fetch action.
+                ->authorize(fn (InboundDeliveryNote $record): bool => auth()->user()?->can('update', $record) ?? false)
                 ->action(function (InboundDeliveryNote $record): void {
                     try {
-                        $result = (new InboundDeliveryService($record->company))->refreshStatus($record);
+                        $result = $this->service()->refreshStatus($record);
 
                         Notification::make()
                             ->title('Κατάσταση ΑΑΔΕ: '.($result['label'] ?? '—'))
@@ -99,7 +107,7 @@ class ViewInboundDeliveryNote extends ViewRecord
                 ->modalSubmitActionLabel('Παραλήφθηκε')
                 ->action(function (InboundDeliveryNote $record): void {
                     try {
-                        (new InboundDeliveryService($record->company))->acknowledge($record);
+                        $this->service()->acknowledge($record);
 
                         Notification::make()->title('Επισημάνθηκε ως παραληφθέν')->success()->send();
 
@@ -109,6 +117,23 @@ class ViewInboundDeliveryNote extends ViewRecord
                     }
                 }),
         ];
+    }
+
+    /**
+     * Resolve the service for the ACTING tenant (Filament::getTenant()), not the
+     * record's own company — so InboundDeliveryService::assertTenant is a real
+     * backstop (verifies the row belongs to the tenant we're acting as) and the
+     * AADE call runs under the acting tenant's credentials. Refuses (→ danger
+     * notification via the callers' try/catch) if there's no tenant context.
+     */
+    private function service(): InboundDeliveryService
+    {
+        $tenant = Filament::getTenant();
+        if (! $tenant instanceof Company) {
+            throw new RuntimeException('Δεν έχει επιλεγεί εταιρεία.');
+        }
+
+        return new InboundDeliveryService($tenant);
     }
 
     private function actionError(Throwable $e): void
