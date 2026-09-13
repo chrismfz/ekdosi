@@ -19,6 +19,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Combined ΤΔΑ — schema foundation (Slice 3a).** Προετοιμασία για το Τιμολόγιο–Δελτίο Αποστολής (ένα
+  monetary 1.1 με `isDeliveryNote=true` + movement header — ζει με τα άλλα Παραστατικά, όχι στην Ψηφιακή
+  Διακίνηση): νέες στήλες κίνησης στα `invoices` (`is_delivery_note`, σκοπός/dispatch/όχημα, διευθύνσεις
+  φόρτωσης/παράδοσης + υποκαταστήματα, transport_type/carrier + lifecycle cache `delivery_state`/
+  `transfer_mark`/`return_mark`), `invoice_types.is_delivery_note`, και **polymorphic audit** — τα
+  `delivery_marks`/`delivery_note_events` απέκτησαν `movable_type`/`movable_id` **προσθετικά** δίπλα στο
+  `delivery_note_id` (backfill → DeliveryNote, κρατιούνται σε lock-step με hook), ώστε να μπορούν να
+  «κρεμαστούν» και σε ΤΔΑ invoice χωρίς να αλλάξει κανένας υπάρχων writer/reader. Καθαρά schema+models —
+  ο builder/lifecycle/seed έρχονται σε 3b/3c (`docs/combined-tda-design.md`).
 - **Ψηφιακή διακίνηση — σκέλος επιστροφής ορατό (myDATA v2.0.2, Slice 2).** Το `IN_TRANSIT_RETURN` (9)
   της ΑΑΔΕ γίνεται πλέον **δικό του** `delivery_state` `'in_transit_return'` («Σε διακίνηση (επιστροφή)»)
   αντί να συγχωνεύεται στο «in_transit» — ο «Έλεγχος κατάστασης» το αναδεικνύει, ώστε ο χειριστής να

@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\MirrorsMovableFromDeliveryNote;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,11 +18,16 @@ class DeliveryMark extends Model
 {
     use BelongsToCompany;
     use HasFactory;
+    use MirrorsMovableFromDeliveryNote;
 
     protected $fillable = [
         'company_id',
         'legacy_id',
         'delivery_note_id',
+        // Polymorphic parent (Combined ΤΔΑ, 3a) — a DeliveryNote OR a ΤΔΑ Invoice.
+        // Mirrored from delivery_note_id on write; see MirrorsMovableFromDeliveryNote.
+        'movable_type',
+        'movable_id',
         'mark',
         // AADE's own MARK for the cancellation ACT — distinct evidence from the
         // MARK of the document being cancelled (MYD-023).
