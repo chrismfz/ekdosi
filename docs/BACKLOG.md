@@ -60,14 +60,22 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    `docs/delivery-sandbox-rehearsal.md` §Findings). Confirmed from the ISSUER's own creds:
    RegisterTransfer ✓, refreshStatus ✓, cancel-from-`registered` ✓; cancel-from-`in_transit`
    ✗ [801]; ConfirmDeliveryReturn from `in_transit` ✗ [828] → **`in_transit` pruned** from
-   `CONFIRM_RETURN_FROM_STATES` (this PR). **DGM two-party sandbox validation — OPEN (P2):**
-   ConfirmDeliveryOutcome is recipient/carrier-only (AADE [833] «Only the recipient or carrier
-   can confirm delivery outcome»), so a single issuer tenant **cannot** drive a note into
-   rejected/partial/failed/in_transit_return — validating confirmReturn from those §3.2.7
-   sources (and the whole outcome path) needs a SECOND sandbox tenant acting recipient/carrier.
-   Until then those sources stay spec-matched but sandbox-UNconfirmed, and the issuer-side
-   `confirmDelivery()` (UI «Δήλωση παράδοσης») is a known [833] dead-end for a plain 9.3 —
-   revisit whether to gate it out of the issuer flow once the two-party path is exercised.
+   `CONFIRM_RETURN_FROM_STATES`. **DGM two-party sandbox validation — ✅ DONE 2026-09-13**
+   (myip⇄nexon, `docs/delivery-two-party-sandbox.md` §Findings): confirmReturn CONFIRMED at AADE
+   from `rejected`, `failed`, AND DeliveredByCarrier(PARTIAL) (posts a deliveryReturnMark). Fixed
+   the **P2-2** bug — `DELIVERED_BY_CARRIER` was collapsed to `'delivered'` (∉ CONFIRM_RETURN set),
+   now split by the ConfirmOutcome lifecycleHistory detail (PARTIAL→`partial`, FULL→`delivered`).
+   Empirical role rules recorded: CARRIER = whoever CALLS RegisterTransfer (not the declared
+   `carrierVatNumber`); recipient NONE = [817]; PARTIAL needs [814] `deliveredPackaging`. **Remaining
+   punch-list (P2):** (a) issuer-side `confirmDelivery()` / UI «Δήλωση παράδοσης» is a [833]/[817]/[814]
+   dead-end — gate it out of the issuer flow (it is not the issuer's call); (b) `delivery:test-lifecycle
+   --return` calls confirmReturn from `in_transit` (pruned → [828] dead path); (c) a receiving-ekdosi
+   «Εισερχόμενα Διακίνησης» is net-new (RequestDocs discovers 9.3s to the counterpart by MARK — no qrUrl;
+   reject-by-MARK works, confirm is qrUrl-only); (d) `deliveryStateFromAade` defaults a
+   DeliveredByCarrier with a MISSING ConfirmOutcome detail to `'delivered'` (conscious — a carrier FULL
+   also reports DeliveredByCarrier, so `'partial'` would mislabel the common case) — revisit only if a
+   real truncated-history case dead-ends a legitimate return; the authoritative outcome stays in
+   `delivery_marks`/lifecycleHistory regardless.
 2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
    `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
    (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
@@ -1491,11 +1499,11 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 - **`refreshStatus()` downgrades the `'partial'`/`'failed'` delivery_state cache** _(P2, CONFIRMED,
   pre-existing — surfaced by the Slice 1 review, NOT introduced by it)._ The refresh guard
   (`DeliveryLifecycleService::refreshStatus`, ~L341) protects only `cancelled`/`CANCELLED`/`'returned'`
-  from being overwritten by the AADE-mapped state, but `deliveryStateFromAade()` can only emit
-  `registered/in_transit/delivered/failed/rejected/cancelled` — never `'partial'`. So a δελτίο left in
-  `'partial'` (or `'failed'`) by `confirmDelivery(PARTIAL/NONE)` has its cache silently flipped by any
-  later refresh (e.g. AADE `COMPLETED → 'delivered'`) — the same downgrade the `'returned'` clause now
-  blocks. (`IN_TRANSIT_RETURN(9)` maps to `'in_transit_return'` since Slice 2 — that state is NOT in
+  from being overwritten by the AADE-mapped state. `deliveryStateFromAade()` now CAN emit `'partial'`
+  (DeliveredByCarrier split, 2026-09-13) as well as `in_transit_return` — so refresh keeps a carrier-PARTIAL
+  note in `'partial'` idempotently (AADE keeps reporting DeliveredByCarrier). The residual downgrade risk is
+  a note locally in `'partial'`/`'failed'` that a later refresh maps elsewhere (e.g. AADE `COMPLETED →
+  'delivered'`) — the same downgrade the `'returned'` clause now blocks. (`IN_TRANSIT_RETURN(9)` maps to `'in_transit_return'` since Slice 2 — that state is NOT in
   this bucket: it is AADE/carrier-reported and non-terminal, so it SHOULD follow refresh.) Related
   pre-existing edge: a return leg the operator never closes with `confirmReturn` but the carrier
   completes → refresh reports `COMPLETED → 'delivered'` («Παραδόθηκε»), misrepresenting a returned
@@ -1503,13 +1511,12 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `delivery_marks` rows + lifecycleHistory, so this is cache-fidelity only (no legal/money impact). Fix
   when touched: treat the operator-declared outcome states (`partial`/`failed`/`delivered`) as terminal
   in the same guard, or derive the guard from "is this state locally-authoritative" rather than listing.
-- **Slice-2 follow-up: `confirmReturn` reachable-from** _(CONFIRMED vs DGM v2.0.2 §3.2.7)._ ✅ **PARTLY
-  DONE** — `CONFIRM_RETURN_FROM_STATES` now adds the 3 real sources for plain 9.3 (`rejected/partial/failed`);
-  the operator-blocking gap is closed. **Still open (sandbox-gated):** `in_transit`/`in_transit_return` are
-  KEPT fail-safe but §3.2.7 gives a bare `InTransit` source only for 9.2 or 9.3-`reverseDeliveryNote`, so
-  for plain 9.3 they are probably invalid — **prune after the sandbox rehearsal** (`docs/delivery-sandbox-rehearsal.md`)
-  confirms AADE rejects them. Same rehearsal also answers whether AADE accepts **issuer-side PARTIAL**
-  (`confirmDelivery(PARTIAL)`) — v2.0.2 says PARTIAL is carrier-only; if rejected, gate it out (separate fix).
+- **Slice-2 follow-up: `confirmReturn` reachable-from** _(CONFIRMED vs DGM v2.0.2 §3.2.7)._ ✅ **DONE**
+  — `CONFIRM_RETURN_FROM_STATES` = `rejected/partial/failed/in_transit_return`. Sandbox-settled: `in_transit`
+  pruned (AADE [828]); `rejected`/`failed`/DeliveredByCarrier(`partial`) all CONFIRMED accepted two-party
+  (`docs/delivery-two-party-sandbox.md`). **Issuer-side PARTIAL answered:** the whole issuer-side
+  `confirmDelivery()` is a [833]/[817]/[814] dead-end (outcome is recipient/carrier-only) → gate it out of
+  the issuer flow (still-open punch-list item, TIER-1 delivery).
 - **Strict tenant scope** — _audited 2026-06-11: **0 live leaks** σε ~54 entry points· το no-op default είναι σωστό/load-bearing. Έγινε το φθηνό hardening (StockService explicit company_id· SweepOrphanMailLogs explicit withoutGlobalScope· CLAUDE.md rule). Το enforcement (null→throw) **deferred**: naive flip σπάει ~18 ασφαλή explicit-where paths· execution-time tripwire false-positives σε relation/eager-load FK queries. Re-open μόνο αν εμφανιστεί πραγματικό leak ή μεγαλώσει πολύ το CLI surface._
 - **WHMCS outbound push — «claimed-but-lost» recovery** _(from the 2-way payment-sync double review, M1)._
   `WhmcsPaymentPusher` claims the `whmcs_payment_pushed_at` marker **before** the WHMCS write (prevents a

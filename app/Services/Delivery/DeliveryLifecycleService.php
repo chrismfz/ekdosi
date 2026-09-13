@@ -12,6 +12,7 @@ use App\Services\Stock\StockService;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\MyData\CancellationMark;
 use App\Support\Tenancy\TenantCoherence;
+use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\TransportType;
@@ -61,6 +62,7 @@ use Throwable;
  *     in_transit ──confirmDelivery(NONE)────▶ failed
  *     {rejected|partial|failed|in_transit_return} ──confirmReturn──▶ returned  (v2.0.2 §3.2.7; AADE→Completed, deliveryReturnMark; `in_transit` pruned — AADE [828], see CONFIRM_RETURN_FROM_STATES)
  *     in_transit ──(AADE reports IN_TRANSIT_RETURN via refresh)──▶ in_transit_return  (carrier-side return leg; we don't submit it)
+ *     in_transit ──(AADE reports DeliveredByCarrier via refresh)──▶ delivered | partial  (recipient/carrier confirmed; PARTIAL split by the ConfirmOutcome lifecycleHistory detail so confirmReturn stays reachable)
  *     (any filed) ──cancel──▶ cancelled   (terminal; uses CancelInvoice by MARK)
  *     refreshStatus(): READ-ONLY reconcile against AADE §8.22 (no new mark row).
  *
@@ -78,12 +80,18 @@ use Throwable;
  *   - cancel from `in_transit`: ✗ AADE [801] (blocked once moving) — expected & surfaced.
  *   - ConfirmDeliveryReturn from `in_transit`: ✗ AADE [828] → `in_transit` PRUNED from
  *     CONFIRM_RETURN_FROM_STATES.
- * STILL UNVALIDATED (needs a SECOND sandbox tenant acting recipient/carrier — a single
- * issuer tenant cannot reach these states): ConfirmDeliveryOutcome (issuer-side FULL/
- * PARTIAL/NONE returns AADE [833] «Only the recipient or carrier can confirm delivery
- * outcome»), and therefore confirmReturn from the recipient/carrier-produced sources
- * (rejected/partial/failed) and the carrier return leg (in_transit_return). See the
- * BACKLOG «DGM two-party sandbox validation» item.
+ * TWO-PARTY validated (2026-09-13, myip ISSUER ⇄ nexon RECIPIENT/CARRIER — see
+ * `docs/delivery-two-party-sandbox.md`):
+ *   - recipient ConfirmDeliveryOutcome(FULL) → Completed → `delivered` ✓.
+ *   - carrier ConfirmDeliveryOutcome(NONE) → FailedDelivery → `failed` ✓ (recipient NONE = [817]).
+ *   - carrier ConfirmDeliveryOutcome(PARTIAL) → DeliveredByCarrier → `partial` ✓ (needs [814] deliveredPackaging).
+ *   - confirmReturn CONFIRMED from `rejected`, `failed`, AND DeliveredByCarrier(PARTIAL)
+ *     (AADE posts a deliveryReturnMark) — the last drove the DELIVERED_BY_CARRIER split
+ *     in deliveryStateFromAade (was collapsed to `delivered`, blocking the return).
+ * ROLE NOTES (empirical): the CARRIER is whoever CALLS RegisterTransfer, not the declared
+ * `carrierVatNumber`; issuer-side ConfirmDeliveryOutcome is a [833]/[817]/[814] dead-end
+ * (not the issuer's call). NOT wired here (issuer-scoped service): the recipient/carrier
+ * side is driven by that party's own ERP — a receiving-ekdosi flow would be net-new.
  */
 class DeliveryLifecycleService
 {
@@ -357,7 +365,7 @@ class DeliveryLifecycleService
         }
 
         $aadeStatus = $response->getStatus();
-        $mappedState = $this->deliveryStateFromAade($aadeStatus);
+        $mappedState = $this->deliveryStateFromAade($aadeStatus, $response->getLifecycleHistory());
 
         $changed = false;
         $stateSynced = false;
@@ -800,20 +808,78 @@ class DeliveryLifecycleService
      * null → the caller leaves the cache unchanged (never crashes). IN_TRANSIT_RETURN
      * (9) maps to its OWN 'in_transit_return' state (Slice 2) so the carrier-side
      * return leg is visible to the operator rather than collapsed into 'in_transit'.
+     *
+     * DELIVERED_BY_CARRIER is direction-sensitive: AADE reports the SAME §8.22 status
+     * for a carrier FULL delivery and a carrier PARTIAL one — only the lifecycleHistory
+     * ConfirmOutcome event carries the FULL/PARTIAL detail. §3.2.7 lists
+     * DeliveredByCarrier(PARTIAL) as a valid ConfirmDeliveryReturn source (AADE-confirmed
+     * two-party sandbox 2026-09-13: the return posts a deliveryReturnMark), so a PARTIAL
+     * must map to 'partial' (∈ CONFIRM_RETURN_FROM_STATES → the operator can close the
+     * return) while a FULL carrier delivery stays terminal 'delivered'. Hence the
+     * $lifecycleHistory argument — the status alone can't tell the two apart.
      */
-    private function deliveryStateFromAade(?DeliveryStatus $status): ?string
+    private function deliveryStateFromAade(?DeliveryStatus $status, ?array $lifecycleHistory = null): ?string
     {
         return match ($status) {
             DeliveryStatus::REGISTERED => 'registered',
             DeliveryStatus::IN_TRANSIT => 'in_transit',
             DeliveryStatus::IN_TRANSIT_RETURN => 'in_transit_return',
-            DeliveryStatus::DELIVERED_BY_CARRIER => 'delivered',
+            DeliveryStatus::DELIVERED_BY_CARRIER => $this->carrierDeliveredPartially($lifecycleHistory) ? 'partial' : 'delivered',
             DeliveryStatus::COMPLETED => 'delivered',
             DeliveryStatus::FAILED_DELIVERY => 'failed',
             DeliveryStatus::REJECTED => 'rejected',
             DeliveryStatus::CANCELLED => 'cancelled',
             default => null,
         };
+    }
+
+    /**
+     * Did the carrier declare a PARTIAL delivery? Reads the outcome of the LATEST
+     * ConfirmOutcome event in the lifecycleHistory — the effective one — so a PARTIAL
+     * later superseded by a corrective FULL is not misread as still-partial (we take
+     * the most recent by eventTimestamp, falling back to document order when a
+     * timestamp is missing). Used only to split the ambiguous DELIVERED_BY_CARRIER
+     * status (see deliveryStateFromAade).
+     *
+     * Absent/unreadable outcome detail → false (treat as a full carrier delivery).
+     * This is a CONSCIOUS default (BACKLOG P2): a spurious 'delivered' dead-ends an
+     * in-app return that AADE would accept, whereas a spurious 'partial' self-corrects
+     * (AADE rejects an invalid confirmReturn at firstSuccessful, no state corruption) —
+     * but a carrier FULL delivery ALSO reports DeliveredByCarrier, and defaulting to
+     * 'partial' would mislabel that common case as a partial delivery + offer a return
+     * button. GetDeliveryNoteStatus returns a single note's full (un-paginated) history,
+     * so a missing ConfirmOutcome here is a malformed response, not the norm; the
+     * authoritative outcome always survives in the delivery_marks / lifecycleHistory.
+     *
+     * @param  DeliveryEvent[]|null  $lifecycleHistory
+     */
+    private function carrierDeliveredPartially(?array $lifecycleHistory): bool
+    {
+        $latest = null;
+        $latestTs = null;
+
+        foreach ($lifecycleHistory ?? [] as $event) {
+            if (! $event instanceof DeliveryEvent
+                || $event->getEventType() !== DeliveryEventType::CONFIRM_OUTCOME) {
+                continue;
+            }
+
+            $outcome = $event->getOutcomeDetails()?->getOutcome();
+            if ($outcome === null) {
+                continue;
+            }
+
+            // ISO-8601 UTC timestamps compare correctly as strings; a missing one
+            // sorts first so a later, timestamped outcome wins, and document order
+            // breaks ties (last one seen).
+            $ts = (string) ($event->getEventTimestamp() ?? '');
+            if ($latest === null || $ts >= $latestTs) {
+                $latest = $outcome;
+                $latestTs = $ts;
+            }
+        }
+
+        return $latest === DeliveryOutcomeType::PARTIAL;
     }
 
     private function requireState(DeliveryNote $note, string $expected, string $op): void
