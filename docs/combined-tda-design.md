@@ -1,6 +1,8 @@
 # Combined ΤΔΑ (Τιμολόγιο–Δελτίο Αποστολής) — design
 
 > **Status:** DESIGN / proposal (Slice 3 of the myDATA v2.0.2 digital-delivery work). Not built.
+> **Reality-synced 2026-09-13** to the merged issuer-lifecycle work (#527–#531 + two-party sandbox
+> validation): no issuer `confirmDelivery`, `CONFIRM_RETURN_FROM_STATES` final, DeliveredByCarrier split.
 > **Decision owner:** operator. **Author:** this doc is for review before any code.
 > **Ties to:** `docs/BACKLOG.md` MYD-002 (Combined ΤΔΑ), MYD-003 (monetary vs movement split),
 > `docs/aade/mydata-v2.0.2-changes.md` §C1, `docs/mydata-submit-payload.md` (the monetary payload).
@@ -11,7 +13,7 @@ A **ΤΔΑ is a monetary invoice, not a delivery note.** It is a myDATA **type `
 Πώλησης) carrying **`isDeliveryNote = true`** + a movement header. So it lives with the other
 **Παραστατικά** (`Invoice`), next to ΤΙΜ/ΤΠΥ/ΑΛΠ — **option «Α»** — NOT under «Ψηφιακή Διακίνηση»
 (which is money-less 9.x `DeliveryNote`). The only thing shared with the ΔΑ world is the
-**movement lifecycle** (RegisterTransfer → … → ConfirmDelivery/Return), which is keyed by the
+**movement lifecycle** (RegisterTransfer → *observe outcome* → ConfirmReturn), which is keyed by the
 `qrUrl` the `1.1` submission returns — so it applies to a ΤΔΑ unchanged.
 
 **Recommended architecture:** `Invoice` gains the movement fields + lifecycle-cache columns and
@@ -126,8 +128,10 @@ in four places that the contract must break (all verified in source):
     `belongsTo → morphTo`; `DeliveryNote::marks()/events()` `hasMany → morphMany`; both `$fillable` gain
     `movable_*`; ~20 test/seed writers of `delivery_note_id` updated.
 - **`MovableDocument` contract** = every accessor + seam the service touches:
-  `qrUrl`(`mydata_url`), `mydata_mark`, `mydata_state`, `delivery_state`, `transfer_mark`/`outcome_mark`/
-  `return_mark`/`reject_mark`, `transport_type`, `vehicle_number`, `carrier_afm`, `local_status`,
+  `qrUrl`(`mydata_url`), `mydata_mark`, `mydata_state`, `delivery_state`, `transfer_mark`/`return_mark`
+  (the ONLY issuer-written movement marks post-#531; `outcome_mark`/`reject_mark` are recipient/carrier
+  marks — never written by the issuer flow, observe-only via `delivery_note_events`, so NOT part of the
+  contract's write seam), `transport_type`, `vehicle_number`, `carrier_afm`, `local_status`,
   `invcode`, `company_id`, `issued_at`, `getKey()`, `forceFill`/save, the polymorphic `marks()`/`events()`
   relations, a `assertTenantCoherence($tenant)` seam, and a `reverseSaleForMovable()` stock seam.
   Both `DeliveryNote` and `Invoice` implement it.
@@ -201,9 +205,14 @@ rows deterministically. Backfill on `invoices`: none (new columns default NULL/f
 ## 7. Lifecycle + cancel ownership
 
 **Tracking on (default):** a filed ΤΔΑ returns a `qrUrl` and enters the SAME state machine as a 9.3
-(DGM v2.0.2 §1.2: Registered → RegisterTransfer → InTransit → ConfirmDeliveryOutcome/Return →
-Completed). So the generalised `DeliveryLifecycleService` (§4-A1, via the contract — **not** verbatim)
-drives RegisterTransfer/confirmDelivery/confirmReturn/refreshStatus on the ΤΔΑ invoice.
+(DGM v2.0.2 §1.2), **TWO-PARTY sandbox-validated 2026-09-13** (myip⇄nexon, `docs/delivery-two-party-sandbox.md`):
+Registered → RegisterTransfer → InTransit → *(recipient/carrier outcome)* → Completed. So the generalised
+`DeliveryLifecycleService` (§4-A1, via the contract — **not** verbatim) drives the **ISSUER's** actions on
+the ΤΔΑ invoice: **RegisterTransfer**, **refreshStatus** (OBSERVE the outcome), **confirmReturn**. There is
+**no issuer `confirmDelivery`** — the delivery OUTCOME (ConfirmDeliveryOutcome FULL/PARTIAL/NONE) is the
+recipient's/carrier's call ([833] for the issuer) and was **removed from the service in #531**; a ΤΔΑ
+inherits that. The `DeliveredByCarrier` PARTIAL/FULL split (#530) lives in `deliveryStateFromAade` and is
+parent-agnostic, so it carries to a ΤΔΑ unchanged.
 
 **Tracking off (`withoutDigitalTransportTracking=true`):** the ΤΔΑ files straight to *Completed*, no
 `qrUrl`, no lifecycle — the movement actions must be hidden for it.
@@ -261,26 +270,27 @@ question.)
 ## 11. Open questions / risks
 
 1. **A1 vs A3** — recommend A1 now (with polymorphic audit); revisit A3 only if more movable types arrive.
-2. ~~Is a separate RegisterTransfer required?~~ **RESOLVED** (DGM v2.0.2 §1.2, now in repo): a tracked
-   ΤΔΑ enters the same Registered→RegisterTransfer→… machine as a 9.3; `withoutDigitalTransportTracking=true`
-   skips it → *Completed*. See §7. Confirm on sandbox.
+2. ~~Is a separate RegisterTransfer required?~~ **RESOLVED + two-party sandbox-validated** (DGM v2.0.2 §1.2;
+   myip⇄nexon 2026-09-13): a tracked ΤΔΑ enters the same Registered→RegisterTransfer→… machine as a 9.3;
+   `withoutDigitalTransportTracking=true` skips it → *Completed*. See §7.
 3. **Types beyond 1.1** (1.4/3.1/3.2/11.5) — out of scope for v1; trivial allowlist add later.
 4. **recipient/loading vs counterpart address** — map the combined-doc addresses (`otherDeliveryNoteHeader`
    loading/delivery + branches) to the existing counterpart snapshot + the new loading/delivery fields
    without duplication.
-5. **Sandbox NOW available** — the Β' Φάση DGM API is live in the AADE test env (2026-09, dev creds on
-   hand), so the combined payload + lifecycle can finally be round-tripped before go-live — a change from
-   the whole DGM stack's prior «NOT SANDBOX-VALIDATED» state.
+5. **Sandbox — ✅ issuer lifecycle two-party validated** (2026-09-13, myip issuer ⇄ nexon recipient/carrier,
+   AADE test env, `docs/delivery-two-party-sandbox.md`): RegisterTransfer → observe → confirmReturn all
+   round-trip at AADE. The remaining sandbox item is the combined **ΤΔΑ 1.1 payload + qrUrl** round-trip —
+   done in **3b** (nexon is the natural tenant once its fresh migration lands; it can flip to sandbox again).
 6. **Priority** — **No tenant issues ΤΔΑ today** (MCP: myip/nexon cut ΤΙΜ/ΤΠΥ/ΑΛΠ); nexon will need it
    after its fresh migration + for completeness → «real but not on fire».
-7. **Related Slice-2 fix (adjacent, being done alongside):** DGM v2.0.2 §3.2.7 lists ConfirmDeliveryReturn
-   sources as Rejected / DeliveredByCarrier(PARTIAL) / FailedDelivery, and a bare InTransit ONLY for 9.2 or
-   9.3-`reverseDeliveryNote`. For our **plain 9.3** that's `{rejected, partial, failed}` — a **reconcile**,
-   not a clean «widen»: Slice 2's guard was `{in_transit, in_transit_return}` (overlap only at nothing the
-   spec lists — `in_transit_return` is not a spec source at all). The fix (this branch) sets
-   `CONFIRM_RETURN_FROM_STATES = {rejected, partial, failed, in_transit, in_transit_return}` — adds the 3
-   real sources and KEEPS `in_transit`/`in_transit_return` as fail-safe pending the sandbox rehearsal
-   (`docs/delivery-sandbox-rehearsal.md`), which will confirm whether AADE rejects them so we can prune.
+7. **Slice-2 confirmReturn thread — ✅ DONE (merged #527–#531).** The issuer movement lifecycle is settled
+   and two-party sandbox-validated, so Slice 3 builds on solid ground:
+   - `CONFIRM_RETURN_FROM_STATES = {rejected, partial, failed, in_transit_return}` — `in_transit` **pruned**
+     (AADE [828], #529); `DeliveredByCarrier` **split** by the ConfirmOutcome detail so `partial` is
+     reachable (#530).
+   - issuer-side `confirmDelivery()` + UI «Δήλωση παράδοσης» **REMOVED** (#531, [833]/[817]/[814] dead-end).
+   The ΤΔΑ reuses this settled lifecycle via the `MovableDocument` contract (§4-A1) — nothing here is still
+   "pending a rehearsal".
 
 ## 12. Sub-slices (each: code → sandbox rehearsal → review → merge)
 
