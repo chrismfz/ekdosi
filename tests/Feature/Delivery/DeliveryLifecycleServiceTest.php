@@ -192,6 +192,16 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertSame('App\\Models\\Invoice', $explicit->movable_type);
         $this->assertSame(4242, (int) $explicit->movable_id);
         $this->assertNull($explicit->delivery_note_id);
+
+        // Bidirectional (3c): a mark created THROUGH the morphMany relation sets
+        // movable_* only — the hook back-fills delivery_note_id so the FK readers
+        // (DeliveryNoteSubmitter, FiledSeriesBackfill) still see it.
+        $viaRelation = $note->marks()->create([
+            'company_id' => $this->tenant->id, 'mark' => '888',
+            'mydata_action' => 'REGISTER_TRANSFER', 'mark_date' => now()->toDateString(),
+        ])->fresh();
+        $this->assertSame($note->id, (int) $viaRelation->delivery_note_id);
+        $this->assertSame(DeliveryNote::class, $viaRelation->movable_type);
     }
 
     public function test_events_can_be_parented_by_an_invoice_via_the_morph(): void
