@@ -360,7 +360,9 @@ class DeliveryLifecycleServiceTest extends TestCase
 
     public function test_confirm_return_completes_and_stores_return_mark(): void
     {
-        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+        // 'failed' is a §3.2.7 source (the carrier failed to deliver). 'in_transit'
+        // was pruned — AADE rejects it [828] (sandbox rehearsal 2026-09-13).
+        $note = $this->makeFiledNote(['delivery_state' => 'failed']);
 
         $mark = $this->service($this->confirmReturnResponse())->confirmReturn($note);
 
@@ -432,8 +434,9 @@ class DeliveryLifecycleServiceTest extends TestCase
     public function test_confirm_return_still_rejects_states_outside_the_spec_set(): void
     {
         // registered (pre-transit) and delivered (fully completed) are NOT
-        // ConfirmDeliveryReturn sources — must still be refused.
-        foreach (['registered', 'delivered', 'cancelled'] as $from) {
+        // ConfirmDeliveryReturn sources — must still be refused. 'in_transit' was
+        // pruned after the sandbox rehearsal proved AADE rejects it [828].
+        foreach (['registered', 'in_transit', 'delivered', 'cancelled'] as $from) {
             $note = $this->makeFiledNote(['delivery_state' => $from]);
             try {
                 $this->service($this->confirmReturnResponse())->confirmReturn($note);

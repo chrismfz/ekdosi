@@ -59,7 +59,7 @@ use Throwable;
  *     in_transit ──confirmDelivery(FULL)────▶ delivered
  *     in_transit ──confirmDelivery(PARTIAL)─▶ partial
  *     in_transit ──confirmDelivery(NONE)────▶ failed
- *     {rejected|partial|failed|in_transit|in_transit_return} ──confirmReturn──▶ returned  (v2.0.2 §3.2.7; AADE→Completed, deliveryReturnMark)
+ *     {rejected|partial|failed|in_transit_return} ──confirmReturn──▶ returned  (v2.0.2 §3.2.7; AADE→Completed, deliveryReturnMark; `in_transit` pruned — AADE [828], see CONFIRM_RETURN_FROM_STATES)
  *     in_transit ──(AADE reports IN_TRANSIT_RETURN via refresh)──▶ in_transit_return  (carrier-side return leg; we don't submit it)
  *     (any filed) ──cancel──▶ cancelled   (terminal; uses CancelInvoice by MARK)
  *     refreshStatus(): READ-ONLY reconcile against AADE §8.22 (no new mark row).
@@ -69,12 +69,21 @@ use Throwable;
  * OBSERVE them via refreshStatus (→ in_transit_return state + a timeline event).
  * The issuer closes a return with confirmReturn (ConfirmDeliveryReturn, → returned).
  *
- * NOT SANDBOX-VALIDATED. Like the DeliveryNoteSubmitter 9.3 payload, the whole
- * DGM lifecycle (RegisterTransfer / ConfirmDeliveryOutcome / GetDeliveryNoteStatus
- * / cancel-by-MARK) is built against the firebed reference shapes + vendor test
- * stubs but has NOT been round-tripped against the AADE sandbox. Confirm live
- * before go-live (esp. that CancelInvoice — and not the provider-only
- * CancelDeliveryNote — is the correct ERP cancel route for a 9.x δελτίο).
+ * PARTIALLY SANDBOX-VALIDATED (Β' Φάση rehearsal, 2026-09-13, `myip` on the AADE
+ * test env — see `docs/delivery-sandbox-rehearsal.md`). Confirmed from the ISSUER's
+ * own credentials on a plain 9.3:
+ *   - RegisterTransfer (registered → in_transit): ✓ accepted.
+ *   - refreshStatus / RequestDeliveryNoteStatus: ✓ (IN_TRANSIT mapped, lifecycleHistory parses).
+ *   - cancel from `registered` (pre-transfer): ✓ (provider path — InvoSign cancel).
+ *   - cancel from `in_transit`: ✗ AADE [801] (blocked once moving) — expected & surfaced.
+ *   - ConfirmDeliveryReturn from `in_transit`: ✗ AADE [828] → `in_transit` PRUNED from
+ *     CONFIRM_RETURN_FROM_STATES.
+ * STILL UNVALIDATED (needs a SECOND sandbox tenant acting recipient/carrier — a single
+ * issuer tenant cannot reach these states): ConfirmDeliveryOutcome (issuer-side FULL/
+ * PARTIAL/NONE returns AADE [833] «Only the recipient or carrier can confirm delivery
+ * outcome»), and therefore confirmReturn from the recipient/carrier-produced sources
+ * (rejected/partial/failed) and the carrier return leg (in_transit_return). See the
+ * BACKLOG «DGM two-party sandbox validation» item.
  */
 class DeliveryLifecycleService
 {
@@ -247,23 +256,29 @@ class DeliveryLifecycleService
      * not `reverseDeliveryNote`) the spec lists **Rejected / DeliveredByCarrier
      * (PARTIAL) / FailedDelivery** → our `rejected`/`partial`/`failed`.
      *
-     * `in_transit`/`in_transit_return` are KEPT here on purpose, pending sandbox
-     * confirmation: §3.2.7 lists a bare `InTransit` source ONLY for 9.2 or
-     * 9.3-reverse, so for a plain 9.3 they are probably NOT valid — but keeping
-     * them is fail-safe (a wrong source is rejected by AADE at `firstSuccessful`,
-     * never corrupts state), whereas dropping the three real sources blocks a
-     * legal operator action. The Β' Φάση sandbox rehearsal
-     * (`docs/delivery-sandbox-rehearsal.md`) tests each source empirically; prune
-     * `in_transit`/`in_transit_return` here once AADE confirms it rejects them.
+     * `in_transit` was PRUNED after the Β' Φάση sandbox rehearsal
+     * (`docs/delivery-sandbox-rehearsal.md`, 2026-09-13): AADE rejects
+     * ConfirmDeliveryReturn from a plain-9.3 InTransit with **[828]** «Cannot call
+     * ConfirmDeliveryReturn … because of its current delivery status: InTransit».
+     * Since `in_transit` is the ONE such state the issuer can actually reach on its
+     * own (RegisterTransfer → in_transit), keeping it only offered an operator an
+     * action that always [828]-fails.
+     *
+     * `in_transit_return` is KEPT: it is a DIFFERENT AADE status (IN_TRANSIT_RETURN,
+     * the carrier-reported return leg — §3.2.7's 9.3-reverse case) that a single
+     * issuer tenant cannot reach in the sandbox (the return leg is carrier-driven),
+     * so the rehearsal could neither confirm nor disprove it. Keeping it is
+     * fail-safe (a wrong source is rejected by AADE at `firstSuccessful`, never
+     * corrupts state) and matches the one in-transit-family source §3.2.7 allows.
      *
      * @var list<string>
      */
-    public const CONFIRM_RETURN_FROM_STATES = ['rejected', 'partial', 'failed', 'in_transit', 'in_transit_return'];
+    public const CONFIRM_RETURN_FROM_STATES = ['rejected', 'partial', 'failed', 'in_transit_return'];
 
     /**
      * Δήλωση ολοκλήρωσης διακίνησης ΕΠΙ ΕΠΙΣΤΡΟΦΗΣ (myDATA v2.0.2): ο εκδότης δηλώνει
      * ότι η διακίνηση έκλεισε με επιστροφή (ο μεταφορέας δεν παρέδωσε όλα τα αγαθά).
-     * `{rejected|partial|failed|in_transit|in_transit_return} → returned` (βλ.
+     * `{rejected|partial|failed|in_transit_return} → returned` (βλ.
      * CONFIRM_RETURN_FROM_STATES + DGM v2.0.2 §3.2.7). Keyed by the qrUrl· με επιτυχία
      * η ΑΑΔΕ φέρνει το `deliveryReturnMark` και το δελτίο μεταβαίνει σε Completed.
      * Αυτός είναι ο durable attempt-record που περίμενε το DEP-001.

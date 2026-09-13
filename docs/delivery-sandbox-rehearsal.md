@@ -95,3 +95,51 @@ Paste the terminal session's findings here (or the report `.txt` files). We then
 - fix any issuer-side PARTIAL / other rejections the matrix reveals,
 - lift the `NOT SANDBOX-VALIDATED` docblock on `DeliveryLifecycleService` once green,
 - and reuse the same harness for the ΤΔΑ combined-1.1 payload (Slice 3).
+
+---
+
+## §Findings — rehearsal RAN 2026-09-13 (`myip`, AADE test env)
+
+Ran end-to-end against the AADE test environment (`mydataapidev.aade.gr`) from the artisan
+host, `myip` tenant (gr-provider + InvoSign sandbox for issue/cancel, direct-myDATA sandbox
+creds for the lifecycle; `mydata_mode=off` is fine — `initFirebed` selects the sandbox
+credential pair regardless). `mydata:preflight --tenant=myip` → exit 0. Verbatim AADE
+responses:
+
+### Per-call results (issuer's own credentials, plain 9.3)
+
+| Call | From state | AADE result |
+|------|-----------|-------------|
+| RegisterTransfer | registered | **Success** — transferMark, → in_transit |
+| ConfirmDeliveryOutcome (FULL/PARTIAL/NONE) | in_transit | **[833]** «User with VAT number: 800561849 is not authorized to confirm delivery outcome … Only the recipient or carrier can confirm delivery outcome» |
+| ConfirmDeliveryReturn | in_transit | **[828]** «Cannot call ConfirmDeliveryReturn … because of its current delivery status: InTransit» |
+| cancel (CancelInvoice / provider CancelDeliveryNote) | in_transit | **[801]** «Invoice … cannot be cancelled because of its current delivery status: InTransit» |
+| cancel | registered (pre-transfer) | **Success** — cancellationMark; all three states → cancelled |
+| RequestDeliveryNoteStatus / refreshStatus | any | **Success** (read-only) — IN_TRANSIT → `in_transit`, lifecycleHistory (RegisterTransfer + actor VAT + ts) parses |
+
+### confirmReturn source-state matrix (the key Slice-2 question)
+
+| Source state | Result | Note |
+|--------------|--------|------|
+| `in_transit` | **[828] REJECTED** | empirically confirmed → **pruned** from `CONFIRM_RETURN_FROM_STATES` |
+| `rejected` | UNTESTED | needs recipient `RejectDeliveryNote` — unreachable from the issuer tenant |
+| `partial` | UNTESTED | needs carrier `ConfirmDeliveryOutcome(PARTIAL)` [833] — unreachable |
+| `failed` | UNTESTED | needs carrier `ConfirmDeliveryOutcome(NONE)` [833] — unreachable |
+| `in_transit_return` | UNTESTED | carrier-reported `RegisterTransferReturn` — only observed, never submitted |
+
+### Conclusions / actions taken
+
+1. **`in_transit` PRUNED** from `DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES`
+   (AADE [828]). It was the one such state the issuer could reach on its own, so keeping it
+   only offered an always-failing action. `in_transit_return` KEPT (different AADE status,
+   §3.2.7's 9.3-reverse case, unreachable to disprove).
+2. **The lifecycle does NOT close from the issuer alone.** ConfirmDeliveryOutcome is
+   recipient/carrier-only ([833]); the issuer's role is RegisterTransfer + cancel-before-transit
+   + refreshStatus + confirmReturn (only once a second party has produced rejected/partial/
+   failed). The issuer-side `confirmDelivery()` (UI «Δήλωση παράδοσης») is a known [833]
+   dead-end for a plain 9.3 — flagged in BACKLOG for a gate decision.
+3. **Two-party validation OPEN.** Validating confirmReturn from rejected/partial/failed
+   (and the whole outcome path) needs a SECOND sandbox tenant acting recipient/carrier — a
+   single issuer tenant cannot drive those states. Tracked in `docs/BACKLOG.md` (TIER 1,
+   «DGM two-party sandbox validation»). Until then the `NOT SANDBOX-VALIDATED` docblock stays
+   (downgraded to PARTIALLY validated with the confirmed calls listed).

@@ -111,9 +111,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   μερική παράδοση (PARTIAL) / FailedDelivery** → `rejected/partial/failed`. Το Slice 2 επέτρεπε μόνο
   `in_transit`/`in_transit_return`, οπότε ο χειριστής **δεν μπορούσε** να δηλώσει επιστροφή σε δελτίο που
   ο κύκλος ζωής άφησε rejected/partial/failed. Fix: `CONFIRM_RETURN_FROM_STATES` (νέα const) προσθέτει τα
-  3 πραγματικά sources· τα `in_transit`/`in_transit_return` κρατιούνται fail-safe (η ΑΑΔΕ απορρίπτει άκυρο
-  source στην υποβολή — για plain 9.3 το §3.2.7 τα δίνει μόνο σε 9.2/9.3-reverse) εκκρεμεί επιβεβαίωση στο
-  **sandbox** (`docs/delivery-sandbox-rehearsal.md`, Β' Φάση live) για να κλαδευτούν αν χρειάζεται.
+  3 πραγματικά sources. **Sandbox rehearsal RAN 2026-09-13** (`myip`, AADE test env): η ΑΑΔΕ απορρίπτει
+  ConfirmDeliveryReturn από `in_transit` με **[828]** → το `in_transit` **κλαδεύτηκε** από το
+  `CONFIRM_RETURN_FROM_STATES`. Το `in_transit_return` κρατιέται (διαφορετικό AADE status, carrier return
+  leg — §3.2.7 9.3-reverse — που ένας μόνο εκδότης-tenant δεν φτάνει στο sandbox για να το διαψεύσει).
+  Βλ. `docs/delivery-sandbox-rehearsal.md` §Findings.
 - **CI πράσινο ξανά: τα tests δεν εξαρτώνται πια από export-ignored vendor stubs.** Το firebed 5.12.0
   πρόσθεσε `/stubs export-ignore` στο δικό του `.gitattributes` («leaner package»), οπότε το
   `composer install --prefer-dist` της CI **δεν** κατεβάζει πια το `vendor/firebed/aade-mydata/stubs/`.
