@@ -462,20 +462,12 @@ surfaced in the open-items sections further down.
 - **Combined Τιμολόγιο–Δελτίο Αποστολής (ΤΔΑ) — ✅ SHIPPED (Slice 3a–3d, MYD-002 closed → FEATURES §5).**
   Ένα 1.1 με `isDeliveryNote=true` + movement header στο ίδιο έγγραφο: schema (3a) + payload (3b) +
   lifecycle contract `MovableDocument` (3c) + UI/seed/normaliser + invoice-view κινήσεις + goods-type
-  guard + row-lock (3d). Ζει με τα Παραστατικά· ακυρώνεται από το monetary path (§7). Απομένει ΜΟΝΟ το
-  3d-c (shared movement-header builder, κάτω) + το 3e (single stock event / PDF / polish).
-  - **[P2] Shared movement-header builder (deferred 3c-2/3d-a/3d-b → 3d-c).** Ο
-    `DeliveryNoteSubmitter` (9.x) και ο `AadeInvoiceDocument::applyMovementHeader` (3b, ΤΔΑ) χτίζουν
-    ΚΑΙ ΟΙ ΔΥΟ το ίδιο issue-time movement header (movePurpose +τίτλος για 19, dispatchDate/Time,
-    όχημα, `otherDeliveryNoteHeader`). Το 3b review το σημείωσε ως τη ρίζα ενός `H:i` vs `H:i:s` drift
-    (ήδη διορθωμένο — και οι δύο `H:i:s`). Deferred από το 3c-2 (lifecycle contract) γιατί είναι
-    issue-path drift-prevention ΟΡΘΟΓΩΝΙΟ στο contract + έχει byte-output risk σε ΔΥΟ golden suites.
-    Το 3d ξανα-αγγίζει το issue path (seed/form) → εκεί extract έναν builder keyed σε `MovableDocument`,
-    driving ΚΑΙ τα δύο golden suites για byte-identical output· κράτα την policy διεύθυνσης όπου
-    διαφέρει γνήσια (9.x = υποχρεωτικές διευθύνσεις· ΤΔΑ = τις εγγυάται η φόρμα).
-    _(Resolved στο 3d-b: goods-type guard [`AadeInvoiceDocument::applyMovementHeader` via firebed
-    `supportsDeliveryNote`], row-lock [`SyncInvoiceStateFromAade` lockForUpdate re-check, WHMCS κλήση εκτός],
-    FEATURES §5 line — έμειναν μόνο για ιστορικό στο CLAUDE-history.)_
+  guard + row-lock (3d-b) + shared movement-header builder (3d-c). Ζει με τα Παραστατικά· ακυρώνεται από
+  το monetary path (§7). Απομένει ΜΟΝΟ το **3e** (single stock event / PDF / polish).
+  _(Resolved: 3d-b — goods-type guard [`AadeInvoiceDocument::applyMovementHeader` via firebed
+  `supportsDeliveryNote`], row-lock [`SyncInvoiceStateFromAade` lockForUpdate re-check, WHMCS κλήση εκτός],
+  FEATURES §5. 3d-c — `MovementHeaderBuilder::applyCommon` ενοποιεί movePurpose+dispatch(H:i:s)+vehicle και
+  για τα δύο issue paths, byte-identical, golden suites πράσινα. Ιστορικό: CLAUDE-history.)_
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον

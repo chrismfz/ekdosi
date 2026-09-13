@@ -7,6 +7,7 @@ use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
+use App\Services\EInvoice\MovementHeaderBuilder;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\InvoiceNumberer;
 use App\Services\MyData\FirebedCredentials;
@@ -22,7 +23,6 @@ use App\Support\Tenancy\TenantCoherence;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\IncomeClassificationCategory;
-use Firebed\AadeMyData\Enums\MovePurpose;
 use Firebed\AadeMyData\Exceptions\InvalidResponseException;
 use Firebed\AadeMyData\Exceptions\MyDataAuthenticationException;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
@@ -170,12 +170,17 @@ class DeliveryNoteSubmitter
             ->setAa((string) $note->code)
             ->setIssueDate(Carbon::parse($note->issued_at)->toDateString())
             ->setInvoiceType($type)
-            ->setMovePurpose(MovePurpose::from($movePurpose))
             ->setOtherDeliveryNoteHeader($this->buildDeliveryHeader($note));
 
         if ($note->third_party_collection) {
             $header->setThirdPartyCollection(true);
         }
+
+        // Shared with AadeInvoiceDocument (Combined ΤΔΑ, 3d-c): movePurpose +
+        // dispatchDate/Time (H:i:s) + vehicleNumber — the ONE home so the 9.x and ΤΔΑ
+        // paths can't drift again (the move-purpose validation above + the addresses +
+        // the purpose-19 message below stay here: they genuinely differ per document).
+        MovementHeaderBuilder::applyCommon($header, $movePurpose, $note);
 
         // movePurpose=19 (Λοιπές Διακινήσεις) requires the free-text title.
         if ($movePurpose === 19) {
@@ -187,17 +192,6 @@ class DeliveryNoteSubmitter
                 );
             }
             $header->setOtherMovePurposeTitle($title);
-        }
-
-        // Planned dispatch date/time (optional).
-        if ($note->dispatch_at) {
-            $dispatch = Carbon::parse($note->dispatch_at);
-            $header->setDispatchDate($dispatch->toDateString());
-            $header->setDispatchTime($dispatch->format('H:i:s'));
-        }
-
-        if (! empty($note->vehicle_number)) {
-            $header->setVehicleNumber($note->vehicle_number);
         }
 
         $details = [];

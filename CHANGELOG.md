@@ -18,6 +18,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- **Combined ΤΔΑ — shared movement-header builder (Slice 3d-c).** Ο `DeliveryNoteSubmitter` (9.x) και ο
+  `AadeInvoiceDocument::applyMovementHeader` (ΤΔΑ 1.1) περνούν πλέον από έναν κοινό
+  `App\Services\EInvoice\MovementHeaderBuilder::applyCommon` για τα ΤΑΥΤΟΣΗΜΑ πεδία του movement header
+  (movePurpose + dispatchDate/Time **H:i:s** + vehicleNumber) — μία πηγή, ώστε να μη ξανα-αποκλίνουν (το
+  3b review είχε βρει drift `H:i` vs `H:i:s`). Η validation του σκοπού + τα μηνύματα ανά έγγραφο + η
+  πολιτική διευθύνσεων (9.x υποχρεωτικές vs ΤΔΑ lenient) + `thirdPartyCollection`/`isDeliveryNote`/
+  `withoutDigitalTransportTracking` μένουν ανά caller (γνήσια διαφορετικά). Byte-identical output — και τα
+  δύο golden suites πράσινα. **Ολοκληρώνει το Slice 3d** (απομένει το 3e: single stock event / PDF / polish).
+
 ### Added
 - **Combined ΤΔΑ — movement lifecycle in the UI (Slice 3d-b).** Ολοκληρώνει το ΤΔΑ end-to-end: (1) ο
   submitter (direct myDATA ΚΑΙ πάροχος) αρχικοποιεί `delivery_state='registered'` όταν φιλάρεται ένα tracking-ON ΤΔΑ (qrUrl επέστρεψε)

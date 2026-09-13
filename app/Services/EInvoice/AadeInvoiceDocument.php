@@ -16,7 +16,6 @@ use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
 use Firebed\AadeMyData\Enums\FeesPercentCategory;
 use Firebed\AadeMyData\Enums\InvoiceType as AadeInvoiceType;
-use Firebed\AadeMyData\Enums\MovePurpose;
 use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
 use Firebed\AadeMyData\Enums\StampCategory;
 use Firebed\AadeMyData\Enums\TaxType;
@@ -733,16 +732,20 @@ class AadeInvoiceDocument
         }
 
         // movePurpose is MANDATORY for a delivery note (AADE rejects without it), so a
-        // ΤΔΑ must carry one — resolve via MovePurpose::from (throws on an out-of-range
-        // code), matching the proven DeliveryNoteSubmitter path.
-        $movePurpose = $invoice->move_purpose ?? throw new RuntimeException(
+        // ΤΔΑ must carry one (ΤΔΑ-specific message; MovePurpose::from in the shared builder
+        // throws on an out-of-range code).
+        $movePurpose = (int) ($invoice->move_purpose ?? throw new RuntimeException(
             "ΤΔΑ {$invoice->invcode}: λείπει ο σκοπός διακίνησης (move_purpose) — υποχρεωτικός για δελτίο αποστολής."
-        );
-        $header->setMovePurpose(MovePurpose::from((int) $movePurpose));
+        ));
+
+        // Shared with DeliveryNoteSubmitter (3d-c): movePurpose + dispatchDate/Time (H:i:s)
+        // + vehicleNumber, so the two issue paths can't drift on the header again.
+        MovementHeaderBuilder::applyCommon($header, $movePurpose, $invoice);
 
         // movePurpose=19 (Λοιπές Διακινήσεις) requires the free-text title — fail loud
         // (like DeliveryNoteSubmitter) rather than emit an untitled 19 AADE rejects opaquely.
-        if ((int) $movePurpose === 19) {
+        // Kept per-caller: the ΤΔΑ-specific message + the address policy below differ.
+        if ($movePurpose === 19) {
             $title = trim((string) $invoice->other_move_purpose_title);
             if ($title === '') {
                 throw new RuntimeException(
@@ -752,17 +755,8 @@ class AadeInvoiceDocument
             $header->setOtherMovePurposeTitle($title);
         }
 
-        if ($invoice->dispatch_at !== null) {
-            $dispatch = Carbon::parse($invoice->dispatch_at);
-            $header->setDispatchDate($dispatch->toDateString());
-            // hh:mm:ss — firebed's documented format + the DeliveryNoteSubmitter path.
-            $header->setDispatchTime($dispatch->format('H:i:s'));
-        }
-
-        if (filled($invoice->vehicle_number)) {
-            $header->setVehicleNumber((string) $invoice->vehicle_number);
-        }
-
+        // ΤΔΑ address policy: lenient (omit-if-empty) — the 3d form guarantees completeness,
+        // unlike the 9.x path which hard-fails on a blank. So NOT shared with the builder.
         if ($other = $this->buildOtherDeliveryNoteHeader($invoice)) {
             $header->setOtherDeliveryNoteHeader($other);
         }
