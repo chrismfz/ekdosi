@@ -141,6 +141,16 @@
         .related .rel-label { color: #6b7280; }
         .related .rel-badge { font-weight: bold; color: #7f1d1d; }
         .related .rel-note { font-size: 7.5pt; color: #6b7280; margin: 0.3mm 0 1mm; }
+
+        /* Στοιχεία διακίνησης — printed only on a ΤΔΑ (is_delivery_note), a monetary
+           1.1 that is ALSO a delivery note, so the paper carries the legal movement
+           info (σκοπός / φόρτωση / παράδοση / μεταφορικό). Mirrors delivery-notes/pdf. */
+        .move { margin-top: 3mm; padding: 2mm 2.5mm; border: 1pt solid #e5e7eb; border-radius: 1mm; background: #fafafa; page-break-inside: avoid; }
+        .move h3 { font-size: 8pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; margin: 0 0 1mm 0; font-weight: bold; }
+        .move-grid { display: table; width: 100%; table-layout: fixed; }
+        .move-col { display: table-cell; width: 50%; vertical-align: top; padding-right: 3mm; }
+        .move-row { font-size: 8.5pt; color: #1f2937; margin: 0.5mm 0; }
+        .move-label { color: #6b7280; }
     </style>
 </head>
 <body>
@@ -292,6 +302,54 @@
         @if($providerEvidence['auth_code'])
             <div class="provider-row"><span class="provider-label">{{ $L('provider_auth') }}:</span> <span class="provider-auth">{{ $providerEvidence['auth_code'] }}</span></div>
         @endif
+    </div>
+@endif
+
+{{-- ============ Στοιχεία διακίνησης — ΤΔΑ only (is_delivery_note) ============ --}}
+@if($invoice->is_delivery_note)
+    @php
+        $movePurposeLabel = \App\Support\MyData\DeliveryCodes::movePurposeLabel($invoice->move_purpose);
+        if ((int) $invoice->move_purpose === 19 && ! empty($invoice->other_move_purpose_title)) {
+            $movePurposeLabel = trim((string) $invoice->other_move_purpose_title);
+        }
+        $transportLabel = \App\Support\MyData\DeliveryCodes::transportTypeLabel($invoice->transport_type);
+    @endphp
+    <div class="move">
+        <h3>@gup('Στοιχεία Διακίνησης')</h3>
+        <div class="move-grid">
+            <div class="move-col">
+                @if($movePurposeLabel)
+                    <div class="move-row"><span class="move-label">Σκοπός διακίνησης:</span> {{ $movePurposeLabel }}</div>
+                @endif
+                @if($invoice->loading_street || $invoice->loading_city || $invoice->loading_postcode)
+                    <div class="move-row"><span class="move-label">Τόπος φόρτωσης:</span>
+                        {{ trim(($invoice->loading_street ?? '').' '.($invoice->loading_number ?? '')) }}{{ ($invoice->loading_street || $invoice->loading_number) && ($invoice->loading_postcode || $invoice->loading_city) ? ', ' : '' }}{{ trim(($invoice->loading_postcode ?? '').' '.($invoice->loading_city ?? '')) }}
+                    </div>
+                @endif
+                @if($invoice->delivery_street || $invoice->delivery_city || $invoice->delivery_postcode)
+                    <div class="move-row"><span class="move-label">Τόπος παράδοσης:</span>
+                        {{ trim(($invoice->delivery_street ?? '').' '.($invoice->delivery_number ?? '')) }}{{ ($invoice->delivery_street || $invoice->delivery_number) && ($invoice->delivery_postcode || $invoice->delivery_city) ? ', ' : '' }}{{ trim(($invoice->delivery_postcode ?? '').' '.($invoice->delivery_city ?? '')) }}
+                    </div>
+                @endif
+            </div>
+            <div class="move-col">
+                @if($transportLabel)
+                    <div class="move-row"><span class="move-label">Μεταφορικό μέσο:</span> {{ $transportLabel }}</div>
+                @endif
+                @if($invoice->vehicle_number)
+                    <div class="move-row"><span class="move-label">Όχημα:</span> {{ $invoice->vehicle_number }}</div>
+                @endif
+                @if($invoice->carrier_afm)
+                    <div class="move-row"><span class="move-label">Μεταφορέας (ΑΦΜ):</span> {{ $invoice->carrier_afm }}</div>
+                @endif
+                @if($invoice->dispatch_at)
+                    <div class="move-row"><span class="move-label">Ημ/ώρα έναρξης:</span> {{ optional($invoice->dispatch_at)->format('d/m/Y H:i') }}</div>
+                @endif
+                @if($invoice->without_digital_transport_tracking)
+                    <div class="move-row"><span class="move-label">Παρακολούθηση:</span> Χωρίς ψηφιακή διακίνηση</div>
+                @endif
+            </div>
+        </div>
     </div>
 @endif
 
