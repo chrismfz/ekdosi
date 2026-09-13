@@ -206,6 +206,12 @@ the myDATA/Provider sections lower down — not repeated here.
   path (PROV-002)** still needs its own wiring in a later slice.
 - **MYD-005 (P2)** — ordinary invoice XML omits the optional myDATA `measurementUnit`
   (data-fidelity enhancement; goods-tenant-conditional).
+- **ΤΔΑ measurementUnit from free-text (P2)** — a combined ΤΔΑ MUST emit a per-line
+  `measurementUnit` ([230]); `AadeInvoiceDocument::measurementUnitCode()` best-effort maps
+  the line's free-text `metric_unit` (τεμ/κιλά/λίτρα/μέτρα/τ.μ./κ.μ.) → §8.13 code with a
+  **fallback to 1 (Τεμάχια)**. A goods sold by an unmapped unit files as Τεμάχια. Proper fix:
+  a §8.13 unit picker on the ΤΔΑ invoice line (like the delivery-note line), or store a code
+  on `invoice_lines`. Sandbox-validated 2026-09-14 (both direct + provider paths).
 - **SETUP-004 (P2)** — Estonian (EE) tenant skips even non-AADE neutral lookups.
 - **SETUP-003 (P2, was «stale»)** — only a *null* payment method defaults to cash
   silently (an unmapped-but-chosen one already warns + surfaces in preflight). Remaining

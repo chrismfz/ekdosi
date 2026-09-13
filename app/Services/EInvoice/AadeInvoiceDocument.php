@@ -101,12 +101,42 @@ class AadeInvoiceDocument
             );
         }
 
+        // Combined ΤΔΑ: isDeliveryNote is legal only on a delivery-note-capable §8.1 type
+        // (supportsDeliveryNote). Assert it UP-FRONT — before the ΤΔΑ-specific counterpart/
+        // issuer address requirements below — so is_delivery_note on an unsupported type
+        // (e.g. a services 2.1) fails with the clear goods-type message, not an opaque
+        // address error. applyMovementHeader keeps the same guard as defence-in-depth.
+        if ($invoice->is_delivery_note
+            && AadeInvoiceType::tryFrom($type)?->supportsDeliveryNote() !== true) {
+            throw new RuntimeException(
+                "ΤΔΑ {$invoice->invcode}: ο τύπος {$type} δεν υποστηρίζει δελτίο αποστολής (isDeliveryNote). "
+                .'Χρησιμοποιήστε τύπο που το επιτρέπει (π.χ. 1.1 Τιμολόγιο) ή απενεργοποιήστε το «Είναι και Δελτίο Αποστολής».'
+            );
+        }
+
         $vatBreakdown = InvoiceVatBreakdown::for($invoice);
 
         $issuer = (new Issuer)
             ->setVatNumber($this->tenant->afm ?? throw new RuntimeException('Issuer company has no AFM'))
             ->setCountry(CountryCode::GR)
             ->setBranch(0);
+
+        // Combined ΤΔΑ: unlike a plain monetary invoice (where [219]/[220] FORBID the
+        // issuer name/address for a GR party), a delivery note REQUIRES the issuer's
+        // full identification — AADE rejects a ΤΔΑ without it with [204] «issuer address
+        // is mandatory … IsDeliveryNote = true» (two-party sandbox, 2026-09-14). Mirrors
+        // DeliveryNoteSubmitter's issuer block.
+        if ($invoice->is_delivery_note) {
+            $issuer
+                ->setName($this->tenant->name ?? throw new RuntimeException('Issuer company has no name'))
+                ->setAddress(
+                    (new Address)
+                        ->setStreet($this->tenant->address ?: 'Έδρα')
+                        ->setNumber((string) ($this->tenant->address_number ?: '0'))
+                        ->setPostalCode($this->tenant->postcode ?: '00000')
+                        ->setCity($this->tenant->city ?: 'Unknown')
+                );
+        }
 
         $counterpart = $this->buildCounterpart($invoice, $type);
 
@@ -172,7 +202,11 @@ class AadeInvoiceDocument
         // optional at the XSD level, so goods types opt in via
         // invoice_types.mydata_requires_quantity; service types (default off)
         // stay byte-identical to the sandbox-validated payload.
-        $emitQuantity = (bool) ($invoice->invoiceType?->mydata_requires_quantity ?? false);
+        // A combined ΤΔΑ is a goods MOVEMENT, so AADE requires quantity + measurementUnit
+        // per line ([230] «measurementUnit … IsDeliveryNote = true is mandatory», sandbox
+        // 2026-09-14) — force quantity on regardless of the type's mydata_requires_quantity.
+        $isTda = (bool) $invoice->is_delivery_note;
+        $emitQuantity = $isTda || (bool) ($invoice->invoiceType?->mydata_requires_quantity ?? false);
 
         $details = [];
         $lineNo = 1;
@@ -185,9 +219,14 @@ class AadeInvoiceDocument
                 ->setVatAmount($lineAmounts[$i]['vat']);
 
             if ($emitQuantity) {
-                // measurementUnit stays omitted (optional per spec; mapping
-                // free-text metric_unit → §8.13 codes is a follow-up).
                 $detail->setQuantity((float) $line->qty);
+                // For a plain goods invoice measurementUnit stays omitted (optional per
+                // spec — keeps that payload byte-identical). A ΤΔΑ REQUIRES it ([230]),
+                // so map the line's free-text metric_unit → §8.13 code (fallback 1
+                // Τεμάχια). A richer per-unit picker on the ΤΔΑ line is a follow-up.
+                if ($isTda) {
+                    $detail->setMeasurementUnit($this->measurementUnitCode($line->metric_unit));
+                }
             }
 
             // Opt-in <itemDescr>: myDATA does NOT require it (the legacy app
@@ -205,7 +244,20 @@ class AadeInvoiceDocument
             // reached ONLY by a combined ΤΔΑ — a 1.1 with `is_delivery_note=true`,
             // which IS a δελτίο and so may carry <itemDescr> (Slice 3b). A pure 9.x
             // δελτίο emits itemDescr through DeliveryNoteSubmitter instead.
-            if ($this->tenant->mydata_send_item_descr
+            // A combined ΤΔΑ makes itemDescr MANDATORY per line ([230] «itemDescr …
+            // IsDeliveryNote = true is mandatory», sandbox 2026-09-14) — so a ΤΔΑ always
+            // emits it (independent of the mydata_send_item_descr knob), and a blank
+            // description hard-fails rather than filing an incomplete δελτίο.
+            if ($isTda) {
+                $descr = trim((string) $line->product_descr);
+                if ($descr === '') {
+                    throw new RuntimeException(
+                        'ΤΔΑ '.$invoice->invcode.': η γραμμή '.($i + 1).' χρειάζεται περιγραφή είδους '
+                        .'(η ΑΑΔΕ την απαιτεί σε Τιμολόγιο-Δελτίο Αποστολής).'
+                    );
+                }
+                $detail->setItemDescr(mb_substr($descr, 0, 256));
+            } elseif ($this->tenant->mydata_send_item_descr
                 && Codes::allowsItemDescr((string) $invoice->invoiceType?->mydata_type, (bool) $invoice->is_delivery_note)
                 && filled($line->product_descr)) {
                 $detail->setItemDescr(mb_substr((string) $line->product_descr, 0, 256));
@@ -889,16 +941,26 @@ class AadeInvoiceDocument
             ->setCountry($country)
             ->setBranch($invoice->filedCounterpartBranch());
 
-        // AADE rule (vendor/firebed/aade-mydata/src/Models/Party.php
-        // docblocks): `name` and `address` are FORBIDDEN for GR
-        // counterparts and REQUIRED for non-GR. Missing them on a
-        // foreign Counterpart causes AADE 4xx with an opaque message.
-        if ($country !== 'GR') {
+        // AADE rule (vendor/firebed/aade-mydata/src/Models/Party.php docblocks):
+        // `name`/`address` are FORBIDDEN for a GR counterpart on a plain monetary
+        // invoice ([219]/[220]) and REQUIRED for a non-GR one — BUT they are ALSO
+        // REQUIRED even for a GR counterpart on a combined ΤΔΑ (isDeliveryNote=true),
+        // where the delivery-note rule wins: AADE rejects a ΤΔΑ whose counterpart
+        // carries no address with [204] «Counterpart address is mandatory … with
+        // invoiceHeader.IsDeliveryNote = true» (two-party sandbox, 2026-09-13). This
+        // mirrors DeliveryNoteSubmitter::buildCounterpart, which sets name+address for
+        // any country. So attach name+address when the counterpart is foreign OR the
+        // invoice is a ΤΔΑ; a plain GR monetary invoice still omits them.
+        $isTda = (bool) $invoice->is_delivery_note;
+        if ($country !== 'GR' || $isTda) {
+            $who = $isTda
+                ? "ΤΔΑ {$invoice->invcode}"
+                : "Foreign counterpart on invoice {$invoice->invcode}";
+
             $counterpart->setName(
                 $invoice->counterpartName()
                 ?? throw new RuntimeException(
-                    "Foreign counterpart on invoice {$invoice->invcode} requires a counterpart name "
-                    .'(AADE rule). Fill «Επωνυμία» on the invoice.'
+                    "{$who} requires a counterpart name (AADE rule). Fill «Επωνυμία» on the invoice."
                 )
             );
 
@@ -915,19 +977,52 @@ class AadeInvoiceDocument
             $postcode = $invoice->postcode ?: $live?->postcode;
             if (blank($street) || blank($city) || blank($postcode)) {
                 throw new RuntimeException(
-                    "Foreign counterpart on invoice {$invoice->invcode} requires a full address ".
-                    '(οδός/πόλη/Τ.Κ.) — AADE rejects a missing one. Fill the customer address.'
+                    "{$who} requires a full address (οδός/πόλη/Τ.Κ.) — AADE rejects a missing one. "
+                    .'Fill the customer address.'
                 );
             }
-            $counterpart->setAddress(
-                (new Address)
-                    ->setStreet($street)
-                    ->setCity($city)
-                    ->setPostalCode($postcode)
-            );
+            $address = (new Address)
+                ->setStreet($street)
+                ->setCity($city)
+                ->setPostalCode($postcode);
+            // A ΤΔΑ additionally requires the counterpart address NUMBER ([204]
+            // «Counterpart address number is mandatory … IsDeliveryNote = true»,
+            // sandbox 2026-09-14). The monetary snapshot has no dedicated number
+            // column, so mirror the 9.3 path and file the '0' placeholder AADE accepts.
+            if ($isTda) {
+                $address->setNumber('0');
+            }
+            $counterpart->setAddress($address);
         }
 
         return $counterpart;
+    }
+
+    /**
+     * Best-effort map of a line's free-text unit (`metric_unit`, e.g. "τεμ", "κιλά",
+     * "lt") → the AADE §8.13 measurementUnit code (Codes::QUANTITY_TYPES: 1 Τεμάχια,
+     * 2 Κιλά, 3 Λίτρα, 4 Μέτρα, 5 τ.μ., 6 κ.μ.). Only used to satisfy a ΤΔΑ's mandatory
+     * per-line measurementUnit; unknown/blank → '1' (Τεμάχια), the safe common default.
+     * Order matters: τετρ/κυβ are checked before the bare "μέτρα"/"m". Code 7
+     * (Τεμάχια_Λοιπές) is never emitted — it needs otherMeasurementUnit* we don't model.
+     */
+    private function measurementUnitCode(?string $freeText): string
+    {
+        $u = trim(mb_strtolower((string) $freeText));
+        if ($u === '') {
+            return '1';
+        }
+        // Strip Greek accents so "λίτρα"/"λιτρα", "μέτρα"/"μετρα" both match.
+        $u = strtr($u, ['ά' => 'α', 'έ' => 'ε', 'ή' => 'η', 'ί' => 'ι', 'ό' => 'ο', 'ύ' => 'υ', 'ώ' => 'ω', 'ϊ' => 'ι', 'ϋ' => 'υ']);
+
+        return match (true) {
+            str_contains($u, 'κιλ') || $u === 'kg' || str_contains($u, 'kgr') => '2',
+            str_contains($u, 'λιτρ') || $u === 'lt' || $u === 'l' => '3',
+            str_contains($u, 'τετρ') || str_contains($u, 'τ.μ') || str_contains($u, 'm2') || str_contains($u, 'm²') => '5',
+            str_contains($u, 'κυβ') || str_contains($u, 'κ.μ') || str_contains($u, 'm3') || str_contains($u, 'm³') => '6',
+            str_contains($u, 'μετρ') || $u === 'm' => '4',
+            default => '1', // τεμ / τεμάχια / τμχ / anything else
+        };
     }
 
     /**

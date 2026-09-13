@@ -51,6 +51,10 @@ class CombinedTdaPayloadTest extends TestCase
             'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
             'issued_at' => now(), 'header_discount_percent' => 0,
             'company_name' => 'Πελάτης ΑΕ', 'vat_no' => '997073525',
+            // A ΤΔΑ REQUIRES the counterpart name+address even for a GR party (AADE [204]
+            // «Counterpart address is mandatory … IsDeliveryNote = true», sandbox 2026-09-14),
+            // unlike a plain GR 1.1 where [219]/[220] forbid it. So the snapshot carries one.
+            'address1' => 'Παραλήπτη', 'city' => 'Πάτρα', 'postcode' => '26221',
             'is_delivery_note' => true,
             'move_purpose' => 1,
             'dispatch_at' => now(),
@@ -93,6 +97,31 @@ class CombinedTdaPayloadTest extends TestCase
         $this->assertStringContainsString('Κιβώτια', $xml);
         // Still a monetary document — currency is present (unlike a pure 9.x δελτίο).
         $this->assertStringContainsString('EUR', $xml);
+
+        // Regression (sandbox 2026-09-14): a ΤΔΑ REQUIRES the counterpart's + issuer's
+        // full identity even for a GR party — AADE rejects a missing one with [204],
+        // and each goods line needs quantity + measurementUnit ([230]). A plain GR 1.1
+        // omits all of these; the ΤΔΑ path must add them.
+        $issuer = $this->section($xml, 'issuer');
+        $this->assertStringContainsString('<name>', $issuer, 'ΤΔΑ issuer must carry a name');
+        $this->assertStringContainsString('<address>', $issuer, 'ΤΔΑ issuer must carry an address');
+        $this->assertStringContainsString('ΑΔΡΙΑΝΟΥ 16', $issuer);
+
+        $counterpart = $this->section($xml, 'counterpart');
+        $this->assertStringContainsString('<name>', $counterpart, 'ΤΔΑ counterpart must carry a name');
+        $this->assertStringContainsString('<address>', $counterpart, 'ΤΔΑ counterpart must carry an address');
+        $this->assertStringContainsString('Παραλήπτη', $counterpart);
+        $this->assertStringContainsString('<number>', $counterpart, 'ΤΔΑ counterpart address needs a number ([204])');
+
+        // Goods movement: per-line quantity + measurementUnit (mandatory for a ΤΔΑ, [230]).
+        $this->assertStringContainsString('<quantity>', $xml);
+        $this->assertStringContainsString('measurementUnit', $xml);
+    }
+
+    /** Extract the inner text of the first <tag>…</tag> block (namespace-agnostic). */
+    private function section(string $xml, string $tag): string
+    {
+        return preg_match('#<'.$tag.'>(.*?)</'.$tag.'>#s', $xml, $m) ? $m[1] : '';
     }
 
     public function test_tracking_off_emits_without_digital_transport_tracking(): void
@@ -137,6 +166,14 @@ class CombinedTdaPayloadTest extends TestCase
 
         $this->assertStringNotContainsString('isDeliveryNote', $xml);
         $this->assertStringNotContainsString('otherDeliveryNoteHeader', $xml);
+
+        // Byte-identical guarantee: the ΤΔΑ counterpart/issuer name+address additions are
+        // gated on is_delivery_note, so a plain GR 1.1 keeps the bare GR counterpart
+        // ([219]/[220] forbid its name/address) even though the row carries an address.
+        $counterpart = $this->section($xml, 'counterpart');
+        $this->assertStringNotContainsString('<name>', $counterpart);
+        $this->assertStringNotContainsString('<address>', $counterpart);
+        $this->assertStringNotContainsString('measurementUnit', $xml);
     }
 
     public function test_is_delivery_note_on_a_services_type_fails_the_goods_type_guard(): void
