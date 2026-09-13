@@ -55,12 +55,18 @@ delivery note / QR sticker on the goods**. Therefore:
 
 This asymmetry is the whole shape of the UI (§5). We must **not** pretend confirm is a desk action.
 
-> **One residual empirical check** (cheap, before wiring confirm): re-run
-> `php artisan mydata:fetch-docs --tenant=<sandbox> --raw` filtered to a delivery-bearing doc and
-> grep for `<qrCodeUrl>`. If AADE has *started* returning it to the counterpart in v2.0.2 (it did
-> not at the 2026-09-13 rehearsal), confirm-outcome upgrades to a desk action and the scan step
-> becomes optional. The design below works either way — the qrUrl field is just pre-filled when
-> present. **This is a verification step, not a blocker for reject/refresh.**
+> **Residual empirical checks** (cheap, against a real counterpart capture — `php artisan
+> mydata:fetch-docs --tenant=<sandbox> --raw` on a delivery-bearing doc filed *to* the sandbox):
+> - grep for `<qrCodeUrl>` — if AADE has *started* returning it to the counterpart in v2.0.2 (it did
+>   not at the 2026-09-13 rehearsal), confirm-outcome upgrades to a desk action and the scan step
+>   becomes optional. The design works either way — the qrUrl field is just pre-filled when present.
+> - grep for `<otherDeliveryNoteHeader>` / `<invoiceDeliveryStatus>` (Slice-4a review P2-4) — the movement
+>   filter's only hook for an inbound **combined 1.x ΤΔΑ** is these two elements (a pure 9.x is caught by
+>   its type). If AADE strips them from the counterpart view like `qrCodeUrl`, an inbound ΤΔΑ would be
+>   silently skipped; confirm they survive before relying on the filter for ΤΔΑ.
+>
+> **Neither blocks reject/refresh on a pure 9.x** (caught by type + MARK) — they gate the ΤΔΑ and confirm
+> paths only. **These are verification steps, not blockers for shipping 4a/4b.**
 
 ## 3. Discovery (reuse, don't reinvent)
 

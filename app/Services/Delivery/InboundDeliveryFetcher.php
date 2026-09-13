@@ -18,6 +18,7 @@ use Firebed\AadeMyData\Models\InvoiceHeader;
 use Firebed\AadeMyData\Models\Issuer;
 use Firebed\AadeMyData\Models\OtherDeliveryNoteHeader;
 use GuzzleHttp\Handler\MockHandler;
+use Illuminate\Database\UniqueConstraintViolationException;
 
 /**
  * Slice 4a — stage the ψηφιακή-διακίνηση documents OTHERS filed against us
@@ -183,11 +184,26 @@ class InboundDeliveryFetcher
             }
 
             if (! $dryRun) {
-                InboundDeliveryNote::create(array_merge($attributes, [
-                    'company_id' => $this->tenant->getKey(),
-                    'mydata_mark' => $mark,
-                    'local_state' => InboundDeliveryNote::STATE_NEW,
-                ]));
+                try {
+                    InboundDeliveryNote::create(array_merge($attributes, [
+                        'company_id' => $this->tenant->getKey(),
+                        'mydata_mark' => $mark,
+                        'local_state' => InboundDeliveryNote::STATE_NEW,
+                    ]));
+                } catch (UniqueConstraintViolationException) {
+                    // A concurrent run (a manual --tenant run overlapping the
+                    // scheduled all-tenants sweep) won the insert on the
+                    // (company_id, mydata_mark) unique. Treat it as an update:
+                    // refresh the AADE snapshot without touching the disposition
+                    // the winner may have set. No corruption, no lost poll.
+                    InboundDeliveryNote::withTrashed()
+                        ->where('company_id', $this->tenant->getKey())
+                        ->where('mydata_mark', $mark)
+                        ->first()?->forceFill($attributes)->save();
+                    $updated++;
+
+                    continue;
+                }
             }
             $created++;
             $createdMarks[] = $mark;

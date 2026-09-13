@@ -119,11 +119,13 @@ class InboundDeliveryFetcherTest extends TestCase
             ])),
         ]))->fetch(now()->subMonth(), now());
 
-        // Operator rejects it (the disposition the poll must NEVER undo).
+        // Operator rejects it + stamps every disposition column the poll must NEVER undo.
         $row = InboundDeliveryNote::where('company_id', $this->tenant->id)->firstOrFail();
         $row->update([
             'local_state' => InboundDeliveryNote::STATE_REJECTED,
             'reject_mark' => '900000000000009',
+            'outcome_mark' => '900000000000010',
+            'qr_code_url' => 'https://scanned.example/qr',
         ]);
 
         // Second poll: same MARK, AADE status advanced to 4 (REJECTED).
@@ -140,7 +142,56 @@ class InboundDeliveryFetcherTest extends TestCase
         $row->refresh();
         $this->assertSame(4, $row->aade_delivery_status);                        // AADE snapshot refreshed
         $this->assertSame(InboundDeliveryNote::STATE_REJECTED, $row->local_state); // our disposition kept
-        $this->assertSame('900000000000009', $row->reject_mark);                 // our MARK kept
+        $this->assertSame('900000000000009', $row->reject_mark);                 // our reject MARK kept
+        $this->assertSame('900000000000010', $row->outcome_mark);                // our outcome MARK kept
+        $this->assertSame('https://scanned.example/qr', $row->qr_code_url);      // our scanned qrUrl kept
+    }
+
+    public function test_follows_the_continuation_token_across_pages(): void
+    {
+        $result = $this->fetcher($this->tenant, new MockHandler([
+            // Page 1 carries a continuationToken → the fetcher pulls page 2.
+            new Response(200, [], $this->page([
+                $this->movementDoc('500000000000001', '9.3', status: 3),
+            ], continuationKey: 'PK1')),
+            // Page 2 has no token → the loop ends.
+            new Response(200, [], $this->page([
+                $this->movementDoc('500000000000002', '9.3', status: 3),
+            ])),
+        ]))->fetch(now()->subMonth(), now());
+
+        $this->assertSame(2, $result->created);
+        $this->assertEqualsCanonicalizing(
+            ['500000000000001', '500000000000002'],
+            InboundDeliveryNote::where('company_id', $this->tenant->id)->pluck('mydata_mark')->all(),
+        );
+    }
+
+    public function test_repoll_of_a_soft_deleted_row_refreshes_without_duplicating_or_unhiding(): void
+    {
+        // First poll stages the row; operator "hides" it (soft-delete).
+        $this->fetcher($this->tenant, new MockHandler([
+            new Response(200, [], $this->page([
+                $this->movementDoc('500000000000001', '9.3', status: 3),
+            ])),
+        ]))->fetch(now()->subMonth(), now());
+        InboundDeliveryNote::where('company_id', $this->tenant->id)->firstOrFail()->delete();
+
+        // Re-poll (status advanced): withTrashed lookup refreshes the SAME row —
+        // no duplicate, and the operator's hide is respected (stays trashed).
+        $result = $this->fetcher($this->tenant, new MockHandler([
+            new Response(200, [], $this->page([
+                $this->movementDoc('500000000000001', '9.3', status: 8),
+            ])),
+        ]))->fetch(now()->subMonth(), now());
+
+        $this->assertSame(0, $result->created);
+        $this->assertSame(1, $result->updated);
+        $this->assertSame(1, InboundDeliveryNote::withTrashed()->where('company_id', $this->tenant->id)->count());
+
+        $row = InboundDeliveryNote::withTrashed()->where('company_id', $this->tenant->id)->firstOrFail();
+        $this->assertSame(8, $row->aade_delivery_status);   // snapshot refreshed
+        $this->assertTrue($row->trashed());                 // hide respected
     }
 
     public function test_dry_run_stages_nothing(): void
@@ -181,10 +232,20 @@ class InboundDeliveryFetcherTest extends TestCase
 
     // ---- fixtures --------------------------------------------------------
 
-    /** @param list<string> $docs */
-    private function page(array $docs): string
+    /**
+     * @param  list<string>  $docs
+     * @param  string|null  $continuationKey  when set, appends a continuationToken so the
+     *                                        fetcher paginates to the next MockHandler page
+     */
+    private function page(array $docs, ?string $continuationKey = null): string
     {
         $body = implode("\n", $docs);
+        $token = $continuationKey === null ? '' : <<<XML
+            <continuationToken>
+                <nextPartitionKey>{$continuationKey}</nextPartitionKey>
+                <nextRowKey>{$continuationKey}</nextRowKey>
+            </continuationToken>
+            XML;
 
         return <<<XML
         <?xml version="1.0" encoding="utf-8"?>
@@ -192,6 +253,7 @@ class InboundDeliveryFetcherTest extends TestCase
             <invoicesDoc>
                 {$body}
             </invoicesDoc>
+            {$token}
         </RequestedDoc>
         XML;
     }
