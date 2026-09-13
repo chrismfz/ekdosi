@@ -93,6 +93,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `session.serialization` (json/php) + `session.encrypt`.
 
 ### Changed
+- **Ψηφιακή διακίνηση — αφαιρέθηκε η issuer «Δήλωση παράδοσης» (proven dead-end).** Το
+  `ConfirmDeliveryOutcome` (FULL/PARTIAL/NONE) είναι ενέργεια **παραλήπτη/μεταφορέα**, ΠΟΤΕ του εκδότη:
+  η two-party sandbox validation (2026-09-13, myip⇄nexon) απέδειξε ότι η ΑΑΔΕ το απορρίπτει με **[833]**
+  «Only the recipient or carrier can confirm delivery outcome» με τα credentials του εκδότη — ακόμη κι
+  όταν ο εκδότης δηλώνει τον εαυτό του μεταφορέα (carrier = όποιος καλεί το RegisterTransfer, και ο
+  εκδότης του εγγράφου δεν μετράει). Αφαιρέθηκαν το UI action «Δήλωση παράδοσης» + η μέθοδος
+  `DeliveryLifecycleService::confirmDelivery()` (ήταν issuer-scoped → μόνο [833] θα επέστρεφε). Το
+  αποτέλεσμα παράδοσης πλέον **μόνο παρατηρείται** μέσω «Έλεγχος κατάστασης» (refresh →
+  delivered/partial/failed). Επίσης το `delivery:test-lifecycle --return` (καλούσε confirmReturn από
+  `in_transit` → [828] dead path) αφαιρέθηκε — outcome/return δοκιμάζονται two-party
+  (`docs/delivery-two-party-sandbox.md`). Αφαιρέθηκαν και τα πλέον κενά infolist πεδία «MARK παράδοσης»/
+  «MARK απόρριψης» (είναι marks παραλήπτη/μεταφορέα — φαίνονται στο «Ιστορικό διακίνησης», όχι εδώ).
 - **`firebed/aade-mydata` 5.10.4 → 5.12.0** (myDATA API **v2.0.2** support, backwards-compatible —
   όλα τα νέα πεδία optional, ίδιο XML). Ξεκλειδώνει το DEP-001 / την «delivery-note family» (βλ.
   `docs/BACKLOG.md`). Η κύρια ύλη αφορά **ψηφιακή διακίνηση** (ConfirmDeliveryReturn/deliveryReturnMark,
