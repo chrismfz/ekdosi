@@ -29,6 +29,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   δύο golden suites πράσινα. **Ολοκληρώνει το Slice 3d** (απομένει το 3e: single stock event / PDF / polish).
 
 ### Added
+- **Combined ΤΔΑ — PDF movement block + stock confirmation (Slice 3e, closes Slice 3).** Το PDF του
+  παραστατικού τυπώνει πλέον, για ένα ΤΔΑ (`is_delivery_note`), block «Στοιχεία Διακίνησης» (σκοπός §8.14,
+  τόπος φόρτωσης/παράδοσης, μεταφορικό/όχημα/μεταφορέας, ημ/ώρα, ένδειξη «χωρίς ψηφιακή διακίνηση») δίπλα
+  στο υπάρχον myDATA QR/MARK — ένα ΤΔΑ είναι και νόμιμο δελτίο, οπότε το χαρτί φέρει τη διακίνηση.
+  Επιβεβαιώθηκε (regression test) ότι ένα ΤΔΑ κινεί απόθεμα ΜΙΑ φορά: ως Invoice μέσω
+  `recordSaleForInvoice`/`reverseSaleForInvoice`, ΠΟΤΕ και από το DeliveryNote path. **Ολοκληρώνει το
+  Combined ΤΔΑ (Slice 3, MYD-002).**
 - **Combined ΤΔΑ — movement lifecycle in the UI (Slice 3d-b).** Ολοκληρώνει το ΤΔΑ end-to-end: (1) ο
   submitter (direct myDATA ΚΑΙ πάροχος) αρχικοποιεί `delivery_state='registered'` όταν φιλάρεται ένα tracking-ON ΤΔΑ (qrUrl επέστρεψε)
   ώστε να ξεκινά ο κύκλος ζωής· (2) στην προβολή Παραστατικού μπαίνουν οι κινήσεις «Έναρξη διακίνησης» /

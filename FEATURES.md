@@ -213,6 +213,8 @@
   από την προβολή του παραστατικού μέσω του contract-typed `DeliveryLifecycleService` (`MovableDocument`):
   ένα ΤΔΑ είναι ΕΝΑ έγγραφο/MARK, οπότε **ακυρώνεται από το monetary path** (όχι movement cancel). Fork
   v2.0.2 `withoutDigitalTransportTracking` → φιλάρεται κατευθείαν «ολοκληρωμένο» χωρίς qrUrl/κύκλο ζωής.
+  Το PDF του παραστατικού φέρει block «Στοιχεία Διακίνησης» (σκοπός/φόρτωση/παράδοση/μεταφορικό) δίπλα στο
+  QR/MARK· το απόθεμα κινείται ΜΙΑ φορά (ως Invoice, ποτέ διπλά από το DeliveryNote path).
 - **`DeliveryNoteResource`** invoice-grade (View/lines/Ιστορικό/Συνημμένα), αμφίδρομη
   σύνδεση δελτίο↔τιμολόγιο.
 - **Lifecycle (εκδότης)**: έκδοση → έναρξη διακίνησης → *(παρατήρηση αποτελέσματος μέσω ελέγχου

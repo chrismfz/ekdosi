@@ -353,8 +353,11 @@ question.)
    κατάστασης» lands here, add the `lockForUpdate` re-check the DN twin has — with the WHMCS write-back
    OUTSIDE the lock (never network I/O under a row lock). Tests: seeding + normaliser idempotency + both
    golden suites unchanged.
-5. **3e — Stock + polish:** confirm single stock event; PDF; docs (FEATURES/CHANGELOG); move MYD-002
-   BACKLOG → FEATURES.
+5. **3e — Stock + polish (✅ BUILT):** confirmed single stock event (a ΤΔΑ moves stock ONCE via the
+   Invoice path — `recordSaleForInvoice`/`reverseSaleForInvoice` — never also the DeliveryNote path;
+   regression-tested); invoice PDF now prints a «Στοιχεία Διακίνησης» block (σκοπός/φόρτωση/παράδοση/
+   μεταφορικό) for a ΤΔΑ next to the existing QR/MARK; docs (FEATURES §5 / CHANGELOG); MYD-002 closed.
+   **This completes the Combined ΤΔΑ (Slice 3).**
 
 Each sub-slice is independently mergeable; 3a/3b are the invisible foundation (schema + payload), 3c wires
 the lifecycle, and 3d makes a ΤΔΑ operator-issuable.
