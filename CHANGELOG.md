@@ -19,6 +19,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Combined ΤΔΑ — operator-issuable (Slice 3d-a).** Το ΤΔΑ γίνεται επιλέξιμο + συμπληρώσιμο από το UI:
+  (1) νέα ενότητα «Δελτίο Αποστολής (ΤΔΑ)» στη φόρμα Παραστατικού — toggle `is_delivery_note` (+
+  `without_digital_transport_tracking`) που αποκαλύπτει το movement sub-form (σκοπός §8.14 +scenario helper,
+  διευθύνσεις φόρτωσης/παράδοσης + υποκαταστήματα, τρόπος μεταφοράς/όχημα/ΑΦΜ μεταφορέα/ημ-ώρα), mirror του
+  Δελτίου Αποστολής ΜΕΙΟΝ το `third_party_collection` (payments-only, AADE-invalid στο 1.1)· επιλογή τύπου
+  «ΤΔΑ» προεπιλέγει το flag. (2) Επανεντάχθηκε το seed row `ΤΔΑ` (1.1 + `is_delivery_note=true`) — ασφαλές
+  πλέον που η φόρμα γεμίζει flag+δεδομένα (λύνει το MYD-002). (3) Legacy normaliser migration: γυρίζει ένα
+  προϋπάρχον `ΤΔΑ`-coded type (ETL/pre-3d) σε `is_delivery_note=true`, idempotent, δεν πειράζει operator-
+  reclassified σειρές. Οι κινήσεις (Έναρξη/Έλεγχος/Επιστροφή) έρχονται στην προβολή παραστατικού στο 3d-b.
 - **Combined ΤΔΑ — lifecycle contract (Slice 3c-2).** Νέο `App\Contracts\MovableDocument` και ο
   `DeliveryLifecycleService` γενικεύτηκε πάνω του: η ΙΔΙΑ issuer lifecycle (RegisterTransfer → refresh →
   ConfirmReturn) οδηγεί πλέον ΚΑΙ ένα money-less 9.x `DeliveryNote` ΚΑΙ ένα monetary 1.1 ΤΔΑ `Invoice`.

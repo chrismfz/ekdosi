@@ -17,6 +17,8 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
 use App\Support\MyData\CommonTaxPresets;
+use App\Support\MyData\DeliveryCodes;
+use App\Support\MyData\DeliveryGuidance;
 use App\Support\MyData\ReverseCharge;
 use App\Support\MyData\VatExemptionGuidance;
 use Filament\Facades\Filament;
@@ -28,6 +30,7 @@ use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
+use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
@@ -128,6 +131,13 @@ class InvoiceForm
                             if ($type->delivery_method_id) {
                                 $set('delivery_method_id', $type->delivery_method_id);
                             }
+                            // Combined ΤΔΑ (3d): a type flagged is_delivery_note (a ΤΔΑ
+                            // series) makes THIS 1.1 also a δελτίο → pre-set the flag so the
+                            // movement section reveals. Mirror it in both directions: picking
+                            // a plain type clears it, so a ΤΔΑ→ΤΙΜ switch doesn't leave a
+                            // stale movement header on a plain invoice (operator can still
+                            // toggle it back on for an ad-hoc combined doc).
+                            $set('is_delivery_note', (bool) $type->is_delivery_note);
                         })
                         // Once issued (mydata_state set) the type is frozen — operator
                         // can't reclassify a filed invoice.
@@ -256,6 +266,167 @@ class InvoiceForm
 
                     TagControls::field()
                         ->columnSpanFull(),
+                ]),
+
+            // ─── Δελτίο Αποστολής (ΤΔΑ) — combined 1.1 + κίνηση αγαθών ───
+            // A ΤΔΑ is a monetary 1.1 that ALSO carries isDeliveryNote=true + a movement
+            // header on the SAME document (Slice 3d). The reveal toggle binds
+            // `is_delivery_note`; a ΤΔΑ invoice-type pre-sets it (see invoice_type_id
+            // above). The movement fields mirror the Δελτίο Αποστολής form (same columns,
+            // same DeliveryGuidance/DeliveryCodes helpers) — MINUS third_party_collection
+            // (payments-only 8.4/8.5, AADE-invalid on a 1.1, no column on invoices). The
+            // lifecycle (Έναρξη διακίνησης / Έλεγχος / Επιστροφή) runs from the invoice
+            // VIEW after issue, exactly like a 9.x δελτίο.
+            Section::make('Δελτίο Αποστολής (ΤΔΑ)')
+                ->columnSpanFull()
+                ->columns(2)
+                ->collapsible()
+                ->collapsed(fn (Get $get): bool => ! $get('is_delivery_note'))
+                ->schema([
+                    Toggle::make('is_delivery_note')
+                        ->label('Είναι και Δελτίο Αποστολής (ΤΔΑ)')
+                        ->helperText('Το παραστατικό (1.1) φέρει και κίνηση αγαθών: αποστέλλεται με isDeliveryNote=true + στοιχεία διακίνησης. Ο τύπος «ΤΔΑ» το προεπιλέγει· μπορείς να το ενεργοποιήσεις και χειροκίνητα για ένα τιμολόγιο που συνοδεύει αποστολή.')
+                        ->live()
+                        ->columnSpanFull()
+                        ->disabled(fn ($record) => $record && $record->mydata_state !== null),
+
+                    Toggle::make('without_digital_transport_tracking')
+                        ->label('Χωρίς ψηφιακή διακίνηση (χωρίς QR / κύκλο ζωής)')
+                        ->helperText('Το ΤΔΑ φιλάρεται κατευθείαν ως «ολοκληρωμένο» — δεν επιστρέφει qrUrl και δεν παρακολουθείται (Έναρξη/Έλεγχος/Επιστροφή δεν εφαρμόζονται). Άφησέ το κλειστό για κανονική παρακολούθηση διακίνησης.')
+                        ->visible(fn (Get $get): bool => (bool) $get('is_delivery_note'))
+                        ->columnSpanFull()
+                        ->disabled(fn ($record) => $record && $record->mydata_state !== null),
+
+                    // Σκοπός διακίνησης (§8.14) — the goods-movement purpose, distinct from
+                    // the header's `distribution_aim_id` (the income distribution aim).
+                    Section::make('Σκοπός διακίνησης')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->visible(fn (Get $get): bool => (bool) $get('is_delivery_note'))
+                        ->schema([
+                            Select::make('scenario')
+                                ->label('Τι θέλω να κάνω;')
+                                ->options(DeliveryGuidance::scenarioOptions())
+                                ->helperText(DeliveryGuidance::fieldHelp('scenario'))
+                                ->dehydrated(false)
+                                ->live()
+                                ->afterStateUpdated(function ($state, callable $set): void {
+                                    if (! $state) {
+                                        return;
+                                    }
+                                    $scenario = DeliveryGuidance::scenario($state);
+                                    if (! $scenario) {
+                                        return;
+                                    }
+                                    $set('move_purpose', $scenario['move_purpose']);
+                                    if (! empty($scenario['other_title'])) {
+                                        $set('other_move_purpose_title', $scenario['other_title']);
+                                    }
+                                })
+                                ->columnSpanFull(),
+
+                            Select::make('move_purpose')
+                                ->label('Κωδικός σκοπού (ΑΑΔΕ §8.14)')
+                                ->options(DeliveryCodes::movePurposeOptions())
+                                ->required()
+                                ->searchable()
+                                ->live()
+                                ->helperText(DeliveryGuidance::fieldHelp('move_purpose')),
+
+                            TextInput::make('other_move_purpose_title')
+                                ->label('Τίτλος σκοπού (Λοιπές Διακινήσεις)')
+                                ->maxLength(120)
+                                ->visible(fn (Get $get) => (int) $get('move_purpose') === 19)
+                                ->required(fn (Get $get) => (int) $get('move_purpose') === 19)
+                                ->helperText(DeliveryGuidance::fieldHelp('other_move_purpose_title')),
+                        ]),
+
+                    // Διευθύνσεις φόρτωσης / παράδοσης (otherDeliveryNoteHeader).
+                    Section::make('Διευθύνσεις')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->visible(fn (Get $get): bool => (bool) $get('is_delivery_note'))
+                        ->schema([
+                            Section::make('Φόρτωση (από πού φεύγει)')
+                                ->columns(2)
+                                ->schema([
+                                    TextInput::make('loading_street')
+                                        ->label('Οδός')
+                                        ->required()
+                                        ->default(fn () => Filament::getTenant()?->address)
+                                        ->helperText(DeliveryGuidance::fieldHelp('loading_address')),
+                                    TextInput::make('loading_number')->label('Αριθμός')->maxLength(20),
+                                    TextInput::make('loading_postcode')
+                                        ->label('Τ.Κ.')
+                                        ->required()
+                                        ->maxLength(10)
+                                        ->default(fn () => Filament::getTenant()?->postcode),
+                                    TextInput::make('loading_city')
+                                        ->label('Πόλη')
+                                        ->required()
+                                        ->maxLength(60)
+                                        ->default(fn () => Filament::getTenant()?->city),
+                                    TextInput::make('start_shipping_branch')
+                                        ->label('Υποκατάστημα εκκίνησης')
+                                        ->numeric()
+                                        ->default(0),
+                                ]),
+
+                            Section::make('Παράδοση (πού πάει)')
+                                ->columns(2)
+                                ->schema([
+                                    TextInput::make('delivery_street')
+                                        ->label('Οδός')
+                                        ->required()
+                                        ->helperText(DeliveryGuidance::fieldHelp('delivery_address')),
+                                    TextInput::make('delivery_number')->label('Αριθμός')->maxLength(20),
+                                    TextInput::make('delivery_postcode')
+                                        ->label('Τ.Κ.')
+                                        ->required()
+                                        ->maxLength(10),
+                                    TextInput::make('delivery_city')
+                                        ->label('Πόλη')
+                                        ->required()
+                                        ->maxLength(60),
+                                    TextInput::make('complete_shipping_branch')
+                                        ->label('Υποκατάστημα παράδοσης')
+                                        ->numeric()
+                                        ->default(0),
+                                ]),
+                        ]),
+
+                    // Μεταφορά — NO third_party_collection (invoice has no such column).
+                    Section::make('Μεταφορά')
+                        ->columnSpanFull()
+                        ->columns(2)
+                        ->visible(fn (Get $get): bool => (bool) $get('is_delivery_note'))
+                        ->schema([
+                            Select::make('transport_type')
+                                ->label('Τρόπος μεταφοράς')
+                                ->options(DeliveryCodes::transportTypeOptions())
+                                ->required()
+                                ->searchable()
+                                ->helperText(DeliveryGuidance::fieldHelp('transport_type')),
+
+                            TextInput::make('vehicle_number')
+                                ->label('Πινακίδα οχήματος')
+                                ->required()
+                                ->maxLength(40)
+                                ->helperText(DeliveryGuidance::fieldHelp('vehicle_number')),
+
+                            TextInput::make('carrier_afm')
+                                ->label('ΑΦΜ μεταφορέα')
+                                ->maxLength(20)
+                                ->default(fn () => Filament::getTenant()?->afm)
+                                ->helperText(DeliveryGuidance::fieldHelp('carrier_afm')),
+
+                            DateTimePicker::make('dispatch_at')
+                                ->label('Έναρξη διακίνησης (ημ/ώρα)')
+                                ->required()
+                                ->default(now())
+                                ->seconds(false)
+                                ->helperText(DeliveryGuidance::fieldHelp('dispatch_at')),
+                        ]),
                 ]),
 
             // ─── Γραμμές (Excel-style) ───

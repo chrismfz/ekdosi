@@ -153,6 +153,15 @@ class MyDataLookupSeeder
                             $existing->mydata_income_class_category = $defaults['category'];
                             $touched = true;
                         }
+                        // Combined ΤΔΑ (3d): a ΤΔΑ-coded series (this seed row flags it) that
+                        // predates the flag — a prior seeder run before 3d, or an ETL'd row —
+                        // must carry is_delivery_note, else picking it mis-files as a plain 1.1
+                        // (the MYD-002 hazard). Targeted (keyed on the seed code), and a
+                        // correction, not clobbering: a ΤΔΑ type with the flag off is contradictory.
+                        if (($row['is_delivery_note'] ?? false) && ! $existing->is_delivery_note) {
+                            $existing->is_delivery_note = true;
+                            $touched = true;
+                        }
                     }
 
                     if ($touched) {
@@ -175,6 +184,9 @@ class MyDataLookupSeeder
                     'invcount' => 1,
                     'show_on_menu' => true,
                     'is_credit' => $row['is_credit'] ?? false,
+                    // Combined ΤΔΑ (3d): a ΤΔΑ series carries the flag so the invoice form
+                    // pre-sets invoice.is_delivery_note when it is picked. Plain types false.
+                    'is_delivery_note' => $row['is_delivery_note'] ?? false,
                     'mydata_requires_quantity' => $defaults['goods'],
                 ]);
                 $created++;
@@ -425,7 +437,7 @@ class MyDataLookupSeeder
      *      default it to the services chain (this is a services-first tenant),
      *      adjust if you mostly credit goods invoices.
      *
-     * @var list<array{code: string, name: string, mydata_type: string, income_class?: string, income_class_category?: string, is_credit?: bool, goods?: bool}>
+     * @var list<array{code: string, name: string, mydata_type: string, income_class?: string, income_class_category?: string, is_credit?: bool, is_delivery_note?: bool, goods?: bool}>
      */
     private const INVOICE_TYPE_SEED = [
         // Goods — the missing "κόψε εμπόρευμα" case.
@@ -435,10 +447,13 @@ class MyDataLookupSeeder
         // carries what is series-specific: the tenant code, name, §8.1 type and
         // (for clarity) the credit flag.
         ['code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο Πώλησης', 'mydata_type' => '1.1'],
-        // NB: no «ΤΔΑ» here — a combined invoice+delivery (ΤΔΑ) is a 1.1 with
-        // isDeliveryNote=true + full movement data, which the builder does not emit
-        // yet (MYD-002). Seeding a «ΤΔΑ» that files as a plain 1.1 would mislabel it;
-        // the real combined document is a BACKLOG item. Plain 1.1 sales use ΤΙΜ.
+        // Combined Τιμολόγιο–Δελτίο Αποστολής (ΤΔΑ): a 1.1 that ALSO carries
+        // isDeliveryNote=true + a movement header (Slice 3d). SAFE to seed now — the
+        // invoice form fills the flag + movement data (a picked ΤΔΑ type pre-sets
+        // is_delivery_note), so it files as a real combined document, not a plain 1.1
+        // (the MYD-002 concern that withheld it in 3a/3b is resolved). Income/E3 derive
+        // from Codes::typeDefaults('1.1') like ΤΙΜ.
+        ['code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο–Δελτίο Αποστολής', 'mydata_type' => '1.1', 'is_delivery_note' => true],
         ['code' => 'ΕΝΔ', 'name' => 'Τιμολόγιο Πώλησης / Ενδοκοινοτικές Παραδόσεις', 'mydata_type' => '1.2'],
         // Goods export to third countries (the non-EU twin of ΕΝΔ).
         ['code' => 'ΕΞΑ', 'name' => 'Τιμολόγιο Πώλησης / Παραδόσεις Τρίτων Χωρών', 'mydata_type' => '1.3'],
