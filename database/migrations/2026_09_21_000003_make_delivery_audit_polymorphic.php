@@ -34,6 +34,11 @@ return new class extends Migration
 {
     public function up(): void
     {
+        // The backfill UPDATEs below are deliberately un-chunked: this is a one-time
+        // deploy migration over the movement AUDIT tables, which hold at most a handful
+        // of rows per delivery note across a few tenants — the whole-table write is
+        // sub-millisecond here. Chunk (chunkById + per-batch update) only if a future
+        // tenant accumulates a large e-transport history and the deploy lock is felt.
         Schema::table('delivery_marks', function (Blueprint $t) {
             $t->nullableMorphs('movable'); // movable_type + movable_id + composite index
         });

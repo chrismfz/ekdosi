@@ -100,6 +100,17 @@ class Invoice extends Model
             // audit-worthy like header_discount_percent; logOnlyDirty means it only
             // records a row on a real change, never for the default-0 no-op.
             'counterpart_branch',
+            // Combined ΤΔΑ (3a): the movement header is operator-set and `is_delivery_note`
+            // changes the document's legal nature («is this 1.1 ALSO a ΔΑ?»), so it is
+            // audited like the other business columns. logOnlyDirty + dontLogEmptyChanges
+            // means a plain invoice (all null/false) never records a row. The lifecycle
+            // CACHE cols (delivery_state / *_mark) are excluded — written by the movement
+            // service via forceFill, like the money cache.
+            'is_delivery_note',
+            'move_purpose', 'other_move_purpose_title', 'dispatch_at', 'vehicle_number',
+            'transport_type', 'carrier_afm',
+            'loading_street', 'loading_number', 'loading_postcode', 'loading_city', 'start_shipping_branch',
+            'delivery_street', 'delivery_number', 'delivery_postcode', 'delivery_city', 'complete_shipping_branch',
             'mydata_state', 'mydata_mark',
         ];
     }

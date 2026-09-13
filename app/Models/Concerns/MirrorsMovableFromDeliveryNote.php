@@ -15,16 +15,18 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
  * those write sites.
  *
  * An Invoice-backed ΤΔΑ row (3c) sets `movable_*` directly and leaves
- * `delivery_note_id` NULL; the `empty(movable_type)` guard makes the hook a no-op
- * there, so it never overwrites an explicit morph. Audit rows are append-only, so
- * a `creating` hook is enough — `delivery_note_id` never changes after insert.
+ * `delivery_note_id` NULL → this is a no-op there, so an explicit morph is never
+ * overwritten. Mirrored on `saving` (create AND update), not just `creating`: the
+ * rows are append-only today, but keying off `delivery_note_id` on every save means
+ * even a later data-fix that reassigns it can't leave `movable_*` on the stale
+ * parent — the morph always tracks the FK whenever the FK is set.
  */
 trait MirrorsMovableFromDeliveryNote
 {
     public static function bootMirrorsMovableFromDeliveryNote(): void
     {
-        static::creating(function ($model): void {
-            if (empty($model->movable_type) && ! empty($model->delivery_note_id)) {
+        static::saving(function ($model): void {
+            if (! empty($model->delivery_note_id)) {
                 $model->movable_type = DeliveryNote::class;
                 $model->movable_id = $model->delivery_note_id;
             }
