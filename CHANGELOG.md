@@ -19,6 +19,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Combined ΤΔΑ — polymorphic audit completed (Slice 3c-1).** Το `delivery_note_events` έγινε πλήρως
+  polymorphic: `delivery_note_id` → nullable + νέο `unique(movable_type, movable_id, dedup_key)` (το
+  idempotency anchor για ΑΜΦΟΤΕΡΟΥΣ τους γονείς), και τα `DeliveryNote::marks()/events()/latestMark()`
+  διαβάζουν πλέον από το morph (`movable_*`) — διάφανο για ένα DeliveryNote (κρατά και τα δύο μέσω hook),
+  αλλά επιτρέπει σε ένα ΤΔΑ Invoice να «κρεμάσει» τα δικά του lifecycle events. Το seam που θα οδηγήσει ο
+  γενικευμένος `DeliveryLifecycleService` στο 3c-2.
 - **Combined ΤΔΑ — issue payload (Slice 3b).** Ο monetary builder (`AadeInvoiceDocument`) εκπέμπει πλέον
   το **movement header πάνω στο ίδιο 1.1** όταν το invoice έχει `is_delivery_note=true`: `isDeliveryNote`,
   σκοπός διακίνησης (+τίτλος για 19), dispatch date/time, όχημα, και `otherDeliveryNoteHeader`
