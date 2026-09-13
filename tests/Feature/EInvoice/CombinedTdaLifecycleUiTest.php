@@ -43,7 +43,9 @@ class CombinedTdaLifecycleUiTest extends TestCase
             'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
             'afm' => '800561849', 'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K',
         ]);
-        $this->customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης', 'afm' => '997073525']);
+        $this->customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης', 'afm' => '997073525',
+            // Address present so a combined-ΤΔΑ (is_delivery_note) can build the counterpart AADE requires ([204]).
+            'address1' => 'Παραλήπτη 5', 'city' => 'Πάτρα', 'postcode' => '26221']);
         VatCategory::create(['company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
     }
 

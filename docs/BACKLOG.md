@@ -212,6 +212,12 @@ the myDATA/Provider sections lower down — not repeated here.
   **fallback to 1 (Τεμάχια)**. A goods sold by an unmapped unit files as Τεμάχια. Proper fix:
   a §8.13 unit picker on the ΤΔΑ invoice line (like the delivery-note line), or store a code
   on `invoice_lines`. Sandbox-validated 2026-09-14 (both direct + provider paths).
+- **ΤΔΑ issuer address placeholder (P2)** — for a combined ΤΔΑ, `AadeInvoiceDocument` files the
+  issuer name+seat address; if the tenant company row has a blank address it falls back to
+  'Έδρα'/'00000'/'Unknown' (mirrors `DeliveryNoteSubmitter::buildTenantAddress`), whereas the
+  counterpart branch (MYD-6) hard-refuses such placeholders. Inconsistent on the same legal
+  document, but unreachable in practice (an invoicing tenant always has a configured seat).
+  Align (hard-fail issuer too) if a real blank-seat tenant appears.
 - **SETUP-004 (P2)** — Estonian (EE) tenant skips even non-AADE neutral lookups.
 - **SETUP-003 (P2, was «stale»)** — only a *null* payment method defaults to cash
   silently (an unmapped-but-chosen one already warns + surfaces in preflight). Remaining

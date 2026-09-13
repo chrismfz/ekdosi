@@ -47,6 +47,9 @@ class GrProviderSubmitterTest extends TestCase
         ]);
         $this->customer = Customer::create([
             'company_id' => $this->tenant->id, 'name' => 'Πελάτης', 'afm' => '123456789',
+            // Address present so a combined-ΤΔΑ test (is_delivery_note) can build the
+            // counterpart AADE now requires ([204]); a plain GR ΤΠΥ still omits it.
+            'address1' => 'Παραλήπτη 5', 'city' => 'Πάτρα', 'postcode' => '26221',
         ]);
         $this->type = InvoiceType::create([
             'company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'Τιμολόγιο',

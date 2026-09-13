@@ -887,6 +887,11 @@ class AadeInvoiceDocument
         // Retail (Λιανικής) types forbid Counterpart even if customer
         // has an AFM (operator booked a B2B-style customer into a
         // retail receipt — common with WHMCS-originated invoices).
+        // NOTE: 11.1/11.5 are delivery-note-capable (supportsDeliveryNote), so a RETAIL
+        // combined ΤΔΑ (a consumer receipt that is also a delivery note) legitimately files
+        // with NO counterpart party — the ΤΔΑ counterpart name/address rule below never
+        // applies to it. Our tenants don't issue retail ΤΔΑ; if one ever does and AADE
+        // demands a counterpart identity there, revisit (BACKLOG: retail-ΤΔΑ counterpart).
         if (str_starts_with($type, '11.')) {
             return null;
         }

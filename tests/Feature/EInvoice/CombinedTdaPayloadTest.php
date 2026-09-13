@@ -118,7 +118,12 @@ class CombinedTdaPayloadTest extends TestCase
         $this->assertStringContainsString('measurementUnit', $xml);
     }
 
-    /** Extract the inner text of the first <tag>…</tag> block (namespace-agnostic). */
+    /**
+     * Inner text of the first <tag>…</tag> block. The AADE invoice payload serialises
+     * issuer/counterpart UNPREFIXED (default namespace), so a bare-tag match is correct;
+     * callers add an assertNotEmpty guard so a future prefixed serialisation can't turn a
+     * negative assertion into a vacuous pass.
+     */
     private function section(string $xml, string $tag): string
     {
         return preg_match('#<'.$tag.'>(.*?)</'.$tag.'>#s', $xml, $m) ? $m[1] : '';
@@ -171,6 +176,11 @@ class CombinedTdaPayloadTest extends TestCase
         // gated on is_delivery_note, so a plain GR 1.1 keeps the bare GR counterpart
         // ([219]/[220] forbid its name/address) even though the row carries an address.
         $counterpart = $this->section($xml, 'counterpart');
+        // Guard against a vacuous pass: a plain B2B GR 1.1 still files a counterpart
+        // (vatNumber/country/branch), so the negatives below assert a real absence of
+        // name/address, not a section() extraction miss.
+        $this->assertNotEmpty($counterpart, 'plain 1.1 must still file a counterpart');
+        $this->assertStringContainsString('<vatNumber>', $counterpart);
         $this->assertStringNotContainsString('<name>', $counterpart);
         $this->assertStringNotContainsString('<address>', $counterpart);
         $this->assertStringNotContainsString('measurementUnit', $xml);
