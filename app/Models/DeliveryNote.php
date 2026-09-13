@@ -15,7 +15,8 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Database\Eloquent\Relations\MorphOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 /**
@@ -375,9 +376,13 @@ class DeliveryNote extends Model
         return $this->hasMany(DeliveryNoteLine::class);
     }
 
-    public function marks(): HasMany
+    // Combined ΤΔΑ (3c): the movement audit is polymorphic (`movable_*`), so these
+    // key off the morph, not delivery_note_id — a DeliveryNote row carries both (the
+    // MirrorsMovableFromDeliveryNote hook), so the results are identical to the old
+    // hasMany while an Invoice-backed ΤΔΑ reaches its own audit through the same seam.
+    public function marks(): MorphMany
     {
-        return $this->hasMany(DeliveryMark::class);
+        return $this->morphMany(DeliveryMark::class, 'movable');
     }
 
     /**
@@ -385,14 +390,14 @@ class DeliveryNote extends Model
      * synced by DeliveryLifecycleService::syncLifecycleHistory on refreshStatus.
      * Ordered oldest→newest so the View reads as a timeline.
      */
-    public function events(): HasMany
+    public function events(): MorphMany
     {
-        return $this->hasMany(DeliveryNoteEvent::class)->orderBy('event_timestamp');
+        return $this->morphMany(DeliveryNoteEvent::class, 'movable')->orderBy('event_timestamp');
     }
 
-    public function latestMark(): HasOne
+    public function latestMark(): MorphOne
     {
-        return $this->hasOne(DeliveryMark::class)->latestOfMany();
+        return $this->morphOne(DeliveryMark::class, 'movable')->latestOfMany();
     }
 
     /**

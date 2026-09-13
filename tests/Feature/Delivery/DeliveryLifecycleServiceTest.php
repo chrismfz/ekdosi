@@ -192,6 +192,39 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertSame('App\\Models\\Invoice', $explicit->movable_type);
         $this->assertSame(4242, (int) $explicit->movable_id);
         $this->assertNull($explicit->delivery_note_id);
+
+        // Bidirectional (3c): a mark created THROUGH the morphMany relation sets
+        // movable_* only — the hook back-fills delivery_note_id so the FK readers
+        // (DeliveryNoteSubmitter, FiledSeriesBackfill) still see it.
+        $viaRelation = $note->marks()->create([
+            'company_id' => $this->tenant->id, 'mark' => '888',
+            'mydata_action' => 'REGISTER_TRANSFER', 'mark_date' => now()->toDateString(),
+        ])->fresh();
+        $this->assertSame($note->id, (int) $viaRelation->delivery_note_id);
+        $this->assertSame(DeliveryNote::class, $viaRelation->movable_type);
+    }
+
+    public function test_events_can_be_parented_by_an_invoice_via_the_morph(): void
+    {
+        // 3c-1: delivery_note_events is fully polymorphic now — a ΤΔΑ Invoice parents
+        // its lifecycle events with movable_type=Invoice + delivery_note_id NULL,
+        // deduped by the morph unique (movable_type, movable_id, dedup_key), NOT the
+        // DeliveryNote FK. This is the seam the generalised service uses in 3c-2.
+        $event = DeliveryNoteEvent::create([
+            'company_id' => $this->tenant->id,
+            'movable_type' => 'App\\Models\\Invoice', 'movable_id' => 555,
+            'event_type' => 'ConfirmOutcome', 'dedup_key' => 'inv-k1',
+        ])->fresh();
+        $this->assertSame('App\\Models\\Invoice', $event->movable_type);
+        $this->assertNull($event->delivery_note_id);
+
+        // Idempotent on the morph keys (a re-poll never duplicates an Invoice event).
+        DeliveryNoteEvent::updateOrCreate(
+            ['movable_type' => 'App\\Models\\Invoice', 'movable_id' => 555, 'dedup_key' => 'inv-k1'],
+            ['company_id' => $this->tenant->id, 'event_type' => 'ConfirmOutcome'],
+        );
+        $this->assertSame(1, DeliveryNoteEvent::query()
+            ->where('movable_type', 'App\\Models\\Invoice')->where('movable_id', 555)->count());
     }
 
     // ---- AADE status → delivery_state mapping (totality) --------------
