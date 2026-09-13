@@ -84,7 +84,22 @@ class MyDataLookupSeederTest extends TestCase
         $tenant = $this->tenant();
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(14, $r['created']);   // ΤΔΑ dropped (MYD-002)
+        $this->assertSame(15, $r['created']);   // + ΤΔΑ re-added (Slice 3d)
+
+        // Combined ΤΔΑ (3d): a 1.1 series flagged is_delivery_note so the invoice
+        // form pre-sets invoice.is_delivery_note when it is picked (files as a real
+        // combined document, not a mislabelled plain 1.1 — the MYD-002 concern).
+        $tda = InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΔΑ')->first();
+        $this->assertNotNull($tda);
+        $this->assertSame('1.1', $tda->mydata_type);
+        $this->assertTrue((bool) $tda->is_delivery_note);
+        // It shares the 1.1 income classification with ΤΙΜ (same typeDefaults source).
+        $this->assertSame(
+            InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->value('mydata_income_class'),
+            $tda->mydata_income_class,
+        );
+        // Only the ΤΔΑ series carries the flag — a plain ΤΙΜ never does.
+        $this->assertFalse((bool) InvoiceType::where('company_id', $tenant->id)->where('code', 'ΤΙΜ')->value('is_delivery_note'));
 
         // Cross-border SERVICES twins exist (2.2/2.3) — not just the goods ones.
         $eny = InvoiceType::where('company_id', $tenant->id)->where('mydata_type', '2.2')->first();
@@ -192,7 +207,7 @@ class MyDataLookupSeederTest extends TestCase
         InvoiceType::create(['company_id' => $tenant->id, 'code' => 'ΤΠΥ', 'name' => 'Δικό μου', 'invcount' => 50, 'mydata_type' => '2.1']);
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
-        $this->assertSame(13, $r['created']);    // all but the existing ΤΠΥ (14 total − ΤΠΥ)
+        $this->assertSame(14, $r['created']);    // all but the existing ΤΠΥ (15 total − ΤΠΥ)
         $this->assertSame(1, $r['filled']);     // ΤΠΥ income chain back-filled (type matches)
         $this->assertSame(0, $r['skipped']);
 
@@ -313,8 +328,8 @@ class MyDataLookupSeederTest extends TestCase
 
         $r = $this->svc()->seedInvoiceTypes($tenant);
 
-        // ΤΙΜ was filled (not skipped); the other 13 are created.
-        $this->assertSame(13, $r['created']);
+        // ΤΙΜ was filled (not skipped); the other 14 are created.
+        $this->assertSame(14, $r['created']);
         $this->assertSame(1, $r['filled']);
         $this->assertSame(0, $r['skipped']);
 

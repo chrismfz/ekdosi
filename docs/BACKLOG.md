@@ -490,6 +490,18 @@ surfaced in the open-items sections further down.
     μπει το invoice-view refresh action, βάλε το lock σωστά (η WHMCS κλήση ΕΚΤΟΣ του lock — π.χ. lock μόνο
     το terminality re-check, ή lockForUpdate re-check μέσα στον `SyncInvoiceStateFromAade` που το φτιάχνει
     για όλους τους callers).
+  - **[P2] Goods-type guard στο `is_delivery_note` toggle (3d-a review).** Το toggle «Είναι και Δελτίο
+    Αποστολής» εμφανίζεται σε ΚΑΘΕ τύπο παραστατικού· ενεργοποίησή του σε τύπο ΥΠΗΡΕΣΙΩΝ (π.χ. ΤΠΥ 2.1)
+    θα χτίσει payload με `isDeliveryNote=true` + `otherDeliveryNoteHeader` σε 2.1 — αντιφατικό (οι υπηρεσίες
+    δεν εκπέμπουν per-line `<quantity>`, μια κίνηση απαιτεί ποσότητες) → πιθανή απόρριψη ΑΑΔΕ. Απαιτεί
+    σκόπιμη κακή χρήση (P2· η ΑΑΔΕ ήδη απορρίπτει → fails safe). Fix: submit-time guard στο
+    `AadeInvoiceDocument::applyMovementHeader` — αν `is_delivery_note` αλλά ο τύπος δεν υποστηρίζει δελτίο
+    (v2.0.2 `supportsDeliveryNote`: 1.1/1.4/3.1/3.2/11.5), throw καθαρό ελληνικό μήνυμα· ή πρόσφερε το
+    toggle μόνο σε goods-capable τύπους. Δες στο 3d-b/3e.
+  - **[P2] FEATURES.md line για το Combined ΤΔΑ.** Το 3d-a έβαλε CHANGELOG entries αλλά ΟΧΙ FEATURES.md
+    (το «τι κάνει το ekdosi»). Συνειδητή αναβολή: πρόσθεσε τη γραμμή ΤΔΑ στο FEATURES.md όταν κλείσει το
+    3d-b (lifecycle actions στην προβολή) ώστε το feature να περιγράφεται ΟΛΟΚΛΗΡΟ (issue + κίνηση), και
+    μετακίνησε το MYD-002 BACKLOG→FEATURES.
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον
