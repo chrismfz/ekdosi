@@ -463,6 +463,37 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertTrue($result['changed']);
     }
 
+    public function test_refresh_maps_delivered_by_carrier_partial_to_partial(): void
+    {
+        // Two-party sandbox truth (2026-09-13): a carrier PARTIAL delivery reports
+        // AADE status DeliveredByCarrier — the SAME status as a carrier FULL — and
+        // only the ConfirmOutcome lifecycleHistory detail says PARTIAL. It MUST map
+        // to 'partial' (not 'delivered') so confirmReturn stays reachable (§3.2.7;
+        // AADE accepts the return from here — it posts a deliveryReturnMark).
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+
+        $result = $this->service($this->statusResponseDeliveredByCarrier('PARTIAL'))->refreshStatus($note);
+
+        $this->assertSame(DeliveryStatus::DELIVERED_BY_CARRIER, $result['aade_status']);
+        $this->assertSame('partial', $result['mapped_state']);
+        $this->assertSame('partial', $note->fresh()->delivery_state);
+        // …and 'partial' is a confirmReturn source, so the operator can close it.
+        $this->assertContains('partial', DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES);
+    }
+
+    public function test_refresh_maps_delivered_by_carrier_full_to_delivered(): void
+    {
+        // A FULL carrier delivery is terminal — no return leg — so DeliveredByCarrier
+        // with a FULL ConfirmOutcome stays 'delivered'.
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+
+        $result = $this->service($this->statusResponseDeliveredByCarrier('FULL'))->refreshStatus($note);
+
+        $this->assertSame(DeliveryStatus::DELIVERED_BY_CARRIER, $result['aade_status']);
+        $this->assertSame('delivered', $result['mapped_state']);
+        $this->assertSame('delivered', $note->fresh()->delivery_state);
+    }
+
     public function test_refresh_status_maps_aade_state_and_forcefills(): void
     {
         // Locally still 'registered' but AADE reports IN_TRANSIT → reconcile.
@@ -991,6 +1022,37 @@ XML;
 <GetDeliveryNoteStatusResponse xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <invoiceMark>480301204040191</invoiceMark>
     <status>{$status}</status>
+</GetDeliveryNoteStatusResponse>
+XML;
+    }
+
+    /**
+     * Status DELIVERED_BY_CARRIER carrying a single ConfirmOutcome event with the
+     * given outcome (FULL|PARTIAL) — the status alone is identical for both, so the
+     * mapper reads this detail to split 'delivered' vs 'partial'.
+     */
+    private function statusResponseDeliveredByCarrier(string $outcome): string
+    {
+        return <<<XML
+<?xml version="1.0" encoding="utf-8"?>
+<GetDeliveryNoteStatusResponse xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <invoiceMark>480301204040191</invoiceMark>
+    <status>DELIVERED_BY_CARRIER</status>
+    <lifecycleHistory>
+        <eventType>RegisterTransfer</eventType>
+        <eventTimestamp>2026-09-13T10:00:00Z</eventTimestamp>
+        <actorVat>801280908</actorVat>
+        <mark>222222222222222</mark>
+    </lifecycleHistory>
+    <lifecycleHistory>
+        <eventType>ConfirmOutcome</eventType>
+        <eventTimestamp>2026-09-13T11:00:00Z</eventTimestamp>
+        <actorVat>801280908</actorVat>
+        <mark>333333333333333</mark>
+        <outcomeDetails>
+            <outcome>{$outcome}</outcome>
+        </outcomeDetails>
+    </lifecycleHistory>
 </GetDeliveryNoteStatusResponse>
 XML;
     }

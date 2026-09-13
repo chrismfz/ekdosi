@@ -106,6 +106,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   access ή λειτουργία.
 
 ### Fixed
+- **Ψηφιακή διακίνηση — μερική παράδοση μεταφορέα ξεκλειδώνει τη «Δήλωση επιστροφής» (DGM v2.0.2 §3.2.7).**
+  Two-party sandbox validation (2026-09-13, myip⇄nexon) απέδειξε ότι μια **μερική παράδοση από τον
+  μεταφορέα** αναφέρεται από την ΑΑΔΕ ως `DeliveredByCarrier` — **ίδιο status** με την πλήρη παράδοση
+  μεταφορέα· μόνο το `ConfirmOutcome` του lifecycleHistory ξεχωρίζει FULL/PARTIAL. Ο `deliveryStateFromAade`
+  χαρτογραφούσε `DELIVERED_BY_CARRIER → 'delivered'` (εκτός `CONFIRM_RETURN_FROM_STATES`), οπότε ο χειριστής
+  **δεν μπορούσε ποτέ** να δηλώσει επιστροφή μετά από μερική παράδοση — παρότι η ΑΑΔΕ τη δέχεται (επιστρέφει
+  `deliveryReturnMark`). Fix: το mapping διαβάζει πλέον το outcome του lifecycleHistory → carrier **PARTIAL
+  → `'partial'`** (ο «Έλεγχος κατάστασης» ξεκλειδώνει τη «Δήλωση επιστροφής»), carrier **FULL → `'delivered'`**
+  (τερματικό). Βλ. `docs/delivery-two-party-sandbox.md` §Findings.
 - **Ψηφιακή διακίνηση — «Δήλωση επιστροφής» από τις σωστές καταστάσεις (DGM v2.0.2 §3.2.7).** Το DGM
   v2.0.2 doc (πλέον στο repo) όρισε ρητά ότι η ConfirmDeliveryReturn του εκδότη καλείται από **Rejected /
   μερική παράδοση (PARTIAL) / FailedDelivery** → `rejected/partial/failed`. Το Slice 2 επέτρεπε μόνο
