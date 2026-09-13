@@ -77,6 +77,41 @@ class GrProviderSubmitterTest extends TestCase
         $this->assertTrue((bool) $fresh->mydata_sent);
     }
 
+    public function test_provider_filing_of_a_tracking_on_tda_seeds_registered_state(): void
+    {
+        // Combined ΤΔΑ (3d-b): symmetric with the direct-myDATA path — a provider-filed
+        // tracking-ON ΤΔΑ must enter the movement lifecycle (delivery_state='registered')
+        // so «Έναρξη διακίνησης» surfaces; the lifecycle itself runs direct to myDATA.
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'is_delivery_note' => true, 'move_purpose' => 1, 'vehicle_number' => 'ΙΑΒ1234',
+            'loading_street' => 'Φόρτωση', 'loading_postcode' => '11111', 'loading_city' => 'Αθήνα',
+            'delivery_street' => 'Παράδοση', 'delivery_postcode' => '22222', 'delivery_city' => 'Θεσσαλονίκη',
+        ])->save();
+
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertNotEmpty($fresh->mydata_url);
+        $this->assertSame('registered', $fresh->delivery_state);
+    }
+
+    public function test_provider_filing_of_a_tracking_off_tda_leaves_no_lifecycle_state(): void
+    {
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'is_delivery_note' => true, 'without_digital_transport_tracking' => true, 'move_purpose' => 1,
+            'loading_street' => 'Φόρτωση', 'loading_postcode' => '11111', 'loading_city' => 'Αθήνα',
+            'delivery_street' => 'Παράδοση', 'delivery_postcode' => '22222', 'delivery_city' => 'Θεσσαλονίκη',
+        ])->save();
+
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice->fresh('lines'));
+
+        $this->assertSame('VALID', $invoice->fresh()->mydata_state);
+        $this->assertNull($invoice->fresh()->delivery_state);
+    }
+
     public function test_persist_snapshots_the_provider_identity_in_force(): void
     {
         // PROV-003 (b): freeze the identity IN FORCE at issue on the mark, so a

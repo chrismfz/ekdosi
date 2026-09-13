@@ -19,6 +19,21 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Combined ΤΔΑ — movement lifecycle in the UI (Slice 3d-b).** Ολοκληρώνει το ΤΔΑ end-to-end: (1) ο
+  submitter (direct myDATA ΚΑΙ πάροχος) αρχικοποιεί `delivery_state='registered'` όταν φιλάρεται ένα tracking-ON ΤΔΑ (qrUrl επέστρεψε)
+  ώστε να ξεκινά ο κύκλος ζωής· (2) στην προβολή Παραστατικού μπαίνουν οι κινήσεις «Έναρξη διακίνησης» /
+  «Δήλωση επιστροφής» / «Έλεγχος κατάστασης διακίνησης» (mirror του Δελτίου Αποστολής, μέσω του
+  contract-typed `DeliveryLifecycleService`), κρυμμένες για πλήρη 1.1 και για tracking-OFF ΤΔΑ· η ακύρωση
+  μένει στο monetary path (§7)· (3) routing helper στη φόρμα Δελτίου Αποστολής που στέλνει τα «με αξία»
+  έγγραφα στα Παραστατικά (τύπος ΤΔΑ).
+
+### Fixed
+- **Combined ΤΔΑ — goods-type guard (3d-b).** Ο `AadeInvoiceDocument` απορρίπτει `isDeliveryNote` σε τύπο
+  που δεν το επιτρέπει η ΑΑΔΕ (v2.0.2 `supportsDeliveryNote` — π.χ. υπηρεσίες 2.x) με καθαρό μήνυμα, αντί
+  για αντιφατικό payload που απορρίπτει opaque η ΑΑΔΕ.
+- **Combined ΤΔΑ — row-lock στο invoice remote-cancel (3d-b).** Ο `SyncInvoiceStateFromAade` κάνει πλέον
+  `lockForUpdate` re-check μέσα στο transaction (η WHMCS κλήση μένει ΕΚΤΟΣ), ώστε δύο ταυτόχρονα
+  «Έλεγχος κατάστασης» να μη γράφουν διπλή STATE_SYNC γραμμή — hardening και για τον προϋπάρχοντα caller.
 - **Combined ΤΔΑ — operator-issuable (Slice 3d-a).** Το ΤΔΑ γίνεται επιλέξιμο + συμπληρώσιμο από το UI:
   (1) νέα ενότητα «Δελτίο Αποστολής (ΤΔΑ)» στη φόρμα Παραστατικού — toggle `is_delivery_note` (+
   `without_digital_transport_tracking`) που αποκαλύπτει το movement sub-form (σκοπός §8.14 +scenario helper,

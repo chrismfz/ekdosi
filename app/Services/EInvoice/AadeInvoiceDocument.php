@@ -15,6 +15,7 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
 use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\InvoiceType as AadeInvoiceType;
 use Firebed\AadeMyData\Enums\MovePurpose;
 use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
 use Firebed\AadeMyData\Enums\StampCategory;
@@ -712,6 +713,19 @@ class AadeInvoiceDocument
      */
     private function applyMovementHeader(InvoiceHeader $header, Invoice $invoice): void
     {
+        // Combined ΤΔΑ (3d-b): isDeliveryNote is legal only on a delivery-note-capable
+        // §8.1 type (v2.0.2 supportsDeliveryNote: 1.1/1.2/1.3/1.4/1.6/3.1/3.2/5.1/5.2/
+        // 11.1/11.5 — NOT services 2.x). The form toggle is exposed on every type, so an
+        // operator could flip it on a ΤΠΥ (2.1); guard here (the single submit choke-point,
+        // covers every path) rather than emit a contradictory payload AADE rejects opaquely.
+        $type = (string) $invoice->invoiceType?->mydata_type;
+        if (AadeInvoiceType::tryFrom($type)?->supportsDeliveryNote() !== true) {
+            throw new RuntimeException(
+                "ΤΔΑ {$invoice->invcode}: ο τύπος {$type} δεν υποστηρίζει δελτίο αποστολής (isDeliveryNote). "
+                .'Χρησιμοποιήστε τύπο που το επιτρέπει (π.χ. 1.1 Τιμολόγιο) ή απενεργοποιήστε το «Είναι και Δελτίο Αποστολής».'
+            );
+        }
+
         $header->setIsDeliveryNote(true);
 
         if ($invoice->without_digital_transport_tracking) {

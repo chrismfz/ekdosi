@@ -87,7 +87,30 @@ class SyncInvoiceStateFromAade
             return ['changed' => false, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $fromLocal];
         }
 
-        DB::transaction(function () use ($invoice, $aadeState, $toLocal, $fromState, $fromLocal, $cancelledByMark): void {
+        // Serialise concurrent syncs under a row lock so only ONE writes the STATE_SYNC
+        // row — the legal audit must not duplicate. This is newly reachable via the
+        // Combined ΤΔΑ movement refresh (3d-b: applyRemoteCancellationMonetary delegates
+        // here), where the scheduler + a manual «Έλεγχος» can overlap; it also hardens
+        // the pre-existing manual caller. lockForUpdate is real on MariaDB (prod), a no-op
+        // on sqlite (tests). The WHMCS write-back stays OUTSIDE the transaction, so the
+        // lock is never held across network I/O. Explicit company filter: reachable from
+        // console/queue with no ambient CompanyContext (CLAUDE.md CLI/queue rule).
+        $applied = DB::transaction(function () use ($invoice, $aadeState, $toLocal, $fromState, $fromLocal, $cancelledByMark): bool {
+            $locked = Invoice::query()
+                ->where('company_id', $invoice->company_id)
+                ->whereKey($invoice->getKey())
+                ->lockForUpdate()
+                ->first();
+
+            if ($locked === null) {
+                return false;
+            }
+            // Another sync already reached the target under the lock → do not write a
+            // second STATE_SYNC row (idempotent; the pre-lock check is only a fast path).
+            if ($locked->mydata_state === $aadeState && $locked->local_status === $toLocal) {
+                return false;
+            }
+
             $invoice->forceFill([
                 'mydata_state' => $aadeState,
                 'local_status' => $toLocal,
@@ -106,7 +129,15 @@ class SyncInvoiceStateFromAade
                 'mark_date' => now()->toDateString(),
                 'mark_time' => now()->toTimeString(),
             ]);
+
+            return true;
         });
+
+        // A concurrent sync won the lock and already applied the terminal state — nothing
+        // to log, write back, or report as changed.
+        if (! $applied) {
+            return ['changed' => false, 'from' => $fromState, 'to' => $aadeState, 'local_status' => $toLocal];
+        }
 
         Log::info('myDATA state synced from AADE', [
             'company_id' => $invoice->company_id,
