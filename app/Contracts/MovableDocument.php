@@ -4,6 +4,7 @@ namespace App\Contracts;
 
 use App\Models\Company;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Carbon;
 
 /**
  * A document that drives the myDATA e-transport (Ψηφιακή Διακίνηση) movement
@@ -45,6 +46,9 @@ use Illuminate\Database\Eloquent\Relations\MorphMany;
  * @property int|null $transport_type §8.15 TransportType (1–7)
  * @property string|null $vehicle_number
  * @property string|null $carrier_afm
+ * @property int|null $move_purpose §8.14 goods-movement purpose
+ * @property string|null $other_move_purpose_title free-text title when move_purpose=19
+ * @property Carbon|null $dispatch_at planned dispatch date/time
  * @property string|null $transfer_mark the RegisterTransfer MARK (issuer-written)
  * @property string|null $return_mark the ConfirmReturn MARK (issuer-written)
  *

@@ -340,7 +340,8 @@ question.)
      the 3c-2 diff reviewable. Tracked in `docs/BACKLOG.md`.
    **No longer blocked** (Q2 resolved); the DGM doc only decides which actions surface (tracked vs
    `withoutDigitalTransportTracking`).
-4. **3d — UI/wizard + seed:** the Παραστατικά toggle (sets `invoice.is_delivery_note`) + movement
+4. **3d — UI/wizard + seed (✅ BUILT — 3d-a form+seed+normaliser, 3d-b invoice-view lifecycle + goods-type
+   guard + row-lock, 3d-c shared `MovementHeaderBuilder`):** the Παραστατικά toggle (sets `invoice.is_delivery_note`) + movement
    sub-form + lifecycle actions on the invoice view; the Διακίνηση helper/tooltip; **re-add the ΤΔΑ seed
    row + apply-loop + legacy normaliser and re-offer ΤΔΑ in the picker** — safe now that the form fills the
    flag + movement data. **Also (folded from 3c):** (a) extract the SHARED movement-header builder keyed on
