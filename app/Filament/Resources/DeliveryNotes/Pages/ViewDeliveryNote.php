@@ -169,8 +169,9 @@ class ViewDeliveryNote extends ViewRecord
 
             // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (myDATA v2.0.2 §3.2.7): ο
             // εκδότης κλείνει τη διακίνηση με επιστροφή. Πηγές (plain 9.3):
-            // rejected/partial/failed· in_transit/in_transit_return κρατιούνται
-            // pending sandbox (βλ. DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES).
+            // rejected/partial/failed (+ in_transit_return, carrier return leg)· το
+            // in_transit αφαιρέθηκε — η ΑΑΔΕ το απορρίπτει [828] (sandbox 2026-09-13,
+            // βλ. DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES).
             Action::make('confirm_return')
                 ->label('Δήλωση επιστροφής')
                 ->icon('heroicon-o-arrow-uturn-left')

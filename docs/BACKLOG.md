@@ -56,6 +56,18 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    `TransportDetails::packingsDeclaration`; PLUS the **new Receiving Note flow** (Δελτίο Ποσοτικής
    Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`, `ReceivingNotePurpose`) if in scope;
    `supportsDeliveryNote()` now also allows 1.4/3.1/3.2/11.5.
+   **9.3 lifecycle sandbox rehearsal — RAN 2026-09-13** (`myip`, AADE test env; see
+   `docs/delivery-sandbox-rehearsal.md` §Findings). Confirmed from the ISSUER's own creds:
+   RegisterTransfer ✓, refreshStatus ✓, cancel-from-`registered` ✓; cancel-from-`in_transit`
+   ✗ [801]; ConfirmDeliveryReturn from `in_transit` ✗ [828] → **`in_transit` pruned** from
+   `CONFIRM_RETURN_FROM_STATES` (this PR). **DGM two-party sandbox validation — OPEN (P2):**
+   ConfirmDeliveryOutcome is recipient/carrier-only (AADE [833] «Only the recipient or carrier
+   can confirm delivery outcome»), so a single issuer tenant **cannot** drive a note into
+   rejected/partial/failed/in_transit_return — validating confirmReturn from those §3.2.7
+   sources (and the whole outcome path) needs a SECOND sandbox tenant acting recipient/carrier.
+   Until then those sources stay spec-matched but sandbox-UNconfirmed, and the issuer-side
+   `confirmDelivery()` (UI «Δήλωση παράδοσης») is a known [833] dead-end for a plain 9.3 —
+   revisit whether to gate it out of the issuer flow once the two-party path is exercised.
 2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
    `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
    (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
