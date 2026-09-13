@@ -65,6 +65,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
   έγγραφα στα Παραστατικά (τύπος ΤΔΑ).
 
 ### Fixed
+- **Combined ΤΔΑ — πλήρες payload που δέχεται η ΑΑΔΕ (sandbox two-party, 2026-09-14).** Το ΤΔΑ (1.1 +
+  `isDeliveryNote`) απορριπτόταν από την ΑΑΔΕ (και direct myDATA **και** μέσω InvoSign) γιατί ο κοινός
+  `AadeInvoiceDocument` ακολουθούσε τον monetary-1.1 κανόνα και **παρέλειπε** στοιχεία που το δελτίο απαιτεί:
+  (α) **counterpart** name + address ([204], ενώ [219]/[220] τα απαγορεύουν σε απλό GR τιμολόγιο) +
+  **address number**· (β) **issuer** name + address ([204])· (γ) ανά γραμμή **quantity + measurementUnit**
+  ([230] — best-effort map του free-text `metric_unit`→§8.13 κωδικού, fallback 1 Τεμάχια)· (δ) υποχρεωτικό
+  **itemDescr** ανά γραμμή ([230]). Όλα gated στο `is_delivery_note` → **απλό 1.1 μένει byte-identical**.
+  Επαληθεύθηκε end-to-end στο sandbox **και στις δύο διαδρομές** (direct myDATA MARK + InvoSign MARK),
+  PDF «Στοιχεία Διακίνησης» + lifecycle Έναρξη/Έλεγχος + πολυμορφικό audit. Ο goods-type guard έγινε
+  hoist πριν το counterpart ώστε άκυρος τύπος να αποτυγχάνει με το σωστό μήνυμα. (Regression tests στο
+  `CombinedTdaPayloadTest`.)
 - **Combined ΤΔΑ — goods-type guard (3d-b).** Ο `AadeInvoiceDocument` απορρίπτει `isDeliveryNote` σε τύπο
   που δεν το επιτρέπει η ΑΑΔΕ (v2.0.2 `supportsDeliveryNote` — π.χ. υπηρεσίες 2.x) με καθαρό μήνυμα, αντί
   για αντιφατικό payload που απορρίπτει opaque η ΑΑΔΕ.
