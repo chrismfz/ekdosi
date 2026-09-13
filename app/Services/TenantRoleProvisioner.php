@@ -77,6 +77,10 @@ class TenantRoleProvisioner
         // WHMCS inbox: daily operator work (review/file staged invoices). No
         // Create:* exists (rows arrive via ingestion only).
         'PendingWhmcsInvoice' => ['ViewAny', 'View', 'Update'],
+        // «Εισερχόμενα Διακίνησης» inbox: daily operator work (reject/refresh/ack a
+        // received movement). Update covers the reject/refresh/acknowledge actions;
+        // no Create:* (rows arrive via delivery:fetch-inbound only).
+        'InboundDeliveryNote' => ['ViewAny', 'View', 'Update'],
         // Read-only ΜΑΡΚ drill-down, linked from invoice rows. Granting the page
         // perm directly (instead of piggy-backing on View:Invoice) keeps the
         // access model honest; the live-AADE orphan lookup inside the page is

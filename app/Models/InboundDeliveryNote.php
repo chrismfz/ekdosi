@@ -53,6 +53,34 @@ class InboundDeliveryNote extends Model
         self::STATE_CANCELLED_BY_ISSUER,
     ];
 
+    /** Greek labels for `local_state` (operator-facing). */
+    public const STATE_LABELS = [
+        self::STATE_NEW => 'Νέο',
+        self::STATE_ACKNOWLEDGED => 'Παραλήφθηκε',
+        self::STATE_REJECTED => 'Απορρίφθηκε',
+        self::STATE_CONFIRMED => 'Επιβεβαιώθηκε',
+        self::STATE_CANCELLED_BY_ISSUER => 'Ακυρώθηκε από τον εκδότη',
+    ];
+
+    public static function stateLabel(?string $state): ?string
+    {
+        return $state === null ? null : (self::STATE_LABELS[$state] ?? $state);
+    }
+
+    /**
+     * AADE §7.1 statuses from which a recipient reject is no longer meaningful —
+     * CANCELLED (2), REJECTED (4), COMPLETED (8). Used to hide «Απόρριψη» once the
+     * doc is terminal at AADE even if our local disposition hasn't been refreshed
+     * (design §5). firebed DeliveryStatus values.
+     */
+    public const AADE_TERMINAL_STATUSES = [2, 4, 8];
+
+    public function aadeIsTerminal(): bool
+    {
+        return $this->aade_delivery_status !== null
+            && in_array($this->aade_delivery_status, self::AADE_TERMINAL_STATUSES, true);
+    }
+
     protected $fillable = [
         'company_id',
         'mydata_mark',
