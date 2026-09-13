@@ -315,22 +315,43 @@ question.)
    plain 1.1). Tests: golden combined-1.1 XML (movement header + itemDescr + tracking-off) + plain-1.1
    stays byte-identical + MYD-003 still rejects pure 9.x. Sandbox test uses a tinker-constructed ΤΔΑ (no
    picker needed yet): file it, confirm MARK + qrUrl (or straight-to-Completed when tracking off).
-3. **3c — Lifecycle contract:** extract `MovableDocument` (incl. the audit/coherence/stock seams),
-   generalise `DeliveryLifecycleService`, implement on `Invoice`; make `events.delivery_note_id` nullable
-   + move the dedup unique to the morph keys + teach `FiledSeriesBackfill` the morph + flip the read
-   relations to `movable`; **extract a SHARED movement-header builder** — `DeliveryNoteSubmitter` and
-   `AadeInvoiceDocument::applyMovementHeader` (3b) both build the issue-time movement header (movePurpose
-   +purpose-19 title, dispatchDate/Time, vehicle, otherDeliveryNoteHeader), so keyed on `MovableDocument`
-   one builder keeps both in lockstep (3b review flagged the duplication as the root of a dispatchTime
-   `H:i` vs `H:i:s` drift — fixed by matching for now); wire the monetary cancel to reconcile
-   `delivery_state` + `reverseSaleForInvoice`
-   (§7). Tests: existing delivery-lifecycle suite green against the contract + a ΤΔΑ drives
-   RegisterTransfer/refresh. **No longer blocked** (Q2 resolved); the DGM doc only decides which actions
-   surface (tracked vs `withoutDigitalTransportTracking`).
+3. **3c — Lifecycle contract:** split into two independently-mergeable steps.
+   - **3c-1 (✅ BUILT):** made `delivery_note_events.delivery_note_id` nullable + moved the dedup unique to
+     the morph keys `(movable_type, movable_id, dedup_key)` + flipped `DeliveryNote::marks()/events()/
+     latestMark()` to the morph, kept the FK-index unique for MariaDB (the drop failed with error 1553 —
+     the unique doubles as the FK's index; lesson logged). `MirrorsMovableFromDeliveryNote` made
+     bidirectional. `FiledSeriesBackfill` reads the kept `delivery_note_id` directly, so it was left alone.
+   - **3c-2 (✅ BUILT):** extracted `App\Contracts\MovableDocument` (the audit/coherence/stock seams; the
+     one type-specific cancel-routing seam stays an explicit `instanceof Invoice` branch in the service —
+     a conscious exception, not a contract method), generalised `DeliveryLifecycleService` (`registerTransfer`/`confirmReturn`/
+     `refreshStatus`/`syncLifecycleHistory` → typed `MovableDocument`; `persistEvent`/`syncLifecycleHistory`
+     write through the morph relation), and implemented the contract on both `Invoice` and `DeliveryNote`.
+     Wired the monetary cancel (§7): `finaliseCancellation` reconciles `delivery_state` for a ΤΔΑ, and the
+     `refreshStatus` remote-cancel branch delegates to `SyncInvoiceStateFromAade` for an invoice-backed
+     movable (stock reverses ONCE via the InvoiceObserver). `cancel()` stays DeliveryNote-typed (refuses an
+     invoice at the type boundary). Tests: existing lifecycle suite green against the contract + a ΤΔΑ
+     invoice drives RegisterTransfer/confirmReturn/refresh + morph-keyed events + monetary remote-cancel.
+   - **DEFERRED to 3d** (conscious disposition, not dropped): the **SHARED movement-header builder** —
+     `DeliveryNoteSubmitter` and `AadeInvoiceDocument::applyMovementHeader` (3b) both build the issue-time
+     movement header (movePurpose +purpose-19 title, dispatchDate/Time, vehicle, otherDeliveryNoteHeader).
+     It is issue-path drift-prevention ORTHOGONAL to the lifecycle contract, carries byte-output risk on
+     TWO golden suites (DeliveryNote-submit + combined-ΤΔΑ), and both paths are ALREADY aligned (the 3b
+     `H:i:s` fix). Folding it into 3d — which already re-touches the issue path for the seed/form — keeps
+     the 3c-2 diff reviewable. Tracked in `docs/BACKLOG.md`.
+   **No longer blocked** (Q2 resolved); the DGM doc only decides which actions surface (tracked vs
+   `withoutDigitalTransportTracking`).
 4. **3d — UI/wizard + seed:** the Παραστατικά toggle (sets `invoice.is_delivery_note`) + movement
    sub-form + lifecycle actions on the invoice view; the Διακίνηση helper/tooltip; **re-add the ΤΔΑ seed
    row + apply-loop + legacy normaliser and re-offer ΤΔΑ in the picker** — safe now that the form fills the
-   flag + movement data. Tests: seeding + normaliser idempotency.
+   flag + movement data. **Also (folded from 3c):** (a) extract the SHARED movement-header builder keyed on
+   `MovableDocument` so `DeliveryNoteSubmitter` and `AadeInvoiceDocument::applyMovementHeader` stop
+   duplicating it (drive BOTH golden suites to prove byte-identical output; keep each caller's address
+   policy where it genuinely differs — 9.x mandates the addresses, a ΤΔΑ's form guarantees them); and
+   (b) **row-lock the invoice remote-cancel** — `applyRemoteCancellationMonetary` is lock-free in 3c-2
+   (the invoice branch is unreachable until this action exists), so when the invoice-view «Έλεγχος
+   κατάστασης» lands here, add the `lockForUpdate` re-check the DN twin has — with the WHMCS write-back
+   OUTSIDE the lock (never network I/O under a row lock). Tests: seeding + normaliser idempotency + both
+   golden suites unchanged.
 5. **3e — Stock + polish:** confirm single stock event; PDF; docs (FEATURES/CHANGELOG); move MYD-002
    BACKLOG → FEATURES.
 

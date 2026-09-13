@@ -2,14 +2,17 @@
 
 namespace App\Models;
 
+use App\Contracts\MovableDocument;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\TracksActivity;
+use App\Services\Stock\StockService;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
 use App\Support\IsoCountry;
 use App\Support\ProvisionalCode;
+use App\Support\Tenancy\TenantCoherence;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -30,7 +33,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * ONLY by the submitter / lifecycle service via forceFill, alongside their
  * `delivery_marks` audit row. Same guard as Invoice's mydata cache.
  */
-class DeliveryNote extends Model
+class DeliveryNote extends Model implements MovableDocument
 {
     use BelongsToCompany;
     use HasAttachments;
@@ -398,6 +401,33 @@ class DeliveryNote extends Model
     public function latestMark(): MorphOne
     {
         return $this->morphOne(DeliveryMark::class, 'movable')->latestOfMany();
+    }
+
+    // ---- MovableDocument (Combined ΤΔΑ, Slice 3c) ---------------------------
+    // The lifecycle service (DeliveryLifecycleService) is typed against the
+    // contract so the SAME issuer lifecycle drives a 9.x note and a 1.1 ΤΔΑ
+    // invoice. For a money-less DeliveryNote the movement-audit relations ARE
+    // the existing morph relations; the tenant/stock seams route to the
+    // DeliveryNote-typed helpers.
+
+    public function movementMarks(): MorphMany
+    {
+        return $this->marks();
+    }
+
+    public function movementEvents(): MorphMany
+    {
+        return $this->events();
+    }
+
+    public function assertMovementTenant(Company $tenant): void
+    {
+        TenantCoherence::assertDeliveryNote($tenant, $this);
+    }
+
+    public function reverseMovementStock(): void
+    {
+        app(StockService::class)->reverseSaleForDeliveryNote($this);
     }
 
     /**
