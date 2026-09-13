@@ -624,6 +624,17 @@ class GrProviderSubmitter implements EInvoiceSubmitter
                 'mydata_mark' => $mark,
                 'mydata_url' => $result->qrUrl ?? $invoice->mydata_url,
                 'mydata_type' => $invoice->invoiceType?->mydata_type,
+                // Combined ΤΔΑ (3d-b): seed the movement lifecycle on a tracking-ON ΤΔΑ,
+                // symmetric with the direct-myDATA path (MyDataSubmitter). The lifecycle
+                // itself runs DIRECT to myDATA (keyed by the qrUrl), so a provider ΤΔΑ
+                // needs delivery_state='registered' here too, else «Έναρξη διακίνησης» is
+                // hidden until a manual «Έλεγχος κατάστασης» back-fills it. Gated on a
+                // qrUrl (the lifecycle key) being stored.
+                ...($invoice->is_delivery_note
+                    && ! $invoice->without_digital_transport_tracking
+                    && filled($result->qrUrl ?? $invoice->mydata_url)
+                    ? ['delivery_state' => 'registered']
+                    : []),
             ]))->save();
 
             return $audit;

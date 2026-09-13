@@ -20,7 +20,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ### Added
 - **Combined ΤΔΑ — movement lifecycle in the UI (Slice 3d-b).** Ολοκληρώνει το ΤΔΑ end-to-end: (1) ο
-  submitter αρχικοποιεί `delivery_state='registered'` όταν φιλάρεται ένα tracking-ON ΤΔΑ (qrUrl επέστρεψε)
+  submitter (direct myDATA ΚΑΙ πάροχος) αρχικοποιεί `delivery_state='registered'` όταν φιλάρεται ένα tracking-ON ΤΔΑ (qrUrl επέστρεψε)
   ώστε να ξεκινά ο κύκλος ζωής· (2) στην προβολή Παραστατικού μπαίνουν οι κινήσεις «Έναρξη διακίνησης» /
   «Δήλωση επιστροφής» / «Έλεγχος κατάστασης διακίνησης» (mirror του Δελτίου Αποστολής, μέσω του
   contract-typed `DeliveryLifecycleService`), κρυμμένες για πλήρη 1.1 και για tracking-OFF ΤΔΑ· η ακύρωση
