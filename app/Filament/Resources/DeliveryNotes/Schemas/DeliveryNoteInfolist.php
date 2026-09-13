@@ -180,9 +180,12 @@ class DeliveryNoteInfolist
                         ->limit(40),
                 ]),
 
-            // Lifecycle: the e-transport movement (§8.22) — local intent + the
-            // AADE delivery state, plus the per-step lifecycle marks
-            // (RegisterTransfer / ConfirmDeliveryOutcome / RejectDeliveryNote).
+            // Lifecycle: the e-transport movement (§8.22) — local intent + the AADE
+            // delivery state, plus the ISSUER's per-step marks (RegisterTransfer,
+            // ConfirmDeliveryReturn). The delivery OUTCOME / rejection marks are the
+            // recipient's/carrier's, not written by our issuer flow — they surface in
+            // the «Ιστορικό διακίνησης» events (delivery_note_events), not as a blank
+            // cache field here.
             Section::make('Κατάσταση διακίνησης (lifecycle)')
                 ->columns(4)
                 ->schema([
@@ -193,9 +196,7 @@ class DeliveryNoteInfolist
                         ->formatStateUsing(fn (?string $state) => DeliveryLifecycleService::stateLabel($state) ?? '—')
                         ->placeholder('—'),
                     TextEntry::make('transfer_mark')->label('MARK έναρξης')->placeholder('—')->copyable(),
-                    TextEntry::make('outcome_mark')->label('MARK παράδοσης')->placeholder('—')->copyable(),
                     TextEntry::make('return_mark')->label('MARK επιστροφής')->placeholder('—')->copyable(), // v2.0.2 ConfirmDeliveryReturn
-                    TextEntry::make('reject_mark')->label('MARK απόρριψης')->placeholder('—')->copyable(),
                 ]),
 
             Section::make('Παρατηρήσεις (εκτύπωσης)')

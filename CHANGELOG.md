@@ -103,7 +103,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
   αποτέλεσμα παράδοσης πλέον **μόνο παρατηρείται** μέσω «Έλεγχος κατάστασης» (refresh →
   delivered/partial/failed). Επίσης το `delivery:test-lifecycle --return` (καλούσε confirmReturn από
   `in_transit` → [828] dead path) αφαιρέθηκε — outcome/return δοκιμάζονται two-party
-  (`docs/delivery-two-party-sandbox.md`).
+  (`docs/delivery-two-party-sandbox.md`). Αφαιρέθηκαν και τα πλέον κενά infolist πεδία «MARK παράδοσης»/
+  «MARK απόρριψης» (είναι marks παραλήπτη/μεταφορέα — φαίνονται στο «Ιστορικό διακίνησης», όχι εδώ).
 - **`firebed/aade-mydata` 5.10.4 → 5.12.0** (myDATA API **v2.0.2** support, backwards-compatible —
   όλα τα νέα πεδία optional, ίδιο XML). Ξεκλειδώνει το DEP-001 / την «delivery-note family» (βλ.
   `docs/BACKLOG.md`). Η κύρια ύλη αφορά **ψηφιακή διακίνηση** (ConfirmDeliveryReturn/deliveryReturnMark,

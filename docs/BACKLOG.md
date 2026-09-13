@@ -70,7 +70,11 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    punch-list (P2):** (a) ✅ **DONE** — issuer-side `confirmDelivery()` + UI «Δήλωση παράδοσης» REMOVED
    (was a [833]/[817]/[814] dead-end; outcome is recipient/carrier-only, only observed via refresh);
    (b) ✅ **DONE** — `delivery:test-lifecycle --return` (confirmReturn from `in_transit` → [828]) removed,
-   command is now the issuer flow register→status(+cancel); (c) a receiving-ekdosi
+   command is now the issuer flow register→status(+cancel). _(Cleanup left: the `delivery_notes.outcome_mark`
+   + `reject_mark` cache columns are now write-only/vestigial — the outcome/rejection marks are the
+   recipient's/carrier's and surface in `delivery_note_events`; their blank infolist fields were removed.
+   Either populate them from the synced ConfirmOutcome/Rejection events on refresh, or drop the columns in a
+   later migration — P2, non-destructive to leave.)_ (c) a receiving-ekdosi
    «Εισερχόμενα Διακίνησης» is net-new (RequestDocs discovers 9.3s to the counterpart by MARK — no qrUrl;
    reject-by-MARK works, confirm is qrUrl-only); (d) `deliveryStateFromAade` defaults a
    DeliveredByCarrier with a MISSING ConfirmOutcome detail to `'delivered'` (conscious — a carrier FULL
