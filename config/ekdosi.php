@@ -222,6 +222,14 @@ return [
         'mydata_console_refresh_enabled' => env('EKDOSI_SCHEDULE_MYDATA_CONSOLE_REFRESH', false),
         'mydata_console_refresh_cron' => env('EKDOSI_MYDATA_CONSOLE_REFRESH_CRON', '0 */6 * * *'),
 
+        // delivery:fetch-inbound — READ-ONLY staging of the ψηφιακή-διακίνηση docs
+        // OTHERS filed against us (goods we are RECEIVING) into «Εισερχόμενα
+        // Διακίνησης», per myDATA-readable tenant. Only stages — never rejects /
+        // confirms / mutates any AADE state (those stay operator-gated). Default
+        // OFF (we are almost always the issuer; opt-in per deploy).
+        'delivery_fetch_inbound_enabled' => env('EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND', false),
+        'delivery_fetch_inbound_cron' => env('EKDOSI_DELIVERY_FETCH_INBOUND_CRON', '0 */6 * * *'),
+
         // spatie/laravel-backup tasks — the WHOLE-DB (all tenants + files)
         // safety net, distinct from the per-company backups below.
         //

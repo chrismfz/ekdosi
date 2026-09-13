@@ -29,6 +29,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   δύο golden suites πράσινα. **Ολοκληρώνει το Slice 3d** (απομένει το 3e: single stock event / PDF / polish).
 
 ### Added
+- **Εισερχόμενα Διακίνησης — inbound-movement staging (Slice 4a).** Νέος READ-ONLY μηχανισμός που στήνει
+  τα εισερχόμενα ψηφιακής διακίνησης (έγγραφα που ΑΛΛΟΙ έκοψαν σε εμάς — εμπορεύματα που παραλαμβάνουμε):
+  πίνακας `inbound_delivery_notes` (δίδυμος του `pending_whmcs_invoices`, ΟΧΙ ο εκδοτικός polymorphic audit),
+  `App\Services\Delivery\InboundDeliveryFetcher` που ξαναχρησιμοποιεί τη ροή `RequestDocs` (ίδια με τον
+  `ExpenseReconciler`) φιλτράροντας μόνο τα παραστατικά κίνησης (invoiceDeliveryStatus ή
+  otherDeliveryNoteHeader ή τύπος 9.x), και εντολή `delivery:fetch-inbound` (scheduler-gated,
+  `EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND`, **default OFF**· `--tenant`/`--from`/`--to`/`--dry-run`). Μόνο
+  σταδιοποιεί — reject/confirm μένουν operator-gated (Slice 4b/4c). Idempotent upsert σε (company_id,
+  mydata_mark)· ένα re-poll ΠΟΤΕ δεν πατά τη διάθεση του χειριστή (local_state/reject_mark). Σχεδίαση:
+  `docs/delivery-inbound-design.md`.
 - **Combined ΤΔΑ — PDF movement block + stock confirmation (Slice 3e, closes Slice 3).** Το PDF του
   παραστατικού τυπώνει πλέον, για ένα ΤΔΑ (`is_delivery_note`), block «Στοιχεία Διακίνησης» (σκοπός §8.14,
   τόπος φόρτωσης/παράδοσης, μεταφορικό/όχημα/μεταφορέας, ημ/ώρα, ένδειξη «χωρίς ψηφιακή διακίνηση») δίπλα
