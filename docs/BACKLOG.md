@@ -478,6 +478,18 @@ surfaced in the open-items sections further down.
     Το 3d ξανα-αγγίζει το issue path (seed/form) → εκεί extract έναν builder keyed σε `MovableDocument`,
     driving ΚΑΙ τα δύο golden suites για byte-identical output· κράτα την policy διεύθυνσης όπου
     διαφέρει γνήσια (9.x = υποχρεωτικές διευθύνσεις· ΤΔΑ = τις εγγυάται η φόρμα).
+  - **[P2] Row-lock το invoice remote-cancel (deferred from 3c-2 → 3d).** Το
+    `DeliveryLifecycleService::applyRemoteCancellationMonetary` ΔΕΝ κλειδώνει (σε αντίθεση με το DN twin
+    `applyRemoteCancellation` που κάνει `lockForUpdate` re-check «το legal audit δεν διπλογράφεται»): ο
+    `SyncInvoiceStateFromAade` έχει lock-free no-op guard, οπότε δύο ταυτόχρονα refresh (scheduler +
+    χειροκίνητο «Έλεγχος κατάστασης», ή double-click) μπορούν να γράψουν διπλή STATE_SYNC γραμμή στα
+    `mydata_marks` (μόνο διπλό forensic row — τα state fields συγκλίνουν σωστά). ΔΕΝ μπήκε lock στο 3c-2
+    γιατί ο `SyncInvoiceStateFromAade` κάνει WHMCS write-back **HTTP κλήση** μετά το DB write → ένα
+    `lockForUpdate` transaction γύρω του θα κρατούσε το row lock πάνω σε network I/O. Το path είναι
+    ΜΗ-προσβάσιμο μέχρι το 3d (κανένας caller δεν περνά Invoice στο `refreshStatus` ακόμη). Στο 3d, όταν
+    μπει το invoice-view refresh action, βάλε το lock σωστά (η WHMCS κλήση ΕΚΤΟΣ του lock — π.χ. lock μόνο
+    το terminality re-check, ή lockForUpdate re-check μέσα στον `SyncInvoiceStateFromAade` που το φτιάχνει
+    για όλους τους callers).
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον

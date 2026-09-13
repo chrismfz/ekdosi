@@ -801,6 +801,14 @@ class DeliveryLifecycleService
         // Monetary choke-point: owns mydata_state/local_status + STATE_SYNC row +
         // WHMCS write-back + (via the observer) stock. No cancellation MARK is exposed
         // by RequestDeliveryNoteStatus, so none is passed (honest «no evidence»).
+        //
+        // NOT row-locked here (unlike the DN twin applyRemoteCancellation): SyncInvoice-
+        // StateFromAade fires a WHMCS write-back HTTP call after its DB write, so wrapping
+        // it in a lockForUpdate transaction would hold the row lock across network I/O.
+        // The unguarded no-op means two overlapping refreshes could each write a STATE_SYNC
+        // row — a duplicate FORENSIC row (state still converges; nothing money-wrong). This
+        // path is UNREACHABLE until 3d wires the invoice-view refresh action; the lock (done
+        // right — WHMCS call outside it) is deferred to 3d with it. BACKLOG: «Combined ΤΔΑ».
         $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, 'CANCELLED');
 
         // Reconcile the movement cache too — SyncInvoiceStateFromAade is money-only and

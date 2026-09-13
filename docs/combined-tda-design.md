@@ -321,8 +321,9 @@ question.)
      latestMark()` to the morph, kept the FK-index unique for MariaDB (the drop failed with error 1553 —
      the unique doubles as the FK's index; lesson logged). `MirrorsMovableFromDeliveryNote` made
      bidirectional. `FiledSeriesBackfill` reads the kept `delivery_note_id` directly, so it was left alone.
-   - **3c-2 (✅ BUILT):** extracted `App\Contracts\MovableDocument` (the audit/coherence/stock seams +
-     `isMonetaryMovable`), generalised `DeliveryLifecycleService` (`registerTransfer`/`confirmReturn`/
+   - **3c-2 (✅ BUILT):** extracted `App\Contracts\MovableDocument` (the audit/coherence/stock seams; the
+     one type-specific cancel-routing seam stays an explicit `instanceof Invoice` branch in the service —
+     a conscious exception, not a contract method), generalised `DeliveryLifecycleService` (`registerTransfer`/`confirmReturn`/
      `refreshStatus`/`syncLifecycleHistory` → typed `MovableDocument`; `persistEvent`/`syncLifecycleHistory`
      write through the morph relation), and implemented the contract on both `Invoice` and `DeliveryNote`.
      Wired the monetary cancel (§7): `finaliseCancellation` reconciles `delivery_state` for a ΤΔΑ, and the
@@ -342,11 +343,15 @@ question.)
 4. **3d — UI/wizard + seed:** the Παραστατικά toggle (sets `invoice.is_delivery_note`) + movement
    sub-form + lifecycle actions on the invoice view; the Διακίνηση helper/tooltip; **re-add the ΤΔΑ seed
    row + apply-loop + legacy normaliser and re-offer ΤΔΑ in the picker** — safe now that the form fills the
-   flag + movement data. **Also (folded from 3c):** extract the SHARED movement-header builder keyed on
+   flag + movement data. **Also (folded from 3c):** (a) extract the SHARED movement-header builder keyed on
    `MovableDocument` so `DeliveryNoteSubmitter` and `AadeInvoiceDocument::applyMovementHeader` stop
    duplicating it (drive BOTH golden suites to prove byte-identical output; keep each caller's address
-   policy where it genuinely differs — 9.x mandates the addresses, a ΤΔΑ's form guarantees them). Tests:
-   seeding + normaliser idempotency + both golden suites unchanged.
+   policy where it genuinely differs — 9.x mandates the addresses, a ΤΔΑ's form guarantees them); and
+   (b) **row-lock the invoice remote-cancel** — `applyRemoteCancellationMonetary` is lock-free in 3c-2
+   (the invoice branch is unreachable until this action exists), so when the invoice-view «Έλεγχος
+   κατάστασης» lands here, add the `lockForUpdate` re-check the DN twin has — with the WHMCS write-back
+   OUTSIDE the lock (never network I/O under a row lock). Tests: seeding + normaliser idempotency + both
+   golden suites unchanged.
 5. **3e — Stock + polish:** confirm single stock event; PDF; docs (FEATURES/CHANGELOG); move MYD-002
    BACKLOG → FEATURES.
 
