@@ -15,6 +15,7 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
 use Firebed\AadeMyData\Enums\FeesPercentCategory;
+use Firebed\AadeMyData\Enums\MovePurpose;
 use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
 use Firebed\AadeMyData\Enums\StampCategory;
 use Firebed\AadeMyData\Enums\TaxType;
@@ -717,18 +718,31 @@ class AadeInvoiceDocument
             $header->setWithoutDigitalTransportTracking(true);
         }
 
-        if ($invoice->move_purpose !== null) {
-            $header->setMovePurpose((string) $invoice->move_purpose);
-            // movePurpose=19 «Άλλη αιτία» requires a free-text title (spec L879).
-            if ((int) $invoice->move_purpose === 19 && filled($invoice->other_move_purpose_title)) {
-                $header->setOtherMovePurposeTitle((string) $invoice->other_move_purpose_title);
+        // movePurpose is MANDATORY for a delivery note (AADE rejects without it), so a
+        // ΤΔΑ must carry one — resolve via MovePurpose::from (throws on an out-of-range
+        // code), matching the proven DeliveryNoteSubmitter path.
+        $movePurpose = $invoice->move_purpose ?? throw new RuntimeException(
+            "ΤΔΑ {$invoice->invcode}: λείπει ο σκοπός διακίνησης (move_purpose) — υποχρεωτικός για δελτίο αποστολής."
+        );
+        $header->setMovePurpose(MovePurpose::from((int) $movePurpose));
+
+        // movePurpose=19 (Λοιπές Διακινήσεις) requires the free-text title — fail loud
+        // (like DeliveryNoteSubmitter) rather than emit an untitled 19 AADE rejects opaquely.
+        if ((int) $movePurpose === 19) {
+            $title = trim((string) $invoice->other_move_purpose_title);
+            if ($title === '') {
+                throw new RuntimeException(
+                    "ΤΔΑ {$invoice->invcode}: ο σκοπός 19 (Λοιπές Διακινήσεις) απαιτεί τίτλο (other_move_purpose_title)."
+                );
             }
+            $header->setOtherMovePurposeTitle($title);
         }
 
         if ($invoice->dispatch_at !== null) {
             $dispatch = Carbon::parse($invoice->dispatch_at);
             $header->setDispatchDate($dispatch->toDateString());
-            $header->setDispatchTime($dispatch->format('H:i'));
+            // hh:mm:ss — firebed's documented format + the DeliveryNoteSubmitter path.
+            $header->setDispatchTime($dispatch->format('H:i:s'));
         }
 
         if (filled($invoice->vehicle_number)) {
@@ -780,9 +794,10 @@ class AadeInvoiceDocument
 
     /**
      * A firebed Address from split street/number/postcode/city, or null when the
-     * whole block is empty. postalCode/city are non-nullable firebed setters, so we
-     * always pass them (as '' when absent) once any field is present — AADE then
-     * surfaces an incomplete address rather than us silently dropping it.
+     * whole block is empty. Each field is set only when filled — the XML writer omits
+     * an empty node anyway, so an incomplete address (e.g. no postcode/city) emits
+     * just the present fields and AADE rejects it as an incomplete required address;
+     * the 3d ΤΔΑ form is what guarantees completeness.
      */
     private function buildMovementAddress(?string $street, ?string $number, ?string $postcode, ?string $city): ?Address
     {
@@ -797,8 +812,12 @@ class AadeInvoiceDocument
         if (filled($number)) {
             $address->setNumber((string) $number);
         }
-        $address->setPostalCode((string) ($postcode ?? ''));
-        $address->setCity((string) ($city ?? ''));
+        if (filled($postcode)) {
+            $address->setPostalCode((string) $postcode);
+        }
+        if (filled($city)) {
+            $address->setCity((string) $city);
+        }
 
         return $address;
     }

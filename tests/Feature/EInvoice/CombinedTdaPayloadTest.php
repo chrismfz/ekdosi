@@ -9,6 +9,7 @@ use App\Models\InvoiceType;
 use App\Models\VatCategory;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -100,6 +101,31 @@ class CombinedTdaPayloadTest extends TestCase
         $xml = $this->xml($tenant, $this->invoice($tenant, ['without_digital_transport_tracking' => true]));
 
         $this->assertStringContainsString('withoutDigitalTransportTracking', $xml);
+    }
+
+    public function test_tda_without_move_purpose_fails_loud(): void
+    {
+        // movePurpose is mandatory for a δελτίο — a ΤΔΑ with none must fail at the
+        // builder (a clear message), never emit isDeliveryNote without movePurpose
+        // for AADE to reject opaquely. Matches DeliveryNoteSubmitter.
+        $tenant = $this->tenant();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/σκοπός διακίνησης/u');
+
+        $this->xml($tenant, $this->invoice($tenant, ['move_purpose' => null]));
+    }
+
+    public function test_move_purpose_19_without_title_fails_loud(): void
+    {
+        // σκοπός 19 (Λοιπές Διακινήσεις) requires the free-text title — fail loud
+        // rather than emit an untitled 19 that AADE rejects opaquely.
+        $tenant = $this->tenant();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/σκοπός 19/u');
+
+        $this->xml($tenant, $this->invoice($tenant, ['move_purpose' => 19, 'other_move_purpose_title' => null]));
     }
 
     public function test_plain_1_1_invoice_omits_the_movement_header(): void

@@ -318,7 +318,12 @@ question.)
 3. **3c — Lifecycle contract:** extract `MovableDocument` (incl. the audit/coherence/stock seams),
    generalise `DeliveryLifecycleService`, implement on `Invoice`; make `events.delivery_note_id` nullable
    + move the dedup unique to the morph keys + teach `FiledSeriesBackfill` the morph + flip the read
-   relations to `movable`; wire the monetary cancel to reconcile `delivery_state` + `reverseSaleForInvoice`
+   relations to `movable`; **extract a SHARED movement-header builder** — `DeliveryNoteSubmitter` and
+   `AadeInvoiceDocument::applyMovementHeader` (3b) both build the issue-time movement header (movePurpose
+   +purpose-19 title, dispatchDate/Time, vehicle, otherDeliveryNoteHeader), so keyed on `MovableDocument`
+   one builder keeps both in lockstep (3b review flagged the duplication as the root of a dispatchTime
+   `H:i` vs `H:i:s` drift — fixed by matching for now); wire the monetary cancel to reconcile
+   `delivery_state` + `reverseSaleForInvoice`
    (§7). Tests: existing delivery-lifecycle suite green against the contract + a ΤΔΑ drives
    RegisterTransfer/refresh. **No longer blocked** (Q2 resolved); the DGM doc only decides which actions
    surface (tracked vs `withoutDigitalTransportTracking`).
