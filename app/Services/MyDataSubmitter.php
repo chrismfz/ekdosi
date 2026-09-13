@@ -1040,6 +1040,19 @@ class MyDataSubmitter implements EInvoiceSubmitter
                 'mydata_type' => $this->normalizeInvoiceTypeForStorage(
                     $payload->getInvoiceHeader()->getInvoiceType()
                 ),
+                // Combined ΤΔΑ (3d-b): a tracking-ON ΤΔΑ (1.1 + isDeliveryNote, no
+                // withoutDigitalTransportTracking) enters the SAME movement state machine
+                // as a 9.x δελτίο — seed delivery_state='registered' so the invoice-view
+                // «Έναρξη διακίνησης» surfaces (mirrors DeliveryNoteSubmitter). Gated on a
+                // qrUrl actually returning (the lifecycle key). A tracking-OFF ΤΔΑ files
+                // straight to Completed with no qrUrl → no lifecycle, delivery_state stays
+                // null (the movement actions are hidden for it). A plain 1.1 (flag off) is
+                // untouched.
+                ...($invoice->is_delivery_note
+                    && ! $invoice->without_digital_transport_tracking
+                    && filled($qrUrl)
+                    ? ['delivery_state' => 'registered']
+                    : []),
             ]))->save();
 
             return $audit;

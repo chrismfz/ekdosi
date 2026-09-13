@@ -459,17 +459,12 @@ surfaced in the open-items sections further down.
   κονσόλα-Έξοδα. _(Χειροκίνητη καταχώριση + PDF/scan attachment: ✅ shipped — βλ. «Done recently».)_
 - **§8.13 quantity/units για ΔΑ αγαθών** — οι μονάδες υπάρχουν· τυχόν goods-tenant ειδικά
   (π.χ. `<quantity>` per-line σε goods invoice types) ανοίγουν μόνο αν έρθει goods tenant.
-- **Combined Τιμολόγιο–Δελτίο Αποστολής (ΤΔΑ)** — το ΤΔΑ ΔΕΝ είναι ξεχωριστός τύπος:
-  είναι ένα 1.1 με `isDeliveryNote=true` + πλήρη movement header (σκοπός, μεταφορικό,
-  διευθύνσεις φόρτωσης/παράδοσης). Ο `AadeInvoiceDocument` δεν εκπέμπει combined payload,
-  οπότε το seeded «ΤΔΑ» αφαιρέθηκε (MYD-002). Χτίσε το combined document (payload +
-  validation + lifecycle) και ξανα-πρόσφερέ το ως τύπο. **Εξάρτηση itemDescr:** το opt-in
-  `mydata_send_item_descr` στον monetary builder (`AadeInvoiceDocument`) εκπέμπει `<itemDescr>`
-  μόνο για τύπους που το επιτρέπει η ΑΑΔΕ (9.x) — αλλά υπό MYD-003 ο monetary builder
-  απορρίπτει κάθε 9.x, οπότε ο κλάδος είναι πλέον μη-προσβάσιμος (τα καθαρά ΔΑ εκπέμπουν
-  itemDescr μέσω `DeliveryNoteSubmitter`). Όταν μπει το `isDeliveryNote`, το
-  `Codes::allowsItemDescr()` πρέπει να ελέγχει ΑΥΤΟ το flag (combined 1.1) αντί του 9.x τύπου.
-  - **[P2] Shared movement-header builder (deferred from Slice 3c-2 → 3d).** Ο
+- **Combined Τιμολόγιο–Δελτίο Αποστολής (ΤΔΑ) — ✅ SHIPPED (Slice 3a–3d, MYD-002 closed → FEATURES §5).**
+  Ένα 1.1 με `isDeliveryNote=true` + movement header στο ίδιο έγγραφο: schema (3a) + payload (3b) +
+  lifecycle contract `MovableDocument` (3c) + UI/seed/normaliser + invoice-view κινήσεις + goods-type
+  guard + row-lock (3d). Ζει με τα Παραστατικά· ακυρώνεται από το monetary path (§7). Απομένει ΜΟΝΟ το
+  3d-c (shared movement-header builder, κάτω) + το 3e (single stock event / PDF / polish).
+  - **[P2] Shared movement-header builder (deferred 3c-2/3d-a/3d-b → 3d-c).** Ο
     `DeliveryNoteSubmitter` (9.x) και ο `AadeInvoiceDocument::applyMovementHeader` (3b, ΤΔΑ) χτίζουν
     ΚΑΙ ΟΙ ΔΥΟ το ίδιο issue-time movement header (movePurpose +τίτλος για 19, dispatchDate/Time,
     όχημα, `otherDeliveryNoteHeader`). Το 3b review το σημείωσε ως τη ρίζα ενός `H:i` vs `H:i:s` drift
@@ -478,30 +473,9 @@ surfaced in the open-items sections further down.
     Το 3d ξανα-αγγίζει το issue path (seed/form) → εκεί extract έναν builder keyed σε `MovableDocument`,
     driving ΚΑΙ τα δύο golden suites για byte-identical output· κράτα την policy διεύθυνσης όπου
     διαφέρει γνήσια (9.x = υποχρεωτικές διευθύνσεις· ΤΔΑ = τις εγγυάται η φόρμα).
-  - **[P2] Row-lock το invoice remote-cancel (deferred from 3c-2 → 3d).** Το
-    `DeliveryLifecycleService::applyRemoteCancellationMonetary` ΔΕΝ κλειδώνει (σε αντίθεση με το DN twin
-    `applyRemoteCancellation` που κάνει `lockForUpdate` re-check «το legal audit δεν διπλογράφεται»): ο
-    `SyncInvoiceStateFromAade` έχει lock-free no-op guard, οπότε δύο ταυτόχρονα refresh (scheduler +
-    χειροκίνητο «Έλεγχος κατάστασης», ή double-click) μπορούν να γράψουν διπλή STATE_SYNC γραμμή στα
-    `mydata_marks` (μόνο διπλό forensic row — τα state fields συγκλίνουν σωστά). ΔΕΝ μπήκε lock στο 3c-2
-    γιατί ο `SyncInvoiceStateFromAade` κάνει WHMCS write-back **HTTP κλήση** μετά το DB write → ένα
-    `lockForUpdate` transaction γύρω του θα κρατούσε το row lock πάνω σε network I/O. Το path είναι
-    ΜΗ-προσβάσιμο μέχρι το 3d (κανένας caller δεν περνά Invoice στο `refreshStatus` ακόμη). Στο 3d, όταν
-    μπει το invoice-view refresh action, βάλε το lock σωστά (η WHMCS κλήση ΕΚΤΟΣ του lock — π.χ. lock μόνο
-    το terminality re-check, ή lockForUpdate re-check μέσα στον `SyncInvoiceStateFromAade` που το φτιάχνει
-    για όλους τους callers).
-  - **[P2] Goods-type guard στο `is_delivery_note` toggle (3d-a review).** Το toggle «Είναι και Δελτίο
-    Αποστολής» εμφανίζεται σε ΚΑΘΕ τύπο παραστατικού· ενεργοποίησή του σε τύπο ΥΠΗΡΕΣΙΩΝ (π.χ. ΤΠΥ 2.1)
-    θα χτίσει payload με `isDeliveryNote=true` + `otherDeliveryNoteHeader` σε 2.1 — αντιφατικό (οι υπηρεσίες
-    δεν εκπέμπουν per-line `<quantity>`, μια κίνηση απαιτεί ποσότητες) → πιθανή απόρριψη ΑΑΔΕ. Απαιτεί
-    σκόπιμη κακή χρήση (P2· η ΑΑΔΕ ήδη απορρίπτει → fails safe). Fix: submit-time guard στο
-    `AadeInvoiceDocument::applyMovementHeader` — αν `is_delivery_note` αλλά ο τύπος δεν υποστηρίζει δελτίο
-    (v2.0.2 `supportsDeliveryNote`: 1.1/1.4/3.1/3.2/11.5), throw καθαρό ελληνικό μήνυμα· ή πρόσφερε το
-    toggle μόνο σε goods-capable τύπους. Δες στο 3d-b/3e.
-  - **[P2] FEATURES.md line για το Combined ΤΔΑ.** Το 3d-a έβαλε CHANGELOG entries αλλά ΟΧΙ FEATURES.md
-    (το «τι κάνει το ekdosi»). Συνειδητή αναβολή: πρόσθεσε τη γραμμή ΤΔΑ στο FEATURES.md όταν κλείσει το
-    3d-b (lifecycle actions στην προβολή) ώστε το feature να περιγράφεται ΟΛΟΚΛΗΡΟ (issue + κίνηση), και
-    μετακίνησε το MYD-002 BACKLOG→FEATURES.
+    _(Resolved στο 3d-b: goods-type guard [`AadeInvoiceDocument::applyMovementHeader` via firebed
+    `supportsDeliveryNote`], row-lock [`SyncInvoiceStateFromAade` lockForUpdate re-check, WHMCS κλήση εκτός],
+    FEATURES §5 line — έμειναν μόνο για ιστορικό στο CLAUDE-history.)_
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον

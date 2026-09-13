@@ -16,6 +16,7 @@ use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Cmr\CreateCmrFromSource;
+use App\Services\Delivery\DeliveryLifecycleService;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\EInvoice\Transports\InvoSignDocument;
 use App\Services\EInvoiceSubmitterFactory;
@@ -1121,6 +1122,100 @@ class ViewInvoice extends ViewRecord
                         ->success()->send();
                 }),
 
+            // ---- Combined ΤΔΑ movement lifecycle (Slice 3d-b) -------------------
+            // A ΤΔΑ (is_delivery_note, tracking ON) drives the SAME issuer lifecycle as a
+            // 9.x δελτίο, via the contract-typed DeliveryLifecycleService (§4-A1). These
+            // mirror ViewDeliveryNote's actions but pass the Invoice; ALL are hidden for a
+            // plain invoice AND for a tracking-OFF ΤΔΑ (no qrUrl → no lifecycle). Cancel is
+            // NOT here — a ΤΔΑ cancels through the monetary «Ακύρωση» (cancel_at_mydata), §7.
+
+            // «Έναρξη διακίνησης» — RegisterTransfer. VALID + delivery_state=registered.
+            Action::make('register_transfer')
+                ->label('Έναρξη διακίνησης')
+                ->icon('heroicon-o-truck')
+                ->color('primary')
+                ->visible(fn (Invoice $record) => $record->is_delivery_note
+                    && ! $record->without_digital_transport_tracking
+                    && $record->mydata_state === 'VALID'
+                    && $record->delivery_state === 'registered')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Έναρξη διακίνησης (myDATA)')
+                ->modalDescription('Δηλώνεται η παραλαβή των αγαθών και η έναρξη της διακίνησης. Το παραστατικό περνά σε κατάσταση «Σε διακίνηση».')
+                ->modalSubmitActionLabel('Έναρξη')
+                ->action(fn (Invoice $record) => $this->runMovementLifecycle(
+                    $record,
+                    fn (DeliveryLifecycleService $svc) => $svc->registerTransfer($record),
+                    'Δηλώθηκε η έναρξη διακίνησης',
+                )),
+
+            // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (§3.2.7). Sources per
+            // CONFIRM_RETURN_FROM_STATES (rejected/partial/failed/in_transit_return). No
+            // issuer «Δήλωση παράδοσης» — the outcome is the recipient's/carrier's [833].
+            Action::make('confirm_return')
+                ->label('Δήλωση επιστροφής')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('warning')
+                ->visible(fn (Invoice $record) => $record->is_delivery_note
+                    && ! $record->without_digital_transport_tracking
+                    && in_array($record->delivery_state, DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES, true))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Δήλωση επιστροφής (myDATA)')
+                ->modalDescription('Δηλώνεται ότι ο μεταφορέας δεν παρέδωσε το σύνολο των αγαθών και τα επέστρεψε στον εκδότη. Η διακίνηση ολοκληρώνεται ως «Επιστράφηκε».')
+                ->modalSubmitActionLabel('Δήλωση επιστροφής')
+                ->action(fn (Invoice $record) => $this->runMovementLifecycle(
+                    $record,
+                    fn (DeliveryLifecycleService $svc) => $svc->confirmReturn($record),
+                    'Δηλώθηκε η επιστροφή',
+                )),
+
+            // «Έλεγχος κατάστασης διακίνησης (ΑΑΔΕ)» — RequestDeliveryNoteStatus
+            // (read-only). A remote CANCELLED routes through the monetary choke-point
+            // (SyncInvoiceStateFromAade) for a ΤΔΑ invoice — see the service (§7).
+            Action::make('refresh_movement_status')
+                ->label('Έλεγχος κατάστασης διακίνησης (ΑΑΔΕ)')
+                ->icon('heroicon-o-arrow-path')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $record->is_delivery_note
+                    && ! $record->without_digital_transport_tracking
+                    && ! empty($record->mydata_mark))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
+                ->action(function (Invoice $record) {
+                    try {
+                        $svc = app(DeliveryLifecycleService::class, ['tenant' => $record->company]);
+                        $result = $svc->refreshStatus($record);
+
+                        $eventsLine = ($result['events_synced'] ?? 0) > 0
+                            ? ' Ιστορικό διακίνησης: '.$result['events_synced'].' γεγονότα.'
+                            : '';
+
+                        if ($result['state_synced'] ?? false) {
+                            Notification::make()
+                                ->title('Το ΤΔΑ ΑΚΥΡΩΘΗΚΕ στην ΑΑΔΕ')
+                                ->body('Εντοπίστηκε ακύρωση εκτός ekdosi και συγχρονίστηκε: κατάσταση → Ακυρώθηκε '
+                                    .'(τοπικά + myDATA), το απόθεμα επιστράφηκε. Δες το «Ιστορικό myDATA».'.$eventsLine)
+                                ->warning()
+                                ->persistent()
+                                ->send();
+                        } else {
+                            $stateLine = $result['changed']
+                                ? 'Η κατάσταση διακίνησης ενημερώθηκε.'
+                                : 'Καμία αλλαγή — η τοπική κατάσταση διακίνησης συμφωνεί με την ΑΑΔΕ.';
+
+                            Notification::make()
+                                ->title('Κατάσταση διακίνησης ΑΑΔΕ: '.($result['aade_label'] ?? '—'))
+                                ->body($stateLine.$eventsLine)
+                                ->success()
+                                ->send();
+                        }
+
+                        $this->refreshFormData(['delivery_state', 'mydata_state', 'local_status']);
+                    } catch (Throwable $e) {
+                        $this->movementLifecycleError($e);
+                    }
+                }),
+
             // PDF download. Works for any invoice regardless of state —
             // operators may want a paper trail of drafts too.
             Action::make('download_pdf')
@@ -1149,6 +1244,46 @@ class ViewInvoice extends ViewRecord
                     );
                 }),
         ];
+    }
+
+    /**
+     * Combined ΤΔΑ (3d-b): run a movement-lifecycle call on the invoice (resolved for
+     * its own company), show a Greek success notification with the new movement state,
+     * and refresh the view. Mirrors ViewDeliveryNote::runLifecycle — the service is
+     * contract-typed, so it accepts the Invoice. Any RuntimeException/Throwable surfaces
+     * as a persistent danger notification (no 500).
+     *
+     * @param  callable(DeliveryLifecycleService):mixed  $call
+     */
+    private function runMovementLifecycle(Invoice $record, callable $call, string $successTitle): void
+    {
+        try {
+            $svc = app(DeliveryLifecycleService::class, ['tenant' => $record->company]);
+            $call($svc);
+
+            Notification::make()
+                ->title($successTitle)
+                ->body('Κατάσταση διακίνησης: '.(DeliveryLifecycleService::stateLabel($record->fresh()->delivery_state) ?? '—'))
+                ->success()
+                ->send();
+
+            $this->redirect(static::getResource()::getUrl('view', [
+                'record' => $record,
+                'tenant' => $record->company,
+            ]));
+        } catch (Throwable $e) {
+            $this->movementLifecycleError($e);
+        }
+    }
+
+    private function movementLifecycleError(Throwable $e): void
+    {
+        Notification::make()
+            ->title('Η ενέργεια διακίνησης απέτυχε')
+            ->body($e->getMessage())
+            ->danger()
+            ->persistent()
+            ->send();
     }
 
     /**

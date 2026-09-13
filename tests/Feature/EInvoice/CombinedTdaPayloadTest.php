@@ -138,4 +138,40 @@ class CombinedTdaPayloadTest extends TestCase
         $this->assertStringNotContainsString('isDeliveryNote', $xml);
         $this->assertStringNotContainsString('otherDeliveryNoteHeader', $xml);
     }
+
+    public function test_is_delivery_note_on_a_services_type_fails_the_goods_type_guard(): void
+    {
+        // 3d-b guard: the form toggle is exposed on every type, so an operator could flip
+        // is_delivery_note on a SERVICES type (2.1) — which AADE's supportsDeliveryNote does
+        // NOT allow (services emit no per-line <quantity>; a movement needs quantities). The
+        // builder must refuse with a clear Greek message, not emit a contradictory payload.
+        $tenant = $this->tenant();
+
+        $customer = Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Πελάτης ΑΕ', 'afm' => '997073525',
+        ]);
+        $type = InvoiceType::create([
+            'company_id' => $tenant->id, 'code' => 'ΤΠΥΔ', 'name' => 'ΤΠΥ ως δελτίο (άκυρο)',
+            'invcount' => 1, 'mydata_type' => '2.1', 'is_delivery_note' => true,
+            'mydata_income_class' => 'E3_561_001', 'mydata_income_class_category' => 'category1_3',
+        ]);
+        VatCategory::create(['company_id' => $tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+
+        $invoice = Invoice::create([
+            'company_id' => $tenant->id, 'invcode' => 'ΤΠΥΔ1', 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+            'company_name' => 'Πελάτης ΑΕ', 'vat_no' => '997073525',
+            'is_delivery_note' => true, 'move_purpose' => 1, 'vehicle_number' => 'ΙΑΒ1234',
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $tenant->id, 'product_descr' => 'Υπηρεσία',
+            'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24,
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/δεν υποστηρίζει δελτίο αποστολής/u');
+
+        $this->xml($tenant, $invoice->fresh('lines'));
+    }
 }

@@ -72,6 +72,23 @@ class DeliveryNoteForm
                             .'<p class="pt-2 text-gray-500">'.e(DeliveryGuidance::INTRO).'</p>'
                             .'</div>'
                         )),
+
+                    // Combined ΤΔΑ routing (Slice 3d-b): a MONEY document that also moves
+                    // goods is NOT a 9.x δελτίο — it is a Τιμολόγιο–Δελτίο Αποστολής (a 1.1
+                    // with isDeliveryNote), issued from «Παραστατικά». Here you cut ONLY
+                    // value-less 9.x movement notes. Classes are all defined in panel.css
+                    // (no Tailwind build in the panel) — ps-5/lists avoided on purpose.
+                    Placeholder::make('tda_routing_notice')
+                        ->hiddenLabel()
+                        ->content(fn () => new HtmlString(
+                            '<div class="text-sm rounded bg-info-50 p-3 space-y-1">'
+                            .'<p class="font-medium">Έχει αξία/ΦΠΑ το έγγραφο;</p>'
+                            .'<p class="text-gray-600">Αν πουλάς και στέλνεις μαζί (τιμολόγιο + αποστολή), '
+                            .'είναι <span class="font-medium">Τιμολόγιο–Δελτίο Αποστολής (ΤΔΑ)</span> — '
+                            .'εκδίδεται από τα «Παραστατικά» με τύπο ΤΔΑ (ένα 1.1 με ένδειξη δελτίου), όχι από εδώ. '
+                            .'Εδώ κόβεις ΜΟΝΟ δελτία διακίνησης χωρίς αξία (9.x).</p>'
+                            .'</div>'
+                        )),
                 ]),
 
             // ─── Σκοπός διακίνησης ───
