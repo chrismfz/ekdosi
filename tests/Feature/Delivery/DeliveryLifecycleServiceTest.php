@@ -8,7 +8,9 @@ use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
 use App\Models\DeliveryNoteEvent;
 use App\Models\DeliveryNoteLine;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\MyDataMark;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\StockMovement;
@@ -140,6 +142,71 @@ class DeliveryLifecycleServiceTest extends TestCase
         return $note->fresh('lines');
     }
 
+    /**
+     * A Combined ΤΔΑ (Slice 3c): a MONETARY 1.1 invoice with `is_delivery_note=true`
+     * that has ALREADY been filed (VALID + registered + qrUrl + MARK), so it can drive
+     * the SAME movement lifecycle as a 9.x note through the MovableDocument contract.
+     * Uses the SAME issue MARK the status stubs echo, so refreshStatus matches.
+     */
+    private function makeFiledTda(array $cacheOverrides = []): Invoice
+    {
+        static $seq = 0;
+        $seq++;
+
+        $type = InvoiceType::firstOrCreate(
+            ['company_id' => $this->tenant->id, 'code' => 'ΤΔΑ'],
+            ['name' => 'Τιμολόγιο–Δελτίο Αποστολής', 'invcount' => 1, 'mydata_type' => '1.1', 'is_delivery_note' => true],
+        );
+
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id,
+            'invcode' => 'ΤΔΑ'.$seq,
+            'code' => $seq,
+            'invoice_type_id' => $type->id,
+            'customer_id' => $this->recipient->id,
+            'issued_at' => now(),
+            'company_name' => 'Παραλήπτης ΑΕ',
+            'vat_no' => '123456789',
+            'is_delivery_note' => true,
+            'move_purpose' => 8,
+            'vehicle_number' => 'ΙΑΒ1234',
+            'transport_type' => 2,
+            'carrier_afm' => '777777777',
+            'loading_street' => 'Φόρτωσης', 'loading_number' => '10',
+            'loading_postcode' => '11111', 'loading_city' => 'Αθήνα',
+            'delivery_street' => 'Παράδοσης', 'delivery_number' => '20',
+            'delivery_postcode' => '22222', 'delivery_city' => 'Θεσσαλονίκη',
+            'local_status' => 'active',
+        ]);
+
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id,
+            'product_descr' => 'Κιβώτια',
+            'qty' => 3, 'price_per_item' => 100, 'vat_percent' => 24,
+        ]);
+
+        // Simulate the 1.1 INSERT result (guarded cache) — the same shape the movement
+        // columns take after a real filing, plus the monetary INSERT MyDataMark.
+        $invoice->forceFill(array_merge([
+            'mydata_sent' => true,
+            'mydata_state' => 'VALID',
+            'mydata_mark' => '480301204040191',
+            'mydata_url' => 'https://mydataapidev.aade.gr/TimologioQR/QRInfo?q=testqr',
+            'delivery_state' => 'registered',
+        ], $cacheOverrides))->save();
+
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '480301204040191',
+            'mydata_action' => 'INSERT',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        return $invoice->fresh('lines');
+    }
+
     private function service(string $responseXml): DeliveryLifecycleService
     {
         return $this->serviceWith([$responseXml]);
@@ -225,6 +292,118 @@ class DeliveryLifecycleServiceTest extends TestCase
         );
         $this->assertSame(1, DeliveryNoteEvent::query()
             ->where('movable_type', 'App\\Models\\Invoice')->where('movable_id', 555)->count());
+    }
+
+    // ---- Combined ΤΔΑ (3c-2): a 1.1 Invoice drives the lifecycle -------
+
+    public function test_tda_invoice_register_transfer_moves_to_in_transit_via_the_contract(): void
+    {
+        // The whole point of 3c: DeliveryLifecycleService is typed against
+        // MovableDocument, so a MONETARY ΤΔΑ invoice drives RegisterTransfer exactly
+        // like a 9.x note — and its audit MARK lands on the polymorphic relation with
+        // movable_type=Invoice and delivery_note_id NULL (never a bogus FK).
+        $invoice = $this->makeFiledTda();
+
+        $mark = $this->service($this->registerTransferResponse())->registerTransfer($invoice);
+
+        $this->assertSame('in_transit', $invoice->fresh()->delivery_state);
+        $this->assertSame('222222222222222', $invoice->fresh()->transfer_mark);
+
+        $this->assertSame(Invoice::class, $mark->movable_type);
+        $this->assertSame($invoice->id, (int) $mark->movable_id);
+        $this->assertNull($mark->delivery_note_id); // an invoice can't carry the DN FK
+        $this->assertSame('REGISTER_TRANSFER', $mark->mydata_action);
+    }
+
+    public function test_tda_invoice_confirm_return_stores_the_return_mark_on_its_morph(): void
+    {
+        $invoice = $this->makeFiledTda(['delivery_state' => 'failed']);
+
+        $mark = $this->service($this->confirmReturnResponse())->confirmReturn($invoice);
+
+        $this->assertSame('returned', $invoice->fresh()->delivery_state);
+        $this->assertSame('444444444444444', $invoice->fresh()->return_mark);
+        $this->assertSame(Invoice::class, $mark->movable_type);
+        $this->assertNull($mark->delivery_note_id);
+    }
+
+    public function test_tda_invoice_refresh_syncs_lifecycle_events_under_its_morph(): void
+    {
+        // refreshStatus → syncLifecycleHistory writes the carrier/recipient timeline
+        // through the polymorphic relation, so the events dedup on the Invoice morph
+        // (movable_type, movable_id, dedup_key), not a NULL delivery_note_id.
+        $invoice = $this->makeFiledTda(['delivery_state' => 'in_transit']);
+
+        $result = $this->service($this->statusResponseWithHistory())->refreshStatus($invoice);
+
+        $this->assertGreaterThan(0, $result['events_synced']);
+
+        $events = DeliveryNoteEvent::query()
+            ->where('movable_type', Invoice::class)
+            ->where('movable_id', $invoice->id)
+            ->get();
+        $this->assertGreaterThan(0, $events->count());
+        $this->assertTrue($events->every(fn ($e) => $e->delivery_note_id === null));
+    }
+
+    public function test_tda_invoice_remote_cancel_routes_through_the_monetary_choke_point(): void
+    {
+        // §7: a ΤΔΑ is ONE 1.1 document/MARK, so a portal-side cancel discovered via
+        // refreshStatus must be applied by the MONETARY choke-point
+        // (SyncInvoiceStateFromAade) — a MyDataMark STATE_SYNC row on the invoice,
+        // NOT a DeliveryMark STATE_SYNC row — and all three state fields go terminal,
+        // including delivery_state which the money-only sync doesn't touch.
+        $invoice = $this->makeFiledTda(['delivery_state' => 'in_transit']);
+
+        $result = $this->service($this->statusResponse('CANCELLED'))->refreshStatus($invoice);
+
+        $this->assertTrue($result['state_synced']);
+
+        $fresh = $invoice->fresh();
+        $this->assertSame('CANCELLED', $fresh->mydata_state);
+        $this->assertSame('cancelled', $fresh->local_status);
+        $this->assertSame('cancelled', $fresh->delivery_state);
+
+        // The sync row is on the invoice's OWN audit table (mydata_marks), and NO
+        // DeliveryMark STATE_SYNC row was written for the invoice morph.
+        $this->assertSame(1, MyDataMark::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('mydata_action', 'STATE_SYNC')
+            ->count());
+        $this->assertSame(0, DeliveryMark::query()
+            ->where('movable_type', Invoice::class)
+            ->where('movable_id', $invoice->id)
+            ->where('mydata_action', 'STATE_SYNC')
+            ->count());
+    }
+
+    public function test_tda_invoice_remote_cancel_is_idempotent_across_refreshes(): void
+    {
+        // A repeated refresh on an already-terminal ΤΔΑ must not write a second
+        // STATE_SYNC row nor re-report a change (the monetary choke-point + the
+        // delivery_state guard are both idempotent).
+        $invoice = $this->makeFiledTda(['delivery_state' => 'in_transit']);
+
+        $this->service($this->statusResponse('CANCELLED'))->refreshStatus($invoice);
+        $second = $this->service($this->statusResponse('CANCELLED'))->refreshStatus($invoice->fresh());
+
+        $this->assertFalse($second['state_synced']);
+        $this->assertSame(1, MyDataMark::query()
+            ->where('invoice_id', $invoice->id)
+            ->where('mydata_action', 'STATE_SYNC')
+            ->count());
+    }
+
+    public function test_lifecycle_cancel_still_refuses_an_invoice_at_the_type_boundary(): void
+    {
+        // §7: the movement cancel() stays DeliveryNote-typed — a ΤΔΑ cancels through
+        // the monetary path, so passing an Invoice is a hard TypeError, not a silent
+        // wrong-path cancel.
+        $invoice = $this->makeFiledTda();
+
+        $this->expectException(\TypeError::class);
+        // @phpstan-ignore-next-line — intentionally passing the wrong type to prove the guard.
+        $this->service($this->cancelResponse())->cancel($invoice, 'λάθος');
     }
 
     // ---- AADE status → delivery_state mapping (totality) --------------

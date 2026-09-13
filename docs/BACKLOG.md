@@ -469,6 +469,15 @@ surfaced in the open-items sections further down.
   απορρίπτει κάθε 9.x, οπότε ο κλάδος είναι πλέον μη-προσβάσιμος (τα καθαρά ΔΑ εκπέμπουν
   itemDescr μέσω `DeliveryNoteSubmitter`). Όταν μπει το `isDeliveryNote`, το
   `Codes::allowsItemDescr()` πρέπει να ελέγχει ΑΥΤΟ το flag (combined 1.1) αντί του 9.x τύπου.
+  - **[P2] Shared movement-header builder (deferred from Slice 3c-2 → 3d).** Ο
+    `DeliveryNoteSubmitter` (9.x) και ο `AadeInvoiceDocument::applyMovementHeader` (3b, ΤΔΑ) χτίζουν
+    ΚΑΙ ΟΙ ΔΥΟ το ίδιο issue-time movement header (movePurpose +τίτλος για 19, dispatchDate/Time,
+    όχημα, `otherDeliveryNoteHeader`). Το 3b review το σημείωσε ως τη ρίζα ενός `H:i` vs `H:i:s` drift
+    (ήδη διορθωμένο — και οι δύο `H:i:s`). Deferred από το 3c-2 (lifecycle contract) γιατί είναι
+    issue-path drift-prevention ΟΡΘΟΓΩΝΙΟ στο contract + έχει byte-output risk σε ΔΥΟ golden suites.
+    Το 3d ξανα-αγγίζει το issue path (seed/form) → εκεί extract έναν builder keyed σε `MovableDocument`,
+    driving ΚΑΙ τα δύο golden suites για byte-identical output· κράτα την policy διεύθυνσης όπου
+    διαφέρει γνήσια (9.x = υποχρεωτικές διευθύνσεις· ΤΔΑ = τις εγγυάται η φόρμα).
 - **Πλήρη 9.1 / 9.2 Δελτία Αποστολής** — το 9.1 (συσχετιζόμενο) θέλει payload με
   correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών παραστατικών) και το 9.2
   (συγκεντρωτικό) μοντέλο σύνοψης πολλαπλών κινήσεων. Προς το παρόν είναι κρυμμένα από τον

@@ -1089,9 +1089,16 @@ class MyDataSubmitter implements EInvoiceSubmitter
 
             // MARK_AI0 trigger replacement: preserve the MARK for audit but flip
             // state to CANCELLED; sync local_status here too (single choke-point).
+            //
+            // Combined ΤΔΑ (§7): a 1.1 with `is_delivery_note` is ONE document/MARK, so
+            // its cancel is owned by THIS monetary choke-point — reconcile the movement
+            // cache (`delivery_state → cancelled`) in the same transaction so the
+            // Διακίνηση view agrees with the invoice. Stock is reversed ONCE by the
+            // InvoiceObserver on the `local_status → cancelled` transition (not here).
             $invoice->forceFill([
                 'mydata_state' => 'CANCELLED',
                 'local_status' => 'cancelled',
+                ...($invoice->is_delivery_note ? ['delivery_state' => 'cancelled'] : []),
             ])->save();
 
             return $mark;

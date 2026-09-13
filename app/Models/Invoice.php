@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Contracts\MovableDocument;
 use App\Enums\PaymentStatus;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
@@ -11,12 +12,14 @@ use App\Models\Concerns\TracksActivity;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
+use App\Services\Stock\StockService;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
 use App\Support\EInvoice\ProviderEvidence;
 use App\Support\InvoiceScope;
 use App\Support\IsoCountry;
 use App\Support\ProvisionalCode;
+use App\Support\Tenancy\TenantCoherence;
 use Firebed\AadeMyData\Enums\WithheldPercentCategory;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
@@ -25,6 +28,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\URL;
@@ -52,7 +56,7 @@ use RuntimeException;
  * lock so concurrent issues for the same type can't collide.
  */
 #[ObservedBy(InvoiceObserver::class)]
-class Invoice extends Model
+class Invoice extends Model implements MovableDocument
 {
     use BelongsToCompany;
     use HasAttachments;
@@ -1017,6 +1021,35 @@ class Invoice extends Model
     public function mydataMarks(): HasMany
     {
         return $this->hasMany(MyDataMark::class);
+    }
+
+    // ---- MovableDocument (Combined ΤΔΑ, Slice 3c) ---------------------------
+    // A 1.1 invoice with `is_delivery_note = true` (a ΤΔΑ) drives the SAME movement
+    // lifecycle as a 9.x DeliveryNote (RegisterTransfer → refresh → ConfirmReturn),
+    // via DeliveryLifecycleService typed against the contract. The movement audit is
+    // the POLYMORPHIC delivery_marks/delivery_note_events (morph `movable` = Invoice),
+    // DISTINCT from the monetary `mydataMarks()` HasMany. The tenant/stock seams route
+    // to the Invoice-typed helpers; cancel is NOT here — a ΤΔΑ cancels through the
+    // monetary path (MyDataSubmitter::cancel → finaliseCancellation), §7.
+
+    public function movementMarks(): MorphMany
+    {
+        return $this->morphMany(DeliveryMark::class, 'movable');
+    }
+
+    public function movementEvents(): MorphMany
+    {
+        return $this->morphMany(DeliveryNoteEvent::class, 'movable')->orderBy('event_timestamp');
+    }
+
+    public function assertMovementTenant(Company $tenant): void
+    {
+        TenantCoherence::assertInvoice($tenant, $this);
+    }
+
+    public function reverseMovementStock(): void
+    {
+        app(StockService::class)->reverseSaleForInvoice($this);
     }
 
     /** Request-scoped memo for latestProviderMark() (not an attribute). */

@@ -19,6 +19,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Combined ΤΔΑ — lifecycle contract (Slice 3c-2).** Νέο `App\Contracts\MovableDocument` και ο
+  `DeliveryLifecycleService` γενικεύτηκε πάνω του: η ΙΔΙΑ issuer lifecycle (RegisterTransfer → refresh →
+  ConfirmReturn) οδηγεί πλέον ΚΑΙ ένα money-less 9.x `DeliveryNote` ΚΑΙ ένα monetary 1.1 ΤΔΑ `Invoice`.
+  Το `Invoice` και το `DeliveryNote` υλοποιούν το contract (polymorphic movement-audit relations +
+  tenant-coherence + stock seams). Τα `persistEvent`/`syncLifecycleHistory` γράφουν πλέον μέσα από το
+  morph relation (idempotent στο `(movable_type, movable_id, dedup_key)`), οπότε ένα ΤΔΑ κρεμάει τα δικά
+  του lifecycle events χωρίς DN FK. **Cancel ownership (§7):** ένα ΤΔΑ είναι ΕΝΑ 1.1 έγγραφο/MARK →
+  ακυρώνεται από το monetary path: το `finaliseCancellation` συμφιλιώνει και το `delivery_state`, και ένα
+  remote (portal-side) cancel που εντοπίζεται στο `refreshStatus` δρομολογείται στο
+  `SyncInvoiceStateFromAade` (το invoice choke-point) αντί για το DN `applyRemoteCancellation`. Το
+  movement `cancel()` μένει DeliveryNote-typed (αρνείται ένα Invoice στο type boundary). Καμία αλλαγή
+  συμπεριφοράς για τα υπάρχοντα 9.x δελτία (η υπάρχουσα lifecycle suite μένει πράσινη).
 - **Combined ΤΔΑ — polymorphic audit completed (Slice 3c-1).** Το `delivery_note_events` έγινε πλήρως
   polymorphic: `delivery_note_id` → nullable + νέο `unique(movable_type, movable_id, dedup_key)` (το
   idempotency anchor για ΑΜΦΟΤΕΡΟΥΣ τους γονείς), και τα `DeliveryNote::marks()/events()/latestMark()`

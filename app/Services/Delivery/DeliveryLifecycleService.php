@@ -2,16 +2,16 @@
 
 namespace App\Services\Delivery;
 
+use App\Contracts\MovableDocument;
 use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\DeliveryMark;
 use App\Models\DeliveryNote;
-use App\Models\DeliveryNoteEvent;
+use App\Models\Invoice;
 use App\Services\EInvoice\ProviderTransportRegistry;
-use App\Services\Stock\StockService;
+use App\Services\MyData\SyncInvoiceStateFromAade;
 use App\Support\EInvoice\ProviderCredentials;
 use App\Support\MyData\CancellationMark;
-use App\Support\Tenancy\TenantCoherence;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
@@ -129,11 +129,11 @@ class DeliveryLifecycleService
      * Δήλωση παραλαβής αγαθών + έναρξη διακίνησης. registered → in_transit.
      * Keyed by the qrUrl (mydata_url). On success stores the transferMark.
      */
-    public function registerTransfer(DeliveryNote $note): DeliveryMark
+    public function registerTransfer(MovableDocument $note): DeliveryMark
     {
         // MYD-022: the lifecycle events are filed under the tenant's ΑΦΜ and
         // credentials just like the issue itself — same fail-closed check.
-        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+        $note->assertMovementTenant($this->tenant);
 
         $this->requireState($note, 'registered', 'Έναρξη διακίνησης');
 
@@ -187,7 +187,7 @@ class DeliveryLifecycleService
 
         $action = new RegisterTransfer;
         $response = $this->dispatch($note, 'register_transfer', fn () => $action->handle($transport));
-        $first = $this->firstSuccessful($note, $response, 'Έναρξη διακίνησης');
+        $first = $this->firstSuccessful($response, 'Έναρξη διακίνησης');
 
         $mark = $first->getTransferMark();
 
@@ -255,10 +255,10 @@ class DeliveryLifecycleService
      * η ΑΑΔΕ φέρνει το `deliveryReturnMark` και το δελτίο μεταβαίνει σε Completed.
      * Αυτός είναι ο durable attempt-record που περίμενε το DEP-001.
      */
-    public function confirmReturn(DeliveryNote $note): DeliveryMark
+    public function confirmReturn(MovableDocument $note): DeliveryMark
     {
         // MYD-022: filed under the tenant's ΑΦΜ + credentials, like every event.
-        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+        $note->assertMovementTenant($this->tenant);
 
         $this->requireStateIn($note, self::CONFIRM_RETURN_FROM_STATES, 'Δήλωση επιστροφής');
 
@@ -266,7 +266,7 @@ class DeliveryLifecycleService
 
         $action = new ConfirmDeliveryReturn;
         $response = $this->dispatch($note, 'confirm_return', fn () => $action->handle($deliveryReturn));
-        $first = $this->firstSuccessful($note, $response, 'Δήλωση επιστροφής');
+        $first = $this->firstSuccessful($response, 'Δήλωση επιστροφής');
 
         $mark = $first->getDeliveryReturnMark();
 
@@ -292,11 +292,11 @@ class DeliveryLifecycleService
      *
      * @return array{aade_status: ?DeliveryStatus, aade_label: ?string, mapped_state: ?string, changed: bool}
      */
-    public function refreshStatus(DeliveryNote $note): array
+    public function refreshStatus(MovableDocument $note): array
     {
         // MYD-022: the lifecycle events are filed under the tenant's ΑΦΜ and
         // credentials just like the issue itself — same fail-closed check.
-        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+        $note->assertMovementTenant($this->tenant);
 
         if (empty($note->mydata_mark)) {
             throw new RuntimeException(
@@ -341,7 +341,15 @@ class DeliveryLifecycleService
             // stock compensation as a local/provider cancel — not merely flip the
             // delivery_state cache and leave mydata_state=VALID / local_status=active
             // (the split state that made different screens disagree). Idempotent.
-            $stateSynced = $this->applyRemoteCancellation($note);
+            //
+            // Combined ΤΔΑ (§7): a monetary movable is ONE 1.1 document/MARK, so its
+            // remote cancel is owned by the MONETARY choke-point (SyncInvoiceStateFromAade
+            // — the invoice twin of applyRemoteCancellation), NOT the DN-typed path that
+            // would write a DeliveryMark STATE_SYNC row in the wrong audit table and
+            // collide with the monetary sync. A money-less DeliveryNote keeps the DN path.
+            $stateSynced = $note instanceof Invoice
+                ? $this->applyRemoteCancellationMonetary($note)
+                : $this->applyRemoteCancellation($note);
             $changed = $stateSynced;
         } elseif ($mappedState !== null && $mappedState !== $note->delivery_state) {
             // Non-terminal remote state: keep the delivery_state cache fresh — but
@@ -383,7 +391,7 @@ class DeliveryLifecycleService
      *
      * @param  DeliveryEvent[]|null  $events
      */
-    public function syncLifecycleHistory(DeliveryNote $note, ?array $events): int
+    public function syncLifecycleHistory(MovableDocument $note, ?array $events): int
     {
         if (empty($events)) {
             return 0;
@@ -404,8 +412,14 @@ class DeliveryLifecycleService
                     ? (string) $mark
                     : substr(hash('sha256', $type.'|'.($timestamp ?? '').'|'.($actor ?? '')), 0, 64);
 
-                DeliveryNoteEvent::updateOrCreate(
-                    ['delivery_note_id' => $note->id, 'dedup_key' => $dedupKey],
+                // Combined ΤΔΑ (3c): morph-keyed idempotency. Writing THROUGH the
+                // polymorphic relation scopes the match by (movable_type, movable_id)
+                // — the (movable_type, movable_id, dedup_key) unique (3c-1) — so an
+                // Invoice-backed ΤΔΑ event dedups on ITS morph, not a NULL
+                // delivery_note_id. For a DeliveryNote the MirrorsMovableFromDeliveryNote
+                // hook back-fills delivery_note_id so the FK readers still see it.
+                $note->movementEvents()->updateOrCreate(
+                    ['dedup_key' => $dedupKey],
                     [
                         'company_id' => $note->company_id,
                         'event_mark' => $mark,
@@ -462,9 +476,10 @@ class DeliveryLifecycleService
      */
     public function cancel(DeliveryNote $note, string $reason = ''): DeliveryMark
     {
-        // MYD-022: the lifecycle events are filed under the tenant's ΑΦΜ and
-        // credentials just like the issue itself — same fail-closed check.
-        TenantCoherence::assertDeliveryNote($this->tenant, $note);
+        // Cancel stays DeliveryNote-typed (§7): a monetary ΤΔΑ cancels through the
+        // monetary path (MyDataSubmitter::cancel), so an Invoice is refused here at
+        // the call boundary. MYD-022: filed under the tenant's ΑΦΜ + credentials.
+        $note->assertMovementTenant($this->tenant);
 
         if (empty($note->mydata_mark)) {
             throw new RuntimeException(
@@ -636,7 +651,7 @@ class DeliveryLifecycleService
         // a repeat cancel, or a reconciliation-driven remote cancellation (MYD-019),
         // reruns it safely. A no-op for any σκοπός that never moved stock.
         try {
-            app(StockService::class)->reverseSaleForDeliveryNote($note);
+            $note->reverseMovementStock();
         } catch (Throwable $e) {
             Log::warning('Stock reversal after delivery-note cancel failed (the cancel succeeded)', [
                 'delivery_note_id' => $note->id,
@@ -740,7 +755,7 @@ class DeliveryLifecycleService
         // Best-effort + OUTSIDE the transaction: the terminal state is AADE's truth
         // and already persisted, so a stock-write hiccup must never undo the sync.
         try {
-            app(StockService::class)->reverseSaleForDeliveryNote($note);
+            $note->reverseMovementStock();
         } catch (Throwable $e) {
             Log::warning('Stock reversal after remote-detected delivery cancel failed (state synced)', [
                 'delivery_note_id' => $note->id,
@@ -757,6 +772,46 @@ class DeliveryLifecycleService
         ]);
 
         return true;
+    }
+
+    /**
+     * Combined ΤΔΑ (§7): a TERMINAL AADE cancellation of a MONETARY movable
+     * (`is_delivery_note` Invoice) discovered via refreshStatus is owned by the
+     * MONETARY choke-point, not the DN-typed applyRemoteCancellation. Delegating to
+     * SyncInvoiceStateFromAade keeps ONE truth for an invoice remote-cancel: it flips
+     * mydata_state + local_status, writes the STATE_SYNC row into `mydata_marks` (the
+     * RIGHT audit table for an invoice), reflects the cancel on the WHMCS side, and —
+     * via the InvoiceObserver's `local_status → cancelled` transition — reverses stock
+     * ONCE (so there is deliberately no reverseMovementStock() call here; a second
+     * would double-reverse). This service then reconciles the movement CACHE
+     * (`delivery_state`), which the money-only sync does not touch.
+     *
+     * Idempotent: a no-op (returns false) once the ΤΔΑ is already fully terminal, so a
+     * repeated refresh writes no second row.
+     */
+    private function applyRemoteCancellationMonetary(Invoice $invoice): bool
+    {
+        // Fast path: already fully terminal (money + movement) → nothing to sync.
+        if ($invoice->mydata_state === 'CANCELLED'
+            && $invoice->local_status === 'cancelled'
+            && $invoice->delivery_state === 'cancelled') {
+            return false;
+        }
+
+        // Monetary choke-point: owns mydata_state/local_status + STATE_SYNC row +
+        // WHMCS write-back + (via the observer) stock. No cancellation MARK is exposed
+        // by RequestDeliveryNoteStatus, so none is passed (honest «no evidence»).
+        $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, 'CANCELLED');
+
+        // Reconcile the movement cache too — SyncInvoiceStateFromAade is money-only and
+        // never touches delivery_state. GUARDED column → forceFill.
+        $deliveryChanged = false;
+        if ($invoice->delivery_state !== 'cancelled') {
+            $invoice->forceFill(['delivery_state' => 'cancelled'])->save();
+            $deliveryChanged = true;
+        }
+
+        return $result['changed'] || $deliveryChanged;
     }
 
     // ---- internals ----------------------------------------------------
@@ -846,7 +901,7 @@ class DeliveryLifecycleService
         return $latest === DeliveryOutcomeType::PARTIAL;
     }
 
-    private function requireState(DeliveryNote $note, string $expected, string $op): void
+    private function requireState(MovableDocument $note, string $expected, string $op): void
     {
         $this->requireStateIn($note, [$expected], $op);
     }
@@ -858,7 +913,7 @@ class DeliveryLifecycleService
      *
      * @param  list<string>  $expected
      */
-    private function requireStateIn(DeliveryNote $note, array $expected, string $op): void
+    private function requireStateIn(MovableDocument $note, array $expected, string $op): void
     {
         if (! in_array($note->delivery_state, $expected, true)) {
             $allowed = implode(' / ', array_map(fn (string $s): string => self::stateLabel($s) ?? $s, $expected));
@@ -869,7 +924,7 @@ class DeliveryLifecycleService
         }
     }
 
-    private function requireQrUrl(DeliveryNote $note): string
+    private function requireQrUrl(MovableDocument $note): string
     {
         $qrUrl = trim((string) $note->mydata_url);
         if ($qrUrl === '') {
@@ -890,7 +945,7 @@ class DeliveryLifecycleService
      *
      * @param  callable():mixed  $call
      */
-    private function dispatch(DeliveryNote $note, string $kind, callable $call): mixed
+    private function dispatch(MovableDocument $note, string $kind, callable $call): mixed
     {
         $this->initFirebed();
 
@@ -912,7 +967,7 @@ class DeliveryLifecycleService
     }
 
     /** Pull the first Success Response or throw a Greek error with the AADE errors. */
-    private function firstSuccessful(DeliveryNote $note, ResponseDoc $response, string $op): DgmResponse
+    private function firstSuccessful(ResponseDoc $response, string $op): DgmResponse
     {
         /** @var DgmResponse|null $first */
         $first = $response->first();
@@ -926,7 +981,7 @@ class DeliveryLifecycleService
     }
 
     private function persistEvent(
-        DeliveryNote $note,
+        MovableDocument $note,
         string $action,
         ?string $mark,
         string $requestXml,
@@ -934,9 +989,11 @@ class DeliveryLifecycleService
         array $cache,
     ): DeliveryMark {
         return DB::transaction(function () use ($note, $action, $mark, $requestXml, $responseXml, $cache) {
-            $audit = DeliveryMark::create([
+            // Combined ΤΔΑ (3c): write through the polymorphic relation so the morph
+            // keys (movable_type/movable_id) are set for EITHER parent. A DeliveryNote
+            // also gets delivery_note_id back-filled by MirrorsMovableFromDeliveryNote.
+            $audit = $note->movementMarks()->create([
                 'company_id' => $note->company_id,
-                'delivery_note_id' => $note->id,
                 'mark' => $mark,
                 'mydata_action' => $action,
                 'invoice_url' => $note->mydata_url,
@@ -1004,11 +1061,12 @@ class DeliveryLifecycleService
         return implode('; ', $messages) ?: ($response->getStatusCode() ?? 'unknown');
     }
 
-    private function logFailure(DeliveryNote $note, string $kind, Throwable $e): void
+    private function logFailure(MovableDocument $note, string $kind, Throwable $e): void
     {
         Log::warning('myDATA delivery-lifecycle failure', [
             'company_id' => $this->tenant->getKey(),
-            'delivery_note_id' => $note->id,
+            'movable_type' => $note::class,
+            'movable_id' => $note->getKey(),
             'invcode' => $note->invcode,
             'kind' => $kind,
             'exception' => get_class($e),
