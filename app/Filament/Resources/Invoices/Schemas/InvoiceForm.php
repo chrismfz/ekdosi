@@ -297,9 +297,10 @@ class InvoiceForm
                         ->columnSpanFull()
                         ->disabled(fn ($record) => $record && $record->mydata_state !== null),
 
-                    // Σκοπός διακίνησης (§8.14) — the goods-movement purpose, distinct from
-                    // the header's `distribution_aim_id` (the income distribution aim).
-                    Section::make('Σκοπός διακίνησης')
+                    // §8.14 goods-movement purpose — distinct from the header's
+                    // `distribution_aim_id` «Σκοπός διακίνησης» (income distribution aim);
+                    // the heading says «αγαθών» so the two aren't confused on screen.
+                    Section::make('Σκοπός διακίνησης αγαθών (§8.14)')
                         ->columnSpanFull()
                         ->columns(2)
                         ->visible(fn (Get $get): bool => (bool) $get('is_delivery_note'))

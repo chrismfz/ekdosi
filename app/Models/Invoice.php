@@ -63,6 +63,21 @@ class Invoice extends Model implements MovableDocument
     use HasFactory, HasInternalNotes, HasTags, SoftDeletes, TracksActivity;
 
     /**
+     * The Combined ΤΔΑ NULLABLE movement-header DATA columns (Slice 3d) — everything
+     * EXCEPT the `is_delivery_note` discriminant, the NOT-NULL `without_digital_
+     * transport_tracking` flag (reset to false, not null), and the lifecycle CACHE
+     * (delivery_state / *_mark, written only by the movement service). Cleared when the
+     * invoice is NOT a ΤΔΑ so a plain 1.1 carries no orphan movement header
+     * (EditInvoice). The lifecycle cache is untouched — a filed ΤΔΑ can't reach edit.
+     */
+    public const MOVEMENT_DATA_COLUMNS = [
+        'move_purpose', 'other_move_purpose_title', 'dispatch_at', 'vehicle_number',
+        'transport_type', 'carrier_afm',
+        'loading_street', 'loading_number', 'loading_postcode', 'loading_city', 'start_shipping_branch',
+        'delivery_street', 'delivery_number', 'delivery_postcode', 'delivery_city', 'complete_shipping_branch',
+    ];
+
+    /**
      * A permanent, unforgeable (HMAC-signed with APP_KEY) public URL to this
      * invoice's official PDF — handed to the WHMCS bridge so a παραστατικό can be
      * linked without copying the file. The PDF stays here (source of truth). No

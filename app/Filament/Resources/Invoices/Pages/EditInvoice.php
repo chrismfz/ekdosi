@@ -89,6 +89,28 @@ class EditInvoice extends EditRecord
      * and the write. The lock blocks any concurrent writer (or other
      * SELECT FOR UPDATE) until this save commits or rolls back.
      */
+    /**
+     * Combined ΤΔΑ (3d-a review P2): toggling «Είναι και Δελτίο Αποστολής» OFF on a
+     * draft hides the movement sub-form → Filament stops dehydrating those fields →
+     * their stale DB values would survive on a now-plain 1.1 (never FILED — the payload
+     * builder gates the movement header on `is_delivery_note` — but latent orphan data
+     * on a legal row, and it wouldn't show in the activity-log diff). Clear them
+     * explicitly so a plain invoice carries no movement header. Create is already clean
+     * (hidden fields never dehydrate → null), so this is the edit-only leak.
+     */
+    protected function mutateFormDataBeforeSave(array $data): array
+    {
+        if (empty($data['is_delivery_note'])) {
+            foreach (Invoice::MOVEMENT_DATA_COLUMNS as $col) {
+                $data[$col] = null;
+            }
+            // NOT-NULL boolean → reset to its default, not null.
+            $data['without_digital_transport_tracking'] = false;
+        }
+
+        return $data;
+    }
+
     protected function beforeSave(): void
     {
         $current = Invoice::query()

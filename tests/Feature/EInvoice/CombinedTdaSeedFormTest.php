@@ -3,6 +3,7 @@
 namespace Tests\Feature\EInvoice;
 
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
+use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -164,5 +165,54 @@ class CombinedTdaSeedFormTest extends TestCase
         $this->assertFalse((bool) $invoice->is_delivery_note);
         $this->assertNull($invoice->move_purpose);
         $this->assertNull($invoice->vehicle_number);
+    }
+
+    public function test_toggling_the_flag_off_on_a_draft_clears_the_movement_columns(): void
+    {
+        // 3d-a review P2: turning «Είναι και Δελτίο Αποστολής» OFF on a draft hides the
+        // movement fields (not dehydrated), so their stale values would survive. The
+        // EditInvoice mutate hook clears them so a now-plain 1.1 carries no orphan header.
+        $tenant = $this->tenant();
+        Gate::before(fn () => true);
+        $this->actingAs(User::create([
+            'name' => 'Op', 'email' => 'op-'.uniqid().'@example.test', 'password' => bcrypt('x'),
+        ]));
+        Filament::setTenant($tenant);
+
+        $type = InvoiceType::create([
+            'company_id' => $tenant->id, 'code' => 'ΤΔΑ', 'name' => 'ΤΔΑ',
+            'invcount' => 1, 'mydata_type' => '1.1', 'is_delivery_note' => true, 'show_on_menu' => true,
+        ]);
+        VatCategory::create(['company_id' => $tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'Πελάτης', 'afm' => '997073525']);
+
+        $invoice = Invoice::create([
+            'company_id' => $tenant->id, 'invcode' => 'ΤΔΑ9', 'code' => 9,
+            'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
+            'issued_at' => now(), 'local_status' => 'draft',
+            'company_name' => 'Πελάτης', 'vat_no' => '997073525',
+            'is_delivery_note' => true, 'without_digital_transport_tracking' => true,
+            'move_purpose' => 1, 'vehicle_number' => 'ΑΒΓ1234', 'transport_type' => 1,
+            'loading_street' => 'Φόρτωση 5', 'loading_postcode' => '11111', 'loading_city' => 'Αθήνα',
+            'delivery_street' => 'Παράδοση 9', 'delivery_postcode' => '22222', 'delivery_city' => 'Θεσσαλονίκη',
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $tenant->id, 'product_descr' => 'X', 'qty' => 1,
+            'price_per_item' => 100, 'discount' => 0, 'vat_percent' => 24,
+        ]);
+
+        Livewire::test(EditInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+            ->fillForm(['is_delivery_note' => false])
+            ->call('save')
+            ->assertHasNoFormErrors();
+
+        $fresh = $invoice->fresh();
+        $this->assertFalse((bool) $fresh->is_delivery_note);
+        $this->assertNull($fresh->move_purpose);
+        $this->assertNull($fresh->vehicle_number);
+        $this->assertNull($fresh->transport_type);
+        $this->assertNull($fresh->loading_street);
+        $this->assertNull($fresh->delivery_street);
+        $this->assertFalse((bool) $fresh->without_digital_transport_tracking);
     }
 }
