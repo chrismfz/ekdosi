@@ -307,54 +307,11 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertStringContainsString('<vehicleNumber>ΙΑΒ1234</vehicleNumber>', $mark->request);
     }
 
-    // ---- confirmDelivery ----------------------------------------------
-
-    public function test_confirm_full_delivery_moves_to_delivered(): void
-    {
-        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
-
-        $mark = $this->service($this->confirmOutcomeResponse())->confirmDelivery($note, 'FULL');
-
-        $this->assertSame('CONFIRM_OUTCOME', $mark->mydata_action);
-        $this->assertSame('333333333333333', $mark->mark);
-
-        $fresh = $note->fresh();
-        $this->assertSame('delivered', $fresh->delivery_state);
-        $this->assertSame('333333333333333', $fresh->outcome_mark);
-    }
-
-    public function test_confirm_partial_and_none_map_to_partial_and_failed(): void
-    {
-        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
-        $this->service($this->confirmOutcomeResponse())->confirmDelivery($note, 'PARTIAL');
-        $this->assertSame('partial', $note->fresh()->delivery_state);
-
-        // Reset to in_transit for the NONE leg.
-        $note->forceFill(['delivery_state' => 'in_transit'])->save();
-        $this->service($this->confirmOutcomeResponse())->confirmDelivery($note, 'NONE');
-        $this->assertSame('failed', $note->fresh()->delivery_state);
-    }
-
-    public function test_confirm_delivery_rejects_wrong_state(): void
-    {
-        // Still registered (not in_transit) → cannot confirm.
-        $note = $this->makeFiledNote();
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/Δήλωση παράδοσης/u');
-
-        $this->service($this->confirmOutcomeResponse())->confirmDelivery($note, 'FULL');
-    }
-
-    public function test_confirm_delivery_rejects_unknown_outcome(): void
-    {
-        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessageMatches('/Άγνωστο αποτέλεσμα/u');
-
-        $this->service($this->confirmOutcomeResponse())->confirmDelivery($note, 'BOGUS');
-    }
+    // NB: no confirmDelivery tests — the method was removed. ConfirmDeliveryOutcome is
+    // the recipient's/carrier's call ([833]), never the issuer's, so it is gated out of
+    // this issuer-scoped service (docs/delivery-two-party-sandbox.md). The OUTCOME is
+    // exercised via refreshStatus mapping (DeliveredByCarrier/Completed/FailedDelivery),
+    // covered by the refresh tests below.
 
     // ---- confirmReturn (δήλωση επιστροφής, v2.0.2) ---------------------
 
@@ -955,19 +912,6 @@ XML;
 <ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <response>
         <transferMark>222222222222222</transferMark>
-        <statusCode>Success</statusCode>
-    </response>
-</ResponseDoc>
-XML;
-    }
-
-    private function confirmOutcomeResponse(): string
-    {
-        return <<<'XML'
-<?xml version="1.0" encoding="utf-8"?>
-<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
-    <response>
-        <deliveryOutcomeMark>333333333333333</deliveryOutcomeMark>
         <statusCode>Success</statusCode>
     </response>
 </ResponseDoc>

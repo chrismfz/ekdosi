@@ -206,10 +206,15 @@
 ## 5. Διακίνηση / Δελτία αποστολής (Ψηφιακό ΔΑ)
 - **`DeliveryNoteResource`** invoice-grade (View/lines/Ιστορικό/Συνημμένα), αμφίδρομη
   σύνδεση δελτίο↔τιμολόγιο.
-- **Lifecycle**: έκδοση → έναρξη διακίνησης → δήλωση παράδοσης **ή δήλωση επιστροφής** → έλεγχος
-  κατάστασης → ακύρωση (`DeliveryLifecycleService` + `DeliveryNoteSubmitter`), §7.1 status cache.
+- **Lifecycle (εκδότης)**: έκδοση → έναρξη διακίνησης → *(παρατήρηση αποτελέσματος μέσω ελέγχου
+  κατάστασης)* → δήλωση επιστροφής → ακύρωση (`DeliveryLifecycleService` + `DeliveryNoteSubmitter`),
+  §7.1 status cache. Το **αποτέλεσμα παράδοσης (ConfirmDeliveryOutcome)** είναι ενέργεια
+  **παραλήπτη/μεταφορέα**, όχι εκδότη (η ΑΑΔΕ το απορρίπτει [833] με τα credentials του εκδότη) — δεν
+  προσφέρεται ως ενέργεια, μόνο παρατηρείται μέσω «Έλεγχος κατάστασης» (→ delivered/partial/failed).
+  Δες `docs/delivery-two-party-sandbox.md`.
 - **Δήλωση επιστροφής (ConfirmDeliveryReturn, myDATA v2.0.2)** — όταν ο μεταφορέας δεν παρέδωσε και
-  επέστρεψε τα αγαθά: `in_transit`/`in_transit_return → returned`, η ΑΑΔΕ φέρνει `deliveryReturnMark`
+  επέστρεψε τα αγαθά: από `rejected`/`partial`/`failed`/`in_transit_return → returned` (το `in_transit`
+  απορρίπτεται [828]), η ΑΑΔΕ φέρνει `deliveryReturnMark`
   (cache `delivery_notes.return_mark`, audit `CONFIRM_RETURN`). Τερματικό state (ο έλεγχος κατάστασης
   δεν το πατάει πίσω). Direct-myDATA μονοπάτι· ο durable attempt-record που ξεκλείδωσε το DEP-001.
 - **Σκέλος επιστροφής ορατό (v2.0.2)** — το `IN_TRANSIT_RETURN` (9) της ΑΑΔΕ είναι δικό του state
@@ -222,8 +227,9 @@
   ΑΦΜ παραλήπτη. Ξένος παραλήπτης **δεν δηλώνεται ποτέ ως GR**: χωρίς αναγνωρίσιμη χώρα η υποβολή
   απορρίπτεται· GR μόνο για ενδοδιακίνηση. Κοινός normaliser `Support\IsoCountry` (EL→GR, UK→GB)
   με το monetary invoice.
-- **Πάροχος vs direct**: έκδοση/ακύρωση μέσω παρόχου· έναρξη/παράδοση/**επιστροφή**/έλεγχος direct
-  myDATA. Sandbox round-tripped. (Η επιστροφή μέσω παρόχου — PROV-002 — μένει για επόμενο slice.)
+- **Πάροχος vs direct**: έκδοση/ακύρωση μέσω παρόχου· έναρξη/**επιστροφή**/έλεγχος direct myDATA
+  (το αποτέλεσμα παράδοσης το δηλώνει ο παραλήπτης/μεταφορέας). Sandbox round-tripped two-party
+  (myip⇄nexon, 2026-09-13). (Η επιστροφή μέσω παρόχου — PROV-002 — μένει για επόμενο slice.)
 - **CMR (διεθνής φορτωτική)** — αυτοτελές έγγραφο μεταφοράς (ΟΧΙ myDATA), στα Αγγλικά, για
   διασυνοριακές αποστολές. `CmrResource` (standalone «Νέο CMR») + action «Δημιουργία CMR» σε
   Τιμολόγιο/ΔΑ → **προσχέδιο** με μεταγραφή ΕΛΟΤ-743 (ελληνικά→λατινικά), editable πριν την

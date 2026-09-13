@@ -15,9 +15,11 @@ use Illuminate\Support\Facades\DB;
 /**
  * End-to-end sandbox validation of the whole Δελτίο Αποστολής feature against
  * the tenant's configured myDATA environment. Creates a throwaway TEST δελτίο,
- * then runs the full chain — ΕΚΔΟΣΗ (SendInvoices) → ΕΝΑΡΞΗ (RegisterTransfer)
- * → ΠΑΡΑΔΟΣΗ (ConfirmDeliveryOutcome) → ΕΛΕΓΧΟΣ (RequestDeliveryNoteStatus) →
- * [ΑΚΥΡΩΣΗ] — and writes a .txt report (every step + the request/response XML).
+ * then runs the ISSUER chain — ΕΚΔΟΣΗ (SendInvoices) → ΕΝΑΡΞΗ (RegisterTransfer)
+ * → ΕΛΕΓΧΟΣ (RequestDeliveryNoteStatus) → [ΑΚΥΡΩΣΗ] — and writes a .txt report
+ * (every step + the request/response XML). The delivery OUTCOME is the recipient's/
+ * carrier's call ([833]), out of a single-tenant harness — see
+ * docs/delivery-two-party-sandbox.md.
  *
  * Dry-run by default (builds the XML, NO AADE call). Pass --execute to actually
  * file at AADE (the tenant must be in sandbox mode with dev credentials and the
@@ -89,9 +91,9 @@ class DeliverySandboxValidate extends Command
 
         if ($note->fresh()->mydata_state === 'VALID') {
             $ok = $this->step('ΕΝΑΡΞΗ ΔΙΑΚΙΝΗΣΗΣ (RegisterTransfer)', $note, fn () => $lifecycle->registerTransfer($note)) && $ok;
-            if ($note->fresh()->delivery_state === 'in_transit') {
-                $ok = $this->step('ΠΑΡΑΔΟΣΗ (ConfirmDeliveryOutcome / FULL)', $note, fn () => $lifecycle->confirmDelivery($note, 'FULL')) && $ok;
-            }
+            // The delivery OUTCOME (ConfirmDeliveryOutcome) is the recipient's/carrier's
+            // call ([833]), not the issuer's — this single-tenant harness cannot drive it.
+            // See docs/delivery-two-party-sandbox.md for the two-party outcome/return flow.
             $ok = $this->step('ΕΛΕΓΧΟΣ ΚΑΤΑΣΤΑΣΗΣ (RequestDeliveryNoteStatus)', $note, fn () => $lifecycle->refreshStatus($note)) && $ok;
             if ($this->option('cancel')) {
                 $ok = $this->step('ΑΚΥΡΩΣΗ (CancelInvoice)', $note, fn () => $lifecycle->cancel($note, 'sandbox validation')) && $ok;

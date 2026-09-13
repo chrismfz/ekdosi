@@ -11,7 +11,6 @@ use App\Services\Delivery\DeliveryNotePdf;
 use App\Services\Delivery\DeliveryNoteSubmitter;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
@@ -31,8 +30,10 @@ use Throwable;
  *
  * The e-transport lifecycle (D3, Β' φάση) rides ON TOP of a filed note via
  * DeliveryLifecycleService: «Έναρξη διακίνησης» (RegisterTransfer), «Δήλωση
- * παράδοσης» (ConfirmDeliveryOutcome), «Έλεγχος κατάστασης (ΑΑΔΕ)»
- * (RequestDeliveryNoteStatus) and «Ακύρωση» (CancelInvoice by MARK). Each
+ * επιστροφής» (ConfirmDeliveryReturn), «Έλεγχος κατάστασης (ΑΑΔΕ)»
+ * (RequestDeliveryNoteStatus) and «Ακύρωση» (CancelInvoice by MARK). The delivery
+ * OUTCOME (ConfirmDeliveryOutcome) is intentionally absent — it is the recipient's/
+ * carrier's call ([833]), only OBSERVED here via «Έλεγχος κατάστασης». Each
  * resolves the service for the record's own company, runs inside try/catch and
  * surfaces a Greek success/danger notification (never a 500), then refreshes.
  */
@@ -141,31 +142,10 @@ class ViewDeliveryNote extends ViewRecord
                     'Δηλώθηκε η έναρξη διακίνησης',
                 )),
 
-            // «Δήλωση παράδοσης» — ConfirmDeliveryOutcome. delivery_state=in_transit.
-            Action::make('confirm_delivery')
-                ->label('Δήλωση παράδοσης')
-                ->icon('heroicon-o-check-badge')
-                ->color('success')
-                ->visible(fn (DeliveryNote $record) => $record->delivery_state === 'in_transit')
-                ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
-                ->modalHeading('Δήλωση αποτελέσματος παράδοσης (myDATA)')
-                ->modalSubmitActionLabel('Δήλωση')
-                ->schema([
-                    Select::make('outcome')
-                        ->label('Αποτέλεσμα παράδοσης')
-                        ->options([
-                            'FULL' => 'Πλήρης παράδοση',
-                            'PARTIAL' => 'Μερική παράδοση',
-                            'NONE' => 'Καμία παράδοση',
-                        ])
-                        ->default('FULL')
-                        ->required(),
-                ])
-                ->action(fn (DeliveryNote $record, array $data) => $this->runLifecycle(
-                    $record,
-                    fn (DeliveryLifecycleService $svc) => $svc->confirmDelivery($record, $data['outcome'] ?? 'FULL'),
-                    'Δηλώθηκε το αποτέλεσμα παράδοσης',
-                )),
+            // NO «Δήλωση παράδοσης» action: ConfirmDeliveryOutcome is the recipient's /
+            // carrier's call, never the issuer's — AADE rejects an issuer-credentialled
+            // outcome with [833] (two-party sandbox 2026-09-13, docs/delivery-two-party-sandbox.md).
+            // The outcome is OBSERVED via «Έλεγχος κατάστασης» (refresh → delivered/partial/failed).
 
             // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (myDATA v2.0.2 §3.2.7): ο
             // εκδότης κλείνει τη διακίνηση με επιστροφή. Πηγές (plain 9.3):

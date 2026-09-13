@@ -243,7 +243,7 @@ class TenantCoherenceTest extends TestCase
 
     public function test_every_delivery_lifecycle_event_refuses_another_tenants_note(): void
     {
-        // Register / confirm / refresh / cancel are all filed under the tenant's
+        // Register / confirmReturn / refresh / cancel are all filed under the tenant's
         // ΑΦΜ and credentials just like the issue itself.
         $note = $this->deliveryNoteFor($this->other);
         $note->forceFill([
@@ -253,7 +253,7 @@ class TenantCoherenceTest extends TestCase
 
         foreach ([
             'registerTransfer' => fn (DeliveryLifecycleService $s) => $s->registerTransfer($note),
-            'confirmDelivery' => fn (DeliveryLifecycleService $s) => $s->confirmDelivery($note),
+            'confirmReturn' => fn (DeliveryLifecycleService $s) => $s->confirmReturn($note),
             'refreshStatus' => fn (DeliveryLifecycleService $s) => $s->refreshStatus($note),
             'cancel' => fn (DeliveryLifecycleService $s) => $s->cancel($note, 'λάθος'),
         ] as $name => $call) {
