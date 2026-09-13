@@ -71,7 +71,11 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    dead-end — gate it out of the issuer flow (it is not the issuer's call); (b) `delivery:test-lifecycle
    --return` calls confirmReturn from `in_transit` (pruned → [828] dead path); (c) a receiving-ekdosi
    «Εισερχόμενα Διακίνησης» is net-new (RequestDocs discovers 9.3s to the counterpart by MARK — no qrUrl;
-   reject-by-MARK works, confirm is qrUrl-only).
+   reject-by-MARK works, confirm is qrUrl-only); (d) `deliveryStateFromAade` defaults a
+   DeliveredByCarrier with a MISSING ConfirmOutcome detail to `'delivered'` (conscious — a carrier FULL
+   also reports DeliveredByCarrier, so `'partial'` would mislabel the common case) — revisit only if a
+   real truncated-history case dead-ends a legitimate return; the authoritative outcome stays in
+   `delivery_marks`/lifecycleHistory regardless.
 2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
    `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
    (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`

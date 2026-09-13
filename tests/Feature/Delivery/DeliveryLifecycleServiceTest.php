@@ -494,6 +494,20 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertSame('delivered', $note->fresh()->delivery_state);
     }
 
+    public function test_delivered_by_carrier_uses_the_latest_outcome_not_any_partial(): void
+    {
+        // A PARTIAL later SUPERSEDED by a corrective FULL is a full delivery — the
+        // mapper must read the LATEST ConfirmOutcome (by timestamp), not the first
+        // PARTIAL it finds, else a completed note stays wrongly return-eligible.
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+
+        $result = $this->service($this->statusResponseDeliveredByCarrierSequence(['PARTIAL', 'FULL']))
+            ->refreshStatus($note);
+
+        $this->assertSame('delivered', $result['mapped_state']);
+        $this->assertSame('delivered', $note->fresh()->delivery_state);
+    }
+
     public function test_refresh_status_maps_aade_state_and_forcefills(): void
     {
         // Locally still 'registered' but AADE reports IN_TRANSIT → reconcile.
@@ -1053,6 +1067,40 @@ XML;
             <outcome>{$outcome}</outcome>
         </outcomeDetails>
     </lifecycleHistory>
+</GetDeliveryNoteStatusResponse>
+XML;
+    }
+
+    /**
+     * DELIVERED_BY_CARRIER with several ConfirmOutcome events at increasing
+     * timestamps (2026-09-13T10:00, 11:00, …) — to test that the LATEST outcome wins.
+     *
+     * @param  string[]  $outcomes  in chronological order
+     */
+    private function statusResponseDeliveredByCarrierSequence(array $outcomes): string
+    {
+        $events = '';
+        foreach (array_values($outcomes) as $i => $outcome) {
+            $hour = str_pad((string) (10 + $i), 2, '0', STR_PAD_LEFT);
+            $events .= <<<XML
+
+    <lifecycleHistory>
+        <eventType>ConfirmOutcome</eventType>
+        <eventTimestamp>2026-09-13T{$hour}:00:00Z</eventTimestamp>
+        <actorVat>801280908</actorVat>
+        <mark>33333333333330{$i}</mark>
+        <outcomeDetails>
+            <outcome>{$outcome}</outcome>
+        </outcomeDetails>
+    </lifecycleHistory>
+XML;
+        }
+
+        return <<<XML
+<?xml version="1.0" encoding="utf-8"?>
+<GetDeliveryNoteStatusResponse xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <invoiceMark>480301204040191</invoiceMark>
+    <status>DELIVERED_BY_CARRIER</status>{$events}
 </GetDeliveryNoteStatusResponse>
 XML;
     }

@@ -834,26 +834,52 @@ class DeliveryLifecycleService
     }
 
     /**
-     * Did the carrier declare a PARTIAL delivery? Scans the lifecycleHistory for a
-     * ConfirmOutcome event whose outcome detail is PARTIAL. Used only to split the
-     * ambiguous DELIVERED_BY_CARRIER status (see deliveryStateFromAade). Absent or
-     * unreadable detail → false (treat as a full carrier delivery — the safe,
-     * non-return default that keeps the note terminal rather than inviting a return
-     * AADE would reject).
+     * Did the carrier declare a PARTIAL delivery? Reads the outcome of the LATEST
+     * ConfirmOutcome event in the lifecycleHistory — the effective one — so a PARTIAL
+     * later superseded by a corrective FULL is not misread as still-partial (we take
+     * the most recent by eventTimestamp, falling back to document order when a
+     * timestamp is missing). Used only to split the ambiguous DELIVERED_BY_CARRIER
+     * status (see deliveryStateFromAade).
+     *
+     * Absent/unreadable outcome detail → false (treat as a full carrier delivery).
+     * This is a CONSCIOUS default (BACKLOG P2): a spurious 'delivered' dead-ends an
+     * in-app return that AADE would accept, whereas a spurious 'partial' self-corrects
+     * (AADE rejects an invalid confirmReturn at firstSuccessful, no state corruption) —
+     * but a carrier FULL delivery ALSO reports DeliveredByCarrier, and defaulting to
+     * 'partial' would mislabel that common case as a partial delivery + offer a return
+     * button. GetDeliveryNoteStatus returns a single note's full (un-paginated) history,
+     * so a missing ConfirmOutcome here is a malformed response, not the norm; the
+     * authoritative outcome always survives in the delivery_marks / lifecycleHistory.
      *
      * @param  DeliveryEvent[]|null  $lifecycleHistory
      */
     private function carrierDeliveredPartially(?array $lifecycleHistory): bool
     {
+        $latest = null;
+        $latestTs = null;
+
         foreach ($lifecycleHistory ?? [] as $event) {
-            if ($event instanceof DeliveryEvent
-                && $event->getEventType() === DeliveryEventType::CONFIRM_OUTCOME
-                && $event->getOutcomeDetails()?->getOutcome() === DeliveryOutcomeType::PARTIAL) {
-                return true;
+            if (! $event instanceof DeliveryEvent
+                || $event->getEventType() !== DeliveryEventType::CONFIRM_OUTCOME) {
+                continue;
+            }
+
+            $outcome = $event->getOutcomeDetails()?->getOutcome();
+            if ($outcome === null) {
+                continue;
+            }
+
+            // ISO-8601 UTC timestamps compare correctly as strings; a missing one
+            // sorts first so a later, timestamped outcome wins, and document order
+            // breaks ties (last one seen).
+            $ts = (string) ($event->getEventTimestamp() ?? '');
+            if ($latest === null || $ts >= $latestTs) {
+                $latest = $outcome;
+                $latestTs = $ts;
             }
         }
 
-        return false;
+        return $latest === DeliveryOutcomeType::PARTIAL;
     }
 
     private function requireState(DeliveryNote $note, string $expected, string $op): void
