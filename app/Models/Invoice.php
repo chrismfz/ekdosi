@@ -106,7 +106,7 @@ class Invoice extends Model
             // means a plain invoice (all null/false) never records a row. The lifecycle
             // CACHE cols (delivery_state / *_mark) are excluded — written by the movement
             // service via forceFill, like the money cache.
-            'is_delivery_note',
+            'is_delivery_note', 'without_digital_transport_tracking',
             'move_purpose', 'other_move_purpose_title', 'dispatch_at', 'vehicle_number',
             'transport_type', 'carrier_afm',
             'loading_street', 'loading_number', 'loading_postcode', 'loading_city', 'start_shipping_branch',
@@ -202,6 +202,7 @@ class Invoice extends Model
         // return_mark) are NOT fillable — written ONLY by the movement service via
         // forceFill, exactly like the mydata_* cache.
         'is_delivery_note',
+        'without_digital_transport_tracking',
         'move_purpose',
         'other_move_purpose_title',
         'dispatch_at',
@@ -215,8 +216,9 @@ class Invoice extends Model
     {
         return [
             'issued_at' => 'datetime',
-            // Combined ΤΔΑ (Slice 3a)
+            // Combined ΤΔΑ (Slice 3a/3b)
             'is_delivery_note' => 'boolean',
+            'without_digital_transport_tracking' => 'boolean',
             'dispatch_at' => 'datetime',
             'move_purpose' => 'integer',
             'transport_type' => 'integer',

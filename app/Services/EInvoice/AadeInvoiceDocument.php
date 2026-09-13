@@ -29,6 +29,7 @@ use Firebed\AadeMyData\Models\InvoiceHeader;
 use Firebed\AadeMyData\Models\InvoicesDoc;
 use Firebed\AadeMyData\Models\InvoiceSummary;
 use Firebed\AadeMyData\Models\Issuer;
+use Firebed\AadeMyData\Models\OtherDeliveryNoteHeader;
 use Firebed\AadeMyData\Models\PaymentMethodDetail;
 use Firebed\AadeMyData\Models\TaxTotals;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
@@ -133,6 +134,13 @@ class AadeInvoiceDocument
             $header->addCorrelatedInvoice((int) $this->originalInsertMark($invoice));
         }
 
+        // Combined ΤΔΑ (Slice 3b): a 1.1 that is ALSO a delivery note carries the
+        // movement header on the SAME document (spec note 13). A plain invoice leaves
+        // the flag false → nothing is added and the payload stays byte-identical.
+        if ($invoice->is_delivery_note) {
+            $this->applyMovementHeader($header, $invoice);
+        }
+
         // Income classification (E3_561_xxx + categoryN_x). AADE requires it for
         // income documents at the per-line level AND aggregated on the summary —
         // verified against an imported legacy MARK request that AADE accepted (it
@@ -191,16 +199,13 @@ class AadeInvoiceDocument
             // document type; the knob can never produce a rejection. 256-char
             // clamp matches the product_descr column width (and WhmcsInvoiceMapper).
             //
-            // NOTE (MYD-003): allowsItemDescr() is true ONLY for 9.x, and build()
-            // now REJECTS a 9.x type up-front (a movement note is not a monetary
-            // invoice), so this branch is currently UNREACHABLE on the monetary
-            // path — delivery-note itemDescr is emitted by DeliveryNoteSubmitter
-            // instead. It is kept as defensive code for the day a combined
-            // invoice+delivery (1.1 with isDeliveryNote=true) is modelled, at which
-            // point allowsItemDescr() must gate on that flag rather than the 9.x
-            // type. See docs/BACKLOG.md.
+            // NOTE (MYD-003): build() REJECTS a pure 9.x type up-front (a movement
+            // note is not a monetary invoice), so on the monetary path this branch is
+            // reached ONLY by a combined ΤΔΑ — a 1.1 with `is_delivery_note=true`,
+            // which IS a δελτίο and so may carry <itemDescr> (Slice 3b). A pure 9.x
+            // δελτίο emits itemDescr through DeliveryNoteSubmitter instead.
             if ($this->tenant->mydata_send_item_descr
-                && Codes::allowsItemDescr((string) $invoice->invoiceType?->mydata_type)
+                && Codes::allowsItemDescr((string) $invoice->invoiceType?->mydata_type, (bool) $invoice->is_delivery_note)
                 && filled($line->product_descr)) {
                 $detail->setItemDescr(mb_substr((string) $line->product_descr, 0, 256));
             }
@@ -695,6 +700,107 @@ class AadeInvoiceDocument
                 '(1.1/2.1=εγχώριο, 1.2/2.2=ενδοκοινοτικό, 1.3/2.3=τρίτες χώρες).'
             );
         }
+    }
+
+    /**
+     * Combined ΤΔΑ (Slice 3b): the movement header on a 1.1 that is ALSO a delivery
+     * note (`is_delivery_note`). Adds isDeliveryNote + σκοπός/dispatch/vehicle + the
+     * loading/delivery points (otherDeliveryNoteHeader). The v2.0.2
+     * `withoutDigitalTransportTracking` fork files the ΤΔΑ straight to Completed
+     * (no qrUrl, no lifecycle) when the operator turns tracking off.
+     */
+    private function applyMovementHeader(InvoiceHeader $header, Invoice $invoice): void
+    {
+        $header->setIsDeliveryNote(true);
+
+        if ($invoice->without_digital_transport_tracking) {
+            $header->setWithoutDigitalTransportTracking(true);
+        }
+
+        if ($invoice->move_purpose !== null) {
+            $header->setMovePurpose((string) $invoice->move_purpose);
+            // movePurpose=19 «Άλλη αιτία» requires a free-text title (spec L879).
+            if ((int) $invoice->move_purpose === 19 && filled($invoice->other_move_purpose_title)) {
+                $header->setOtherMovePurposeTitle((string) $invoice->other_move_purpose_title);
+            }
+        }
+
+        if ($invoice->dispatch_at !== null) {
+            $dispatch = Carbon::parse($invoice->dispatch_at);
+            $header->setDispatchDate($dispatch->toDateString());
+            $header->setDispatchTime($dispatch->format('H:i'));
+        }
+
+        if (filled($invoice->vehicle_number)) {
+            $header->setVehicleNumber((string) $invoice->vehicle_number);
+        }
+
+        if ($other = $this->buildOtherDeliveryNoteHeader($invoice)) {
+            $header->setOtherDeliveryNoteHeader($other);
+        }
+    }
+
+    /**
+     * The loading (issuer) + delivery (recipient) POINTS of the combined ΤΔΑ
+     * (§5.3.2 OtherDeliveryNoteHeaderType). Returns null when no movement address /
+     * branch is filled, so the element is omitted rather than emitted empty.
+     */
+    private function buildOtherDeliveryNoteHeader(Invoice $invoice): ?OtherDeliveryNoteHeader
+    {
+        $loading = $this->buildMovementAddress(
+            $invoice->loading_street, $invoice->loading_number,
+            $invoice->loading_postcode, $invoice->loading_city,
+        );
+        $delivery = $this->buildMovementAddress(
+            $invoice->delivery_street, $invoice->delivery_number,
+            $invoice->delivery_postcode, $invoice->delivery_city,
+        );
+
+        if ($loading === null && $delivery === null
+            && $invoice->start_shipping_branch === null && $invoice->complete_shipping_branch === null) {
+            return null;
+        }
+
+        $other = new OtherDeliveryNoteHeader;
+        if ($loading !== null) {
+            $other->setLoadingAddress($loading);
+        }
+        if ($delivery !== null) {
+            $other->setDeliveryAddress($delivery);
+        }
+        if ($invoice->start_shipping_branch !== null) {
+            $other->setStartShippingBranch((int) $invoice->start_shipping_branch);
+        }
+        if ($invoice->complete_shipping_branch !== null) {
+            $other->setCompleteShippingBranch((int) $invoice->complete_shipping_branch);
+        }
+
+        return $other;
+    }
+
+    /**
+     * A firebed Address from split street/number/postcode/city, or null when the
+     * whole block is empty. postalCode/city are non-nullable firebed setters, so we
+     * always pass them (as '' when absent) once any field is present — AADE then
+     * surfaces an incomplete address rather than us silently dropping it.
+     */
+    private function buildMovementAddress(?string $street, ?string $number, ?string $postcode, ?string $city): ?Address
+    {
+        if (! filled($street) && ! filled($number) && ! filled($postcode) && ! filled($city)) {
+            return null;
+        }
+
+        $address = new Address;
+        if (filled($street)) {
+            $address->setStreet((string) $street);
+        }
+        if (filled($number)) {
+            $address->setNumber((string) $number);
+        }
+        $address->setPostalCode((string) ($postcode ?? ''));
+        $address->setCity((string) ($city ?? ''));
+
+        return $address;
     }
 
     private function buildCounterpart(Invoice $invoice, string $type): ?Counterpart

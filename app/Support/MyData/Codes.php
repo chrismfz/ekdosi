@@ -846,13 +846,13 @@ final class Codes
      * είναι τιμολόγια και δελτία αποστολής ή απλά δελτία διακίνησης (π.χ 9.3)»
      * — i.e. delivery notes / shipping documents (and tax-free / isDeliveryNote
      * invoices). For a plain ΤΠΥ/ΤΙΜ (2.1, 1.1, 11.x …) AADE REJECTS it, so the
-     * opt-in itemDescr knob must never emit it there. We only have the document
-     * type as a deterministic signal (no isDeliveryNote / tax-free columns on
-     * Invoice), so we gate on the 9.x δελτία-διακίνησης types.
+     * opt-in itemDescr knob must never emit it there. Gated on the 9.x
+     * δελτία-διακίνησης types OR a combined ΤΔΑ — a monetary 1.1 that carries
+     * `isDeliveryNote=true` IS a δελτίο and so may carry `<itemDescr>` (Slice 3b).
      */
-    public static function allowsItemDescr(?string $code): bool
+    public static function allowsItemDescr(?string $code, bool $isDeliveryNote = false): bool
     {
-        return self::isMovementOnlyType($code);
+        return $isDeliveryNote || self::isMovementOnlyType($code);
     }
 
     /**

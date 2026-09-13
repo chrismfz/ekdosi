@@ -23,13 +23,13 @@ use Tests\TestCase;
  * (spec line 1287). The monetary builder therefore never emits itemDescr for an
  * ordinary invoice, knob on or off.
  *
- * AADE accepts itemDescr only for delivery-note / shipping types (9.x). Since MYD-003
- * a 9.x type can no longer be a monetary invoice at all — AadeInvoiceDocument::build()
- * rejects it, and those documents go through the Delivery Notes flow where
- * DeliveryNoteSubmitter emits itemDescr. So on the monetary side the itemDescr branch
- * is currently unreachable; the day a combined invoice+delivery (1.1 with
- * isDeliveryNote=true) is modelled, allowsItemDescr() gates on that flag instead (see
- * docs/BACKLOG.md). These tests pin the monetary builder's actual behaviour today.
+ * AADE accepts itemDescr only for delivery-note / shipping types (9.x) — and, since
+ * Slice 3b, a combined ΤΔΑ (a 1.1 with `is_delivery_note=true`, which IS a δελτίο).
+ * A pure 9.x type can no longer be a monetary invoice at all (MYD-003:
+ * AadeInvoiceDocument::build() rejects it → the Delivery Notes flow / DeliveryNoteSubmitter
+ * emits itemDescr there). So on the monetary side itemDescr now emits ONLY for a ΤΔΑ
+ * (`Codes::allowsItemDescr($type, $isDeliveryNote)`) — a plain ΤΠΥ/ΤΙΜ still never gets
+ * it. These tests pin the plain-invoice behaviour; the ΤΔΑ path is in CombinedTdaPayloadTest.
  */
 class ItemDescrKnobTest extends TestCase
 {
