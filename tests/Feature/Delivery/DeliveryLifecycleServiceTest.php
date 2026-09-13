@@ -156,6 +156,44 @@ class DeliveryLifecycleServiceTest extends TestCase
         return new DeliveryLifecycleService($this->tenant, $mock);
     }
 
+    // ---- Combined ΤΔΑ (3a): polymorphic audit mirror -------------------
+
+    public function test_movement_audit_rows_mirror_the_morph_from_delivery_note_id(): void
+    {
+        // 3a keeps delivery_note_id AND adds movable_*; MirrorsMovableFromDeliveryNote
+        // populates the morph on write so a DeliveryNote row is reachable through
+        // movable() too — the seam a ΤΔΑ Invoice reuses in 3c. A wrong boot-method name
+        // would SILENTLY leave the morph null, so assert it is actually mirrored.
+        $note = $this->makeFiledNote(); // creates the INSERT DeliveryMark with delivery_note_id
+
+        $mark = DeliveryMark::where('delivery_note_id', $note->id)->firstOrFail();
+        $this->assertSame(DeliveryNote::class, $mark->movable_type);
+        $this->assertSame($note->id, (int) $mark->movable_id);
+        $this->assertTrue($mark->movable->is($note)); // morphTo resolves back to the note
+
+        $event = DeliveryNoteEvent::create([
+            'company_id' => $this->tenant->id,
+            'delivery_note_id' => $note->id,
+            'event_type' => 'ConfirmOutcome',
+            'dedup_key' => 'mirror-k1',
+        ])->fresh();
+        $this->assertSame(DeliveryNote::class, $event->movable_type);
+        $this->assertSame($note->id, (int) $event->movable_id);
+
+        // An explicit morph (a future ΤΔΑ Invoice row) is NEVER overwritten by the hook.
+        $explicit = DeliveryMark::create([
+            'company_id' => $this->tenant->id,
+            'movable_type' => 'App\\Models\\Invoice',
+            'movable_id' => 4242,
+            'mark' => '999',
+            'mydata_action' => 'REGISTER_TRANSFER',
+            'mark_date' => now()->toDateString(),
+        ])->fresh();
+        $this->assertSame('App\\Models\\Invoice', $explicit->movable_type);
+        $this->assertSame(4242, (int) $explicit->movable_id);
+        $this->assertNull($explicit->delivery_note_id);
+    }
+
     // ---- AADE status → delivery_state mapping (totality) --------------
 
     public function test_delivery_state_mapping_is_total_over_every_aade_status(): void

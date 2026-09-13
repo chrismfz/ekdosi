@@ -25,6 +25,8 @@ class InvoiceType extends Model
         'is_favorite',
         'is_credit',
         'is_return',
+        // Combined ΤΔΑ (Slice 3a): a «ΤΔΑ» type pre-sets invoices.is_delivery_note.
+        'is_delivery_note',
         'mydata_type',
         'mydata_income_class',
         'mydata_income_class_category',
@@ -43,6 +45,7 @@ class InvoiceType extends Model
             'is_favorite' => 'boolean',
             'is_credit' => 'boolean',
             'is_return' => 'boolean',
+            'is_delivery_note' => 'boolean',
             'mydata_requires_quantity' => 'boolean',
         ];
     }

@@ -186,12 +186,31 @@ class Invoice extends Model
         // "filed document is frozen" guarantee. Mass-assignable so
         // the ETL can backfill from legacy data.
         'mydata_type',
+        // Combined ΤΔΑ (Slice 3a) — a 1.1 that is ALSO a delivery note carries a
+        // movement header. The lifecycle CACHE cols (delivery_state / transfer_mark /
+        // return_mark) are NOT fillable — written ONLY by the movement service via
+        // forceFill, exactly like the mydata_* cache.
+        'is_delivery_note',
+        'move_purpose',
+        'other_move_purpose_title',
+        'dispatch_at',
+        'vehicle_number',
+        'loading_street', 'loading_number', 'loading_postcode', 'loading_city', 'start_shipping_branch',
+        'delivery_street', 'delivery_number', 'delivery_postcode', 'delivery_city', 'complete_shipping_branch',
+        'transport_type', 'carrier_afm',
     ];
 
     protected function casts(): array
     {
         return [
             'issued_at' => 'datetime',
+            // Combined ΤΔΑ (Slice 3a)
+            'is_delivery_note' => 'boolean',
+            'dispatch_at' => 'datetime',
+            'move_purpose' => 'integer',
+            'transport_type' => 'integer',
+            'start_shipping_branch' => 'integer',
+            'complete_shipping_branch' => 'integer',
             'delivery_date' => 'date',
             'header_discount_percent' => 'decimal:2',
             'counterpart_branch' => 'integer',

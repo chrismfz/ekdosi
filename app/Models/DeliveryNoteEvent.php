@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Models\Concerns\MirrorsMovableFromDeliveryNote;
 use App\Support\MyData\DeliveryCodes;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryEventType;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -20,10 +21,15 @@ class DeliveryNoteEvent extends Model
 {
     use BelongsToCompany;
     use HasFactory;
+    use MirrorsMovableFromDeliveryNote;
 
     protected $fillable = [
         'company_id',
         'delivery_note_id',
+        // Polymorphic parent (Combined ΤΔΑ, 3a) — mirrored from delivery_note_id
+        // on write; see MirrorsMovableFromDeliveryNote.
+        'movable_type',
+        'movable_id',
         'event_mark',
         'event_type',
         'event_timestamp',

@@ -294,19 +294,30 @@ question.)
 
 ## 12. Sub-slices (each: code → sandbox rehearsal → review → merge)
 
-1. **3a — Schema + type + flag + audit morph:** migration for the `invoices` movement/cache cols +
-   `invoice_types.is_delivery_note` (+ seeder apply-loop) + the **polymorphic `morphs('movable')` on
-   `delivery_marks`/`delivery_note_events`** (backfill existing → DeliveryNote); re-add ΤΔΑ to the seed;
-   legacy normaliser. Tests: seeding, normaliser idempotency, existing delivery suite green post-morph.
-2. **3b — Issue payload:** `AadeInvoiceDocument` emits the combined header for `is_delivery_note`
-   (incl. the `withoutDigitalTransportTracking` fork); `allowsItemDescr()` → flag; keep pure-9.x reject.
-   Tests: golden combined-1.1 XML vs spec; MYD-003 still rejects pure 9.x. Sandbox: file a ΤΔΑ, confirm
-   MARK + qrUrl (or straight-to-Completed when tracking off).
+1. **3a — Schema foundation (✅ BUILT):** migration for the `invoices` movement + lifecycle-cache cols +
+   `invoice_types.is_delivery_note`; the audit morph added **ADDITIVELY** — `nullableMorphs('movable')`
+   on `delivery_marks`/`delivery_note_events` ALONGSIDE the kept `delivery_note_id`, backfilled to
+   `DeliveryNote`, kept in lock-step by a `creating` hook (`MirrorsMovableFromDeliveryNote`) so NO
+   existing writer/reader/test changes; `Invoice`/`InvoiceType` gain the flag + movement fillable/casts.
+   Validated: full delivery + coherence + seeder suites green; migration up/down round-trips.
+   **Re-scoped OUT of 3a** (each moved to the slice that first needs it — keeps 3a additive + safe):
+   the ΤΔΑ **seed row** + **legacy normaliser** → **3b** (a selectable ΤΔΑ type must NOT exist before the
+   builder emits the header, or it mis-files as a plain 1.1); the **dedup-unique swap to the morph keys**,
+   **`events.delivery_note_id` NULLABLE**, **`FiledSeriesBackfill` morph**, and the **read-relation flip to
+   `movable`** → **3c** (only needed once Invoice-backed audit rows exist).
+2. **3b — Issue payload + ΤΔΑ type:** `AadeInvoiceDocument` emits the combined header for
+   `is_delivery_note` (incl. the `withoutDigitalTransportTracking` fork); `allowsItemDescr()` → flag; keep
+   pure-9.x reject; **re-add ΤΔΑ to the seed + apply-loop + legacy normaliser** (now safe — it files
+   correctly). Tests: golden combined-1.1 XML vs spec; MYD-003 still rejects pure 9.x; seeding +
+   normaliser idempotency. Sandbox: file a ΤΔΑ, confirm MARK + qrUrl (or straight-to-Completed when
+   tracking off).
 3. **3c — Lifecycle contract:** extract `MovableDocument` (incl. the audit/coherence/stock seams),
-   generalise `DeliveryLifecycleService`, implement on `Invoice`; wire the monetary cancel to reconcile
-   `delivery_state` + `reverseSaleForInvoice` (§7). Tests: existing delivery-lifecycle suite green against
-   the contract + a ΤΔΑ drives RegisterTransfer/refresh. **No longer blocked** (Q2 resolved); the DGM doc
-   only decides which actions surface (tracked vs `withoutDigitalTransportTracking`).
+   generalise `DeliveryLifecycleService`, implement on `Invoice`; make `events.delivery_note_id` nullable
+   + move the dedup unique to the morph keys + teach `FiledSeriesBackfill` the morph + flip the read
+   relations to `movable`; wire the monetary cancel to reconcile `delivery_state` + `reverseSaleForInvoice`
+   (§7). Tests: existing delivery-lifecycle suite green against the contract + a ΤΔΑ drives
+   RegisterTransfer/refresh. **No longer blocked** (Q2 resolved); the DGM doc only decides which actions
+   surface (tracked vs `withoutDigitalTransportTracking`).
 4. **3d — UI/wizard:** the Παραστατικά toggle + movement sub-form + lifecycle actions on the invoice
    view; the Διακίνηση helper/tooltip; re-offer ΤΔΑ in the picker.
 5. **3e — Stock + polish:** confirm single stock event; PDF; docs (FEATURES/CHANGELOG); move MYD-002
