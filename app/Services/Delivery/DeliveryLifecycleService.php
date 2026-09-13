@@ -278,7 +278,7 @@ class DeliveryLifecycleService
     /**
      * Δήλωση ολοκλήρωσης διακίνησης ΕΠΙ ΕΠΙΣΤΡΟΦΗΣ (myDATA v2.0.2): ο εκδότης δηλώνει
      * ότι η διακίνηση έκλεισε με επιστροφή (ο μεταφορέας δεν παρέδωσε όλα τα αγαθά).
-     * `{rejected|partial|failed|in_transit|in_transit_return} → returned` (βλ.
+     * `{rejected|partial|failed|in_transit_return} → returned` (βλ.
      * CONFIRM_RETURN_FROM_STATES + DGM v2.0.2 §3.2.7). Keyed by the qrUrl· με επιτυχία
      * η ΑΑΔΕ φέρνει το `deliveryReturnMark` και το δελτίο μεταβαίνει σε Completed.
      * Αυτός είναι ο durable attempt-record που περίμενε το DEP-001.
