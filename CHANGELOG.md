@@ -29,6 +29,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   δύο golden suites πράσινα. **Ολοκληρώνει το Slice 3d** (απομένει το 3e: single stock event / PDF / polish).
 
 ### Added
+- **Εισερχόμενα Διακίνησης — recipient inbox + ενέργειες (Slice 4b).** Νέο Filament resource
+  «Εισερχόμενα Διακίνησης» (ομάδα «Διακίνηση», read-only list + view, nav badge με τα νέα) πάνω στο
+  staging του 4a: header action «Λήψη νέων» (τρέχει τον fetcher για τον tenant), και ανά έγγραφο οι
+  ενέργειες παραλήπτη **«Απόρριψη»** (`RejectDeliveryNote` με MARK — desk-actionable), **«Έλεγχος
+  κατάστασης (ΑΑΔΕ)»** (`RequestDeliveryNoteStatus` με MARK — read-only· terminal ακύρωση εκδότη →
+  `cancelled_by_issuer`, ποτέ resurrect κλεισμένης γραμμής) και **«Παραλήφθηκε»** (τοπικό-μόνο). Νέος
+  `App\Services\Delivery\InboundDeliveryService` (tenant-assert σε κάθε ενέργεια, κοινός
+  `DeliveryEventSnapshot` με τον fetcher για το lifecycle timeline) + `InboundDeliveryNotePolicy` +
+  `OPERATOR_PERMISSION_MAP['InboundDeliveryNote']`. Confirm-outcome (**4c**, qrUrl/σάρωση) παραμένει
+  deferred. **Μετά το deploy: `shield:generate` + re-provision** ώστε να ενεργοποιηθούν τα δικαιώματα.
 - **Εισερχόμενα Διακίνησης — inbound-movement staging (Slice 4a).** Νέος READ-ONLY μηχανισμός που στήνει
   τα εισερχόμενα ψηφιακής διακίνησης (έγγραφα που ΑΛΛΟΙ έκοψαν σε εμάς — εμπορεύματα που παραλαμβάνουμε):
   πίνακας `inbound_delivery_notes` (δίδυμος του `pending_whmcs_invoices`, ΟΧΙ ο εκδοτικός polymorphic audit),

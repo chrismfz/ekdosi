@@ -12,7 +12,6 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Http\RequestDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
-use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryEvent;
 use Firebed\AadeMyData\Models\Invoice;
 use Firebed\AadeMyData\Models\InvoiceHeader;
 use Firebed\AadeMyData\Models\Issuer;
@@ -266,62 +265,16 @@ class InboundDeliveryFetcher
 
     /**
      * A lightweight, display-only snapshot of the deliveryLifecycle events for
-     * the view timeline. Mirrors DeliveryLifecycleService::eventDetails so the
-     * inbox reads the same shape the issuer side stores.
+     * the view timeline. Shared with InboundDeliveryService (the Refresh action)
+     * via DeliveryEventSnapshot so the two entry points can't drift.
      *
      * @return list<array<string, mixed>>|null
      */
     private function parseLifecycle(object $doc): ?array
     {
         $lifecycle = $doc->get('deliveryLifecycle');
-        if (! is_iterable($lifecycle)) {
-            return null;
-        }
 
-        $events = [];
-        foreach ($lifecycle as $event) {
-            if (! $event instanceof DeliveryEvent) {
-                continue;
-            }
-
-            $events[] = array_filter([
-                'type' => $event->getEventType()?->value,
-                'timestamp' => $event->getEventTimestamp(),
-                'actor_vat' => $event->getActorVat(),
-                'mark' => $event->getMark(),
-                'details' => $this->eventDetails($event),
-            ], static fn ($v) => $v !== null);
-        }
-
-        return $events === [] ? null : $events;
-    }
-
-    /**
-     * @return array<string, mixed>|null
-     */
-    private function eventDetails(DeliveryEvent $event): ?array
-    {
-        if ($transport = $event->getTransportDetails()) {
-            return array_filter([
-                'vehicle_number' => $transport->getVehicleNumber(),
-                'carrier_vat' => $transport->getCarrierVatNumber(),
-                'transport_type' => $transport->getTransportType()?->value,
-                'timestamp' => $transport->getTimestamp(),
-            ], static fn ($v) => $v !== null);
-        }
-
-        if ($outcome = $event->getOutcomeDetails()) {
-            return array_filter([
-                'outcome' => $outcome->getOutcome()?->value,
-                'delivered_without_recipient' => $outcome->getDeliveredWithoutRecipient(),
-            ], static fn ($v) => $v !== null);
-        }
-
-        if ($rejection = $event->getRejectionDetails()) {
-            return array_filter(['reason' => $rejection->getReason()], static fn ($v) => $v !== null);
-        }
-
-        return null;
+        return is_iterable($lifecycle) ? DeliveryEventSnapshot::fromEvents($lifecycle) : null;
     }
 
     /**

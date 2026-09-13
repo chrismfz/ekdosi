@@ -53,6 +53,20 @@ class InboundDeliveryNote extends Model
         self::STATE_CANCELLED_BY_ISSUER,
     ];
 
+    /** Greek labels for `local_state` (operator-facing). */
+    public const STATE_LABELS = [
+        self::STATE_NEW => 'Νέο',
+        self::STATE_ACKNOWLEDGED => 'Παραλήφθηκε',
+        self::STATE_REJECTED => 'Απορρίφθηκε',
+        self::STATE_CONFIRMED => 'Επιβεβαιώθηκε',
+        self::STATE_CANCELLED_BY_ISSUER => 'Ακυρώθηκε από τον εκδότη',
+    ];
+
+    public static function stateLabel(?string $state): ?string
+    {
+        return $state === null ? null : (self::STATE_LABELS[$state] ?? $state);
+    }
+
     protected $fillable = [
         'company_id',
         'mydata_mark',

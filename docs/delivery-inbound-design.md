@@ -201,17 +201,18 @@ still asserts the row's `company_id` matches the acting tenant before any AADE c
 
 ## 8. Sub-slices (each: code → sandbox rehearsal → review → merge)
 
-1. **4a — Table + model + fetch command (staging only).** Migration, `InboundDeliveryNote` model
-   (tenant scope, casts, `supplier` relation), `delivery:fetch-inbound` reusing the `RequestDocs`
-   pagination from `ExpenseReconciler`, the movement-bearing filter, scheduler wiring (OFF).
-   Rehearsal: `--raw` against the sandbox counterpart feed → **confirm the qrUrl presence/absence**
-   (§2 residual check) → stage rows, verify idempotent re-poll. **No AADE mutation.**
-2. **4b — Resource + desk actions (Reject / Refresh / Acknowledge).** The MARK-actionable half.
-   Rehearsal: reject a real sandbox inbound 9.x from nexon⇄myip; verify the issuer sees it rejected;
-   refresh reflects it.
-3. **4c — Confirm-outcome (qrUrl/scan-gated) + polish.** The qrUrl modal, the copy/tooltip, badge
-   styling, FEATURES/CHANGELOG/BACKLOG. Rehearsal: confirm with a scanned qrUrl from the physical
-   (sandbox-printed) note; verify `outcome_mark` + issuer-visible outcome.
+1. **4a — Table + model + fetch command (staging only). ✅ BUILT (PR #540).** Migration,
+   `InboundDeliveryNote` model (tenant scope, casts, `supplier` relation), `delivery:fetch-inbound`
+   reusing the `RequestDocs` pagination from `ExpenseReconciler`, the movement-bearing filter, scheduler
+   wiring (OFF). **No AADE mutation.** Rehearsal still to run: `--raw` against the sandbox counterpart
+   feed → confirm the qrUrl / `otherDeliveryNoteHeader` presence (§2 residual checks).
+2. **4b — Resource + desk actions (Reject / Refresh / Acknowledge). ✅ BUILT.** `InboundDeliveryNoteResource`
+   (list + view, «Διακίνηση» group, nav badge) + `InboundDeliveryService` (reject-by-MARK / refresh /
+   local acknowledge, tenant-assert, shared `DeliveryEventSnapshot`) + `InboundDeliveryNotePolicy` +
+   operator permission. Post-deploy: `shield:generate` + re-provision. Rehearsal still to run: reject a
+   real sandbox inbound 9.x (nexon⇄myip); verify the issuer sees it rejected; refresh reflects it.
+3. **4c — Confirm-outcome (qrUrl/scan-gated) + polish. DEFERRED (BACKLOG).** The qrUrl modal, the
+   copy/tooltip. Build only when a tenant actually receives digitally-tracked movements to confirm.
 
 Each sub-slice is independently mergeable; 4a is invisible staging, 4b makes the inbox useful, 4c
 adds the QR-gated confirm.

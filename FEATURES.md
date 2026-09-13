@@ -247,6 +247,16 @@
   εκτύπωση. Προαιρετική πηγή (Τιμολόγιο | ΔΑ | standalone)· `cmr_notes`/`cmr_lines`, `CmrPdf`
   (φόρμα 24 κουτιών), per-company counter. Αγγλικά στοιχεία εταιρείας (Sender). Σχεδίαση:
   `docs/archive/cmr-international-delivery.md`.
+- **«Εισερχόμενα Διακίνησης» (recipient inbox)** — η ΠΑΡΑΛΗΠΤΡΙΑ πλευρά: τα παραστατικά διακίνησης που
+  ΑΛΛΟΙ έκοψαν σε εμάς (εμπορεύματα που παραλαμβάνουμε). `delivery:fetch-inbound` (scheduler-gated,
+  default OFF) αντλεί τη ροή `RequestDocs` (ίδια με τα Έξοδα), κρατά μόνο τα παραστατικά κίνησης
+  (`invoiceDeliveryStatus`/`otherDeliveryNoteHeader`/τύπος 9.x) και τα σταδιοποιεί σε δικό τους πίνακα
+  `inbound_delivery_notes` (δίδυμος των WHMCS «Εισερχόμενα», ΟΧΙ ο εκδοτικός audit). Το Filament resource
+  δίνει ανά έγγραφο: **«Απόρριψη»** (`RejectDeliveryNote` με MARK — desk-actionable), **«Έλεγχος
+  κατάστασης (ΑΑΔΕ)»** (`RequestDeliveryNoteStatus`· terminal ακύρωση εκδότη → `cancelled_by_issuer`) και
+  τοπικό **«Παραλήφθηκε»**. Η **επιβεβαίωση παραλαβής (ConfirmDeliveryOutcome)** χρειάζεται το qrUrl του
+  φυσικού QR (ο counterpart feed δεν το επιστρέφει) → deferred (Slice 4c, BACKLOG). Το idempotent re-poll
+  ΠΟΤΕ δεν πατά τη διάθεση του χειριστή. Σχεδίαση: `docs/delivery-inbound-design.md`.
 
 ## 6. Πάροχοι e-invoicing & PEPPOL
 - **Δίαυλος αποστολής** per-tenant: `gr-mydata` (απευθείας ΑΑΔΕ), `gr-provider`
