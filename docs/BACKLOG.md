@@ -76,7 +76,22 @@ date.** Cutover (1 Oct provider obligation) sorts everything.
    Either populate them from the synced ConfirmOutcome/Rejection events on refresh, or drop the columns in a
    later migration — P2, non-destructive to leave.)_ (c) a receiving-ekdosi
    «Εισερχόμενα Διακίνησης» is net-new (RequestDocs discovers 9.3s to the counterpart by MARK — no qrUrl;
-   reject-by-MARK works, confirm is qrUrl-only); (d) `deliveryStateFromAade` defaults a
+   reject-by-MARK works, confirm is qrUrl-only). **Slice 4a ✅ SHIPPED** (PR #540 — `inbound_delivery_notes`
+   staging table + `InboundDeliveryFetcher` reusing the RequestDocs feed, movement-only filter,
+   `delivery:fetch-inbound` scheduler-gated OFF; design `docs/delivery-inbound-design.md`). **4b** = the inbox
+   Resource + Reject/Refresh/Acknowledge (desk-actionable). **4c** = the qrUrl/scan-gated Confirm-outcome —
+   **DEFERRED** (we are almost always the issuer; needs a physical-QR-scan UX for a flow no tenant hits today).
+   **Slice-4a review P2s (deferred, `docs/delivery-inbound-design.md`):**
+   - **P2-1** — the fetcher folds only `invoicesDoc`, not `cancelledInvoicesDoc` (unlike `ExpenseReconciler`).
+     A DGM *movement* cancel is a `DeliveryStatus::CANCELLED` transition the re-poll picks up; only a full
+     invoice-level cancellation of a received ΤΔΑ could leave `aade_delivery_status` stale until the 4b
+     per-row Refresh runs. Mitigated by 4b Refresh; fold the cancelled list if it proves to bite.
+   - **P2-4** — combined-ΤΔΑ discovery hooks on `otherDeliveryNoteHeader`/`invoiceDeliveryStatus` surviving in
+     the *counterpart* feed (the feed is known to strip `qrCodeUrl`). Extend the §2 sandbox `--raw` residual
+     check to also grep `<otherDeliveryNoteHeader>`/`<invoiceDeliveryStatus>` before relying on the filter.
+   - **P2-5** (low-confidence) — a `DeliveryLifecycle` with an unset `deliveryEvents` key would `TypeError` in
+     `parseLifecycle`; unreachable in practice (firebed defaults it to `[]`; a self-closing element lands as a
+     scalar caught by `is_iterable`). Add a defensive guard only if ever observed. (d) `deliveryStateFromAade` defaults a
    DeliveredByCarrier with a MISSING ConfirmOutcome detail to `'delivered'` (conscious — a carrier FULL
    also reports DeliveredByCarrier, so `'partial'` would mislabel the common case) — revisit only if a
    real truncated-history case dead-ends a legitimate return; the authoritative outcome stays in

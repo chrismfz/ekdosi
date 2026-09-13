@@ -296,6 +296,19 @@ $trackSchedule(
     'mydata_console_refresh'
 );
 
+// delivery:fetch-inbound — READ-ONLY staging of the ψηφιακή-διακίνηση docs OTHERS
+// filed against us (goods we are RECEIVING) into «Εισερχόμενα Διακίνησης», per
+// myDATA-readable tenant. Only stages — reject/confirm stay operator-gated inbox
+// actions. Default OFF (we are almost always the issuer; opt-in per deploy).
+$trackSchedule(
+    Schedule::command('delivery:fetch-inbound')
+        ->cron($scheduleCron('delivery_fetch_inbound_cron', '0 */6 * * *'))
+        ->name('delivery-fetch-inbound-all')
+        ->when(fn () => $scheduleEnabled('delivery_fetch_inbound_enabled'))
+        ->withoutOverlapping(30),
+    'delivery_fetch_inbound'
+);
+
 // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
 // tenant. Read-only, NO email; default OFF (opt-in per deploy).
 $trackSchedule(

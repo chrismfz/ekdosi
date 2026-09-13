@@ -87,6 +87,7 @@ class CompanyExporter
         // accounting dataset a tenant carries across VMs (deferred bucket-C set).
         'delivery_notes', 'delivery_note_lines', 'delivery_note_events', 'delivery_marks',
         // Re-derivable / operational, not source-of-truth tenant data.
+        'inbound_delivery_notes', // «Εισερχόμενα Διακίνησης» — re-fetched from myDATA (RequestDocs).
         'pending_whmcs_invoices',  // WHMCS inbox — re-fetched from the bridge.
         'stock_movements',         // re-derived from invoices/delivery notes.
         'service_contracts',       // deferred bucket-C (recurring-billing layer).
