@@ -1,4 +1,8 @@
 {
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
   "permissions": {
     "allow": [
       "Bash(php -v)",
@@ -57,15 +61,23 @@
       "Bash(vendor/bin/pint app/Models/Invoice.php app/Services/MyDataSubmitter.php config/ekdosi.php database/migrations/2026_07_07_000001_add_mydata_pending_since_to_invoices.php tests/Feature/MyDataSubmitInDoubtTest.php)",
       "Bash(php -l app/Services/EInvoice/GrProviderSubmitter.php)",
       "Bash(vendor/bin/pint app/Services/EInvoice/GrProviderSubmitter.php tests/Feature/EInvoice/GrProviderSubmitterTest.php tests/Feature/EInvoice/InvoSignTransportTest.php)",
-      "Bash(php -r '$c=include \"config/backup.php\"; print_r\\($c[\"backup\"][\"source\"]\\);')"
+      "Bash(php -r '$c=include \"config/backup.php\"; print_r\\($c[\"backup\"][\"source\"]\\);')",
+      "Bash(php -l app/Services/Delivery/DeliveryLifecycleService.php)",
+      "Bash(php -l tests/Feature/Delivery/DeliveryLifecycleServiceTest.php)",
+      "Bash(/usr/bin/gh pr create --base main --head fix/dgm-delivered-by-carrier-partial --title 'fix\\(delivery\\): split DeliveredByCarrier by outcome so PARTIAL reaches confirmReturn' --body ' *)",
+      "Bash(vendor/bin/phpunit tests/Feature/Delivery/DeliveryLifecycleServiceTest.php --filter delivered_by_carrier)",
+      "Bash(php -l app/Filament/Resources/DeliveryNotes/Pages/ViewDeliveryNote.php)",
+      "Bash(php -l app/Console/Commands/DeliveryTestLifecycle.php)",
+      "Bash(php -l app/Console/Commands/DeliverySandboxValidate.php)",
+      "Bash(php -l tests/Feature/MyData/TenantCoherenceTest.php)",
+      "Bash(grep -rn '->confirmDelivery\\\\|$s->confirmDelivery\\\\|svc->confirmDelivery' app/ tests/)",
+      "Bash(/usr/bin/gh pr create --base main --head fix/dgm-gate-out-issuer-confirm-delivery --title 'fix\\(delivery\\): gate out issuer-side ConfirmDeliveryOutcome + dead --return path' --body ' *)",
+      "Bash(php -l app/Filament/Resources/DeliveryNotes/Schemas/DeliveryNoteInfolist.php)",
+      "Bash(php -r 'echo PHP_VERSION,\"\\\\n\";')"
     ]
   },
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "laravel-boost"
-  ],
-  "attribution": {
-    "commit": "",
-    "pr": ""
-  }
+  ]
 }
