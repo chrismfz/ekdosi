@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Schema;
 
+use Illuminate\Foundation\Testing\WithConsoleEvents;
 use Illuminate\Support\Facades\Artisan;
 use RuntimeException;
 use Tests\TestCase;
@@ -15,6 +16,12 @@ use Tests\TestCase;
  */
 class SchemaBaselineTest extends TestCase
 {
+    // Laravel skips re-routing the Symfony console events while
+    // runningUnitTests() (Kernel::__construct), so CommandStarting — and with
+    // it the AppServiceProvider guard below — never fires in the suite unless
+    // we opt back in. Without this the guard test would pass vacuously.
+    use WithConsoleEvents;
+
     private function baseline(string $connection): string
     {
         $path = database_path("schema/{$connection}-schema.sql");
@@ -101,6 +108,9 @@ class SchemaBaselineTest extends TestCase
         $this->assertFileDoesNotExist(database_path('schema/pgsql-schema.sql'));
 
         $this->expectException(RuntimeException::class);
+        // Asserting the MESSAGE matters: without the guard this same call still
+        // throws — but a «could not find driver» PDO error, which would let a
+        // regressed guard pass a bare expectException.
         $this->expectExceptionMessageMatches('/Καμία πηγή schema/u');
 
         Artisan::call('migrate', ['--database' => 'pgsql', '--force' => true]);

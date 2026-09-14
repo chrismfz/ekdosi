@@ -110,15 +110,27 @@ class AppServiceProvider extends ServiceProvider
          * healthy. Pre-squash the same command built the whole schema.
          *
          * Refuse instead: no migrations AND no baseline = nothing can be built.
+         *
+         * Scope: CommandStarting is re-routed from the Symfony console
+         * dispatcher, which Kernel::__construct wires up at boot EXCEPT while
+         * `runningUnitTests()`. So outside the suite this covers every
+         * entrypoint — the shell, `deploy/update.sh` and `SelfUpdate` (both
+         * spawn `php artisan migrate`), and the in-process
+         * `Artisan::call('migrate')` in InstallController alike. Inside the
+         * suite it is inert unless a test opts in with `WithConsoleEvents`,
+         * which SchemaBaselineTest does.
          */
         Event::listen(function (CommandStarting $event) {
             if ($event->command !== 'migrate') {
                 return;
             }
 
-            $connection = $event->input->hasOption('database')
-                ? ($event->input->getOption('database') ?: config('database.default'))
-                : config('database.default');
+            // NOTE: at CommandStarting the input is NOT yet bound to the
+            // command definition, so getOption('database') sees an empty
+            // definition and returns null. getParameterOption() reads the raw
+            // tokens and works for both ArgvInput and ArrayInput.
+            $connection = $event->input->getParameterOption('--database')
+                ?: config('database.default');
 
             $hasMigrations = count(glob(database_path('migrations/*.php')) ?: []) > 0;
             $hasBaseline = file_exists(database_path("schema/{$connection}-schema.sql"))
