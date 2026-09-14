@@ -73,7 +73,19 @@
       "Bash(grep -rn '->confirmDelivery\\\\|$s->confirmDelivery\\\\|svc->confirmDelivery' app/ tests/)",
       "Bash(/usr/bin/gh pr create --base main --head fix/dgm-gate-out-issuer-confirm-delivery --title 'fix\\(delivery\\): gate out issuer-side ConfirmDeliveryOutcome + dead --return path' --body ' *)",
       "Bash(php -l app/Filament/Resources/DeliveryNotes/Schemas/DeliveryNoteInfolist.php)",
-      "Bash(php -r 'echo PHP_VERSION,\"\\\\n\";')"
+      "Bash(php -r 'echo PHP_VERSION,\"\\\\n\";')",
+      "Read(//tmp/**)",
+      "Bash(echo \"exit=$? bytes=$\\(wc -c </tmp/myip-docs.xml\\)\")",
+      "Bash(php -l app/Services/EInvoice/AadeInvoiceDocument.php)",
+      "Bash(php /tmp/probe.php)",
+      "Bash(php -i)",
+      "Bash(php -l tests/Feature/EInvoice/CombinedTdaPayloadTest.php)",
+      "Bash(/usr/bin/gh pr create --base main --head fix/tda-combined-payload-aade --title 'fix\\(tda\\): complete the combined-ΤΔΑ AADE payload \\(counterpart/issuer address, qty+unit, itemDescr\\)' --body ' *)",
+      "Bash(./vendor/bin/phpunit tests/Feature/EInvoice/CombinedTdaPayloadTest.php)",
+      "Bash(composer show *)",
+      "Bash(xargs grep -ln 'protected $casts\\\\|function castAttribute\\\\|function toXml')",
+      "Bash(php -r 'require \"vendor/autoload.php\"; use Firebed\\\\AadeMyData\\\\Enums\\\\UnitMeasurement; var_dump\\(UnitMeasurement::tryFrom\\(\"1\"\\)\\); var_dump\\(UnitMeasurement::tryFrom\\(\"2\"\\)\\);')",
+      "Bash(grep -n 'str_starts_with\\($type, '\\\\''11.'\\\\''\\)' app/Services/EInvoice/AadeInvoiceDocument.php)"
     ]
   },
   "enableAllProjectMcpServers": true,
