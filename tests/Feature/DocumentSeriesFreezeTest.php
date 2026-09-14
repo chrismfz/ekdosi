@@ -262,7 +262,7 @@ class DocumentSeriesFreezeTest extends TestCase
         $odd = $this->invoice(['invcode' => 'ΧΕΙΡΟΓΡΑΦΟ', 'code' => 78]);
         DB::table('invoices')->whereIn('id', [$good->id, $odd->id])->update(['series' => null]);
 
-        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
         $migration->up();
 
         $this->assertSame('ΤΠΥ', $good->fresh()->series);
@@ -309,7 +309,7 @@ class DocumentSeriesFreezeTest extends TestCase
             'request' => '<invoiceHeader><series>ΤΠΥ2</series><aa>50</aa></invoiceHeader>',
         ]);
 
-        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
         $migration->up();
 
         $this->assertSame('ΤΠΥ2', $invoice->fresh()->series);
@@ -334,7 +334,7 @@ class DocumentSeriesFreezeTest extends TestCase
             'request' => 'Cancel reason: ΠΟΤΕ',
         ]);
 
-        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
         $migration->up();
 
         $this->assertSame('ΤΠΥ', $invoice->fresh()->series, 'falls back to the frozen invcode');
@@ -356,7 +356,7 @@ class DocumentSeriesFreezeTest extends TestCase
             'request' => '<invoiceHeader><series>ΤΠΥ2</series><aa>53</aa></invoiceHeader>',
         ]);
 
-        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
         $migration->up();
 
         $this->assertSame('ΤΠΥ2', $invoice->fresh()->series);
@@ -381,7 +381,7 @@ class DocumentSeriesFreezeTest extends TestCase
         ]);
         $this->assertLessThan($second->id, $first->id);
 
-        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
         $migration->up();
 
         $this->assertSame('ΠΡΩΤΗ', $invoice->fresh()->series);
@@ -517,7 +517,7 @@ class DocumentSeriesFreezeTest extends TestCase
         }
         DB::table('invoices')->whereIn('id', $ids)->update(['series' => null]);
 
-        $migration = require database_path('migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_02_000002_add_series_to_numbered_documents.php');
         $migration->up();
 
         $this->assertSame(

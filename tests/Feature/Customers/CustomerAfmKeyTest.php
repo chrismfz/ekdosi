@@ -413,7 +413,7 @@ class CustomerAfmKeyTest extends TestCase
         $note = Lead::create(['company_id' => $t->id, 'name' => 'Χωρίς', 'afm' => 'x']);
         DB::table('leads')->where('id', $note->id)->update(['afm' => 'N/A']);
 
-        $migration = require base_path('database/migrations/2026_09_03_000001_add_afm_key_unique_to_customers.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_03_000001_add_afm_key_unique_to_customers.php');
         $migration->up(); // idempotent re-run
 
         $this->assertSame('123456789', $lead->fresh()->afm);
@@ -579,7 +579,7 @@ class CustomerAfmKeyTest extends TestCase
         DB::table('customers')->where('id', $c->id)->update(['afm' => null]);
         $this->assertSame('123456789', $c->fresh()->afm_key);
 
-        $migration = require base_path('database/migrations/2026_09_03_000001_add_afm_key_unique_to_customers.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_09_03_000001_add_afm_key_unique_to_customers.php');
         $migration->up();
 
         $this->assertNull($c->fresh()->afm_key, 'a blanked ΑΦΜ owns no identity');

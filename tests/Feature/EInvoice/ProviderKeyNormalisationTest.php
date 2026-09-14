@@ -119,7 +119,7 @@ class ProviderKeyNormalisationTest extends TestCase
         ]);
         DB::table('companies')->where('id', $c->id)->update(['einvoice_provider_key' => ' invosign ']);
 
-        (require base_path('database/migrations/2026_09_18_000001_normalise_einvoice_provider_key.php'))->up();
+        (require base_path('tests/Fixtures/migrations/2026_09_18_000001_normalise_einvoice_provider_key.php'))->up();
 
         Filament::setTenant($c->fresh());
         Livewire::test(EditCompany::class, ['record' => $c->getRouteKey()])
@@ -172,7 +172,7 @@ class ProviderKeyNormalisationTest extends TestCase
         DB::table('companies')->where('id', $dirty->id)->update(['einvoice_provider_key' => '  invosign  ']);
         DB::table('companies')->where('id', $blank->id)->update(['einvoice_provider_key' => '   ']);
 
-        (require base_path('database/migrations/2026_09_18_000001_normalise_einvoice_provider_key.php'))->up();
+        (require base_path('tests/Fixtures/migrations/2026_09_18_000001_normalise_einvoice_provider_key.php'))->up();
 
         $key = fn (Company $c) => DB::table('companies')->where('id', $c->id)->value('einvoice_provider_key');
         $this->assertSame('invosign', $key($dirty), 'το κλειδί με κενά δεν καθαρίστηκε');

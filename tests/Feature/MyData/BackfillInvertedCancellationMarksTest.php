@@ -27,7 +27,7 @@ class BackfillInvertedCancellationMarksTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const MIGRATION = 'database/migrations/2026_09_02_000005_backfill_inverted_provider_cancellation_marks.php';
+    private const MIGRATION = 'tests/Fixtures/migrations/2026_09_02_000005_backfill_inverted_provider_cancellation_marks.php';
 
     private Company $tenant;
 

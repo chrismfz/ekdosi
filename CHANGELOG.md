@@ -19,6 +19,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Changed
+- **Migrations squashed σε schema baseline** (`database/schema/{sqlite,mariadb}-schema.sql`)
+  μετά το v2.0.2. Fresh installs φορτώνουν το schema dump + seeders· υπάρχουσες βάσεις ανέγγιχτες.
+  Νέες αλλαγές μπαίνουν ως κανονικά νέα migrations πάνω από το baseline.
 - **Combined ΤΔΑ — shared movement-header builder (Slice 3d-c).** Ο `DeliveryNoteSubmitter` (9.x) και ο
   `AadeInvoiceDocument::applyMovementHeader` (ΤΔΑ 1.1) περνούν πλέον από έναν κοινό
   `App\Services\EInvoice\MovementHeaderBuilder::applyCommon` για τα ΤΑΥΤΟΣΗΜΑ πεδία του movement header
