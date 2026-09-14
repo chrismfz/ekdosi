@@ -38,6 +38,33 @@ class RequirementsCheckerTest extends TestCase
         }
     }
 
+    /**
+     * Since the v2.0.2 migration squash, a fresh install builds the schema by
+     * LOADING database/schema/mariadb-schema.sql, and Laravel shells out to the
+     * `mariadb` client binary to do it (MariaDbSchemaState::load()). A host
+     * without that binary used to sail through a green preflight and then die
+     * mid-migrate — and because loadSchemaState() deletes the migration
+     * repository BEFORE loading, the retry failed identically. Block instead.
+     */
+    public function test_a_missing_mariadb_client_binary_blocks(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->dbClient = false;
+
+        $this->assertTrue($checker->hasBlockers($checker->check()));
+        $this->assertTrue($this->byKey($checker)['db_client']->blocks());
+    }
+
+    /** Same reason: no proc_open → no shell-out → no schema load → no install. */
+    public function test_disabled_proc_open_blocks(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->procOpen = false;
+
+        $this->assertTrue($checker->hasBlockers($checker->check()));
+        $this->assertTrue($this->byKey($checker)['proc_open']->blocks());
+    }
+
     public function test_a_missing_required_extension_blocks(): void
     {
         $checker = new ConfigurableRequirementsChecker;

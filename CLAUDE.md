@@ -65,6 +65,8 @@ cutover.
   app/Console/Commands/MigrateFromFirebird.php   # re-runnable ETL, one tenant per run
   app/                                           # models, Filament panels, services, actions
   database/schema/*-schema.sql                   # SQUASHED baseline (v2.0.2) — sqlite + mariadb
+                                                 # ⚠ ΠΟΤΕ DROP TABLE μέσα (SchemaBaselineTest) —
+                                                 # το schema:dump τα ξαναβάζει, ξανα-strip πριν commit
   database/migrations/                           # only NEW migrations on top of the baseline
   whmcs-plugin/ekdosi_bridge/                    # OUR WHMCS-side plugin (deployed to tenant's WHMCS)
   docs/aade/*                                    # the AADE specs (submission + ΔΑ lifecycle)

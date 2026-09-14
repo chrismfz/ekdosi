@@ -23,6 +23,9 @@ class ConfigurableRequirementsChecker extends RequirementsChecker
 
     public bool $procOpen = true;
 
+    /** Is the `mariadb` client binary on PATH? (default: a healthy host) */
+    public bool $dbClient = true;
+
     public bool $secure = true;
 
     public string $iniValue = '1G';
@@ -40,6 +43,11 @@ class ConfigurableRequirementsChecker extends RequirementsChecker
     protected function functionEnabled(string $function): bool
     {
         return $this->procOpen;
+    }
+
+    protected function binaryOnPath(string $binary): bool
+    {
+        return $this->dbClient;
     }
 
     protected function pathWritable(string $path): bool

@@ -18,10 +18,24 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **Το schema baseline δεν σβήνει πια πίνακες (data loss).** Το `mariadb-schema.sql` ξεκινούσε με 105
+  `DROP TABLE IF EXISTS`. Ο `migrate` φορτώνει το baseline όποτε το `migrations` table είναι άδειο/απόν
+  — **ανεξάρτητα από το αν υπάρχουν δεδομένα** — οπότε σε μια μισο-τελειωμένη `ekdosi:db-restore`
+  (πίνακες επαναφερμένοι, `migrations` όχι ακόμη) το `php artisan migrate --force` του deploy θα έσβηνε
+  **σιωπηλά** και τους 105 πίνακες αναφέροντας επιτυχία. Επαληθεύτηκε σε πραγματική MariaDB. Χωρίς τα
+  DROP, το πρώτο `CREATE TABLE` σκάει («Table ... already exists»), ο migrate βγαίνει με exit 1 και τα
+  δεδομένα επιζούν.
+
 ### Changed
 - **Migrations squashed σε schema baseline** (`database/schema/{sqlite,mariadb}-schema.sql`)
   μετά το v2.0.2. Fresh installs φορτώνουν το schema dump + seeders· υπάρχουσες βάσεις ανέγγιχτες.
-  Νέες αλλαγές μπαίνουν ως κανονικά νέα migrations πάνω από το baseline.
+  Νέες αλλαγές μπαίνουν ως κανονικά νέα migrations πάνω από το baseline. Τα `DROP TABLE IF EXISTS`
+  του `mariadb-dump` **αφαιρέθηκαν σκόπιμα** από το dump (βλ. Fixed) και ο νέος `SchemaBaselineTest`
+  κοκκινίζει αν επανέλθουν.
+- **Installer preflight: `proc_open` + πελάτης `mariadb` είναι πλέον ΥΠΟΧΡΕΩΤΙΚΑ** (ήταν προαιρετικό/
+  ανύπαρκτο). Το schema baseline φορτώνεται με shell-out στο `mariadb` binary, οπότε ένας host χωρίς
+  αυτά περνούσε πράσινο preflight και μετά έσκαγε στη μέση του `migrate`.
 - **Combined ΤΔΑ — shared movement-header builder (Slice 3d-c).** Ο `DeliveryNoteSubmitter` (9.x) και ο
   `AadeInvoiceDocument::applyMovementHeader` (ΤΔΑ 1.1) περνούν πλέον από έναν κοινό
   `App\Services\EInvoice\MovementHeaderBuilder::applyCommon` για τα ΤΑΥΤΟΣΗΜΑ πεδία του movement header
