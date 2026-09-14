@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\Schema;
 
+use Illuminate\Support\Facades\Artisan;
+use RuntimeException;
 use Tests\TestCase;
 
 /**
@@ -85,6 +87,31 @@ class SchemaBaselineTest extends TestCase
         sort($mariadb[1]);
         sort($sqlite[1]);
         $this->assertSame($mariadb[1], $sqlite[1], 'the two baselines record different migrations — regenerate BOTH');
+    }
+
+    /**
+     * Laravel resolves the baseline by CONNECTION NAME, not driver, and
+     * `loadSchemaState()` returns SILENTLY when no file matches. With an empty
+     * `database/migrations/`, `migrate` on a connection we ship no baseline for
+     * would print «Nothing to migrate», exit 0 and leave the database EMPTY —
+     * a broken install that looks healthy. AppServiceProvider refuses instead.
+     */
+    public function test_migrate_refuses_a_connection_with_no_migrations_and_no_baseline(): void
+    {
+        $this->assertFileDoesNotExist(database_path('schema/pgsql-schema.sql'));
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessageMatches('/Καμία πηγή schema/u');
+
+        Artisan::call('migrate', ['--database' => 'pgsql', '--force' => true]);
+    }
+
+    /** The connections we DO ship a baseline for must not trip that guard. */
+    public function test_the_shipped_connections_have_a_baseline(): void
+    {
+        foreach (['sqlite', 'mariadb'] as $connection) {
+            $this->assertFileExists(database_path("schema/{$connection}-schema.sql"));
+        }
     }
 
     /**

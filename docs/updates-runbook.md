@@ -214,9 +214,17 @@ actually recover». For a restore when the **APP_KEY is lost**, see
   survive a restore and make the next deploy fail with "table already exists" — is
   wiped, and the target db is recreated if it's missing (self-heals an interrupted
   restore). It always targets the connection's db (matching the confirmation
-  prompt), not a name baked into the snapshot. After restoring an OLDER snapshot,
-  run `php artisan migrate --force` to re-apply forward migrations. The db user
-  needs DROP/CREATE on the database (the INSTALL.md `GRANT ALL ON ekdosi.*` covers it).
+  prompt), not a name baked into the snapshot. After a **successful** restore of an
+  OLDER snapshot, run `php artisan migrate --force` to re-apply forward migrations.
+  The db user needs DROP/CREATE on the database (the INSTALL.md `GRANT ALL ON
+  ekdosi.*` covers it).
+  **⚠ Αν η επαναφορά ΔΙΑΚΟΠΕΙ, μην «διορθώσεις» με `migrate`** — ξανατρέξε την
+  επαναφορά. Μετά το v2.0.2 squash το schema έρχεται από το baseline
+  (`database/schema/mariadb-schema.sql`) και το `migrate` το φορτώνει όποτε το
+  `migrations` table λείπει/είναι άδειο. Ο dump επαναφέρει πίνακες ΑΛΦΑΒΗΤΙΚΑ, οπότε
+  μια διακοπή πριν το `migrations` αφήνει ακριβώς αυτή την κατάσταση: δεδομένα χωρίς
+  `migrations`. Το `migrate` τότε **αποτυγχάνει σταθερά** («Table ... already exists»
+  — by design, ώστε να μη σβήσει τα δεδομένα) και δεν πρόκειται να πετύχει ποτέ.
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.

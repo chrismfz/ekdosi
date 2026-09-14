@@ -13,6 +13,7 @@ use App\Support\Tenancy\CompanyContext;
 use Filament\Events\TenantSet;
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Laravel\Passport\Passport;
+use RuntimeException;
 use Spatie\Permission\PermissionRegistrar;
 
 class AppServiceProvider extends ServiceProvider
@@ -94,6 +96,43 @@ class AppServiceProvider extends ServiceProvider
          * Plain `migrate` is unaffected — deploys keep working.
          */
         DB::prohibitDestructiveCommands(! $this->app->environment('testing'));
+
+        /*
+         * Since the v2.0.2 migration squash, `database/migrations/` is empty and
+         * the schema comes from `database/schema/{connection}-schema.sql`.
+         * Laravel resolves that file by CONNECTION NAME, not driver
+         * (MigrateCommand::schemaPath()), and `loadSchemaState()` returns
+         * SILENTLY when the file is missing. So on a connection we ship no
+         * baseline for (config/database.php still defines `mysql`/`pgsql`, and
+         * DbSnapshot/DbRestore/CustomerLedger do branch on the `mysql` driver),
+         * `php artisan migrate` against a COMPLETELY EMPTY database now prints
+         * «Nothing to migrate», exits 0, and leaves a broken install that looks
+         * healthy. Pre-squash the same command built the whole schema.
+         *
+         * Refuse instead: no migrations AND no baseline = nothing can be built.
+         */
+        Event::listen(function (CommandStarting $event) {
+            if ($event->command !== 'migrate') {
+                return;
+            }
+
+            $connection = $event->input->hasOption('database')
+                ? ($event->input->getOption('database') ?: config('database.default'))
+                : config('database.default');
+
+            $hasMigrations = count(glob(database_path('migrations/*.php')) ?: []) > 0;
+            $hasBaseline = file_exists(database_path("schema/{$connection}-schema.sql"))
+                || file_exists(database_path("schema/{$connection}-schema.dump"));
+
+            if (! $hasMigrations && ! $hasBaseline) {
+                throw new RuntimeException(
+                    "Καμία πηγή schema για τη σύνδεση «{$connection}»: το database/migrations/ είναι άδειο "
+                    ."(squash v2.0.2) και δεν υπάρχει database/schema/{$connection}-schema.sql. Το migrate θα "
+                    .'έλεγε «Nothing to migrate» και θα άφηνε ΚΕΝΗ βάση. Χρησιμοποίησε DB_CONNECTION=mariadb '
+                    .'(ή sqlite), ή πρόσθεσε baseline για αυτή τη σύνδεση.'
+                );
+            }
+        });
 
         /*
          * ekdosi MCP server OAuth (routes/ai.php): when Laravel Passport is

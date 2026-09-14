@@ -103,11 +103,19 @@ class DbRestore extends Command
 
         if (! $process->isSuccessful()) {
             $this->error('Η επαναφορά απέτυχε: '.trim($process->getErrorOutput()));
+            // Since the v2.0.2 squash this matters: the dump restores tables
+            // ALPHABETICALLY, so an abort before `migrations` leaves data tables
+            // present with NO migrations table. `migrate` treats that as «never
+            // migrated» and tries to load the schema baseline over live data —
+            // it now aborts loudly («Table ... already exists») instead of
+            // wiping it, but it will NEVER succeed. Re-run the restore.
+            $this->warn('⚠ Η βάση είναι ΗΜΙΤΕΛΗΣ. ΜΗΝ τρέξεις «php artisan migrate» για να το «φτιάξεις» — '
+                .'θα αποτύχει σταθερά. Ξανατρέξε την ΕΠΑΝΑΦΟΡΑ από το ίδιο (ή προηγούμενο) snapshot.');
 
             return self::FAILURE;
         }
 
-        $this->info('✓ Η ΒΔ επαναφέρθηκε. Αν το snapshot είναι παλιότερου schema τρέξε «php artisan migrate --force», και «php artisan up».');
+        $this->info('✓ Η ΒΔ επαναφέρθηκε ΠΛΗΡΩΣ. Αν το snapshot είναι παλιότερου schema τρέξε «php artisan migrate --force» (ασφαλές μόνο μετά από ΕΠΙΤΥΧΗ επαναφορά), και «php artisan up».');
 
         return self::SUCCESS;
     }

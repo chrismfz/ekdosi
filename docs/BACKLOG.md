@@ -1138,6 +1138,11 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   είναι το data-loss footgun που έκλεισε το review: σε βάση με δεδομένα αλλά άδειο/απόν `migrations` table
   (μισο-τελειωμένο `db-restore`) το `migrate --force` θα τα έσβηνε ΣΙΩΠΗΛΑ. Ο `SchemaBaselineTest` κοκκινίζει
   αν επανέλθουν — **μετά από κάθε regeneration ξανα-strip-άρε τα** πριν το commit.
+  **(δ) Baseline υπάρχει ΜΟΝΟ για `mariadb` + `sqlite`.** Ο Laravel το βρίσκει με βάση το ΟΝΟΜΑ της
+  σύνδεσης (`MigrateCommand::schemaPath()`), οπότε ένα `DB_CONNECTION=mysql` (η σύνδεση υπάρχει ακόμη στο
+  `config/database.php` και υπάρχουν driver branches σε `DbSnapshot`/`DbRestore`/`CustomerLedger`) δεν
+  βρίσκει αρχείο. Ο guard στον `AppServiceProvider` πλέον **σκάει δυνατά** αντί να αφήσει κενή βάση, αλλά
+  αν ποτέ χρειαστεί πραγματικά MySQL θέλει είτε δικό του baseline είτε καθάρισμα της σύνδεσης.
 - **`system.update_token` (UI update token) δεν σαρώνεται από `secrets:reencrypt` (P2, DR edge).** Αποθηκεύεται
   στο `system_settings` κρυπτογραφημένο όταν `ekdosi.secrets.encrypt_at_rest` είναι on (ίδια απόφαση με το
   `MaybeEncrypted`). Όμως το `secrets:reencrypt` είναι model/cast-driven (σαρώνει MODELS + `isSecretCast`

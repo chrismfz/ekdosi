@@ -65,6 +65,23 @@ class RequirementsCheckerTest extends TestCase
         $this->assertTrue($this->byKey($checker)['proc_open']->blocks());
     }
 
+    /**
+     * With proc_open off we cannot probe the PATH at all, so the db_client row
+     * must not tell the operator to install a client that may already be there
+     * (they would install it, re-run, and still see red).
+     */
+    public function test_the_db_client_row_says_it_could_not_be_checked_when_proc_open_is_off(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->procOpen = false;
+        $checker->dbClient = true;
+
+        $row = $this->byKey($checker)['db_client'];
+
+        $this->assertStringContainsString('ΔΕΝ ΕΛΕΓΧΘΗΚΕ', $row->detail);
+        $this->assertStringNotContainsString('apt install', $row->fix);
+    }
+
     public function test_a_missing_required_extension_blocks(): void
     {
         $checker = new ConfigurableRequirementsChecker;

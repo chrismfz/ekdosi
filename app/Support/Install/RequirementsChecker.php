@@ -142,15 +142,40 @@ class RequirementsChecker
                 detail: 'Η εγκατάσταση χτίζει τη βάση φορτώνοντας το schema baseline μέσω του πελάτη mariadb (εξωτερική εντολή). Χρειάζεται επίσης για backups (mysqldump) και επαναφορά Firebird (gbak).',
                 fix: 'Αφαίρεσε το proc_open από το disable_functions στο php.ini (fpm ΚΑΙ cli) και κάνε restart την PHP-FPM.',
             ),
-            new Requirement(
+            $this->dbClientCheck(),
+        ];
+    }
+
+    /**
+     * The `mariadb` client binary check.
+     *
+     * When `proc_open` is disabled we CANNOT probe the PATH at all, so saying
+     * «εγκατέστησε τον πελάτη» would send the operator to install something
+     * that may already be there (and they'd still see red after doing it). The
+     * proc_open row above already blocks, so this one just says honestly that
+     * it could not be checked.
+     */
+    private function dbClientCheck(): Requirement
+    {
+        if (! $this->functionEnabled('proc_open')) {
+            return new Requirement(
                 key: 'db_client',
                 label: 'Πελάτης γραμμής εντολών mariadb',
-                passed: $this->binaryOnPath('mariadb'),
+                passed: false,
                 required: true,
-                detail: 'Το εκτελέσιμο «mariadb» πρέπει να υπάρχει στο PATH της PHP — με τον οδηγό «mariadb» (τον οποίο στήνει ο οδηγός εγκατάστασης) ο Laravel το καλεί ΟΝΟΜΑΣΤΙΚΑ για να φορτώσει το schema baseline (database/schema/mariadb-schema.sql). Το «mysql» ΔΕΝ αρκεί.',
-                fix: 'Εγκατέστησε τον πελάτη MariaDB: apt install mariadb-client / dnf install mariadb — και βεβαιώσου ότι το «mariadb» βρίσκεται στο PATH του χρήστη της PHP-FPM.',
-            ),
-        ];
+                detail: 'ΔΕΝ ΕΛΕΓΧΘΗΚΕ — χωρίς proc_open δεν μπορεί να εκτελεστεί εξωτερική εντολή, οπότε ούτε να διαπιστωθεί αν υπάρχει ο πελάτης ούτε να φορτωθεί το schema baseline.',
+                fix: 'Ξεμπλόκαρε πρώτα το proc_open (δες από πάνω) και ξαναφόρτωσε αυτή τη σελίδα — τότε θα φανεί αν λείπει όντως ο πελάτης.',
+            );
+        }
+
+        return new Requirement(
+            key: 'db_client',
+            label: 'Πελάτης γραμμής εντολών mariadb',
+            passed: $this->binaryOnPath('mariadb'),
+            required: true,
+            detail: 'Το εκτελέσιμο «mariadb» πρέπει να υπάρχει στο PATH της PHP — με τον οδηγό «mariadb» (τον οποίο στήνει ο οδηγός εγκατάστασης) ο Laravel το καλεί ΟΝΟΜΑΣΤΙΚΑ για να φορτώσει το schema baseline (database/schema/mariadb-schema.sql). Το «mysql» ΔΕΝ αρκεί.',
+            fix: 'Εγκατέστησε τον πελάτη MariaDB: apt install mariadb-client / dnf install mariadb — και βεβαιώσου ότι το «mariadb» βρίσκεται στο PATH του χρήστη της PHP-FPM.',
+        );
     }
 
     /** @return list<Requirement> */

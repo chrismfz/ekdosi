@@ -36,6 +36,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 - **Installer preflight: `proc_open` + πελάτης `mariadb` είναι πλέον ΥΠΟΧΡΕΩΤΙΚΑ** (ήταν προαιρετικό/
   ανύπαρκτο). Το schema baseline φορτώνεται με shell-out στο `mariadb` binary, οπότε ένας host χωρίς
   αυτά περνούσε πράσινο preflight και μετά έσκαγε στη μέση του `migrate`.
+- **`migrate` αρνείται σύνδεση χωρίς καμία πηγή schema.** Με άδειο `database/migrations/`, ένα
+  `DB_CONNECTION` για το οποίο δεν υπάρχει baseline (π.χ. `mysql`) θα έλεγε «Nothing to migrate», θα
+  έβγαινε με 0 και θα άφηνε **κενή** βάση — broken install που φαίνεται υγιής. Τώρα σκάει με σαφές μήνυμα.
+- **`ekdosi:db-restore`: σωστή καθοδήγηση σε διακοπή.** Ο dump επαναφέρει πίνακες αλφαβητικά, οπότε μια
+  διακοπή πριν το `migrations` αφήνει δεδομένα χωρίς `migrations` table· το «τρέξε migrate» ήταν πλέον
+  λάθος συμβουλή (αποτυγχάνει σταθερά). Η εντολή το λέει ρητά, όπως και το `docs/updates-runbook.md`.
 - **Combined ΤΔΑ — shared movement-header builder (Slice 3d-c).** Ο `DeliveryNoteSubmitter` (9.x) και ο
   `AadeInvoiceDocument::applyMovementHeader` (ΤΔΑ 1.1) περνούν πλέον από έναν κοινό
   `App\Services\EInvoice\MovementHeaderBuilder::applyCommon` για τα ΤΑΥΤΟΣΗΜΑ πεδία του movement header
