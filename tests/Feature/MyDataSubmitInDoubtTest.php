@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Jobs\SendInvoiceEmail;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -14,6 +15,7 @@ use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Queue;
 use Tests\TestCase;
 
 /**
@@ -179,6 +181,44 @@ class MyDataSubmitInDoubtTest extends TestCase
 
         // The reconcile response was consumed and nothing else was attempted.
         $this->assertSame(0, $mock->count(), 'no further AADE calls (no resubmission) should have happened');
+    }
+
+    public function test_in_doubt_self_heal_emails_the_customer_when_opted_in(): void
+    {
+        // A self-healed adoption reaches VALID exactly like a normal filing, and the
+        // earlier (timed-out) attempt never emailed — so the opted-in tenant owes the
+        // customer the same acceptance email. (Before this, adoptMark went VALID
+        // silently.) Parity with GrProviderSubmitter's §14.4 recovery-adopt.
+        Queue::fake();
+        $this->tenant->forceFill(['auto_email_on_mydata_accept' => true])->save();
+        $this->invoice->customer->forceFill(['email' => 'c@example.test'])->save();
+        $this->markInDoubt(1);
+
+        $mock = new MockHandler([
+            $this->transmittedDocsMock('TPY', '1', '400001965177931'),
+        ]);
+
+        (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+
+        $this->assertSame('VALID', $this->invoice->fresh()->mydata_state);
+        Queue::assertPushed(SendInvoiceEmail::class, 1);
+    }
+
+    public function test_in_doubt_self_heal_does_not_email_when_the_tenant_has_not_opted_in(): void
+    {
+        // Default: tenant flag off → no email even on a clean self-heal to VALID.
+        Queue::fake();
+        $this->invoice->customer->forceFill(['email' => 'c@example.test'])->save();
+        $this->markInDoubt(1);
+
+        $mock = new MockHandler([
+            $this->transmittedDocsMock('TPY', '1', '400001965177931'),
+        ]);
+
+        (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+
+        $this->assertSame('VALID', $this->invoice->fresh()->mydata_state);
+        Queue::assertNotPushed(SendInvoiceEmail::class);
     }
 
     public function test_recovery_searches_the_series_the_document_was_filed_under(): void

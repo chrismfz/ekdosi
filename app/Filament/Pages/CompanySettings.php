@@ -178,11 +178,11 @@ class CompanySettings extends Page implements HasForms
                     ->schema([
                         Toggle::make('auto_email_on_mydata_accept')
                             ->label('Auto-email στον πελάτη όταν η ΑΑΔΕ αποδεχτεί')
-                            ->helperText('Όταν μια υποβολή myDATA επιστρέψει VALID, μπαίνει στην ουρά email με το PDF προς τον πελάτη.')
+                            ->helperText('Όταν μια υποβολή (απευθείας myDATA Ή μέσω παρόχου, π.χ. InvoSign) γίνει αποδεκτή/VALID, μπαίνει στην ουρά email με το PDF προς τον πελάτη.')
                             ->columnSpanFull(),
                         Toggle::make('auto_email_on_issue')
-                            ->label('Auto-email στον πελάτη κατά την έκδοση (εκτός myDATA)')
-                            ->helperText('Όταν οριστικοποιείται πρόχειρο σε εταιρεία που ΔΕΝ υποβάλλει μέσω myDATA. Ανά πελάτη υπάρχει opt-out.')
+                            ->label('Auto-email στον πελάτη κατά την έκδοση (εκτός ηλεκτρονικής υποβολής)')
+                            ->helperText('Όταν οριστικοποιείται πρόχειρο σε εταιρεία που ΔΕΝ φιλάρει ηλεκτρονικά (ούτε myDATA ούτε πάροχος) — αλλιώς το email φεύγει στην αποδοχή. Ανά πελάτη υπάρχει opt-out.')
                             ->columnSpanFull(),
                         TextInput::make('mail_from_address')
                             ->label('Διεύθυνση αποστολέα (From)')

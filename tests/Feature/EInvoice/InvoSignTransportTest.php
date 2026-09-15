@@ -325,6 +325,54 @@ class InvoSignTransportTest extends TestCase
         $this->assertStringContainsString('[238]', $result->errorMessage());
     }
 
+    public function test_send_recovers_the_real_error_from_a_malformed_double_document_response(): void
+    {
+        // Seen in production (88-007): InvoSign PREPENDS a junk fragment and a stray
+        // XML prolog before the real ResponseDoc, so libxml rejects the whole body —
+        // the parser used to report an opaque «μη αναγνώσιμη απάντηση» and hide the
+        // actionable signature error. It must now surface [88-007].
+        $body = "<response><mark></mark><uid></uid><error>Code 100:Column 'provider_dignature' cannot be null</error></response>"
+            ."<?xml version=\"1.0\" encoding=\"utf-8\"?>\n"
+            .'<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">'
+            .'<response><index>1</index><statusCode>ValidationError</statusCode>'
+            .'<errors><error><message>Η υπογραφή δεν είναι έγκυρη:</message><code>88-007</code></error></errors>'
+            .'</response></ResponseDoc>';
+        Http::fake([self::DEMO.'/*' => Http::response($body, 200)]);
+        $invoice = $this->makeInvoice();
+
+        $result = (new InvoSignTransport)->send($invoice, '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><invoice></invoice></InvoicesDoc>', ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertFalse($result->success);
+        $this->assertStringContainsString('[88-007]', $result->errorMessage());
+        $this->assertStringContainsString('Η υπογραφή δεν είναι έγκυρη', $result->errorMessage());
+        $this->assertStringNotContainsString('μη αναγνώσιμη', $result->errorMessage());
+    }
+
+    public function test_send_with_a_bare_code_message_but_no_parseable_document_still_surfaces_the_code(): void
+    {
+        // No well-formed <ResponseDoc>/<response> to recover, but a code/message
+        // is present in the raw body — the raw-error hint must still show it.
+        Http::fake([self::DEMO.'/*' => Http::response('garbage <code>99-001</code> and <message>κάτι έσπασε</message> !!!', 200)]);
+        $invoice = $this->makeInvoice();
+
+        $result = (new InvoSignTransport)->send($invoice, '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><invoice></invoice></InvoicesDoc>', ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertFalse($result->success);
+        $this->assertStringContainsString('[99-001]', $result->errorMessage());
+        $this->assertStringContainsString('κάτι έσπασε', $result->errorMessage());
+    }
+
+    public function test_send_with_a_truly_unreadable_body_keeps_the_generic_message(): void
+    {
+        Http::fake([self::DEMO.'/*' => Http::response('!!! not xml at all, no tags !!!', 200)]);
+        $invoice = $this->makeInvoice();
+
+        $result = (new InvoSignTransport)->send($invoice, '<InvoicesDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><invoice></invoice></InvoicesDoc>', ProviderCredentials::fromCompany($this->tenant));
+
+        $this->assertFalse($result->success);
+        $this->assertStringContainsString('μη αναγνώσιμη απάντηση', $result->errorMessage());
+    }
+
     public function test_success_without_mark_is_treated_as_failure_and_does_not_file(): void
     {
         // B1: a 'Success' with an empty <invoiceMark> must NOT mark the invoice VALID.

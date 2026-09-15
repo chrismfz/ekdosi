@@ -18,7 +18,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-09-15
+
 ### Fixed
+- **InvoSign: ένα πραγματικό σφάλμα κρυβόταν πίσω από «μη αναγνώσιμη απάντηση».** Σε production
+  (`88-007 «Η υπογραφή δεν είναι έγκυρη»`) ο InvoSign επιστρέφει **δύο κολλημένα XML** — ένα junk
+  `<response>…Column 'provider_dignature' cannot be null…</response>` + ένα stray XML prolog πριν το
+  πραγματικό `<ResponseDoc>` — που κάνει το `simplexml_load_string` να απορρίπτει όλο το body, οπότε ο
+  `InvoSignTransport::parse()` έδειχνε γενικό «μη αναγνώσιμη απάντηση» και έκρυβε το actionable σφάλμα
+  (το forensic row το κρατούσε, αλλά ο submit toast όχι). Πλέον ο parser ανακτά το **τελευταίο
+  καλοσχηματισμένο** `<ResponseDoc>`/`<response>` block· αν τίποτα δεν parse-άρει, τραβά `<code>`/`<message>`
+  από το raw body ως fallback — έτσι ο χειριστής βλέπει `[88-007] Η υπογραφή δεν είναι έγκυρη` κατευθείαν.
+  Πλήρως garbage απάντηση κρατά το γενικό μήνυμα.
 - **Ο web installer (`/install`) απέτυχε στο import bundle με σφάλμα sqlite, αφήνοντας μισο-στημένη
   εγκατάσταση χωρίς `.env`.** Ο installer επαναστοχεύει το `database.default` στη MariaDB **μέσα** στο
   request (πριν γραφτεί το `.env`), αλλά το permission cache του Spatie είχε ήδη δεθεί —στο boot του
@@ -43,6 +54,19 @@ from `[Unreleased]`; `--major` explicit for milestones).
   βεβαιότητα. Ίδια ασφάλεια (override πάντα απαιτείται — καμία μη-κενή βάση δεν migrate-άρεται χωρίς ρητό tick).
 
 ### Added
+- **Auto-email στην αποδοχή τώρα και για τον δρόμο του παρόχου (InvoSign/`gr-provider`) — parity με το direct myDATA.**
+  Μια φρέσκια αποδοχή μέσω παρόχου (VALID) βάζει στην ουρά το email με το PDF στον πελάτη, με το ΙΔΙΟ gate
+  (`auto_email_on_mydata_accept` + per-customer opt-out), μέσα από κοινό trait `DispatchesAcceptanceEmail`
+  ώστε οι δύο submitters να μη ξανα-αποκλίνουν. Guarded σε φρέσκο MARK (`wasRecentlyCreated`) — καμία διπλή
+  αποστολή στο idempotent adopt-on-retry. **Και οι δύο adopt-on-retry δρόμοι στέλνουν πλέον το email σε
+  φρέσκια υιοθέτηση**, ίδια parity με τον κύριο δρόμο: ο provider recovery §14.4 (send timeout → status-check
+  βρίσκει MARK → adopt) στο `GrProviderSubmitter`, ΚΑΙ το direct-myDATA in-doubt self-heal (`MyDataSubmitter::adoptMark`,
+  RequestTransmittedDocs → adopt) — που πρωτύτερα υιοθετούσε το ΜΑΡΚ αλλά **δεν** έστελνε ποτέ το email του
+  πελάτη (ένα self-healed τιμολόγιο κατέληγε VALID σιωπηλά). **Μαζί, διόρθωση κινδύνου διπλού email:** ο
+  `Invoice::shouldAutoEmailOnFinalize()` έκρινε με `mydata_mode`, οπότε ένας provider tenant (που έχει
+  `mydata_mode='off'`) θα έστελνε auto-email και στο **finalize** ΚΑΙ στην αποδοχή· πλέον κρίνει «φιλάρει
+  ηλεκτρονικά» με το κανονικό `SendChannel` brain (direct myDATA Ή πάροχος), άρα στέλνει μόνο μία φορά.
+  Ενημερώθηκαν και τα help-texts («myDATA» → «myDATA ή πάροχος»).
 - **Κουμπί «Δοκιμή email» στον web installer (`/install`) — SMTP probe, όπως το «Δοκιμή σύνδεσης» της βάσης.**
   Ανοίγει SMTP session με τα στοιχεία της φόρμας (connect + κρυπτογράφηση + AUTH) και λέει **ακριβώς** ποιο
   βήμα έσκασε: `auth` (λάθος credentials), `tls` (λάθος συνδυασμός κρυπτογράφησης/port — 587+TLS vs 465+SSL),

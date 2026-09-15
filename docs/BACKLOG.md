@@ -1147,6 +1147,15 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `config/database.php` και υπάρχουν driver branches σε `DbSnapshot`/`DbRestore`/`CustomerLedger`) δεν
   βρίσκει αρχείο. Ο guard στον `AppServiceProvider` πλέον **σκάει δυνατά** αντί να αφήσει κενή βάση, αλλά
   αν ποτέ χρειαστεί πραγματικά MySQL θέλει είτε δικό του baseline είτε καθάρισμα της σύνδεσης.
+- **Δύο «φιλάρει ηλεκτρονικά» predicates με ΔΙΑΦΟΡΕΤΙΚΗ ευαισθησία στο mode (P2, review 2026-09-15 — provider auto-email parity).**
+  Το `Invoice::shouldAutoEmailOnFinalize()` κρίνει μέσω `SendChannel::isProvider()/isDirectMyData()`, που για έναν
+  `gr-provider` tenant ΜΕ `einvoice_provider_key` αλλά `einvoice_provider_mode='off'` (η «staged, δεν φιλάρει
+  ακόμη» κατάσταση που ρητά προβλέπει ο `EInvoiceSubmitterFactory`) εξακολουθεί να διαβάζει «πάροχος» → **δεν** στέλνει
+  finalize email· και επειδή mode=off → `NullSubmitter` → ούτε acceptance email. Άρα ένας staged provider tenant χάνει
+  προσωρινά το on-issue email του κατά το staging (self-heals μόλις το mode γίνει sandbox/production). Ο αριθμητής
+  (`Company::submitsElectronically()`) είναι mode-AWARE και επιστρέφει false εδώ — οπότε τα δύο predicates διαφωνούν
+  στην ίδια γωνία. Χαμηλό impact (δεν υπάρχει `<provider>-off` επιλογή στο dropdown· self-heals). Fix αν χρειαστεί:
+  ευθυγράμμισε τα δύο σε ένα mode-aware `filesElectronically` ώστε ο staged tenant να παίρνει το finalize email όσο δεν φιλάρει.
 - **`system.update_token` (UI update token) δεν σαρώνεται από `secrets:reencrypt` (P2, DR edge).** Αποθηκεύεται
   στο `system_settings` κρυπτογραφημένο όταν `ekdosi.secrets.encrypt_at_rest` είναι on (ίδια απόφαση με το
   `MaybeEncrypted`). Όμως το `secrets:reencrypt` είναι model/cast-driven (σαρώνει MODELS + `isSecretCast`

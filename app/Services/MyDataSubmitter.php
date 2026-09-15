@@ -4,11 +4,11 @@ namespace App\Services;
 
 use App\Contracts\EInvoiceSubmitter;
 use App\Enums\MyDataMode;
-use App\Jobs\SendInvoiceEmail;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
 use App\Services\EInvoice\AadeInvoiceDocument;
+use App\Services\EInvoice\Concerns\DispatchesAcceptanceEmail;
 use App\Services\MyData\AadeDocSummary;
 use App\Services\MyData\SalesReconciler;
 use App\Services\Whmcs\WhmcsWritebackService;
@@ -71,6 +71,8 @@ use Throwable;
  */
 class MyDataSubmitter implements EInvoiceSubmitter
 {
+    use DispatchesAcceptanceEmail;
+
     public function __construct(
         private readonly Company $tenant,
         /**
@@ -384,53 +386,6 @@ class MyDataSubmitter implements EInvoiceSubmitter
         $this->dispatchAutoEmailIfEnabled($invoice);
 
         return $mark;
-    }
-
-    /**
-     * Best-effort dispatch of the customer-mail job. Silent on every
-     * tenant-opted-out path; logs (doesn't throw) if the dispatcher
-     * itself fails — we don't want a queue-connection hiccup to mask
-     * a successful AADE filing from the operator. The mail can always
-     * be re-sent via the ViewInvoice "Resend email" action.
-     *
-     * NOTE on DB::afterCommit: Laravel's transaction manager fires the
-     * callback IMMEDIATELY when there's no active transaction (verified
-     * at vendor/laravel/framework/.../DatabaseTransactionsManager.php
-     * :205). So in the IssueInvoice (CreateInvoice) path — which wraps
-     * the whole flow in Filament's outer transaction — the dispatch
-     * defers until that outer commit. But in the ViewInvoice "Submit
-     * to myDATA" path, there's no outer transaction, so the dispatch
-     * runs synchronously here. Either way, persistResponse() has
-     * already committed its own inner transaction by this point, so
-     * the invoice + mark row are durable. This is correct behaviour,
-     * not a defense — it's why we use afterCommit defensively even
-     * though it's a no-op in the common case.
-     */
-    private function dispatchAutoEmailIfEnabled(Invoice $invoice): void
-    {
-        if (! ($invoice->company?->auto_email_on_mydata_accept ?? false)) {
-            return;
-        }
-
-        // G6: respect the per-customer opt-out (default true).
-        if (! $invoice->customerAcceptsAutoEmail()) {
-            return;
-        }
-
-        $invoiceId = $invoice->getKey();
-        DB::afterCommit(function () use ($invoiceId): void {
-            try {
-                $fresh = Invoice::query()->whereKey($invoiceId)->first();
-                if ($fresh) {
-                    SendInvoiceEmail::dispatch($fresh);
-                }
-            } catch (Throwable $e) {
-                Log::warning('SendInvoiceEmail auto-dispatch failed (filing succeeded)', [
-                    'invoice_id' => $invoiceId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
-        });
     }
 
     /**
@@ -852,6 +807,16 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // Reflect the (now-confirmed) filing on WHMCS, mirroring performSubmit.
         // Best-effort, never throws, no-op for non-WHMCS invoices.
         app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, $audit->mark);
+
+        // The in-doubt self-heal reaches VALID exactly like a normal filing, so it
+        // owes the customer the same acceptance email — the earlier (timed-out)
+        // attempt never persisted or emailed. Same gate as the main dispatch at the
+        // bottom of submit(); guarded on a FRESH INSERT row so re-adopting an already
+        // -recorded MARK never re-sends. (The provider path's §14.4 recovery-adopt
+        // mirrors this in GrProviderSubmitter — the two submitters stay at parity.)
+        if ($audit->wasRecentlyCreated) {
+            $this->dispatchAutoEmailIfEnabled($invoice);
+        }
 
         return $audit;
     }

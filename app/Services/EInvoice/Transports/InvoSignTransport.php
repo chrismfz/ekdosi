@@ -175,13 +175,67 @@ class InvoSignTransport implements EInvoiceProviderTransport
         return $response->body();
     }
 
+    /**
+     * Parse InvoSign's response, tolerating the malformed bodies it sometimes
+     * returns. Seen in production on the 88-007 signature error: a junk fragment
+     * (`<response>…Code 100:Column 'provider_dignature' cannot be null…</response>`)
+     * is PREPENDED to the real document, and a stray `<?xml?>` declaration appears
+     * MID-body — either alone makes libxml reject the whole string (two roots / a
+     * declaration not at the start), so a genuine, actionable error
+     * («[88-007] Η υπογραφή δεν είναι έγκυρη») was hidden behind a generic
+     * «μη αναγνώσιμη απάντηση». Recover the last well-formed document instead.
+     *
+     * LIBXML_NONET on every parse: never resolve external entities / network from a
+     * third-party response (XXE hardening on a money path).
+     */
+    private function loadResponseXml(string $body): ?\SimpleXMLElement
+    {
+        $sx = @simplexml_load_string($body, \SimpleXMLElement::class, LIBXML_NONET);
+        if ($sx !== false) {
+            return $sx;
+        }
+
+        // Recover the LAST well-formed <ResponseDoc>…</> (the structured document),
+        // then a bare <response>…</> block — whichever parses on its own.
+        foreach (['ResponseDoc', 'response'] as $root) {
+            if (! preg_match_all('#<'.$root.'\b[^>]*>.*?</'.$root.'>#is', $body, $m)) {
+                continue;
+            }
+            foreach (array_reverse($m[0]) as $candidate) {
+                $sx = @simplexml_load_string($candidate, \SimpleXMLElement::class, LIBXML_NONET);
+                if ($sx !== false) {
+                    return $sx;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Last-resort error surface when NOTHING parses as XML: pull a <code>/<message>
+     * pair out of the raw body so the operator still sees the provider's code,
+     * falling back to the generic message only when the body carries neither.
+     */
+    private function rawErrorHint(string $body): string
+    {
+        $code = preg_match('#<code>\s*([^<]+?)\s*</code>#i', $body, $c) ? trim($c[1]) : '';
+        $message = preg_match('#<message>\s*([^<]+?)\s*</message>#i', $body, $mm) ? trim($mm[1]) : '';
+
+        if ($code === '' && $message === '') {
+            return 'InvoSign: μη αναγνώσιμη απάντηση';
+        }
+
+        return 'InvoSign: '.($code !== '' ? "[{$code}] " : '').($message !== '' ? $message : 'σφάλμα');
+    }
+
     private function parse(string $xml, bool $cancel = false, ?string $requestPayload = null): ProviderResult
     {
-        // LIBXML_NONET: never resolve external entities/network from a third-party
-        // provider's response (XXE hardening on a money path).
-        $sx = @simplexml_load_string($xml, \SimpleXMLElement::class, LIBXML_NONET);
-        if ($sx === false) {
-            return ProviderResult::failed(['InvoSign: μη αναγνώσιμη απάντηση'], $xml, $requestPayload);
+        $sx = $this->loadResponseXml($xml);
+        if ($sx === null) {
+            // Even the recovery below couldn't parse it — surface any <code>/<message>
+            // still in the raw body instead of an opaque «μη αναγνώσιμη απάντηση».
+            return ProviderResult::failed([$this->rawErrorHint($xml)], $xml, $requestPayload);
         }
 
         $resp = $sx->response ?? $sx;
