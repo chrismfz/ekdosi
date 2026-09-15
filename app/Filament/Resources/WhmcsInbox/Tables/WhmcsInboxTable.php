@@ -190,7 +190,7 @@ class WhmcsInboxTable
                     ->color(fn (string $state): string => match ($state) {
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'warning',
                         PendingWhmcsInvoice::STATUS_FILED => 'success',
-                        PendingWhmcsInvoice::STATUS_REJECTED => 'danger',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'gray',   // «Αρχειοθετημένο» — neutral, not an error
                         PendingWhmcsInvoice::STATUS_HELD => 'gray',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'info',
                         PendingWhmcsInvoice::STATUS_DRAFTED => 'info',
@@ -200,7 +200,7 @@ class WhmcsInboxTable
                     ->formatStateUsing(fn (string $state) => match ($state) {
                         PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'Προς έλεγχο',
                         PendingWhmcsInvoice::STATUS_FILED => 'Καταχωρημένο',
-                        PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
+                        PendingWhmcsInvoice::STATUS_REJECTED => 'Αρχειοθετήθηκε',
                         PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
                         PendingWhmcsInvoice::STATUS_DRAFTED => 'Προσχέδιο',
@@ -1365,30 +1365,37 @@ class WhmcsInboxTable
 
     private static function rejectAction(): Action
     {
+        // «Αρχειοθέτηση» is the operator-facing name; the internal status stays
+        // `rejected` (STATUS_REJECTED) and the column stays `rejected_reason` — only
+        // the UI strings change (same pattern as the `griniaris` role key). Softer
+        // than «Απόρριψη» for the common case: rows we deliberately ignore (δικά μας,
+        // φίλων, διπλά) rather than genuine junk. Neutral gray + archive icon so it
+        // reads as «στην άκρη», not an error — and stays visually distinct from the
+        // red, admin-only «Διαγραφή».
         return Action::make('reject')
-            ->label('Απόρριψη')
-            ->icon('heroicon-o-x-circle')
-            ->color('danger')
+            ->label('Αρχειοθέτηση')
+            ->icon('heroicon-o-archive-box-arrow-down')
+            ->color('gray')
             ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW
                 || $r->status === PendingWhmcsInvoice::STATUS_HELD)
             ->form([
                 Textarea::make('rejected_reason')
-                    ->label('Λόγος απόρριψης (προαιρετικό)')
-                    ->placeholder('π.χ. διπλό, ακυρωμένο, λάθος πελάτης, να μην καταχωρηθεί στην ΑΑΔΕ')
+                    ->label('Σημείωση αρχειοθέτησης (προαιρετικό)')
+                    ->placeholder('π.χ. δική μας υπηρεσία, φίλου, διπλό, ακυρωμένο — να μην καταχωρηθεί στην ΑΑΔΕ')
                     ->rows(3)
                     ->maxLength(200),
             ])
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Απόρριψη WHMCS #'.$r->whmcs_invoice_id.';')
-            ->modalDescription('Δεν θα καταχωρηθεί στην ΑΑΔΕ. Μπορείς να το επανεκκινήσεις αργότερα αν αλλάξεις γνώμη.')
-            ->modalSubmitActionLabel('Απόρριψη')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αρχειοθέτηση WHMCS #'.$r->whmcs_invoice_id.';')
+            ->modalDescription('Δεν θα καταχωρηθεί στην ΑΑΔΕ και φεύγει από τα «Ανοιχτά» (πάει στα «Αρχειοθετημένα»). Μπορείς να το επαναφέρεις αργότερα αν αλλάξεις γνώμη.')
+            ->modalSubmitActionLabel('Αρχειοθέτηση')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
                 $r->update([
                     'status' => PendingWhmcsInvoice::STATUS_REJECTED,
                     'rejected_reason' => trim((string) ($data['rejected_reason'] ?? '')) ?: null,
                 ]);
-                Notification::make()->title('Απορρίφθηκε')->success()->send();
+                Notification::make()->title('Αρχειοθετήθηκε')->success()->send();
             });
     }
 

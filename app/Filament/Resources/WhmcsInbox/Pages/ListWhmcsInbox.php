@@ -72,9 +72,13 @@ class ListWhmcsInbox extends BaseListRecords
                 ->badgeColor('success')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_FILED)),
 
-            'rejected' => Tab::make('Απορρίφθηκαν')
+            // «Αρχειοθετημένα» = the operator-facing name for status `rejected`
+            // (kept internally): rows set aside / ignored (δικά μας, φίλων, διπλά…),
+            // never filed at AADE, reversible via «Επαναφορά προς έλεγχο».
+            'rejected' => Tab::make('Αρχειοθετημένα')
+                ->icon('heroicon-o-archive-box')
                 ->badge($n(PendingWhmcsInvoice::STATUS_REJECTED) ?: null)
-                ->badgeColor('danger')
+                ->badgeColor('gray')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_REJECTED)),
 
             'split' => Tab::make('Διαχωρισμένα')
