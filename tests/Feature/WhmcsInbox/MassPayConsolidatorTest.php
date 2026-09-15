@@ -279,9 +279,12 @@ class MassPayConsolidatorTest extends TestCase
         $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
 
         $note = $massPay->fresh()->payload['ekdosi_invoice_note'];
+        $this->assertStringContainsString('Από συγκεντρωτικό προτιμολόγιο #32310', $note);
         $this->assertStringContainsString('εξοφλεί τα προτιμολόγια', $note);
         $this->assertStringContainsString('#32280', $note);
         $this->assertStringContainsString('Supermicro', $note);  // child label included
+        // Customer-facing: the business term «προτιμολόγιο», never «WHMCS».
+        $this->assertStringNotContainsString('WHMCS', $note);
     }
 
     public function test_consolidate_tombstones_the_children_so_a_later_fetch_cannot_restage_them(): void
