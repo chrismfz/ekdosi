@@ -15,8 +15,13 @@ namespace App\Services\Install;
  *
  * `reason` classifies the result so the wizard can give an actionable message:
  *  - ok               — connected; DB is EMPTY → safe to proceed automatically.
- *  - non_empty        — connected, but the DB already has tables that are not a
- *                       finished ekdosi install → require the override checkbox.
+ *  - non_empty        — connected, but the DB already holds a FOREIGN schema
+ *                       (WHMCS, another app…) that shares no table with our
+ *                       baseline → require the override checkbox.
+ *  - partial_ekdosi   — connected, and the DB already holds OUR schema (baseline
+ *                       tables present, `migrations` populated) from an unfinished
+ *                       install, but no admin yet → require the override, with a
+ *                       message that says so instead of «not an ekdosi install».
  *  - already_installed— connected, non-empty, AND an ekdosi admin already exists
  *                       → require the override (or point at an empty DB).
  *  - unmigratable     — connected, and at least one table the schema baseline
@@ -55,6 +60,29 @@ class MariaDbProbeResult
             reason: 'non_empty',
             message: "Συνδέθηκε, αλλά η βάση ΔΕΝ είναι κενή (περιέχει {$tableCount} πίνακες που δεν φαίνονται εγκατάσταση ekdosi). "
                 .'Βεβαιώσου ότι έδωσες τη σωστή, κενή βάση. Αν πρόκειται για ημιτελή προηγούμενη προσπάθεια, τσέκαρε «Συνέχεια σε μη-κενή βάση» και ξαναπροσπάθησε.',
+            needsOverride: true,
+            tableCount: $tableCount,
+        );
+    }
+
+    /**
+     * Non-empty, but the tables ARE the ekdosi baseline (they collide) and
+     * `migrations` is populated — a half-finished install (e.g. one whose role
+     * provisioning aborted) with no admin yet. Distinct from {@see nonEmpty()}
+     * because that one's «δεν φαίνονται εγκατάσταση ekdosi» is simply false here
+     * and misleads the operator into hunting for a «wrong» database — this IS
+     * their ekdosi database. Both still require the override; only the wording
+     * (and the recommended action) differ: here, ticking «Συνέχεια» actually
+     * completes the prior attempt.
+     */
+    public static function partialEkdosi(int $tableCount): self
+    {
+        return new self(
+            ok: false,
+            reason: 'partial_ekdosi',
+            message: "Συνδέθηκε. Η βάση περιέχει ΗΔΗ το schema του ekdosi ({$tableCount} πίνακες) από ημιτελή προηγούμενη "
+                .'προσπάθεια εγκατάστασης, αλλά δεν έχει ακόμη διαχειριστή. Για ΚΑΘΑΡΗ εγκατάσταση δώσε κενή βάση· '
+                .'για να ΟΛΟΚΛΗΡΩΘΕΙ η προηγούμενη προσπάθεια, τσέκαρε «Συνέχεια σε μη-κενή βάση» και ξαναπροσπάθησε.',
             needsOverride: true,
             tableCount: $tableCount,
         );
