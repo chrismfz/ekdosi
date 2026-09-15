@@ -144,6 +144,20 @@ already fixed: `resolveWhmcsCustomField` has its `is_array` guard, `AgedReceivab
 `mark_date`, not a bare `'date'`. Remaining CSV item = the shared `Csv::stream()` DRY,
 below.)*
 
+**P2 (review 2026-09-15, deferred — cosmetic/latent):** `BaseListRecords::removeTableFilter()`
+guards a request to clear a filter that no longer exists (fixed the reported 500) and, on the
+individual-remove path, also re-persists the cleaned state via `handleTableFilterUpdates()`.
+Two residual, harmless gaps remain — both deferred because **no table here persists filters in
+session or defers filters**, and an unregistered key is never applied to the query (wrong
+results impossible), so the worst case is a dead `?filters[x]=…` param lingering:
+- `removeTableFilters()` («καθαρισμός όλων») is NOT overridden; it iterates only currently-
+  registered filters, so an orphaned key survives a clear-all instead of being swept.
+- The guard sanitizes the *symptom* on removal, not the *source*: a page that persists filters
+  in session would keep re-hydrating a removed key on mount until it's individually dismissed.
+The clean fix for both is to strip keys absent from `getTable()->getFilters()` at
+hydration/mount, so a removed filter can never linger regardless of path. Not worth the code
+today.
+
 **TIER 7 — Ideas / low-commitment** (multi-currency, shared Contacts CRM, setup
 profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
 
