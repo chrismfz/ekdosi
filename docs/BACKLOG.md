@@ -158,6 +158,19 @@ The clean fix for both is to strip keys absent from `getTable()->getFilters()` a
 hydration/mount, so a removed filter can never linger regardless of path. Not worth the code
 today.
 
+**P2 (review 2026-09-15, bulk «Αρχειοθέτηση επιλεγμένων», deferred):** two low-severity gaps,
+both consistent with the sibling bulk delete:
+- A **held WHMCS mass-pay «container»** row (awaiting «Ενοποίηση»/«Ανάλυση») is `status=held`, so
+  a bulk archive sweeps it like any other held row and its children are never resolved — the
+  consolidate/explode intent is lost (recoverable via «Επαναφορά προς έλεγχο»). The per-row
+  archive has the same gap; bulk just makes an accidental sweep easier. Fix if it bites: exclude
+  (or warn on) mass-pay containers in `isArchivable()`/the bulk action — deferred to avoid
+  coupling the bulk op to mass-pay internals for a reversible edge.
+- The archive loop issues N `update()`s (+ observer passes) **without a transaction** (same as
+  `deleteSelectedAction`), so a mid-batch failure leaves a partial result. Benign — re-running
+  finishes the rest (already-archived rows are skipped). Wrap the loop in `DB::transaction` if we
+  ever want atomic bulk writes across both actions.
+
 **TIER 7 — Ideas / low-commitment** (multi-currency, shared Contacts CRM, setup
 profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
 

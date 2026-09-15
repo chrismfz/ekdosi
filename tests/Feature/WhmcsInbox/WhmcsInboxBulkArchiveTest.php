@@ -58,9 +58,11 @@ class WhmcsInboxBulkArchiveTest extends TestCase
         $t = $this->tenant();
         $pending = $this->row($t, PendingWhmcsInvoice::STATUS_PENDING_REVIEW);
         $held = $this->row($t, PendingWhmcsInvoice::STATUS_HELD);
-        // Skipped: a filed row (legal WHMCS↔MARK link) and one already archived.
+        // Skipped: a filed row (legal WHMCS↔MARK link) and one already archived
+        // that carries an existing note the shared bulk note must NOT clobber.
         $filed = $this->row($t, PendingWhmcsInvoice::STATUS_FILED, mark: '400001234567890');
         $already = $this->row($t, PendingWhmcsInvoice::STATUS_REJECTED);
+        $already->update(['rejected_reason' => 'παλιά σημείωση']);
 
         $this->actingOnInbox($t);
 
@@ -76,8 +78,30 @@ class WhmcsInboxBulkArchiveTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $held->refresh()->status);
         $this->assertSame('δικά μας', $held->rejected_reason);
 
-        // Untouched.
+        // Untouched: filed stays filed; the already-archived row keeps its own note.
         $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $filed->refresh()->status);
+        $already->refresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $already->status);
+        $this->assertSame('παλιά σημείωση', $already->rejected_reason);
+    }
+
+    public function test_archive_is_operator_level_while_bulk_delete_stays_admin_only(): void
+    {
+        $t = $this->tenant();
+        $this->row($t, PendingWhmcsInvoice::STATUS_PENDING_REVIEW);
+
+        // An operator: may archive (Update:PendingWhmcsInvoice) but is NOT admin
+        // (no DeleteAny) — the whole reason archive sits next to delete. Deny only
+        // the admin delete ability, allow the rest so the list still renders.
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@e.test', 'password' => bcrypt('x')]);
+        Gate::before(fn ($u, string $ability): ?bool => in_array($ability, ['deleteAny', 'DeleteAny:PendingWhmcsInvoice'], true) ? false : true);
+        $this->actingAs($user);
+        Filament::setTenant($t);
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->set('activeTab', 'all')
+            ->assertTableBulkActionVisible('archive_selected')
+            ->assertTableBulkActionHidden('delete_selected');
     }
 
     public function test_bulk_archive_note_is_optional(): void
