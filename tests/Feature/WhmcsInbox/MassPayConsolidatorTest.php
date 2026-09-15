@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
+use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\WhmcsInbox\MassPayConsolidator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
@@ -89,6 +90,11 @@ class MassPayConsolidatorTest extends TestCase
         ];
     }
 
+    private function consolidator(WhmcsInvoiceFetcher $fetcher): MassPayConsolidator
+    {
+        return new MassPayConsolidator($fetcher, app(WhmcsInvoiceIngestor::class));
+    }
+
     public function test_consolidate_merges_the_children_real_lines_into_one_payload(): void
     {
         $massPay = $this->massPayRow();
@@ -98,7 +104,7 @@ class MassPayConsolidatorTest extends TestCase
             32280 => $this->child(32280, 'Domain', 'Ανανέωση Domain - otgrowup.gr', '19.00'),
         ]);
 
-        $folded = (new MassPayConsolidator($fetcher))->consolidate($this->tenant, $massPay);
+        $folded = $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
 
         $this->assertEqualsCanonicalizing([32280, 32263, 32256], $folded);
 
@@ -125,6 +131,38 @@ class MassPayConsolidatorTest extends TestCase
         $this->assertNotNull($payload['ekdosi_masspay_source']['items']);
     }
 
+    public function test_consolidate_handles_exempt_and_taxed_lines_per_line(): void
+    {
+        // Prod reality: taxrate=0 invoices + taxed=0 lines are common. A child with
+        // BOTH a 24% and a 0% (exempt) line must be reconstructed PER LINE — a uniform
+        // gross÷1.24 back-out would mis-state the net (530.40 vs the correct 447.00 here).
+        $massPay = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 40000, 'whmcs_userid' => 979,
+            'customer_id' => $this->customer->id, 'status' => PendingWhmcsInvoice::STATUS_HELD,
+            'match_reason' => PendingWhmcsInvoice::REASON_AFM,
+            'payload' => [
+                'invoiceid' => 40000, 'userid' => 979, 'total' => '551.88', 'taxrate' => '24.000', 'status' => 'Paid',
+                'items' => ['item' => [
+                    ['type' => 'Invoice', 'relid' => 32256, 'description' => 'Αρ. Λογαριασμού #32256', 'amount' => '551.88', 'taxed' => '0'],
+                ]],
+            ],
+        ]);
+        $fetcher = $this->fetcherReturning([
+            32256 => ['invoiceid' => 32256, 'userid' => 979, 'total' => '0.00', 'taxrate' => '24.000', 'status' => 'Paid',
+                'items' => ['item' => [
+                    ['type' => 'Hosting', 'description' => 'Hosting 1y', 'amount' => '437.00', 'taxed' => '1'],   // 24%
+                    ['type' => 'Domain', 'description' => 'Domain χωρίς ΦΠΑ', 'amount' => '10.00', 'taxed' => '0'], // exempt
+                ]]],
+        ]);
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+
+        $payload = $massPay->fresh()->payload;
+        $this->assertSame('447.00', $payload['subtotal']); // 437 + 10 (NOT 551.88/1.24 = 445.06)
+        $this->assertSame('104.88', $payload['tax']);       // 437 * 24% only
+        $this->assertSame('551.88', $payload['total']);     // = the deposit
+    }
+
     public function test_consolidate_refuses_a_third_party_child_and_points_to_explode(): void
     {
         $massPay = $this->massPayRow();
@@ -139,7 +177,7 @@ class MassPayConsolidatorTest extends TestCase
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('τρίτου');
 
-        (new MassPayConsolidator($fetcher))->consolidate($this->tenant, $massPay);
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
     }
 
     public function test_consolidate_refuses_when_a_child_cannot_be_fetched(): void
@@ -151,8 +189,131 @@ class MassPayConsolidatorTest extends TestCase
         ]);
 
         $this->expectException(RuntimeException::class);
-        (new MassPayConsolidator($fetcher))->consolidate($this->tenant, $massPay);
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
 
         $this->assertSame(PendingWhmcsInvoice::STATUS_HELD, $massPay->fresh()->status, 'stays held on failure');
+    }
+
+    public function test_consolidate_refuses_when_a_child_was_already_issued_on_its_own(): void
+    {
+        // P0 (review): a child already filed/drafted separately must NOT be folded —
+        // its lines would be declared twice (its own MARK AND inside the consolidated).
+        $massPay = $this->massPayRow();
+        PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 32256,
+            'status' => PendingWhmcsInvoice::STATUS_FILED, 'match_reason' => PendingWhmcsInvoice::REASON_AFM,
+            'payload' => ['invoiceid' => 32256], 'mydata_mark' => '400009999',
+        ]);
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro', '437.00'),
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Domain', '19.00'),
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('ήδη εκδοθεί');
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+    }
+
+    public function test_consolidate_refuses_a_child_whose_lines_do_not_reconcile_to_the_payment(): void
+    {
+        // P1 (review): reconcile is now REAL — the child's own line total is compared
+        // to the mass-pay reference. #32256's lines sum to 248 gross, but the mass-pay
+        // says it settled 541.88 → refuse (would overbill by ~294).
+        $massPay = $this->massPayRow();
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro', '200.00'), // 248 gross ≠ 541.88 ref
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Domain', '19.00'),
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('δεν συμφωνεί');
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+    }
+
+    public function test_rate_comes_from_the_child_not_the_zero_rate_container(): void
+    {
+        // P1 (review): a mass-pay container can report taxrate=0 («no VAT of its own»).
+        // The rate MUST come from the taxed children, else the whole thing files at 0%.
+        $massPay = $this->massPayRow();
+        $massPay->forceFill(['payload' => array_merge($massPay->payload, ['taxrate' => '0.000'])])->save();
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro', '437.00'),  // child taxrate 24
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Domain', '19.00'),
+        ]);
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+
+        $payload = $massPay->fresh()->payload;
+        $this->assertSame('647.70', $payload['total']);   // 24% applied, NOT 0%
+        $this->assertSame('125.36', $payload['tax']);
+    }
+
+    public function test_consolidated_note_lists_the_paid_proformas(): void
+    {
+        $massPay = $this->massPayRow();
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro AMD Server', '437.00'),
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated 8C', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Ανανέωση Domain otgrowup.gr', '19.00'),
+        ]);
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+
+        $note = $massPay->fresh()->payload['ekdosi_invoice_note'];
+        $this->assertStringContainsString('εξοφλεί τα προτιμολόγια', $note);
+        $this->assertStringContainsString('#32280', $note);
+        $this->assertStringContainsString('Supermicro', $note);  // child label included
+    }
+
+    public function test_consolidate_tombstones_the_children_so_a_later_fetch_cannot_restage_them(): void
+    {
+        $massPay = $this->massPayRow();
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro', '437.00'),
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Domain', '19.00'),
+        ]);
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+
+        foreach ([32256, 32263, 32280] as $childId) {
+            $tombstone = PendingWhmcsInvoice::where('company_id', $this->tenant->id)
+                ->where('whmcs_invoice_id', $childId)->first();
+            $this->assertNotNull($tombstone, "child #{$childId} tombstoned");
+            $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $tombstone->status);
+            $this->assertSame($massPay->id, $tombstone->masspay_parent_id, 'linked for grouping');
+        }
+        // The mass-pay «has» its children for the grouped UI.
+        $this->assertCount(3, $massPay->fresh()->massPayChildren);
+    }
+
+    public function test_explode_stages_each_child_as_its_own_row_and_resolves_the_masspay(): void
+    {
+        $massPay = $this->massPayRow();
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro AMD Server', '437.00'),
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated 8C', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Ανανέωση Domain', '19.00'),
+        ]);
+
+        $staged = $this->consolidator($fetcher)->explode($this->tenant, $massPay);
+
+        $this->assertEqualsCanonicalizing([32280, 32263, 32256], $staged);
+        // The container is done.
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $massPay->fresh()->status);
+
+        // Each child is now its OWN issuable row, with its true gross reconstructed
+        // (WHMCS reported total=0) and linked back to the mass-pay for grouping.
+        $child = PendingWhmcsInvoice::where('company_id', $this->tenant->id)->where('whmcs_invoice_id', 32256)->first();
+        $this->assertNotNull($child);
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $child->status);
+        $this->assertSame($massPay->id, $child->masspay_parent_id);
+        $this->assertSame('541.88', $child->payload['total']);  // 437 net + 24%
+        $this->assertSame('437.00', $child->payload['subtotal']);
     }
 }

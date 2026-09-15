@@ -14,6 +14,7 @@ use App\Services\Whmcs\WhmcsCustomerCreateResult;
 use App\Services\Whmcs\WhmcsCustomerCreator;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Services\WhmcsInbox\MassPayConsolidator;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use App\Support\Afm;
@@ -193,6 +194,7 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_HELD => 'gray',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'info',
                         PendingWhmcsInvoice::STATUS_DRAFTED => 'info',
+                        PendingWhmcsInvoice::STATUS_RESOLVED => 'success',
                         default => 'gray',
                     })
                     ->formatStateUsing(fn (string $state) => match ($state) {
@@ -202,6 +204,7 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
                         PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
                         PendingWhmcsInvoice::STATUS_DRAFTED => 'Προσχέδιο',
+                        PendingWhmcsInvoice::STATUS_RESOLVED => 'Ολοκληρώθηκε',
                         default => $state,
                     })
                     // Surface WHY a row is held (e.g. "Αναμονή για ΑΦΜ") /
@@ -209,6 +212,7 @@ class WhmcsInboxTable
                     ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match ($r->status) {
                         PendingWhmcsInvoice::STATUS_HELD => $r->hold_reason,
                         PendingWhmcsInvoice::STATUS_REJECTED => $r->rejected_reason,
+                        PendingWhmcsInvoice::STATUS_RESOLVED => $r->notes,
                         default => null,
                     })
                     // INBOX-COLS: a filed row shows the ekdosi παραστατικό it produced,
@@ -384,6 +388,10 @@ class WhmcsInboxTable
                 // Direct «Διαχωρισμός» button on multi-party rows (visible() gates
                 // it to TP_MULTI) so splitting is one click, not buried in «…».
                 self::splitAction(),
+                // Mass-pay (συγκεντρωτικό): resolve into ONE consolidated παραστατικό
+                // or per-order — both gated to a held mass-pay row.
+                self::consolidateMassPayAction(),
+                self::explodeMassPayAction(),
                 ActionGroup::make([
                     self::openInvoiceAction(),
                     self::retryWritebackAction(),
@@ -1201,6 +1209,74 @@ class WhmcsInboxTable
      * Creates one DRAFT invoice per billing party (operator files each via the
      * normal myDATA submit path) — no risky batch AADE filing here.
      */
+    /** «Ενοποίηση»: fold a WHMCS mass-pay's children into ONE consolidated draft-source. */
+    private static function consolidateMassPayAction(): Action
+    {
+        return Action::make('consolidate_masspay')
+            ->label('Ενοποίηση σε ένα')
+            ->icon('heroicon-o-rectangle-stack')
+            ->color('primary')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => $r->isConsolidatedPayment()
+                && $r->status === PendingWhmcsInvoice::STATUS_HELD)
+            ->requiresConfirmation()
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Ενοποίηση συγκεντρωτικού WHMCS #'.$r->whmcs_invoice_id)
+            ->modalDescription('Φέρνει τις πραγματικές γραμμές των επιμέρους τιμολογίων και τις ενώνει σε ΕΝΑ '
+                .'παραστατικό (ένα κατάθεση → ένα τιμολόγιο). Μετά θα εμφανιστεί «Προς έλεγχο» για να το εκδώσεις. '
+                .'Αν κάποιο τιμολόγιο είναι τρίτου πελάτη, χρησιμοποίησε «Ανάλυση σε επιμέρους».')
+            ->modalSubmitActionLabel('Ενοποίηση')
+            ->action(function (PendingWhmcsInvoice $r) {
+                $tenant = Filament::getTenant();
+                try {
+                    $children = app(MassPayConsolidator::class)->consolidate($tenant, $r);
+                } catch (\RuntimeException $e) {
+                    Notification::make()->title('Δεν έγινε η ενοποίηση')->body($e->getMessage())
+                        ->danger()->persistent()->send();
+
+                    return;
+                }
+                Notification::make()
+                    ->title('Ενοποιήθηκε')
+                    ->body('Ενώθηκαν '.count($children).' τιμολόγια (#'.implode(', #', $children).') σε ένα '
+                        .'προσχέδιο. Άνοιξέ το «Προς έλεγχο», έλεγξέ το και έκδωσέ το.')
+                    ->success()->send();
+            });
+    }
+
+    /** «Ανάλυση σε επιμέρους»: stage each child of a WHMCS mass-pay as its own row. */
+    private static function explodeMassPayAction(): Action
+    {
+        return Action::make('explode_masspay')
+            ->label('Ανάλυση σε επιμέρους')
+            ->icon('heroicon-o-squares-2x2')
+            ->color('gray')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => $r->isConsolidatedPayment()
+                && $r->status === PendingWhmcsInvoice::STATUS_HELD)
+            ->requiresConfirmation()
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Ανάλυση συγκεντρωτικού WHMCS #'.$r->whmcs_invoice_id.' σε επιμέρους')
+            ->modalDescription('Φέρνει το κάθε επιμέρους τιμολόγιο ξεχωριστά στο inbox (ένα παραστατικό ανά '
+                .'παραγγελία), και κλείνει το συγκεντρωτικό. Τα τιμολόγια τρίτων ακολουθούν κανονικά τη δική τους '
+                .'ροή. Έκδοσε το καθένα ξεχωριστά.')
+            ->modalSubmitActionLabel('Ανάλυση')
+            ->action(function (PendingWhmcsInvoice $r) {
+                $tenant = Filament::getTenant();
+                try {
+                    $children = app(MassPayConsolidator::class)->explode($tenant, $r);
+                } catch (\RuntimeException $e) {
+                    Notification::make()->title('Δεν έγινε η ανάλυση')->body($e->getMessage())
+                        ->danger()->persistent()->send();
+
+                    return;
+                }
+                Notification::make()
+                    ->title('Αναλύθηκε σε επιμέρους')
+                    ->body('Μπήκαν '.count($children).' επιμέρους τιμολόγια στο inbox (#'.implode(', #', $children).'). '
+                        .'Έκδοσε το καθένα ξεχωριστά.')
+                    ->success()->send();
+            });
+    }
+
     private static function splitAction(): Action
     {
         return Action::make('split_third_party')

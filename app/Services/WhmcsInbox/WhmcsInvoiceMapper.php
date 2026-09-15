@@ -179,8 +179,12 @@ class WhmcsInvoiceMapper
                 // «Προτιμολόγιο» = how the operator refers to a WHMCS invoice
                 // internally; this note is customer-facing (prints on the PDF
                 // ΠΑΡΑΤΗΡΗΣΕΙΣ), so the business term reads better than the
-                // billing-system name «WHMCS».
-                'notes' => 'Από προτιμολόγιο #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
+                // billing-system name «WHMCS». A consolidated (mass-pay) source
+                // supplies a richer `ekdosi_invoice_note` («…εξοφλεί τα προτιμολόγια
+                // #a, #b, #c»); prefer it when present.
+                'notes' => ! empty($payload['ekdosi_invoice_note'])
+                    ? (string) $payload['ekdosi_invoice_note']
+                    : 'Από προτιμολόγιο #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
             ],
             'lines' => $lines,
             'totals' => $totals,

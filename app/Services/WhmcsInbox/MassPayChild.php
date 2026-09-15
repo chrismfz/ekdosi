@@ -25,6 +25,7 @@ final class MassPayChild
         public readonly float $referenceGross,
         public readonly ?int $whmcsUserId,
         public readonly bool $sameParty,
+        public readonly array $payload = [],
     ) {}
 
     /**
