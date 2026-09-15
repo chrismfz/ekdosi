@@ -481,6 +481,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Inbox alerts**: «άμεση τιμολόγηση» rows float to top + red badge + red nav badge +
   **durable bell notification** (Filament database notifications, 30s poll) on staging· 30s
   table poll· **«Τρίτος» badge** (δικαιούχος / «Πολλοί (N)») + «Άμεσο»/«Τρίτος» filters.
+  Το καμπανάκι **αυτο-καθαρίζεται** (mark-read για όλους τους operators) μόλις η γραμμή χειριστεί
+  (εκδοθεί / προσχέδιο / αρχειοθετηθεί / ενοποιηθεί / διαχωριστεί), μέσω `PendingWhmcsInvoiceObserver`
+  + structured tag στο viewData· backfill παλιών: `php artisan whmcs:resolve-immediate-bells`.
 - **Πρόθεση πελάτη** (τιμολόγιο/απόδειξη, ΑΦΜ/ΔΟΥ, «λείπει ΑΦΜ»), **legacy badge**.
 - **Εισαγωγή πελάτη από ΑΦΜ μέσα στο «Δημιουργία Παραστατικού»** — επεξεργάσιμο ΑΦΜ +
   GSIS lookup (επίσημα ΑΑΔΕ + συμπλήρωση email/τηλεφώνου/διεύθυνσης από WHMCS), δημιουργεί

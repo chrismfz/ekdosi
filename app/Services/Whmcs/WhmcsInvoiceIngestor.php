@@ -263,10 +263,13 @@ class WhmcsInvoiceIngestor
             }
 
             Notification::make()
-                ->title('Άμεσο παραστατικό προς έκδοση')
+                ->title(ImmediateInvoiceBell::TITLE)
                 ->body("WHMCS #{$row->whmcs_invoice_id} — {$row->customer?->name} ζητά άμεση τιμολόγηση.")
                 ->icon('heroicon-o-bolt')
                 ->color('danger')
+                // Structured tag so the bell can be auto-cleared once the WHMCS
+                // row is handled (ImmediateInvoiceBell::resolve, from the observer).
+                ->viewData(ImmediateInvoiceBell::tag($tenant->id, (int) $row->whmcs_invoice_id))
                 ->sendToDatabase($recipients);
         } catch (\Throwable $e) {
             Log::warning('Immediate-invoice notification failed (ingestion unaffected).', [
