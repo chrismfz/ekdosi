@@ -150,6 +150,16 @@ class GrProviderSubmitter implements EInvoiceSubmitter
             if ($adopted !== null) {
                 $this->syncWhmcsFiled($invoice, $adopted);
 
+                // Parity with the main-success path here AND with MyDataSubmitter's
+                // in-doubt self-heal (adoptMark), which emails on the same FRESH-adopt
+                // condition: a document that actually filed but whose response was lost
+                // still reaches VALID here, so it owes the customer the acceptance email
+                // too — guarded on wasRecentlyCreated so re-running the recovery over an
+                // already-adopted MARK (persistSuccess reuses the row) never re-sends.
+                if ($adopted->wasRecentlyCreated) {
+                    $this->dispatchAutoEmailIfEnabled($invoice);
+                }
+
                 return $adopted;
             }
 

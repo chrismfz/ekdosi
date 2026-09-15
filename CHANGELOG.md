@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-09-15
+
 ### Fixed
 - **InvoSign: ένα πραγματικό σφάλμα κρυβόταν πίσω από «μη αναγνώσιμη απάντηση».** Σε production
   (`88-007 «Η υπογραφή δεν είναι έγκυρη»`) ο InvoSign επιστρέφει **δύο κολλημένα XML** — ένα junk
@@ -56,7 +58,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   Μια φρέσκια αποδοχή μέσω παρόχου (VALID) βάζει στην ουρά το email με το PDF στον πελάτη, με το ΙΔΙΟ gate
   (`auto_email_on_mydata_accept` + per-customer opt-out), μέσα από κοινό trait `DispatchesAcceptanceEmail`
   ώστε οι δύο submitters να μη ξανα-αποκλίνουν. Guarded σε φρέσκο MARK (`wasRecentlyCreated`) — καμία διπλή
-  αποστολή στο idempotent adopt-on-retry. **Μαζί, διόρθωση κινδύνου διπλού email:** ο
+  αποστολή στο idempotent adopt-on-retry. **Και οι δύο adopt-on-retry δρόμοι στέλνουν πλέον το email σε
+  φρέσκια υιοθέτηση**, ίδια parity με τον κύριο δρόμο: ο provider recovery §14.4 (send timeout → status-check
+  βρίσκει MARK → adopt) στο `GrProviderSubmitter`, ΚΑΙ το direct-myDATA in-doubt self-heal (`MyDataSubmitter::adoptMark`,
+  RequestTransmittedDocs → adopt) — που πρωτύτερα υιοθετούσε το ΜΑΡΚ αλλά **δεν** έστελνε ποτέ το email του
+  πελάτη (ένα self-healed τιμολόγιο κατέληγε VALID σιωπηλά). **Μαζί, διόρθωση κινδύνου διπλού email:** ο
   `Invoice::shouldAutoEmailOnFinalize()` έκρινε με `mydata_mode`, οπότε ένας provider tenant (που έχει
   `mydata_mode='off'`) θα έστελνε auto-email και στο **finalize** ΚΑΙ στην αποδοχή· πλέον κρίνει «φιλάρει
   ηλεκτρονικά» με το κανονικό `SendChannel` brain (direct myDATA Ή πάροχος), άρα στέλνει μόνο μία φορά.

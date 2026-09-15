@@ -808,6 +808,16 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // Best-effort, never throws, no-op for non-WHMCS invoices.
         app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, $audit->mark);
 
+        // The in-doubt self-heal reaches VALID exactly like a normal filing, so it
+        // owes the customer the same acceptance email — the earlier (timed-out)
+        // attempt never persisted or emailed. Same gate as the main dispatch at the
+        // bottom of submit(); guarded on a FRESH INSERT row so re-adopting an already
+        // -recorded MARK never re-sends. (The provider path's §14.4 recovery-adopt
+        // mirrors this in GrProviderSubmitter — the two submitters stay at parity.)
+        if ($audit->wasRecentlyCreated) {
+            $this->dispatchAutoEmailIfEnabled($invoice);
+        }
+
         return $audit;
     }
 

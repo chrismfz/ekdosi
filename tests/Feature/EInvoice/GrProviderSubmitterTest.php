@@ -489,6 +489,75 @@ class GrProviderSubmitterTest extends TestCase
         Queue::assertNotPushed(SendInvoiceEmail::class);
     }
 
+    public function test_recovery_adopt_of_a_fresh_mark_queues_the_customer_email_when_opted_in(): void
+    {
+        // §14.4 parity: send() throws (lost response) but status-check finds the MARK
+        // the document DID file → a FRESH adoption reaches VALID. The customer must
+        // still be emailed, exactly as the main-success path and MyDataSubmitter's
+        // adopt-on-retry do — otherwise a degraded (but successful) filing silently
+        // skips the mail.
+        Queue::fake();
+        $this->tenant->forceFill(['auto_email_on_mydata_accept' => true])->save();
+        $this->customer->forceFill(['email' => 'c@example.test'])->save();
+
+        $submitter = new GrProviderSubmitter($this->tenant, new FakeGrTransport(send: 'throw', status: 'ok'));
+        $submitter->submit($this->makeInvoice());
+
+        Queue::assertPushed(SendInvoiceEmail::class, 1);
+    }
+
+    public function test_an_idempotent_refile_does_not_re_email_the_customer(): void
+    {
+        // Guard coverage: a PROVIDER_INSERT row for (invoice, mark) already exists
+        // (a prior attempt persisted, response lost) → re-filing the same MARK adopts
+        // the existing row (wasRecentlyCreated=false) and must NOT email a document
+        // already sent. Locks the wasRecentlyCreated gate against a future refactor.
+        Queue::fake();
+        $this->tenant->forceFill(['auto_email_on_mydata_accept' => true])->save();
+        $this->customer->forceFill(['email' => 'c@example.test'])->save();
+
+        $invoice = $this->makeInvoice();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400000000000123', // == FakeGrTransport's mark
+            'mydata_action' => 'PROVIDER_INSERT',
+            'provider_key' => 'fake',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($invoice);
+
+        Queue::assertNotPushed(SendInvoiceEmail::class);
+    }
+
+    public function test_recovery_adopt_of_an_already_recorded_mark_does_not_re_email(): void
+    {
+        // Suppression on the RECOVERY branch specifically (distinct from the main-path
+        // idempotency test above): send() throws, status-check returns a MARK we have
+        // ALREADY recorded → persistSuccess reuses the row (wasRecentlyCreated=false) →
+        // the §14.4 recovery guard must NOT re-email a document already sent.
+        Queue::fake();
+        $this->tenant->forceFill(['auto_email_on_mydata_accept' => true])->save();
+        $this->customer->forceFill(['email' => 'c@example.test'])->save();
+
+        $invoice = $this->makeInvoice();
+        MyDataMark::create([
+            'company_id' => $this->tenant->id,
+            'invoice_id' => $invoice->id,
+            'mark' => '400000000000123', // == FakeGrTransport's status mark
+            'mydata_action' => 'PROVIDER_INSERT',
+            'provider_key' => 'fake',
+            'mark_date' => now()->toDateString(),
+            'mark_time' => now()->toTimeString(),
+        ]);
+
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport(send: 'throw', status: 'ok')))->submit($invoice);
+
+        Queue::assertNotPushed(SendInvoiceEmail::class);
+    }
+
     private function makeInvoice(int $code = 1): Invoice
     {
         $invoice = Invoice::create([
