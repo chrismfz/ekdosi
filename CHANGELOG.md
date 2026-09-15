@@ -19,6 +19,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Fixed
+- **InvoSign: ένα πραγματικό σφάλμα κρυβόταν πίσω από «μη αναγνώσιμη απάντηση».** Σε production
+  (`88-007 «Η υπογραφή δεν είναι έγκυρη»`) ο InvoSign επιστρέφει **δύο κολλημένα XML** — ένα junk
+  `<response>…Column 'provider_dignature' cannot be null…</response>` + ένα stray XML prolog πριν το
+  πραγματικό `<ResponseDoc>` — που κάνει το `simplexml_load_string` να απορρίπτει όλο το body, οπότε ο
+  `InvoSignTransport::parse()` έδειχνε γενικό «μη αναγνώσιμη απάντηση» και έκρυβε το actionable σφάλμα
+  (το forensic row το κρατούσε, αλλά ο submit toast όχι). Πλέον ο parser ανακτά το **τελευταίο
+  καλοσχηματισμένο** `<ResponseDoc>`/`<response>` block· αν τίποτα δεν parse-άρει, τραβά `<code>`/`<message>`
+  από το raw body ως fallback — έτσι ο χειριστής βλέπει `[88-007] Η υπογραφή δεν είναι έγκυρη` κατευθείαν.
+  Πλήρως garbage απάντηση κρατά το γενικό μήνυμα.
 - **Ο web installer (`/install`) απέτυχε στο import bundle με σφάλμα sqlite, αφήνοντας μισο-στημένη
   εγκατάσταση χωρίς `.env`.** Ο installer επαναστοχεύει το `database.default` στη MariaDB **μέσα** στο
   request (πριν γραφτεί το `.env`), αλλά το permission cache του Spatie είχε ήδη δεθεί —στο boot του
