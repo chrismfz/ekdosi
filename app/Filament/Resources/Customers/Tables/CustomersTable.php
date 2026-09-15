@@ -44,7 +44,15 @@ class CustomersTable
             // the filter's whereRaw can reference the join aliases even
             // when the column is toggled off.
             ->modifyQueryUsing(fn (Builder $query): Builder => $query
-                ->withOutstandingBalance(Filament::getTenant()?->getKey() ?? 0))
+                ->withOutstandingBalance(Filament::getTenant()?->getKey() ?? 0)
+                // Sales-activity aliases (invoice_count / turnover /
+                // last_invoiced_at) for the «Αρ. Παρ/ων», «Τζίρος» and
+                // «Τελευταίο παρ/κό» columns + the «Δραστηριότητα» filter.
+                // Chained AFTER withOutstandingBalance (it addSelects, so the
+                // outstanding_balance alias survives). Always applied so the
+                // filter's whereRaw can reference cust_stats even when the
+                // columns are toggled off.
+                ->withInvoiceStats(Filament::getTenant()?->getKey() ?? 0))
             ->columns([
                 TextColumn::make('id')
                     ->label('#')
@@ -75,6 +83,10 @@ class CustomersTable
 
                 TextColumn::make('email')
                     ->searchable()
+                    // Sortable so blanks cluster (empties sort first/last) —
+                    // the «Χωρίς email» filter below is the direct way to find
+                    // them, now that the Πάροχος also emails the παραστατικό.
+                    ->sortable()
                     ->copyable()
                     // Truncate long addresses so they don't widen the row;
                     // full value stays available on hover + via copy.
@@ -82,10 +94,12 @@ class CustomersTable
                     ->tooltip(fn ($state): ?string => $state)
                     ->toggleable(),
 
+                // Hidden by default — rarely needed at a glance; available
+                // from the column controls when an operator wants to call.
                 TextColumn::make('phone1')
                     ->label('Phone')
                     ->copyable()
-                    ->toggleable(),
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('outstanding_balance')
                     ->label('Υπόλοιπο')
@@ -96,6 +110,39 @@ class CustomersTable
                     // Red when they owe, muted otherwise.
                     ->color(fn ($state): ?string => (float) $state > 0.005 ? 'danger' : 'gray')
                     ->toggleable(),
+
+                // Sales activity (aliases from withInvoiceStats). Sortable in
+                // SQL to spot «νεκρούς» (0) and the busiest customers at a glance.
+                TextColumn::make('invoice_count')
+                    ->label('Αρ. Παρ/ων')
+                    ->tooltip('Αριθμός εκδομένων παραστατικών (χωρίς πρόχειρα / ακυρωμένα / πιστωτικά)')
+                    ->alignRight()
+                    ->sortable()
+                    // Grey out the dead ones (0) so they stand out when sorted.
+                    ->color(fn ($state): ?string => (int) $state === 0 ? 'gray' : null)
+                    ->toggleable(),
+
+                // «Τζίρος» = καθαρός κύκλος εργασιών (net, χωρίς ΦΠΑ) — τα
+                // πιστωτικά αφαιρούνται, όπως στο βιβλίο εσόδων. Off by default —
+                // the operator opens it when ranking customers by value.
+                TextColumn::make('turnover')
+                    ->label('Τζίρος')
+                    ->tooltip('Καθαρός κύκλος εργασιών: καθαρή αξία πωλήσεων μείον πιστωτικά (χωρίς ΦΠΑ)')
+                    ->money('EUR')
+                    ->alignRight()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
+                // Dormancy signal — MAX(issued_at). A customer with many
+                // invoices but none for a long time is churning; sort here.
+                TextColumn::make('last_invoiced_at')
+                    ->label('Τελ. παρ/κό')
+                    ->tooltip('Ημερομηνία τελευταίου παραστατικού')
+                    ->date('d/m/Y')
+                    ->placeholder('—')
+                    ->alignRight()
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
 
                 IconColumn::make('is_active')
                     ->label('Active')
@@ -215,6 +262,39 @@ class CustomersTable
                             ->whereHas('invoices', fn (Builder $iq) => InvoiceScope::onlyUnissuedDrafts($iq)),
                         false: fn (Builder $query): Builder => $query
                             ->whereDoesntHave('invoices', fn (Builder $iq) => InvoiceScope::onlyUnissuedDrafts($iq)),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
+
+                // Data quality: find customers with no email on file — the ones
+                // to chase now that the Πάροχος also emails the παραστατικό.
+                // Empty string counts as «χωρίς» (legacy rows store '' not NULL).
+                TernaryFilter::make('has_email')
+                    ->label('Email')
+                    ->placeholder('Όλοι')
+                    ->trueLabel('Με email')
+                    ->falseLabel('Χωρίς email')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query
+                            ->whereNotNull('email')->where('email', '!=', ''),
+                        false: fn (Builder $query): Builder => $query
+                            ->where(fn (Builder $q) => $q->whereNull('email')->orWhere('email', '=', '')),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
+
+                // «Νεκροί» vs ενεργοί — reads the same cust_stats.invoice_count
+                // alias the «Αρ. Παρ/ων» column shows (INVOICE_COUNT_SQL), so the
+                // filter and the column can never disagree on what «έχει
+                // παραστατικά» means.
+                TernaryFilter::make('has_invoices')
+                    ->label('Δραστηριότητα')
+                    ->placeholder('Όλοι')
+                    ->trueLabel('Με παραστατικά')
+                    ->falseLabel('Χωρίς παραστατικά (νεκροί)')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query
+                            ->whereRaw(Customer::INVOICE_COUNT_SQL.' > 0'),
+                        false: fn (Builder $query): Builder => $query
+                            ->whereRaw(Customer::INVOICE_COUNT_SQL.' = 0'),
                         blank: fn (Builder $query): Builder => $query,
                     ),
 
