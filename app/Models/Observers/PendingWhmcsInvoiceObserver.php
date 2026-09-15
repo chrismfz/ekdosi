@@ -3,6 +3,8 @@
 namespace App\Models\Observers;
 
 use App\Models\PendingWhmcsInvoice;
+use App\Services\Whmcs\ImmediateInvoiceBell;
+use Illuminate\Support\Facades\Log;
 use LogicException;
 
 /**
@@ -80,5 +82,33 @@ class PendingWhmcsInvoiceObserver
             $row->mydata_mark ?? '<missing>',
             implode(', ', array_keys($dirty)),
         ));
+    }
+
+    /**
+     * Auto-clear the «Άμεσο παραστατικό προς έκδοση» operator bell the moment its
+     * WHMCS row is HANDLED — issued (filed), turned into a draft, rejected, merged
+     * (resolved) or split. The bell is a durable database notification that would
+     * otherwise stay unread until someone clicked it, worrying the desk about a
+     * παραστατικό that is already out. Only acts on a status transition INTO a
+     * handled state; best-effort (a notification hiccup must never break the
+     * lifecycle write). Touches the notifications table only — never the frozen
+     * row — so it does not fight the audit-freeze above.
+     */
+    public function updated(PendingWhmcsInvoice $row): void
+    {
+        if (! $row->wasChanged('status') || ! ImmediateInvoiceBell::isHandled($row->status)) {
+            return;
+        }
+
+        try {
+            ImmediateInvoiceBell::resolve((int) $row->company_id, (int) $row->whmcs_invoice_id);
+        } catch (\Throwable $e) {
+            Log::warning('Immediate-invoice bell auto-resolve failed (lifecycle unaffected).', [
+                'pending_id' => $row->id,
+                'company_id' => $row->company_id,
+                'whmcs_invoice_id' => $row->whmcs_invoice_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 }

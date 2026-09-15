@@ -1070,6 +1070,24 @@ assertion). Ό,τι απέμεινε:
   routing (το explode test χρησιμοποιεί ένα userid)· tax-inclusive tenant test (δεμένο με το explode fail-safe·
   μη-reachable σήμερα)· concurrency test για το tombstone clobber (row-lock tests = MariaDB-only ανά CLAUDE.md).
 
+### Immediate-invoice bell auto-resolve — surviving P2s (από το review, 2026-09-15)
+Το feature (`ImmediateInvoiceBell` + observer + `whmcs:resolve-immediate-bells`) πέρασε **χωρίς P0/P1** — tenant-safe
+(tag = kind+company+whmcs_id, ποτέ cross-clear), lifecycle-safe (resolve μέσα στο ίδιο tx, αγγίζει μόνο `read_at`).
+Ό,τι απέμεινε (accept-as-is):
+- **Scan ανά handled transition (P2-1):** το `resolve()` κάνει ένα unindexed scan στο `notifications` ακόμη κι όταν
+  η γραμμή δεν είχε ποτέ bell (μη-immediate). Operator-driven, χαμηλή συχνότητα → αμελητέο. Gate σε
+  `customer.needs_immediate_invoice` **απορρίφθηκε** (αν ξε-flagάρει ο πελάτης μετά, θα άφηνε το bell αναμμένο —
+  correctness edge χειρότερο από το micro-perf). Άσε.
+- **MariaDB JSON path χωρίς CI coverage (P2-2):** το CI είναι sqlite· οι `data->viewData->…` / `data->title`
+  where-clauses (string-valued tag, επίτηδες) είναι portable (json_unquote/json_extract), αλλά ο observer
+  swallow-άρει `\Throwable` → τυχόν άγνωστο MariaDB quirk θα «σιωπούσε» (bells δεν καθαρίζουν). **Το backfill
+  command ΔΕΝ σιωπά** (θα σκάσει visible) — τρέξ' το στο deploy ως smoke-test του query σε πραγματικό MariaDB.
+- **Legacy sweep multi-tenant false-KEEP (P2-3):** untagged bell + χρήστης σε ≥2 tenants με σύμπτωση ίδιου
+  `whmcs_invoice_id` σε waiting row άλλου tenant → μένει αναμμένο. Over-conservative (ποτέ wrong-clear/leak),
+  legacy-only + one-shot. Άσε.
+- **Force-delete (P2-5, nit):** breakglass force-delete μιας pending immediate γραμμής δεν τρέχει `deleted()` →
+  το bell μένει μέχρι το επόμενο `whmcs:resolve-immediate-bells` (που το καθαρίζει ως orphan). Αποδεκτό.
+
 ## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
 _Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._
 
