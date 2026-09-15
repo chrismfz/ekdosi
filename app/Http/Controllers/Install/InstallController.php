@@ -16,6 +16,7 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * The web first-run installer (see {@see InstallState} for the fail-closed
@@ -364,6 +365,50 @@ class InstallController
 
         DB::purge('mariadb');
         DB::reconnect('mariadb');
+
+        $this->resetBootstrappedCaches();
+    }
+
+    /**
+     * Neutralise caches that bound themselves to the PLACEHOLDER default
+     * connection during framework boot — before this request repointed the DB at
+     * the real MariaDB. The load-bearing one is Spatie's permission cache: its
+     * {@see PermissionRegistrar} singleton is constructed in
+     * the package's `boot()`, so its cache Repository was wired to a DatabaseStore
+     * on the default connection — which, with no `.env` yet, is Laravel's built-in
+     * `sqlite`. Repointing `database.default` here fixes the DB connection (the
+     * company import commits to MariaDB fine) but does NOT re-wire that already
+     * resolved cache store. So when `ekdosi:install` provisions the tenant's
+     * roles, `forgetCachedPermissions()` issues `delete from cache …` against the
+     * non-existent sqlite file, the import aborts, and the whole install returns
+     * BEFORE `.env` is written — leaving a half-imported tenant and a CLI that now
+     * also defaults to sqlite (no `.env`), so even the suggested
+     * `shield:sync-super-admin` recovery can't run.
+     *
+     * Fix: for the rest of THIS one-shot request route every cache through the
+     * in-memory array store (nothing in an install needs a persistent cache),
+     * forget the store the CacheManager already memoised against the placeholder
+     * connection, and re-init the permission registrar so its held Repository is
+     * rebuilt against the array store. The NEXT request boots fresh from the
+     * written `.env` with the real database cache on MariaDB.
+     */
+    private function resetBootstrappedCaches(): void
+    {
+        $stale = (string) config('cache.default');
+
+        config([
+            'cache.default' => 'array',
+            'permission.cache.store' => 'array',
+        ]);
+
+        // Drop the store the CacheManager memoised against the placeholder DB so
+        // any later cache use in this request rebuilds against the array store.
+        app('cache')->forgetDriver($stale);
+
+        // Rebind Spatie's held cache Repository (constructed at boot) to array.
+        if (app()->bound(PermissionRegistrar::class)) {
+            app(PermissionRegistrar::class)->initializeCache();
+        }
     }
 
     /** @return array<string, string|bool> */

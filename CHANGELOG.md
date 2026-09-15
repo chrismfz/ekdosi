@@ -18,6 +18,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **Ο web installer (`/install`) απέτυχε στο import bundle με σφάλμα sqlite, αφήνοντας μισο-στημένη
+  εγκατάσταση χωρίς `.env`.** Ο installer επαναστοχεύει το `database.default` στη MariaDB **μέσα** στο
+  request (πριν γραφτεί το `.env`), αλλά το permission cache του Spatie είχε ήδη δεθεί —στο boot του
+  package— σε `DatabaseStore` πάνω στην placeholder default σύνδεση, δηλαδή στη built-in `sqlite` του
+  Laravel (χωρίς `.env` ακόμα). Το import έγραφε σωστά την εταιρία στη MariaDB, αλλά μόλις ο
+  `ekdosi:install` προμήθευε τους ρόλους, το `forgetCachedPermissions()` έτρεχε `delete from cache …`
+  πάνω στο ανύπαρκτο `database.sqlite` → η εγκατάσταση ματαίωνε **πριν** το βήμα εγγραφής του `.env`,
+  αφήνοντας μισο-εισηγμένο tenant και ένα CLI που πλέον έπεφτε κι αυτό σε sqlite (χωρίς `.env`), οπότε
+  ούτε η προτεινόμενη ανάκαμψη `shield:sync-super-admin` έτρεχε. Πλέον, τη στιγμή που επαναστοχεύεται η
+  βάση, ο installer δρομολογεί όλο το cache του request στο in-memory `array` store και ξανα-αρχικοποιεί
+  τον `PermissionRegistrar` — ο επόμενος request ξεκινά καθαρός από το γραμμένο `.env`. Regression test
+  αναπαράγει το ακριβές σφάλμα (permission cache δεμένο σε νεκρό sqlite) και επιβεβαιώνει το array store.
+
 ### Added
 - **`INSTALL.md §17` — εγκατάσταση σε cPanel / CloudLinux (shared hosting).** Συγκεντρώνει τα gotchas
   από το στήσιμο του `invoicer.myip.gr`: CLI PHP 8.4 μέσω `PATH` στο `ea-php84` (το MultiPHP ρυθμίζει
