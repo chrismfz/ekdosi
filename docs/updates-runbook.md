@@ -227,10 +227,16 @@ actually recover». For a restore when the **APP_KEY is lost**, see
   - **διακοπή ΠΡΙΝ το `migrations`** → δεδομένα χωρίς `migrations`. Το `migrate`
     **αποτυγχάνει σταθερά** («Table ... already exists» — by design, ώστε να μη σβήσει
     τα δεδομένα) και δεν πρόκειται να πετύχει ποτέ.
-  - **διακοπή ΜΕΤΑ το `migrations`** (η επικίνδυνη) → το `migrations` είναι ΠΛΗΡΕΣ,
-    οπότε το `migrate` λέει **«Nothing to migrate», βγαίνει με 0** και φαίνεται
-    πράσινο — πάνω σε βάση που λείπουν όλοι οι πίνακες από `mydata_*` ως `whmcs_*`.
-    **Πράσινο `migrate` ΔΕΝ είναι απόδειξη ότι η επαναφορά ολοκληρώθηκε.**
+  - **διακοπή ΜΕΤΑ το `migrations`** → το `migrations` είναι ΠΛΗΡΕΣ, οπότε το
+    `migrate` λέει **«Nothing to migrate», βγαίνει με 0** και φαίνεται πράσινο —
+    πάνω σε βάση που λείπουν όλοι οι πίνακες από `model_has_permissions` (54/105:
+    **οι ρόλοι όλων των χρηστών**) ως `whmcs_*`.
+  - **διακοπή με ΜΗΔΕΝ πίνακες** (το `DROP`/`CREATE DATABASE` πέτυχε, το stream
+    πέθανε αμέσως) → το `migrate` βρίσκει καθαρή βάση, φορτώνει ΟΛΟ το baseline και
+    βγαίνει με 0: **πλήρες schema, μηδέν δεδομένα**. Η χειρότερη από τις τρεις,
+    γιατί δεν φαίνεται τίποτα.
+
+  **Πράσινο `migrate` ΔΕΝ είναι απόδειξη ότι η επαναφορά ολοκληρώθηκε.**
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.

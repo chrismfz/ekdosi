@@ -22,6 +22,9 @@ class SchemaBaselineTest extends TestCase
     // we opt back in. Without this the guard test would pass vacuously.
     use WithConsoleEvents;
 
+    /** Throwaway migration written to disk by the guard test below; never committed. */
+    private const PROBE_MIGRATION = '9999_12_31_000000_schema_baseline_guard_probe';
+
     private function baseline(string $connection): string
     {
         $path = database_path("schema/{$connection}-schema.sql");
@@ -143,20 +146,42 @@ class SchemaBaselineTest extends TestCase
      */
     public function test_the_no_baseline_guard_survives_a_post_squash_migration(): void
     {
-        $file = database_path('migrations/9999_12_31_000000_schema_baseline_guard_probe.php');
+        $file = database_path('migrations/'.self::PROBE_MIGRATION.'.php');
         file_put_contents($file, "<?php\n\nreturn new class extends \\Illuminate\\Database\\Migrations\\Migration {};\n");
+
+        // NOTE: catch ONLY around the Artisan call, and assert afterwards.
+        // Wrapping the assertions too would swallow them — PHPUnit's
+        // AssertionFailedError IS a RuntimeException, so a `fail()` inside the
+        // try lands in our own catch and gets re-reported as a bogus message
+        // mismatch instead of the real diagnostic.
+        $thrown = null;
 
         try {
             $this->assertNotEmpty(glob(database_path('migrations/*.php')), 'the probe migration must be on disk');
 
             Artisan::call('migrate', ['--database' => 'pgsql', '--force' => true]);
-
-            $this->fail('migrate on a baseline-less connection must still be refused once migrations exist');
         } catch (RuntimeException $e) {
-            $this->assertMatchesRegularExpression('/Καμία πηγή schema/u', $e->getMessage());
+            $thrown = $e;
         } finally {
             @unlink($file);
         }
+
+        $this->assertNotNull($thrown, 'migrate on a baseline-less connection must still be refused once migrations exist');
+        $this->assertMatchesRegularExpression('/Καμία πηγή schema/u', $thrown->getMessage());
+    }
+
+    /**
+     * Belt and braces for the test above: `finally` covers a throw but not a
+     * SIGKILL/fatal, and a leaked probe file is invisible — it is not in the
+     * baseline, so the «already inside the baseline» test happily passes on it,
+     * and it would ship as a phantom migration row on prod.
+     */
+    public function test_no_leftover_guard_probe_migration_was_committed(): void
+    {
+        $this->assertFileDoesNotExist(
+            database_path('migrations/'.self::PROBE_MIGRATION.'.php'),
+            'a guard-probe migration leaked from test_the_no_baseline_guard_survives_a_post_squash_migration — delete it'
+        );
     }
 
     /** The connections we DO ship a baseline for must not trip that guard. */

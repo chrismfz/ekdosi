@@ -19,9 +19,10 @@ namespace App\Services\Install;
  *                       finished ekdosi install → require the override checkbox.
  *  - already_installed— connected, non-empty, AND an ekdosi admin already exists
  *                       → require the override (or point at an empty DB).
- *  - unmigratable     — connected, carries an ekdosi schema, but the `migrations`
- *                       table is missing/empty → a DEAD END the override cannot
- *                       rescue (see the factory below). Hard stop.
+ *  - unmigratable     — connected, and at least one table the schema baseline
+ *                       would CREATE already exists while `migrations` is
+ *                       missing/empty → a DEAD END the override cannot rescue
+ *                       (see the factory below). Hard stop.
  *  - driver_missing   — pdo_mysql not compiled into this PHP.
  *  - unreachable      — host/port not answering (firewall / wrong host / down).
  *  - auth             — server answered but user/password rejected.
@@ -78,24 +79,33 @@ class MariaDbProbeResult
      * Since the v2.0.2 squash the schema comes from `database/schema/*-schema.sql`,
      * and `MigrateCommand::prepareDatabase()` loads that baseline whenever
      * `hasRunAnyMigrations()` is false — i.e. whenever `migrations` is missing or
-     * empty, REGARDLESS of the data tables already sitting there. So an ekdosi
-     * schema with no migration rows (an aborted `ekdosi:db-restore`, or an
-     * install whose own `migrate` died mid-baseline — `loadSchemaState()` calls
-     * `deleteRepository()` BEFORE it runs the dump) is unrecoverable from the
-     * wizard: every retry re-attempts the baseline and dies on the first
-     * `CREATE TABLE … already exists`. Ticking «Συνέχεια σε μη-κενή βάση» just
-     * loops. Say so, and name the one action that works.
+     * empty, REGARDLESS of the data tables already sitting there. So a database
+     * already holding ANY table the baseline creates, with no migration rows (an
+     * aborted `ekdosi:db-restore`, or an install whose own `migrate` died
+     * mid-baseline — `loadSchemaState()` calls `deleteRepository()` BEFORE it
+     * runs the dump), is unrecoverable from the wizard: every retry re-attempts
+     * the baseline and dies on the first `CREATE TABLE … already exists`.
+     * Ticking «Συνέχεια σε μη-κενή βάση» just loops. Say so, and name the
+     * actions that work.
+     *
+     * The advice is deliberately ordered restore-first: all the probe knows is
+     * «baseline tables + no migration rows», which is ALSO the shape of a
+     * COMPLETE database whose `migrations` table was truncated or dropped out of
+     * band. It cannot prove this DB is junk, so it must not tell the operator to
+     * drop it without qualification — those tables may hold live παραστατικά.
      */
     public static function unmigratable(int $tableCount): self
     {
         return new self(
             ok: false,
             reason: 'unmigratable',
-            message: "Συνδέθηκε, και η βάση περιέχει ήδη πίνακες ekdosi ({$tableCount}), αλλά ο πίνακας `migrations` "
+            message: "Συνδέθηκε, και η βάση περιέχει ήδη πίνακες του schema ({$tableCount} συνολικά), αλλά ο πίνακας `migrations` "
                 .'λείπει ή είναι άδειος. Αυτό είναι υπόλειμμα ημιτελούς εγκατάστασης ή διακοπείσας επαναφοράς '
                 .'(ekdosi:db-restore) και ΔΕΝ διορθώνεται με επανάληψη — το migrate θα ξαναπροσπαθήσει να χτίσει '
-                .'το schema από την αρχή και θα σκάσει σε «Table … already exists». Είτε ολοκλήρωσε την επαναφορά '
-                .'(ξανατρέξε το ekdosi:db-restore από την αρχή), είτε δώσε ΚΕΝΗ βάση (DROP DATABASE / CREATE DATABASE).',
+                .'το schema από την αρχή και θα σκάσει σε «Table … already exists». Η λύση: ξανατρέξε την ΕΠΑΝΑΦΟΡΑ '
+                .'(ekdosi:db-restore) από την αρχή. ΜΟΝΟ αν είσαι βέβαιος ότι αυτή η βάση δεν κρατά δεδομένα που '
+                .'χρειάζεσαι (έλεγξε πρώτα π.χ. SELECT COUNT(*) FROM invoices), δώσε ΚΕΝΗ βάση με DROP DATABASE / '
+                .'CREATE DATABASE.',
             needsOverride: false,
             tableCount: $tableCount,
         );

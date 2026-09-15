@@ -28,6 +28,9 @@ class MariaDbConnectionTester
     /** @var (Closure(string, string, string): PDO)|null test seam: (dsn, user, password) → PDO */
     private $connectionFactory;
 
+    /** @var list<string>|null memoised baseline table names ({@see baselineTables()}) */
+    private static ?array $baselineTables = null;
+
     /**
      * @param  (Closure(string, string, string): PDO)|null  $connectionFactory
      */
@@ -94,13 +97,16 @@ class MariaDbConnectionTester
             return MariaDbProbeResult::emptyDatabase();
         }
 
-        // Non-empty. Post-squash, OUR OWN tables + no migration rows is the one
-        // combination `migrate` can never get past (the baseline re-runs and
-        // collides), so it must not be offered the override checkbox. Keyed on
-        // ekdosi tables specifically, NOT on «non-empty»: a foreign schema
-        // (WHMCS, another app) shares no table names with the baseline, so that
-        // DB still loads it fine and keeps its existing overridable path.
-        if ($this->looksLikeEkdosi($pdo) && $this->migrationRows($pdo) === 0) {
+        // Non-empty. A table the baseline will CREATE + no migration rows is
+        // the one combination `migrate` can never get past, so it must not be
+        // offered the override checkbox. Asked as «does ANY baseline table
+        // already exist», NOT «do these two exist»: the dead end is created by
+        // an abort at an ARBITRARY point of an alphabetical table load, so
+        // keying it on specific tables only catches the aborts that happened to
+        // reach them. It is also not «is the DB non-empty» — a foreign schema
+        // (WHMCS's tbl*) shares no name with the baseline, so `migrate` loads
+        // fine there and that DB keeps its overridable path.
+        if ($this->collidesWithBaseline($pdo) && $this->migrationRows($pdo) === 0) {
             return MariaDbProbeResult::unmigratable($tableCount);
         }
 
@@ -140,21 +146,81 @@ class MariaDbConnectionTester
     }
 
     /**
-     * Do ekdosi's OWN tables live here? Two of the baseline's earliest tables —
-     * one would be enough, but a foreign schema owning a table called `users`
-     * is entirely plausible, while `companies` + `invoices` together is not.
+     * Does this database already hold a table the schema baseline would CREATE?
+     * That — and only that — is what makes `migrate` collide.
+     *
+     * `migrations` is deliberately EXCLUDED from the comparison even though the
+     * baseline creates it: `loadSchemaState()` calls `deleteRepository()`, which
+     * DROPS that table, before it loads the dump. So a database whose only
+     * overlap is `migrations` (an earlier attempt that got as far as
+     * `migrate:install` and died) is NOT a dead end — `migrate` recovers it
+     * cleanly, and hard-stopping it would be a false positive.
      */
-    private function looksLikeEkdosi(PDO $pdo): bool
+    private function collidesWithBaseline(PDO $pdo): bool
     {
-        foreach (['companies', 'invoices'] as $table) {
+        $tables = $this->baselineTables();
+
+        if ($tables === []) {
+            return false;   // no baseline on disk → nothing to collide with; fail open
+        }
+
+        $placeholders = implode(',', array_fill(0, count($tables), '?'));
+        $queries = [
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ({$placeholders})",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ({$placeholders})",
+        ];
+
+        foreach ($queries as $sql) {
             try {
-                $pdo->query("SELECT 1 FROM {$table} LIMIT 1");
+                $statement = $pdo->prepare($sql);
+                $statement->execute($tables);
+
+                return ((int) $statement->fetchColumn()) > 0;
             } catch (Throwable) {
-                return false;
+                continue;
             }
         }
 
-        return true;
+        return false;
+    }
+
+    /**
+     * The table names the committed baseline creates, read from the dump itself
+     * so this can never drift from the real schema. Both engines list the same
+     * 105 tables; whichever file is present wins. Memoised — the probe reads it
+     * at most once per process.
+     *
+     * @return list<string>
+     */
+    private function baselineTables(): array
+    {
+        if (self::$baselineTables !== null) {
+            return self::$baselineTables;
+        }
+
+        $names = [];
+
+        foreach (['mariadb', 'sqlite'] as $connection) {
+            $path = database_path("schema/{$connection}-schema.sql");
+
+            if (! is_file($path)) {
+                continue;
+            }
+
+            preg_match_all(
+                '/^CREATE TABLE (?:IF NOT EXISTS )?[`"]([^`"]+)[`"]/mi',
+                (string) file_get_contents($path),
+                $matches
+            );
+            $names = array_merge($names, $matches[1]);
+
+            if ($names !== []) {
+                break;
+            }
+        }
+
+        // See collidesWithBaseline(): migrate drops `migrations` before loading.
+        return self::$baselineTables = array_values(array_diff(array_unique($names), ['migrations']));
     }
 
     /** Rows in `migrations`; 0 when the table is empty OR absent — the same thing to `migrate`. */

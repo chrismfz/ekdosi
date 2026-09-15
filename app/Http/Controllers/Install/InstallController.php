@@ -128,9 +128,17 @@ class InstallController
             password: (string) ($data['db_password'] ?? ''),
         );
 
-        // A real connection failure (auth / unreachable / unknown DB) always stops.
+        // A real connection failure (auth / unreachable / unknown DB) always
+        // stops — and so does `unmigratable`, which is NOT a connection failure:
+        // we connected fine, the DATABASE is the dead end. Prefixing that one
+        // with «Η σύνδεση απέτυχε» contradicts its own first word («Συνδέθηκε…»)
+        // and sends the operator off checking host/user/password.
         if (! $probe->ok && ! $probe->needsOverride) {
-            return $this->redisplay($request, ['Η σύνδεση στη βάση απέτυχε: '.$probe->message]);
+            return $this->redisplay($request, [
+                $probe->reason === 'unmigratable'
+                    ? $probe->message
+                    : 'Η σύνδεση στη βάση απέτυχε: '.$probe->message,
+            ]);
         }
 
         // ANY non-empty target DB is REFUSED by default — a foreign DB (WHMCS,
