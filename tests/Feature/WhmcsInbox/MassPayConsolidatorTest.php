@@ -316,4 +316,69 @@ class MassPayConsolidatorTest extends TestCase
         $this->assertSame('541.88', $child->payload['total']);  // 437 net + 24%
         $this->assertSame('437.00', $child->payload['subtotal']);
     }
+
+    public function test_explode_refuses_a_child_that_does_not_reconcile(): void
+    {
+        // P2 (review): explode reconstructs net/gross the same way consolidate does,
+        // so it needs the same fail-safe — a child that carries a reference but whose
+        // lines don't sum to it (wrong rate / tax-inclusive tenant) must NOT be staged
+        // double-taxed. #32256's lines give 248 gross vs the 541.88 reference → refuse,
+        // and the container stays untouched (still resolvable by hand).
+        $massPay = $this->massPayRow();
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro', '200.00'), // 248 gross ≠ 541.88 ref
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Domain', '19.00'),
+        ]);
+
+        try {
+            $this->consolidator($fetcher)->explode($this->tenant, $massPay);
+            $this->fail('expected explode to refuse a non-reconciling child');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('δεν συμφωνεί', $e->getMessage());
+        }
+
+        // Nothing staged, container untouched (all-or-nothing).
+        $this->assertSame(PendingWhmcsInvoice::STATUS_HELD, $massPay->fresh()->status);
+        $this->assertSame(0, PendingWhmcsInvoice::where('company_id', $this->tenant->id)
+            ->whereIn('whmcs_invoice_id', [32256, 32263, 32280])->count());
+    }
+
+    public function test_consolidate_refuses_when_a_child_is_already_drafted_on_its_own(): void
+    {
+        // P2 (review): the double-fold guard covers DRAFTED too (not just FILED) and
+        // now runs INSIDE the fold transaction under a row lock on each child.
+        $massPay = $this->massPayRow();
+        PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 32263,
+            'status' => PendingWhmcsInvoice::STATUS_DRAFTED, 'match_reason' => PendingWhmcsInvoice::REASON_AFM,
+            'payload' => ['invoiceid' => 32263],
+        ]);
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro', '437.00'),
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Domain', '19.00'),
+        ]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('ήδη εκδοθεί');
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+    }
+
+    public function test_it_refuses_a_masspay_that_belongs_to_another_tenant(): void
+    {
+        // P2 (review): defensive tenant scoping — the service asserts the pairing.
+        $other = Company::create([
+            'name' => 'Other AE', 'slug' => 'other-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox',
+        ]);
+        $massPay = $this->massPayRow(); // belongs to $this->tenant
+        $fetcher = $this->fetcherReturning([]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('tenant mismatch');
+
+        $this->consolidator($fetcher)->consolidate($other, $massPay);
+    }
 }

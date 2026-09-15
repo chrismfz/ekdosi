@@ -1025,6 +1025,35 @@ data model + phase gates: **`PLAN.md`**.
   πάντα array). Στον γκρινιάρη-mirror το καταπίνει το best-effort `\Throwable` catch· στο create-seed
   (`WhmcsCustomerCreator`) όχι. Fix = ένας κοινός guard `is_array($customfields)` στην κορυφή του reader.
 
+### Mass-pay consolidation — surviving P2s (από το adversarial review, 2026-09-15)
+Το feature (CONSOLIDATE/EXPLODE ενός WHMCS συγκεντρωτικού) πέρασε **χωρίς reachable P0/P1** για τη σημερινή
+διαμόρφωση (όλοι mainland-GR, net-per-line WHMCS, single 24%). Εφαρμόστηκαν οι φθηνές θωρακίσεις (child-rate,
+per-line reconcile oracle, P0 double-fold guard **μέσα** στο tx με row-lock, explode reconcile fail-safe, tenant
+assertion). Ό,τι απέμεινε:
+- **Lifecycle/reversibility (P2-2):** μετά το CONSOLIDATE τα τέκνα μένουν `resolved` tombstones linked στο mass-pay.
+  Αν ο χειριστής μετά (α) **ακυρώσει** το εκδοθέν ενοποιημένο, ή (β) **διαγράψει** το ακόμα-`pending_review`
+  mass-pay row (`isDeletable` το επιτρέπει — δεν έχει invoice_id/mark· FK = `nullOnDelete`), τα τέκνα μένουν
+  `resolved` χωρίς inbox path πίσω (`reStageAction` μόνο για REJECTED/HELD) — ανακτώνται μόνο με νέο WHMCS
+  re-fetch, και το reconstructed breakdown χάνεται στη διαγραφή (`ekdosi_masspay_source` κρατά μόνο items+total).
+  Fix: σε cancel του ενοποιημένου → re-open/allow re-stage των tombstones· κάνε το consolidated pending row
+  **μη-διαγράψιμο** (route to reject). Θέλει lifecycle σχεδιασμό — χαμηλή πιθανότητα στη συνήθη ροή.
+- **Auto-issue bypass (P2-5, judgment call):** μετά το merge `isConsolidatedPayment()` → false, οπότε ο
+  consolidated-guard του `WhmcsAutoIssue::chooseType` δεν το κρατά· σε tenant που έχει armed
+  `whmcs_auto_issue_immediate` ΚΑΙ ο πελάτης είναι `needs_immediate_invoice`, το ενοποιημένο **μπορεί** να
+  αυτο-φιλαριστεί χωρίς το manual review. **Τα χρήματα είναι σωστά** (ισχύουν όλα τα file-guards) και είναι
+  συνεπές με το ρητό opt-in του tenant στο auto-issue — γι' αυτό αφήνεται. Αν θέλουμε «manual issue μετά το
+  consolidate», ο guard είναι one-liner: κράτα rows που φέρουν `ekdosi_consolidated_children` στο payload.
+- **Reduced-rate flatten (P2-4, μη-reachable):** το ενοποιημένο stampάρει ένα `taxrate` (child[0]) κι ο mapper
+  εφαρμόζει το tenant default σε κάθε taxed γραμμή — μείξη 24%+13% θα έβγαζε λάθος per-rate ΦΠΑ. Κανένας tenant
+  με reduced rates σήμερα· ήδη documented στον κώδικα. (Άσε — ίδιος περιορισμός με τον single-rate mapper.)
+- **Text-only refs χωρίς relid (P2-7):** στο heuristic-text detection path (slimmed bridge feed, χωρίς per-line
+  `relid`) `referenceGross=0` → το CONSOLIDATE αρνείται (reconcile fails). Fails safe (το EXPLODE δουλεύει —
+  εκεί ο reconcile guard τρέχει μόνο όταν `referenceGross>0`). Fix: parse το child id από το description της
+  reference γραμμής όταν λείπει το relid. Σπάνιο feed shape (το πραγματικό #32310 έχει relids).
+- **Test gaps (deferred):** cancel/delete-after-consolidate lifecycle test (δεμένο με P2-2)· explode third-party
+  routing (το explode test χρησιμοποιεί ένα userid)· tax-inclusive tenant test (δεμένο με το explode fail-safe·
+  μη-reachable σήμερα)· concurrency test για το tombstone clobber (row-lock tests = MariaDB-only ανά CLAUDE.md).
+
 ## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
 _Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._
 

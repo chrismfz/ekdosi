@@ -36,6 +36,11 @@ class MassPayConsolidator
      */
     public function plan(Company $tenant, PendingWhmcsInvoice $massPay): MassPayConsolidation
     {
+        // Defensive tenant scoping (the Filament table already pairs them, but the
+        // service is the one writing legal rows — assert, don't assume).
+        if ((int) $massPay->company_id !== (int) $tenant->id) {
+            throw new RuntimeException('Το mass-pay ανήκει σε άλλον πελάτη (tenant mismatch).');
+        }
         if (! $massPay->isConsolidatedPayment()) {
             throw new RuntimeException('Το παραστατικό δεν είναι συγκεντρωτικό WHMCS (mass-pay).');
         }
@@ -143,31 +148,37 @@ class MassPayConsolidator
             }
         }
 
-        // P0: never FOLD a child that already exists as an ISSUED or DRAFTED row on
-        // its own — its lines are about to be merged into the consolidated invoice,
-        // so folding one that's separately filed/drafted double-declares it (its own
-        // ΑΑ+MARK AND again inside the consolidated). Refuse the whole consolidation.
+        // P0: never FOLD a child that already exists as an ISSUED / DRAFTED / linked
+        // row on its own — its lines are about to be merged into the consolidated
+        // invoice, so folding one that's separately filed/drafted double-declares it
+        // (its own ΑΑ+MARK AND again inside the consolidated). The guard AND the fold
+        // run in ONE transaction, holding a row lock on every child, so a concurrent
+        // draft/file landing between plan() and here can't slip a child past the
+        // check (TOCTOU).
         $childIds = array_map(fn (MassPayChild $c): int => $c->whmcsInvoiceId, $plan->sameParty);
-        $alreadyIssued = PendingWhmcsInvoice::query()
-            ->where('company_id', $tenant->id)
-            ->whereIn('whmcs_invoice_id', $childIds)
-            ->where(function ($q): void {
-                $q->whereIn('status', [PendingWhmcsInvoice::STATUS_FILED, PendingWhmcsInvoice::STATUS_DRAFTED])
-                    ->orWhereNotNull('invoice_id');
-            })
-            ->pluck('whmcs_invoice_id')
-            ->all();
-        if ($alreadyIssued !== []) {
-            throw new RuntimeException(
-                'Κάποια επιμέρους τιμολόγια έχουν ήδη εκδοθεί ή προσχεδιαστεί ξεχωριστά (#'
-                .implode(', #', $alreadyIssued).') — δεν γίνεται ενοποίηση (θα διπλομετρούσε). '
-                .'Εξέδωσε τα υπόλοιπα ξεχωριστά με «Ανάλυση σε επιμέρους».'
-            );
-        }
-
         $merged = $this->buildConsolidatedPayload($massPay->payload ?? [], $plan);
 
-        return DB::transaction(function () use ($tenant, $massPay, $merged, $plan): array {
+        return DB::transaction(function () use ($tenant, $massPay, $merged, $plan, $childIds): array {
+            // Lock every EXISTING child row up front, for the whole fold.
+            $locked = PendingWhmcsInvoice::query()
+                ->where('company_id', $tenant->id)
+                ->whereIn('whmcs_invoice_id', $childIds)
+                ->lockForUpdate()
+                ->get()
+                ->keyBy('whmcs_invoice_id');
+
+            $alreadyIssued = $locked
+                ->filter(fn (PendingWhmcsInvoice $r): bool => $this->hasProgressedAlone($r))
+                ->keys()
+                ->all();
+            if ($alreadyIssued !== []) {
+                throw new RuntimeException(
+                    'Κάποια επιμέρους τιμολόγια έχουν ήδη εκδοθεί ή προσχεδιαστεί ξεχωριστά (#'
+                    .implode(', #', $alreadyIssued).') — δεν γίνεται ενοποίηση (θα διπλομετρούσε). '
+                    .'Εξέδωσε τα υπόλοιπα ξεχωριστά με «Ανάλυση σε επιμέρους».'
+                );
+            }
+
             $massPay->forceFill([
                 'payload' => $merged,
                 'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
@@ -177,14 +188,11 @@ class MassPayConsolidator
             // Tombstone each folded child (resolved, linked) so a later fetch can't
             // re-stage it as a stray invoice — the consolidated row now represents
             // it — and so the UI can group «τα τρία κάτω από αυτό». Never clobber a
-            // child that was somehow already filed on its own.
+            // child that has progressed on its own (the guard above would have
+            // thrown; belt-and-suspenders in case it's ever relaxed).
             foreach ($plan->sameParty as $child) {
-                $existing = PendingWhmcsInvoice::query()
-                    ->where('company_id', $tenant->id)
-                    ->where('whmcs_invoice_id', $child->whmcsInvoiceId)
-                    ->lockForUpdate()
-                    ->first();
-                if ($existing?->status === PendingWhmcsInvoice::STATUS_FILED) {
+                $existing = $locked->get($child->whmcsInvoiceId);
+                if ($existing !== null && $this->hasProgressedAlone($existing)) {
                     continue;
                 }
                 PendingWhmcsInvoice::updateOrCreate(
@@ -202,7 +210,7 @@ class MassPayConsolidator
                 );
             }
 
-            return array_map(fn (MassPayChild $c): int => $c->whmcsInvoiceId, $plan->sameParty);
+            return $childIds;
         });
     }
 
@@ -228,6 +236,23 @@ class MassPayConsolidator
             throw new RuntimeException('Δεν βρέθηκαν τέκνα προς ανάλυση.');
         }
 
+        // Fail safe on a child whose reconstructed gross doesn't match the mass-pay's
+        // per-child reference — but ONLY when there IS a reference to check. The
+        // text-only detection path (slimmed bridge feed) carries no per-line relid,
+        // so referenceGross is 0 there and we fall back to the ingestor as before. A
+        // mismatch on a child that DOES have a reference means a wrong rate OR a
+        // tax-inclusive tenant whose `amount`s aren't net — staging it would file the
+        // wrong ΦΠΑ, so refuse and let the operator resolve it by hand.
+        foreach ($plan->fetched() as $child) {
+            if ($child->referenceGross > 0.0 && ! $child->reconciles()) {
+                throw new RuntimeException(
+                    'Το τέκνο #'.$child->whmcsInvoiceId.' δεν συμφωνεί με το ποσό της μαζικής πληρωμής '
+                    .'(γραμμές '.number_format($child->gross, 2).' € vs '.number_format($child->referenceGross, 2)
+                    .' €) — έλεγξέ το χειροκίνητα.'
+                );
+            }
+        }
+
         $staged = [];
         foreach ($plan->fetched() as $child) {
             $corrected = $this->buildChildPayload($child);
@@ -237,8 +262,8 @@ class MassPayConsolidator
                 ->where('company_id', $tenant->id)
                 ->where('whmcs_invoice_id', $child->whmcsInvoiceId)
                 ->first();
-            // Never re-link an already-filed child (issued on its own earlier).
-            if ($row !== null && $row->status !== PendingWhmcsInvoice::STATUS_FILED) {
+            // Never re-link a child that has progressed on its own (filed/drafted/linked).
+            if ($row !== null && ! $this->hasProgressedAlone($row)) {
                 $row->forceFill(['masspay_parent_id' => $massPay->id])->save();
             }
             $staged[] = $child->whmcsInvoiceId;
@@ -251,6 +276,20 @@ class MassPayConsolidator
         ])->save();
 
         return $staged;
+    }
+
+    /**
+     * A pending row that has advanced past staging on its own — issued (FILED),
+     * turned into an editable draft (DRAFTED), or already linked to a real ekdosi
+     * invoice. Folding/re-linking such a child would double-declare it.
+     */
+    private function hasProgressedAlone(PendingWhmcsInvoice $row): bool
+    {
+        return $row->invoice_id !== null
+            || in_array($row->status, [
+                PendingWhmcsInvoice::STATUS_FILED,
+                PendingWhmcsInvoice::STATUS_DRAFTED,
+            ], true);
     }
 
     /**
