@@ -50,10 +50,12 @@ class WhmcsInboxResource extends Resource
     protected static ?string $recordTitleAttribute = 'whmcs_invoice_id';
 
     /**
-     * Navigation badge: count of pending_review rows for the current tenant —
-     * "X invoices waiting" without clicking in. (Deliberately NOT memoised in a
-     * process-static: that would serve stale counts across requests under Octane.
-     * Two cheap indexed queries per render are fine.)
+     * Navigation badge: count of OPEN rows for the current tenant — «Προς έλεγχο»
+     * PLUS «Σε αναμονή», matching the default «Ανοιχτά» tab. A held row (waiting on
+     * ΑΦΜ etc.) is just as much a «waiting invoice» as a pending one, so counting
+     * only pending_review here is exactly how a held row got lost. (Deliberately
+     * NOT memoised in a process-static: that would serve stale counts across
+     * requests under Octane. Two cheap indexed queries per render are fine.)
      */
     public static function getNavigationBadge(): ?string
     {
@@ -63,7 +65,10 @@ class WhmcsInboxResource extends Resource
         }
         $count = PendingWhmcsInvoice::query()
             ->where('company_id', $tenant->getKey())
-            ->where('status', PendingWhmcsInvoice::STATUS_PENDING_REVIEW)
+            ->whereIn('status', [
+                PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+                PendingWhmcsInvoice::STATUS_HELD,
+            ])
             ->count();
 
         return $count > 0 ? (string) $count : null;
@@ -73,6 +78,10 @@ class WhmcsInboxResource extends Resource
     {
         // Red when an «άμεση τιμολόγηση» row is waiting — a persistent nav-level
         // cue that something needs issuing NOW; plain warning otherwise.
+        // NOTE: the COUNT (getNavigationBadge) includes held rows, but the COLOR
+        // deliberately keys on pending_review only — a held row is blocked (e.g.
+        // waiting on ΑΦΜ) and can't be issued «now», so it shouldn't trip the red
+        // «issue immediately» cue even if it's an immediate customer.
         $tenant = Filament::getTenant();
         if ($tenant && PendingWhmcsInvoice::query()
             ->where('company_id', $tenant->getKey())

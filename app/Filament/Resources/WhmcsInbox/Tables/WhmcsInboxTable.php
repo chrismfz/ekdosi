@@ -308,17 +308,10 @@ class WhmcsInboxTable
             // without a manual reload — pairs with the bell notification.
             ->poll('30s')
             ->filters([
-                SelectFilter::make('status')
-                    ->label('Κατάσταση')
-                    ->options([
-                        PendingWhmcsInvoice::STATUS_PENDING_REVIEW => 'Προς έλεγχο',
-                        PendingWhmcsInvoice::STATUS_FILED => 'Καταχωρημένο',
-                        PendingWhmcsInvoice::STATUS_REJECTED => 'Απορρίφθηκε',
-                        PendingWhmcsInvoice::STATUS_HELD => 'Σε αναμονή',
-                        PendingWhmcsInvoice::STATUS_SPLIT => 'Διαχωρισμένο',
-                        PendingWhmcsInvoice::STATUS_DRAFTED => 'Προσχέδιο',
-                    ])
-                    ->default(PendingWhmcsInvoice::STATUS_PENDING_REVIEW),
+                // Κατάσταση is now the status TABS on the list page (ListWhmcsInbox::
+                // getTabs) — CFM-style, each with a live count, default «Ανοιχτά» =
+                // προς-έλεγχο + σε-αναμονή together. The old defaulted SelectFilter
+                // hid held rows on load (one got lost), so it was removed here.
 
                 // Filter on the legacy-invoiced flag (the dual-run «τιμολογήθηκε
                 // στην παλιά εφαρμογή» signal). >0 = invoiced in legacy, 0 =

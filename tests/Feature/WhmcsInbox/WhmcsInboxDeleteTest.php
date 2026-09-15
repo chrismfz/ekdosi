@@ -65,9 +65,10 @@ class WhmcsInboxDeleteTest extends TestCase
 
         $this->actingOnInbox($t);
 
-        // Clear the default «Προς έλεγχο» filter so all statuses are selectable.
+        // Switch to the «Όλα» tab so every status is selectable (status is driven
+        // by tabs now — the default «Ανοιχτά» tab shows only προς-έλεγχο + σε-αναμονή).
         Livewire::test(ListWhmcsInbox::class)
-            ->filterTable('status', null)
+            ->set('activeTab', 'all')
             ->callTableBulkAction('delete_selected', [
                 $pending->getKey(), $held->getKey(), $rejected->getKey(), $filed->getKey(),
             ]);
@@ -92,7 +93,7 @@ class WhmcsInboxDeleteTest extends TestCase
         $this->actingOnInbox($t);
 
         Livewire::test(ListWhmcsInbox::class)
-            ->filterTable('status', null)
+            ->set('activeTab', 'all')
             ->callTableBulkAction('delete_selected', [
                 $withMark->getKey(), $drafted->getKey(), $split->getKey(),
             ]);

@@ -430,6 +430,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - Ενοποιημένο plugin **`ekdosi_bridge`**, **PHP-to-PHP μέσω WHMCS API** (HMAC, όχι shared-DB).
 - **Inbox draft-first** (`WhmcsInbox`) — webhook/poll → `pending_whmcs_invoices` →
   «Δημιουργία Παραστατικού» (editable draft) → lifecycle → write-back `invoiced=MARK`.
+- **Inbox status tabs** (CFM-style, με live counts): Ανοιχτά · Προς έλεγχο · Σε αναμονή · Προσχέδια ·
+  Καταχωρημένα · Απορρίφθηκαν · Διαχωρισμένα · Όλα. Default **«Ανοιχτά» = pending_review + held μαζί**,
+  ώστε ένα «Σε αναμονή» να μη κρύβεται· nav badge = pending_review + held.
 - **Αυτόματη κατηγορία εσόδων ανά ομάδα προϊόντων** (MYD-006 bridge) — σελίδα «Αντιστοίχιση WHMCS
   (έσοδα)»: αντλεί τον κατάλογο (`GetProducts`), ο χειριστής ορίζει §8.6 bucket **ανά ομάδα** («Web
   Hosting → υπηρεσία»· νέα πακέτα κληρονομούν). Ο mapper γεμίζει per-line snapshot

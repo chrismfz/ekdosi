@@ -83,9 +83,10 @@ class InboxColumnsTest extends TestCase
             'match_reason' => PendingWhmcsInvoice::REASON_UNMATCHED,
         ]);
 
-        // The default filter shows «Προς έλεγχο»; switch to «Καταχωρημένο» to see filed rows.
+        // The default «Ανοιχτά» tab shows προς-έλεγχο + σε-αναμονή; switch to the
+        // «Καταχωρημένα» tab to see filed rows (status is now driven by tabs).
         Livewire::test(ListWhmcsInbox::class)
-            ->set('tableFilters.status.value', PendingWhmcsInvoice::STATUS_FILED)
+            ->set('activeTab', 'filed')
             ->assertSuccessful()
             ->assertSee('TPY6663'); // filed → linked ekdosi invoice code (in the Κατάσταση description)
     }

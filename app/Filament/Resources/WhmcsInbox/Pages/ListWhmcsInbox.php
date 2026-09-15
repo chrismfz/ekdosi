@@ -5,15 +5,88 @@ namespace App\Filament\Resources\WhmcsInbox\Pages;
 use App\Filament\BaseListRecords;
 use App\Filament\Resources\WhmcsInbox\WhmcsInboxResource;
 use App\Models\Company;
+use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentSyncer;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
+use Filament\Schemas\Components\Tabs\Tab;
+use Illuminate\Database\Eloquent\Builder;
 
 class ListWhmcsInbox extends BaseListRecords
 {
     protected static string $resource = WhmcsInboxResource::class;
+
+    /**
+     * Status tabs (CFM-style), each with a live count. The FIRST tab is the
+     * default view — «Ανοιχτά» = pending_review + held together, because a HELD
+     * row (waiting on ΑΦΜ etc.) is just as actionable as a «Προς έλεγχο» one and
+     * MUST NOT hide by default (the old default status-filter hid held rows, so
+     * one got lost). Tabs own the status filter now (the redundant status
+     * SelectFilter was removed).
+     */
+    public function getTabs(): array
+    {
+        $tenant = Filament::getTenant();
+        $counts = $tenant instanceof Company
+            ? PendingWhmcsInvoice::query()
+                ->where('company_id', $tenant->getKey())
+                ->selectRaw('status, COUNT(*) as aggregate')
+                ->groupBy('status')
+                ->pluck('aggregate', 'status')
+            : collect();
+
+        $n = fn (string ...$statuses): int => (int) array_sum(
+            array_map(fn (string $s): int => (int) ($counts[$s] ?? 0), $statuses)
+        );
+
+        $open = [PendingWhmcsInvoice::STATUS_PENDING_REVIEW, PendingWhmcsInvoice::STATUS_HELD];
+
+        return [
+            // Default: everything still needing an operator — Προς έλεγχο + Σε αναμονή.
+            'open' => Tab::make('Ανοιχτά')
+                ->icon('heroicon-o-inbox-arrow-down')
+                ->badge($n(...$open) ?: null)
+                ->badgeColor('warning')
+                ->modifyQueryUsing(fn (Builder $query) => $query->whereIn('status', $open)),
+
+            'pending' => Tab::make('Προς έλεγχο')
+                ->badge($n(PendingWhmcsInvoice::STATUS_PENDING_REVIEW) ?: null)
+                ->badgeColor('warning')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_PENDING_REVIEW)),
+
+            'held' => Tab::make('Σε αναμονή')
+                ->icon('heroicon-o-pause-circle')
+                ->badge($n(PendingWhmcsInvoice::STATUS_HELD) ?: null)
+                ->badgeColor('gray')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_HELD)),
+
+            'drafted' => Tab::make('Προσχέδια')
+                ->badge($n(PendingWhmcsInvoice::STATUS_DRAFTED) ?: null)
+                ->badgeColor('info')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_DRAFTED)),
+
+            'filed' => Tab::make('Καταχωρημένα')
+                ->badge($n(PendingWhmcsInvoice::STATUS_FILED) ?: null)
+                ->badgeColor('success')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_FILED)),
+
+            'rejected' => Tab::make('Απορρίφθηκαν')
+                ->badge($n(PendingWhmcsInvoice::STATUS_REJECTED) ?: null)
+                ->badgeColor('danger')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_REJECTED)),
+
+            'split' => Tab::make('Διαχωρισμένα')
+                ->badge($n(PendingWhmcsInvoice::STATUS_SPLIT) ?: null)
+                ->badgeColor('info')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_SPLIT)),
+
+            // No modifier → every status for this tenant. Total badge, CFM-style.
+            'all' => Tab::make('Όλα')
+                ->badge((int) $counts->sum() ?: null),
+        ];
+    }
 
     protected function getHeaderActions(): array
     {
