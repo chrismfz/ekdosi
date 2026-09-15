@@ -18,6 +18,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **Λίστες Filament: δεν σκάει πλέον (500) όταν ζητηθεί καθαρισμός φίλτρου που δεν υπάρχει πια.** Μετά το PR
+  που μετέφερε το status φίλτρο των «Εισερχομένων» σε tabs, ένα ανοιχτό tab του browser / bookmarked
+  `?filters[status]=…` URL από πριν το deploy κρατούσε το `status` κλειδί στο URL-bound `tableFilters` state·
+  όταν το frontend ζητούσε να το αφαιρέσει, το Filament καλούσε `->getResetState()` σε null filter →
+  «Call to a member function getResetState() on null» (`HasFilters.php:81`), γεμίζοντας τα error mails.
+  Το `BaseListRecords::removeTableFilter()` πλέον απορρίπτει σιωπηλά ένα άγνωστο φίλτρο (για ΟΛΕΣ τις λίστες)
+  αντί να σκάει· υπαρκτά φίλτρα περνούν αναλλοίωτα από τον κανονικό δρόμο.
+
 ## [2.2.0] - 2026-09-15
 
 ### Added

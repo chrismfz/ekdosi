@@ -22,8 +22,32 @@ use Filament\Support\Enums\Width;
  */
 abstract class BaseListRecords extends ListRecords
 {
-    public function getMaxContentWidth(): Width | string | null
+    public function getMaxContentWidth(): Width|string|null
     {
         return Width::Full;
+    }
+
+    /**
+     * Tolerate a request to clear a table filter that no longer exists on the
+     * table. Filament's `tableFilters` state is URL-bound (`#[Url(as: 'filters')]`)
+     * and also rides the Livewire snapshot, so a bookmarked `?filters=…` URL — or
+     * a browser tab left open across a deploy — can still carry a filter key that a
+     * later release removed (e.g. the WHMCS inbox `status` SelectFilter, replaced by
+     * status tabs). When the frontend then asks to remove it, the parent runs
+     * `->getResetState()` on the null filter and 500s (HasFilters::removeTableFilter,
+     * line 81). Drop the orphaned key instead of crashing; a filter that still exists
+     * goes through the normal parent path unchanged.
+     */
+    public function removeTableFilter(string $filterName, ?string $field = null, bool $isRemovingAllFilters = false): void
+    {
+        if ($this->getTable()->getFilter($filterName) === null) {
+            if (is_array($this->tableFilters)) {
+                unset($this->tableFilters[$filterName]);
+            }
+
+            return;
+        }
+
+        parent::removeTableFilter($filterName, $field, $isRemovingAllFilters);
     }
 }
