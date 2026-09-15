@@ -1399,7 +1399,7 @@ EOF;
             'split' => '<span class="label label-info">Διαχωρισμένο</span>',
             'pending_review' => '<span class="label label-warning">Προς έλεγχο</span>',
             'held' => '<span class="label label-default">Σε αναμονή</span>',
-            'rejected' => '<span class="label label-danger">Απορρίφθηκε</span>',
+            'rejected' => '<span class="label label-default">Αρχειοθετήθηκε</span>',
             default => '<span class="label label-default">'.htmlspecialchars($pendingStatus).'</span>',
         };
     }
@@ -1761,7 +1761,7 @@ EOF;
         $invcodeRow = ($invcode !== null && $invcode !== '')
             ? '<li>Παραστατικό: <strong>'.htmlspecialchars((string) $invcode).'</strong></li>' : '';
         $markRow = $mark ? '<li>MARK: <code>'.htmlspecialchars((string) $mark).'</code></li>' : '';
-        $rejRow = $rejected !== '' ? '<li>Rejected reason: '.$rejected.'</li>' : '';
+        $rejRow = $rejected !== '' ? '<li>Σημείωση αρχειοθέτησης: '.$rejected.'</li>' : '';
         return <<<EOF
 <div class="alert alert-info">
 <strong>Ekdosi status: {$status}</strong>

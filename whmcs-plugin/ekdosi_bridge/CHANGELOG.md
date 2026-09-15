@@ -10,6 +10,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.47.1] — 2026-09-15
+### Changed
+- **Το status «Απορρίφθηκε» εμφανίζεται πλέον ως «Αρχειοθετήθηκε»** στο WHMCS admin (badge στη λίστα
+  παραστατικών + «Σημείωση αρχειοθέτησης» στο status block), εναρμονισμένο με το ekdosi panel όπου το
+  «Απόρριψη» έγινε «Αρχειοθέτηση». Ουδέτερο γκρι badge (`label-default`) αντί για κόκκινο. Αλλαγή κειμένων
+  μόνο — το εσωτερικό status `rejected` του ekdosi δεν αλλάζει.
+
 ## [0.47.0] — 2026-09-04
 ### Added
 - **«Εκδοθέντα Παραστατικά»: historical (pre-bridge) παραστατικά + context-aware verify label.**
