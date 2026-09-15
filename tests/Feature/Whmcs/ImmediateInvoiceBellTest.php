@@ -161,6 +161,81 @@ class ImmediateInvoiceBellTest extends TestCase
         $this->assertTrue(ImmediateInvoiceBell::isHandled(PendingWhmcsInvoice::STATUS_REJECTED));
     }
 
+    public function test_clears_the_bell_for_every_operator(): void
+    {
+        $tenant = $this->tenant();
+        $u1 = $this->operatorFor($tenant);
+        $u2 = $this->operatorFor($tenant);
+        Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Άμεσος', 'whmcs_client_id' => 555,
+            'needs_immediate_invoice' => true,
+        ]);
+        app(WhmcsInvoiceIngestor::class)->ingest($tenant, ['invoiceid' => 9301, 'userid' => 555, 'total' => '10.00']);
+        $this->assertSame(1, $u1->fresh()->unreadNotifications()->count());
+        $this->assertSame(1, $u2->fresh()->unreadNotifications()->count(), 'both operators rung');
+
+        PendingWhmcsInvoice::where('company_id', $tenant->id)->where('whmcs_invoice_id', 9301)->firstOrFail()
+            ->update(['status' => PendingWhmcsInvoice::STATUS_FILED]);
+
+        $this->assertSame(0, $u1->fresh()->unreadNotifications()->count());
+        $this->assertSame(0, $u2->fresh()->unreadNotifications()->count(), 'cleared for EVERY operator, not just one');
+    }
+
+    public function test_handling_one_row_leaves_a_different_rows_bell_lit(): void
+    {
+        $tenant = $this->tenant();
+        [$user, $rowA] = $this->stageImmediate($tenant, 9401, 700);
+        // A second immediate bell for a DIFFERENT WHMCS invoice, same operator.
+        Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Άμεσος 2', 'whmcs_client_id' => 701,
+            'needs_immediate_invoice' => true,
+        ]);
+        app(WhmcsInvoiceIngestor::class)->ingest($tenant, ['invoiceid' => 9402, 'userid' => 701, 'total' => '5.00']);
+        $this->assertSame(2, $user->fresh()->unreadNotifications()->count());
+
+        // Handling only #9401 clears ONLY its bell (resolve is per-WHMCS-id).
+        $rowA->update(['status' => PendingWhmcsInvoice::STATUS_FILED]);
+
+        $this->assertSame(1, $user->fresh()->unreadNotifications()->count(), '#9402 bell untouched');
+    }
+
+    public function test_handling_a_non_immediate_row_is_a_harmless_noop(): void
+    {
+        $tenant = $this->tenant();
+        $user = $this->operatorFor($tenant);
+        Customer::create([
+            'company_id' => $tenant->id, 'name' => 'Ήσυχος', 'whmcs_client_id' => 800,
+            'needs_immediate_invoice' => false,
+        ]);
+        app(WhmcsInvoiceIngestor::class)->ingest($tenant, ['invoiceid' => 9500, 'userid' => 800, 'total' => '5.00']);
+        $this->assertSame(0, $user->fresh()->notifications()->count(), 'non-immediate → no bell');
+
+        // The handled-transition observer runs resolve() and finds nothing to do.
+        PendingWhmcsInvoice::where('company_id', $tenant->id)->where('whmcs_invoice_id', 9500)->firstOrFail()
+            ->update(['status' => PendingWhmcsInvoice::STATUS_FILED]);
+
+        $this->assertSame(0, $user->fresh()->notifications()->count(), 'still no notification, no error');
+    }
+
+    public function test_sweep_clears_a_tagged_bell_using_the_viewdata_not_the_body(): void
+    {
+        $tenant = $this->tenant();
+        $user = $this->operatorFor($tenant);
+        // Tagged bell for WHMCS #4242, but the BODY names a DECOY id (#9999) — so a
+        // clear can only happen if sweep() reads the structured viewData tag.
+        $this->taggedBell($user, $tenant->id, 4242, 'WHMCS #9999 — decoy body.');
+        // The tagged row is already issued (created directly as filed → no observer
+        // transition, so the bell survives until the sweep).
+        PendingWhmcsInvoice::create([
+            'company_id' => $tenant->id, 'whmcs_invoice_id' => 4242,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
+            'match_reason' => PendingWhmcsInvoice::REASON_AFM, 'payload' => ['invoiceid' => 4242],
+        ]);
+
+        $this->assertSame(1, ImmediateInvoiceBell::sweep(), 'cleared via the viewData tag');
+        $this->assertSame(0, $user->fresh()->unreadNotifications()->count());
+    }
+
     private function legacyBell(User $user, string $body): void
     {
         DatabaseNotification::create([
@@ -169,6 +244,22 @@ class ImmediateInvoiceBellTest extends TestCase
             'notifiable_type' => User::class,
             'notifiable_id' => $user->id,
             'data' => ['title' => ImmediateInvoiceBell::TITLE, 'body' => $body],
+            'read_at' => null,
+        ]);
+    }
+
+    private function taggedBell(User $user, int $companyId, int $whmcsId, string $body): void
+    {
+        DatabaseNotification::create([
+            'id' => (string) Str::uuid(),
+            'type' => \Filament\Notifications\DatabaseNotification::class,
+            'notifiable_type' => User::class,
+            'notifiable_id' => $user->id,
+            'data' => [
+                'title' => ImmediateInvoiceBell::TITLE,
+                'body' => $body,
+                'viewData' => ImmediateInvoiceBell::tag($companyId, $whmcsId),
+            ],
             'read_at' => null,
         ]);
     }

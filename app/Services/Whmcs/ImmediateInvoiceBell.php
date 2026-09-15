@@ -28,7 +28,7 @@ class ImmediateInvoiceBell
     /** Notification title — also the matcher for legacy, pre-tag bells (sweep()). */
     public const TITLE = 'Άμεσο παραστατικό προς έκδοση';
 
-    /** viewData discriminator so a sweep only ever touches THIS bell. */
+    /** viewData discriminator that tags a bell for the precise resolve() match. */
     public const KIND = 'immediate_invoice';
 
     /**
