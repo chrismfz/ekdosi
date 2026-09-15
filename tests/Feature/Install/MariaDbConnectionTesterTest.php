@@ -70,19 +70,47 @@ class MariaDbConnectionTesterTest extends TestCase
         $this->assertTrue($result->needsOverride);
         $this->assertFalse($result->alreadyInstalled);
         $this->assertSame(2, $result->tableCount);
+        // A genuinely foreign schema DOES keep the «not an ekdosi install»
+        // wording — that is accurate here (no baseline collision), and it is the
+        // one case partial_ekdosi must NOT swallow.
+        $this->assertStringContainsString('δεν φαίνονται εγκατάσταση ekdosi', $result->message);
     }
 
-    public function test_migrated_but_no_admin_needs_override(): void
+    public function test_migrated_but_no_admin_is_partial_ekdosi_not_foreign(): void
     {
         // A partial ekdosi migrate: schema built (so `migrations` IS populated —
-        // that is what makes the retry idempotent), `users` empty.
+        // that is what makes the retry idempotent), `users` empty. The tables
+        // collide with our baseline, so this is OUR half-built database — it must
+        // NOT be reported as «not an ekdosi install» (which sends the operator
+        // hunting for a wrong DB). Override still required.
         $result = $this->tester($this->fakePdo(['users' => 0, 'companies' => 0, 'invoices' => 0, 'migrations' => 220]))
             ->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
 
         $this->assertFalse($result->ok);
-        $this->assertSame('non_empty', $result->reason);
+        $this->assertSame('partial_ekdosi', $result->reason);
         $this->assertTrue($result->needsOverride);
         $this->assertFalse($result->alreadyInstalled);
+        // Accurate wording: names it as an existing ekdosi schema, NOT «δεν
+        // φαίνονται εγκατάσταση ekdosi».
+        $this->assertStringContainsString('schema του ekdosi', $result->message);
+        $this->assertStringNotContainsString('δεν φαίνονται εγκατάσταση', $result->message);
+    }
+
+    public function test_partial_ekdosi_hedges_the_shared_database_ambiguity(): void
+    {
+        // collidesWithBaseline() matches ANY baseline name, ~20 of which are
+        // generic (users/cache/jobs/sessions/migrations/products…). So a DB
+        // SHARED with another Laravel app — generic tables + populated migrations
+        // + zero user rows — also lands in partial_ekdosi. The message must NOT
+        // assert as fact that it's a half-finished ekdosi attempt; it hedges the
+        // shared-DB possibility (like unmigratable does), while still requiring
+        // the override so nothing is ever clobbered without an explicit tick.
+        $result = $this->tester($this->fakePdo(['users' => 0, 'cache' => 0, 'jobs' => 0, 'migrations' => 4]))
+            ->test('127.0.0.1', 3306, 'someapp', 'u', 'p');
+
+        $this->assertSame('partial_ekdosi', $result->reason);
+        $this->assertTrue($result->needsOverride, 'override always required — never auto-proceed on a non-empty DB');
+        $this->assertStringContainsString('ΜΟΙΡΑΖΕΤΑΙ', $result->message, 'must hedge: it may be a shared/foreign DB, not asserted-ekdosi');
     }
 
     public function test_existing_admin_is_already_installed(): void

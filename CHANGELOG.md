@@ -19,6 +19,39 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Fixed
+- **Ο web installer (`/install`) απέτυχε στο import bundle με σφάλμα sqlite, αφήνοντας μισο-στημένη
+  εγκατάσταση χωρίς `.env`.** Ο installer επαναστοχεύει το `database.default` στη MariaDB **μέσα** στο
+  request (πριν γραφτεί το `.env`), αλλά το permission cache του Spatie είχε ήδη δεθεί —στο boot του
+  package— σε `DatabaseStore` πάνω στην placeholder default σύνδεση, δηλαδή στη built-in `sqlite` του
+  Laravel (χωρίς `.env` ακόμα). Το import έγραφε σωστά την εταιρία στη MariaDB, αλλά μόλις ο
+  `ekdosi:install` προμήθευε τους ρόλους, το `forgetCachedPermissions()` έτρεχε `delete from cache …`
+  πάνω στο ανύπαρκτο `database.sqlite` → η εγκατάσταση ματαίωνε **πριν** το βήμα εγγραφής του `.env`,
+  αφήνοντας μισο-εισηγμένο tenant και ένα CLI που πλέον έπεφτε κι αυτό σε sqlite (χωρίς `.env`), οπότε
+  ούτε η προτεινόμενη ανάκαμψη `shield:sync-super-admin` έτρεχε. Πλέον, τη στιγμή που επαναστοχεύεται η
+  βάση, ο installer δρομολογεί όλο το cache του request στο in-memory `array` store και ξανα-αρχικοποιεί
+  τον `PermissionRegistrar` — ο επόμενος request ξεκινά καθαρός από το γραμμένο `.env`. Regression test
+  αναπαράγει το ακριβές σφάλμα (permission cache δεμένο σε νεκρό sqlite) και επιβεβαιώνει το array store.
+- **Το DB probe του installer έλεγε «πίνακες που δεν φαίνονται εγκατάσταση ekdosi» για… ekdosi schema.** Μια
+  ημιτελής προσπάθεια (π.χ. αυτή που ματαίωνε παραπάνω) αφήνει το πλήρες baseline (105 πίνακες + γεμάτο
+  `migrations`) χωρίς διαχειριστή· το probe το κατέτασσε μαζί με τις ξένες βάσεις (WHMCS κ.λπ.) και ζητούσε
+  «κενή, σωστή βάση» — παραπλανητικό, αφού ΕΙΝΑΙ η βάση του ekdosi. Πλέον, όταν οι πίνακες συγκρούονται με
+  το baseline μας αλλά δεν υπάρχει ακόμη admin, δίνει ξεχωριστό μήνυμα (`partial_ekdosi`) που το λέει σωστά
+  και οδηγεί στο «Συνέχεια σε μη-κενή βάση» για ολοκλήρωση· οι πραγματικά ξένες βάσεις (χωρίς σύγκρουση
+  ονομάτων) κρατούν το παλιό μήνυμα. Η διάγνωση είναι **hedged** όπως στο `unmigratable`: ~20 από τα 105
+  ονόματα του baseline είναι γενικά (`users`, `cache`, `jobs`…), οπότε μια βάση ΜΟΙΡΑΣΜΕΝΗ με άλλη Laravel
+  εφαρμογή μπορεί επίσης να πέσει εδώ — το μήνυμα αναφέρει και τις δύο εκδοχές αντί να δηλώνει ekdosi ως
+  βεβαιότητα. Ίδια ασφάλεια (override πάντα απαιτείται — καμία μη-κενή βάση δεν migrate-άρεται χωρίς ρητό tick).
+
+### Added
+- **`INSTALL.md §17` — εγκατάσταση σε cPanel / CloudLinux (shared hosting).** Συγκεντρώνει τα gotchas
+  από το στήσιμο του `invoicer.myip.gr`: CLI PHP 8.4 μέσω `PATH` στο `ea-php84` (το MultiPHP ρυθμίζει
+  μόνο τον web handler), αφαίρεση `proc_open` από τα `disable_functions` + `cagefsctl --force-update`/`-M`
+  (αλλιώς σκάει το `composer` στο `package:discover`), out-of-tree compile του bundled `pdo_firebird`
+  ext πάνω στο ea-php84 (δεν υπάρχει EA4/PECL πακέτο) με το caveat «ίδια ΑΚΡΙΒΩΣ έκδοση PHP → rebuild σε
+  κάθε PHP update», και ο δρόμος του `/install` wizard + bundle-import ως εναλλακτική που γλιτώνει τελείως
+  το Firebird/ETL στο prod. Symptom-first πίνακας + pointer από την εισαγωγή. Docs-only.
+
+### Fixed
 - **Ο νέος guard «καμία πηγή schema» θα σιωπούσε με το πρώτο νέο migration.** Ήταν κλειδωμένος σε
   «άδειο `database/migrations/` ΚΑΙ κανένα baseline», αλλά το δηλωμένο workflow είναι «νέα migrations
   πάνω από το baseline» — οπότε το πρώτο τέτοιο αρχείο τον απενεργοποιούσε μόνιμα (και κοκκίνιζε το

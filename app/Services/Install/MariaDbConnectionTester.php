@@ -97,16 +97,18 @@ class MariaDbConnectionTester
             return MariaDbProbeResult::emptyDatabase();
         }
 
-        // Non-empty. A table the baseline will CREATE + no migration rows is
-        // the one combination `migrate` can never get past, so it must not be
-        // offered the override checkbox. Asked as «does ANY baseline table
-        // already exist», NOT «do these two exist»: the dead end is created by
-        // an abort at an ARBITRARY point of an alphabetical table load, so
-        // keying it on specific tables only catches the aborts that happened to
-        // reach them. It is also not «is the DB non-empty» — a foreign schema
-        // (WHMCS's tbl*) shares no name with the baseline, so `migrate` loads
-        // fine there and that DB keeps its overridable path.
-        if ($this->collidesWithBaseline($pdo) && $this->migrationRows($pdo) === 0) {
+        // Does the DB hold a table OUR baseline creates? Asked as «does ANY
+        // baseline table already exist», NOT «do these two exist»: an abort
+        // happens at an ARBITRARY point of an alphabetical table load, so keying
+        // it on specific tables only catches the aborts that reached them. It
+        // also tells our schema apart from a foreign one (WHMCS's tbl*), which
+        // shares no name with the baseline — the discriminator both the dead-end
+        // stop and the «partial ekdosi vs foreign» message below turn on.
+        $collidesWithBaseline = $this->collidesWithBaseline($pdo);
+
+        // A baseline table + no migration rows is the one combination `migrate`
+        // can never get past, so it must not be offered the override checkbox.
+        if ($collidesWithBaseline && $this->migrationRows($pdo) === 0) {
             return MariaDbProbeResult::unmigratable($tableCount);
         }
 
@@ -117,8 +119,18 @@ class MariaDbConnectionTester
             $userRows = 0;   // no `users` table → a foreign, non-ekdosi schema
         }
 
-        return $userRows > 0
-            ? MariaDbProbeResult::alreadyInstalled($tableCount)
+        if ($userRows > 0) {
+            return MariaDbProbeResult::alreadyInstalled($tableCount);
+        }
+
+        // No admin yet, override still required — but say WHICH non-empty state
+        // it is. Our own half-built schema (baseline tables + populated
+        // `migrations`, e.g. an install whose role provisioning aborted) is NOT
+        // «not an ekdosi install»; calling it that sends the operator hunting for
+        // a wrong database. A genuinely foreign schema (no baseline collision)
+        // keeps the original message.
+        return $collidesWithBaseline
+            ? MariaDbProbeResult::partialEkdosi($tableCount)
             : MariaDbProbeResult::nonEmpty($tableCount);
     }
 
