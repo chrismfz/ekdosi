@@ -52,8 +52,8 @@ class RecipientCountryBackfillTest extends TestCase
 
     private function runBackfill(): void
     {
-        $migration = require database_path(
-            'migrations/2026_09_01_000001_add_recipient_country_to_delivery_notes.php'
+        $migration = require base_path(
+            'tests/Fixtures/migrations/2026_09_01_000001_add_recipient_country_to_delivery_notes.php'
         );
 
         $method = new ReflectionMethod($migration, 'backfillFromCustomers');

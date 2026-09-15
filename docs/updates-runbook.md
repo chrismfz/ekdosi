@@ -214,9 +214,29 @@ actually recover». For a restore when the **APP_KEY is lost**, see
   survive a restore and make the next deploy fail with "table already exists" — is
   wiped, and the target db is recreated if it's missing (self-heals an interrupted
   restore). It always targets the connection's db (matching the confirmation
-  prompt), not a name baked into the snapshot. After restoring an OLDER snapshot,
-  run `php artisan migrate --force` to re-apply forward migrations. The db user
-  needs DROP/CREATE on the database (the INSTALL.md `GRANT ALL ON ekdosi.*` covers it).
+  prompt), not a name baked into the snapshot. After a **successful** restore of an
+  OLDER snapshot, run `php artisan migrate --force` to re-apply forward migrations.
+  The db user needs DROP/CREATE on the database (the INSTALL.md `GRANT ALL ON
+  ekdosi.*` covers it).
+  **⚠ Αν η επαναφορά ΔΙΑΚΟΠΕΙ, μην «διορθώσεις» με `migrate`** — ξανατρέξε την
+  επαναφορά. Μετά το v2.0.2 squash το schema έρχεται από το baseline
+  (`database/schema/mariadb-schema.sql`) και το `migrate` το φορτώνει όποτε το
+  `migrations` table λείπει/είναι άδειο. Ο dump επαναφέρει πίνακες ΑΛΦΑΒΗΤΙΚΑ και το
+  `migrations` βρίσκεται στη ΜΕΣΗ του αλφαβήτου, οπότε η διακοπή έχει **δύο** εκδοχές
+  — και οι δύο ανεπανόρθωτες από το `migrate`:
+  - **διακοπή ΠΡΙΝ το `migrations`** → δεδομένα χωρίς `migrations`. Το `migrate`
+    **αποτυγχάνει σταθερά** («Table ... already exists» — by design, ώστε να μη σβήσει
+    τα δεδομένα) και δεν πρόκειται να πετύχει ποτέ.
+  - **διακοπή ΜΕΤΑ το `migrations`** → το `migrations` είναι ΠΛΗΡΕΣ, οπότε το
+    `migrate` λέει **«Nothing to migrate», βγαίνει με 0** και φαίνεται πράσινο —
+    πάνω σε βάση που λείπουν όλοι οι πίνακες από `model_has_permissions` (54/105:
+    **οι ρόλοι όλων των χρηστών**) ως `whmcs_*`.
+  - **διακοπή με ΜΗΔΕΝ πίνακες** (το `DROP`/`CREATE DATABASE` πέτυχε, το stream
+    πέθανε αμέσως) → το `migrate` βρίσκει καθαρή βάση, φορτώνει ΟΛΟ το baseline και
+    βγαίνει με 0: **πλήρες schema, μηδέν δεδομένα**. Η χειρότερη από τις τρεις,
+    γιατί δεν φαίνεται τίποτα.
+
+  **Πράσινο `migrate` ΔΕΝ είναι απόδειξη ότι η επαναφορά ολοκληρώθηκε.**
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.

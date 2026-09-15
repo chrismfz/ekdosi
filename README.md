@@ -61,7 +61,8 @@ what's left → [`docs/BACKLOG.md`](docs/BACKLOG.md) · changes → [`CHANGELOG.
 ```
 /                       Laravel 13 app at repo root
   app/                  models, Filament resources, services, actions
-  database/migrations/  schema
+  database/schema/      squashed schema baseline (sqlite + mariadb dumps)
+  database/migrations/  new migrations on top of the baseline
   whmcs-plugin/ekdosi_bridge/   our WHMCS-side plugin
   docs/                 design docs, roadmaps, history
   legacy/               read-only reference (do NOT build)

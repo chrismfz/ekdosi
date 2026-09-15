@@ -3,6 +3,7 @@
 namespace App\Support\Install;
 
 use App\Support\MyData\QrImage;
+use Symfony\Component\Process\Process;
 
 /**
  * Read-only preflight for the web installer: inspects the PHP runtime + host
@@ -124,7 +125,57 @@ class RequirementsChecker
                 detail: 'Ο οδηγός γράφει το .env στον ριζικό φάκελο ΩΣ ΤΕΛΕΥΤΑΙΟ βήμα (μετά τη βάση). Αν δεν είναι εγγράψιμος, η εγκατάσταση αφήνει τη βάση φτιαγμένη αλλά χωρίς .env.',
                 fix: 'Δώσε δικαίωμα εγγραφής στον ριζικό φάκελο (αυτόν που περιέχει το composer.json) στον χρήστη της PHP-FPM: chmod ug+rwX <root> && chown <web-user> <root>.',
             ),
+            // Since the v2.0.2 migration squash the schema is built by LOADING
+            // `database/schema/mariadb-schema.sql`, and Laravel does that by
+            // SHELLING OUT to the `mariadb` client (MariaDbSchemaState::load()) —
+            // not over PDO. So `proc_open` + that binary are now hard install
+            // requirements, not merely backup niceties. Catch them here: the
+            // failure they cause otherwise lands mid-`migrate` in step (5) of
+            // InstallController::run, and `loadSchemaState()` deletes the
+            // migration repository BEFORE loading, so the retry fails the same
+            // way with a raw Symfony process error.
+            new Requirement(
+                key: 'proc_open',
+                label: 'Συνάρτηση proc_open',
+                passed: $this->functionEnabled('proc_open'),
+                required: true,
+                detail: 'Η εγκατάσταση χτίζει τη βάση φορτώνοντας το schema baseline μέσω του πελάτη mariadb (εξωτερική εντολή). Χρειάζεται επίσης για backups (mysqldump) και επαναφορά Firebird (gbak).',
+                fix: 'Αφαίρεσε το proc_open από το disable_functions στο php.ini (fpm ΚΑΙ cli) και κάνε restart την PHP-FPM.',
+            ),
+            $this->dbClientCheck(),
         ];
+    }
+
+    /**
+     * The `mariadb` client binary check.
+     *
+     * When `proc_open` is disabled we CANNOT probe the PATH at all, so saying
+     * «εγκατέστησε τον πελάτη» would send the operator to install something
+     * that may already be there (and they'd still see red after doing it). The
+     * proc_open row above already blocks, so this one just says honestly that
+     * it could not be checked.
+     */
+    private function dbClientCheck(): Requirement
+    {
+        if (! $this->functionEnabled('proc_open')) {
+            return new Requirement(
+                key: 'db_client',
+                label: 'Πελάτης γραμμής εντολών mariadb',
+                passed: false,
+                required: true,
+                detail: 'ΔΕΝ ΕΛΕΓΧΘΗΚΕ — χωρίς proc_open δεν μπορεί να εκτελεστεί εξωτερική εντολή, οπότε ούτε να διαπιστωθεί αν υπάρχει ο πελάτης ούτε να φορτωθεί το schema baseline.',
+                fix: 'Ξεμπλόκαρε πρώτα το proc_open (δες από πάνω) και ξαναφόρτωσε αυτή τη σελίδα — τότε θα φανεί αν λείπει όντως ο πελάτης.',
+            );
+        }
+
+        return new Requirement(
+            key: 'db_client',
+            label: 'Πελάτης γραμμής εντολών mariadb',
+            passed: $this->binaryOnPath('mariadb'),
+            required: true,
+            detail: 'Το εκτελέσιμο «mariadb» πρέπει να υπάρχει στο PATH της PHP — με τον οδηγό «mariadb» (τον οποίο στήνει ο οδηγός εγκατάστασης) ο Laravel το καλεί ΟΝΟΜΑΣΤΙΚΑ για να φορτώσει το schema baseline (database/schema/mariadb-schema.sql). Το «mysql» ΔΕΝ αρκεί.',
+            fix: 'Εγκατέστησε τον πελάτη MariaDB: apt install mariadb-client / dnf install mariadb — και βεβαιώσου ότι το «mariadb» βρίσκεται στο PATH του χρήστη της PHP-FPM.',
+        );
     }
 
     /** @return list<Requirement> */
@@ -161,15 +212,6 @@ class RequirementsChecker
                 fix: 'Χωρίς αυτή δεν δουλεύει: '.$why.'. Εγκατέστησε την php-'.$ext.' αν τη χρειάζεσαι.',
             );
         }
-
-        $checks[] = new Requirement(
-            key: 'proc_open',
-            label: 'Συνάρτηση proc_open',
-            passed: $this->functionEnabled('proc_open'),
-            required: false,
-            detail: 'Χρειάζεται για backups (mysqldump) και επαναφορά Firebird (gbak).',
-            fix: 'Αφαίρεσε το proc_open από το disable_functions στο php.ini αν θες backups.',
-        );
 
         // Upload/memory ceilings that bite the import UI (a .fbk can be large).
         $checks[] = $this->byteThreshold('upload_max_filesize', 20 * 1024 * 1024, 'Μέγιστο μέγεθος αρχείου (upload_max_filesize)', 'ανέβασμα .fbk/αρχείων εισαγωγής');
@@ -243,6 +285,31 @@ class RequirementsChecker
     protected function extensionLoaded(string $extension): bool
     {
         return extension_loaded($extension);
+    }
+
+    /**
+     * Is an executable reachable on the PATH the PHP process actually has?
+     * Probed with `command -v` through the same shell Symfony Process uses, so
+     * a PATH that differs between the shell and PHP-FPM is reported honestly.
+     * Returns false when `proc_open` is disabled — then the binary is
+     * unreachable for our purposes anyway (and its own check already blocks).
+     */
+    protected function binaryOnPath(string $binary): bool
+    {
+        if (! $this->functionEnabled('proc_open')) {
+            return false;
+        }
+
+        $process = Process::fromShellCommandline('command -v '.escapeshellarg($binary));
+        $process->setTimeout(5);
+
+        try {
+            $process->run();
+        } catch (\Throwable) {
+            return false;
+        }
+
+        return $process->getExitCode() === 0;
     }
 
     protected function functionEnabled(string $function): bool

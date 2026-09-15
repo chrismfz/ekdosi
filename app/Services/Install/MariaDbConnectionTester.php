@@ -18,12 +18,18 @@ use Throwable;
  * installer must not get wrong: is this database SAFE to install into, or does
  * it already hold a finished ekdosi install we'd clobber? «Finished» = a
  * super-admin user exists; a merely-migrated DB (tables but no admin) is still
- * safe because both `migrate` and `ekdosi:install` are idempotent.
+ * safe because both `migrate` and `ekdosi:install` are idempotent — with ONE
+ * post-squash exception it also detects: an ekdosi schema whose `migrations`
+ * table is empty is NOT idempotently retryable, it is a dead end
+ * ({@see MariaDbProbeResult::unmigratable()}).
  */
 class MariaDbConnectionTester
 {
     /** @var (Closure(string, string, string): PDO)|null test seam: (dsn, user, password) → PDO */
     private $connectionFactory;
+
+    /** @var list<string>|null memoised baseline table names ({@see baselineTables()}) */
+    private static ?array $baselineTables = null;
 
     /**
      * @param  (Closure(string, string, string): PDO)|null  $connectionFactory
@@ -79,6 +85,9 @@ class MariaDbConnectionTester
      *  - ≥1 table AND ≥1 `users` row → an existing ekdosi admin → distinct
      *                   «already installed» message (still overridable to finish
      *                   a partial attempt).
+     *  - an ekdosi schema with an EMPTY/absent `migrations` table → a dead end
+     *                   the override cannot rescue → hard stop
+     *                   ({@see MariaDbProbeResult::unmigratable()}).
      */
     private function probe(PDO $pdo): MariaDbProbeResult
     {
@@ -88,7 +97,20 @@ class MariaDbConnectionTester
             return MariaDbProbeResult::emptyDatabase();
         }
 
-        // Non-empty. Does it already carry an ekdosi admin?
+        // Non-empty. A table the baseline will CREATE + no migration rows is
+        // the one combination `migrate` can never get past, so it must not be
+        // offered the override checkbox. Asked as «does ANY baseline table
+        // already exist», NOT «do these two exist»: the dead end is created by
+        // an abort at an ARBITRARY point of an alphabetical table load, so
+        // keying it on specific tables only catches the aborts that happened to
+        // reach them. It is also not «is the DB non-empty» — a foreign schema
+        // (WHMCS's tbl*) shares no name with the baseline, so `migrate` loads
+        // fine there and that DB keeps its overridable path.
+        if ($this->collidesWithBaseline($pdo) && $this->migrationRows($pdo) === 0) {
+            return MariaDbProbeResult::unmigratable($tableCount);
+        }
+
+        // Does it already carry an ekdosi admin?
         try {
             $userRows = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
         } catch (Throwable) {
@@ -121,6 +143,100 @@ class MariaDbConnectionTester
         }
 
         return 0;
+    }
+
+    /**
+     * Does this database already hold a table the schema baseline would CREATE?
+     * That — and only that — is what makes `migrate` collide.
+     *
+     * `migrations` is deliberately EXCLUDED from the comparison even though the
+     * baseline creates it: `loadSchemaState()` calls `deleteRepository()`, which
+     * DROPS that table, before it loads the dump. So a database whose only
+     * overlap is `migrations` (an earlier attempt that got as far as
+     * `migrate:install` and died) is NOT a dead end — `migrate` recovers it
+     * cleanly, and hard-stopping it would be a false positive.
+     */
+    private function collidesWithBaseline(PDO $pdo): bool
+    {
+        $tables = $this->baselineTables();
+
+        if ($tables === []) {
+            return false;   // no baseline on disk → nothing to collide with; fail open
+        }
+
+        $placeholders = implode(',', array_fill(0, count($tables), '?'));
+        $queries = [
+            "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ({$placeholders})",
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ({$placeholders})",
+        ];
+
+        foreach ($queries as $sql) {
+            try {
+                $statement = $pdo->prepare($sql);
+                $statement->execute($tables);
+
+                return ((int) $statement->fetchColumn()) > 0;
+            } catch (Throwable) {
+                continue;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The table names the committed baseline creates, read from the dump itself
+     * so this can never drift from the real schema. Both engines list the same
+     * 105 tables; whichever file is present wins. Memoised — the probe reads it
+     * at most once per process.
+     *
+     * The memo is static with no reset seam ON PURPOSE: it is derived from a
+     * committed file that cannot change within a process, and the only caller is
+     * the one-shot web installer. A flush method would have no caller today, so
+     * it is not written — if a future test ever needs to swap the baseline
+     * directory, add it then (it would otherwise be order-dependent).
+     *
+     * @return list<string>
+     */
+    private function baselineTables(): array
+    {
+        if (self::$baselineTables !== null) {
+            return self::$baselineTables;
+        }
+
+        $names = [];
+
+        foreach (['mariadb', 'sqlite'] as $connection) {
+            $path = database_path("schema/{$connection}-schema.sql");
+
+            if (! is_file($path)) {
+                continue;
+            }
+
+            preg_match_all(
+                '/^CREATE TABLE (?:IF NOT EXISTS )?[`"]([^`"]+)[`"]/mi',
+                (string) file_get_contents($path),
+                $matches
+            );
+            $names = array_merge($names, $matches[1]);
+
+            if ($names !== []) {
+                break;
+            }
+        }
+
+        // See collidesWithBaseline(): migrate drops `migrations` before loading.
+        return self::$baselineTables = array_values(array_diff(array_unique($names), ['migrations']));
+    }
+
+    /** Rows in `migrations`; 0 when the table is empty OR absent — the same thing to `migrate`. */
+    private function migrationRows(PDO $pdo): int
+    {
+        try {
+            return (int) $pdo->query('SELECT COUNT(*) FROM migrations')->fetchColumn();
+        } catch (Throwable) {
+            return 0;
+        }
     }
 
     private function classify(Throwable $e): string

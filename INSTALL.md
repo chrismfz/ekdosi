@@ -1402,8 +1402,13 @@ After install:
 - [ ] `sudo -u ekdosi php artisan about` shows: PHP 8.4, Laravel
       13, mariadb driver, cache/session/queue all on `database`,
       Filament v5.x, Shield 4.x.
-- [ ] `sudo -u ekdosi php artisan migrate:status` shows all
-      migrations as `Ran` (no `Pending`).
+- [ ] `sudo -u ekdosi php artisan migrate:status` shows **no
+      `Pending`**. Since the v2.0.2 squash a correct install prints
+      `INFO  No migrations found.` — `database/migrations/` is empty
+      and the schema comes from `database/schema/mariadb-schema.sql`,
+      so that message is the EXPECTED output, not a failure. To confirm
+      the schema really loaded: `SELECT COUNT(*) FROM migrations;`
+      should return 220 (+1 per migration added since).
 - [ ] `php -m | grep -E "bcmath|mbstring|pdo_mysql|intl|gd|zip|curl"`
       lists every one of them.
 - [ ] `sudo -u ekdosi php artisan route:list | grep admin` shows

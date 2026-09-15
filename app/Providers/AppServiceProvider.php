@@ -13,6 +13,7 @@ use App\Support\Tenancy\CompanyContext;
 use Filament\Events\TenantSet;
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
+use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
@@ -22,6 +23,7 @@ use Illuminate\Support\Facades\Queue;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Laravel\Passport\Passport;
+use RuntimeException;
 use Spatie\Permission\PermissionRegistrar;
 
 class AppServiceProvider extends ServiceProvider
@@ -94,6 +96,60 @@ class AppServiceProvider extends ServiceProvider
          * Plain `migrate` is unaffected — deploys keep working.
          */
         DB::prohibitDestructiveCommands(! $this->app->environment('testing'));
+
+        /*
+         * Since the v2.0.2 migration squash, `database/migrations/` is empty and
+         * the schema comes from `database/schema/{connection}-schema.sql`.
+         * Laravel resolves that file by CONNECTION NAME, not driver
+         * (MigrateCommand::schemaPath()), and `loadSchemaState()` returns
+         * SILENTLY when the file is missing. So on a connection we ship no
+         * baseline for (config/database.php still defines `mysql`/`pgsql`, and
+         * DbSnapshot/DbRestore/CustomerLedger do branch on the `mysql` driver),
+         * `php artisan migrate` against a COMPLETELY EMPTY database now prints
+         * «Nothing to migrate», exits 0, and leaves a broken install that looks
+         * healthy. Pre-squash the same command built the whole schema.
+         *
+         * Refuse instead: NO BASELINE for the connection = the schema can never
+         * be built, full stop. Deliberately NOT «and database/migrations/ is
+         * also empty»: post-squash that directory only ever carries DELTAS on
+         * top of the baseline, so the first new migration would silence the
+         * guard forever and hand the operator the exact same empty-but-exit-0
+         * database with one delta applied on top of nothing.
+         *
+         * Scope: CommandStarting is re-routed from the Symfony console
+         * dispatcher, which Kernel::__construct wires up at boot EXCEPT while
+         * `runningUnitTests()`. So outside the suite this covers every
+         * entrypoint — the shell, `deploy/update.sh` and `SelfUpdate` (both
+         * spawn `php artisan migrate`), and the in-process
+         * `Artisan::call('migrate')` in InstallController alike. Inside the
+         * suite it is inert unless a test opts in with `WithConsoleEvents`,
+         * which SchemaBaselineTest does.
+         */
+        Event::listen(function (CommandStarting $event) {
+            if ($event->command !== 'migrate') {
+                return;
+            }
+
+            // NOTE: at CommandStarting the input is NOT yet bound to the
+            // command definition, so getOption('database') sees an empty
+            // definition and returns null. getParameterOption() reads the raw
+            // tokens and works for both ArgvInput and ArrayInput.
+            $connection = $event->input->getParameterOption('--database')
+                ?: config('database.default');
+
+            $hasBaseline = file_exists(database_path("schema/{$connection}-schema.sql"))
+                || file_exists(database_path("schema/{$connection}-schema.dump"));
+
+            if (! $hasBaseline) {
+                throw new RuntimeException(
+                    "Καμία πηγή schema για τη σύνδεση «{$connection}»: δεν υπάρχει "
+                    ."database/schema/{$connection}-schema.sql. Από το squash v2.0.2 το baseline ΕΙΝΑΙ το "
+                    .'schema — το database/migrations/ κρατά μόνο τα deltas από εκεί και πέρα, οπότε το '
+                    .'migrate θα έχτιζε ΚΕΝΗ βάση (ή μόνο τα deltas) και θα έβγαινε με 0. Χρησιμοποίησε '
+                    .'DB_CONNECTION=mariadb (ή sqlite), ή πρόσθεσε baseline για αυτή τη σύνδεση.'
+                );
+            }
+        });
 
         /*
          * ekdosi MCP server OAuth (routes/ai.php): when Laravel Passport is

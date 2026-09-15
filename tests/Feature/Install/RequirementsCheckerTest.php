@@ -38,6 +38,50 @@ class RequirementsCheckerTest extends TestCase
         }
     }
 
+    /**
+     * Since the v2.0.2 migration squash, a fresh install builds the schema by
+     * LOADING database/schema/mariadb-schema.sql, and Laravel shells out to the
+     * `mariadb` client binary to do it (MariaDbSchemaState::load()). A host
+     * without that binary used to sail through a green preflight and then die
+     * mid-migrate — and because loadSchemaState() deletes the migration
+     * repository BEFORE loading, the retry failed identically. Block instead.
+     */
+    public function test_a_missing_mariadb_client_binary_blocks(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->dbClient = false;
+
+        $this->assertTrue($checker->hasBlockers($checker->check()));
+        $this->assertTrue($this->byKey($checker)['db_client']->blocks());
+    }
+
+    /** Same reason: no proc_open → no shell-out → no schema load → no install. */
+    public function test_disabled_proc_open_blocks(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->procOpen = false;
+
+        $this->assertTrue($checker->hasBlockers($checker->check()));
+        $this->assertTrue($this->byKey($checker)['proc_open']->blocks());
+    }
+
+    /**
+     * With proc_open off we cannot probe the PATH at all, so the db_client row
+     * must not tell the operator to install a client that may already be there
+     * (they would install it, re-run, and still see red).
+     */
+    public function test_the_db_client_row_says_it_could_not_be_checked_when_proc_open_is_off(): void
+    {
+        $checker = new ConfigurableRequirementsChecker;
+        $checker->procOpen = false;
+        $checker->dbClient = true;
+
+        $row = $this->byKey($checker)['db_client'];
+
+        $this->assertStringContainsString('ΔΕΝ ΕΛΕΓΧΘΗΚΕ', $row->detail);
+        $this->assertStringNotContainsString('apt install', $row->fix);
+    }
+
     public function test_a_missing_required_extension_blocks(): void
     {
         $checker = new ConfigurableRequirementsChecker;

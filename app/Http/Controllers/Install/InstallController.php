@@ -128,9 +128,17 @@ class InstallController
             password: (string) ($data['db_password'] ?? ''),
         );
 
-        // A real connection failure (auth / unreachable / unknown DB) always stops.
+        // A real connection failure (auth / unreachable / unknown DB) always
+        // stops — and so does `unmigratable`, which is NOT a connection failure:
+        // we connected fine, the DATABASE is the dead end. Prefixing that one
+        // with «Η σύνδεση απέτυχε» contradicts its own first word («Συνδέθηκε…»)
+        // and sends the operator off checking host/user/password.
         if (! $probe->ok && ! $probe->needsOverride) {
-            return $this->redisplay($request, ['Η σύνδεση στη βάση απέτυχε: '.$probe->message]);
+            return $this->redisplay($request, [
+                $probe->reason === 'unmigratable'
+                    ? $probe->message
+                    : 'Η σύνδεση στη βάση απέτυχε: '.$probe->message,
+            ]);
         }
 
         // ANY non-empty target DB is REFUSED by default — a foreign DB (WHMCS,
@@ -180,6 +188,14 @@ class InstallController
         //     (migrate is additive, ekdosi:install is firstOrCreate + --force), so
         //     a retry after a mid-way failure is safe. `.env` is NOT written yet —
         //     a failure here leaves the wizard available for that retry.
+        //
+        //     Post-squash caveat, already screened out at (3): `migrate` is only
+        //     idempotent here while the `migrations` table survives. If it dies
+        //     mid-BASELINE, `loadSchemaState()` has already wiped the repository,
+        //     so the retry would re-load the dump onto the half-built tables and
+        //     fail forever. The probe refuses that state up front (reason
+        //     `unmigratable`, NOT overridable) and names the way out, instead of
+        //     looping the wizard on «Table … already exists».
         try {
             Artisan::call('migrate', ['--force' => true]);
 

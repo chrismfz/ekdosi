@@ -155,8 +155,8 @@ class CountryCodeNormalizationTest extends TestCase
         $neverland = $this->customer(['country' => 'Neverland']);
         $neverland->forceFill(['country_code' => null])->saveQuietly();
 
-        $migration = require database_path(
-            'migrations/2026_09_08_000001_add_country_code_to_customers_and_suppliers.php'
+        $migration = require base_path(
+            'tests/Fixtures/migrations/2026_09_08_000001_add_country_code_to_customers_and_suppliers.php'
         );
         $method = new ReflectionMethod($migration, 'backfill');
         $method->setAccessible(true);

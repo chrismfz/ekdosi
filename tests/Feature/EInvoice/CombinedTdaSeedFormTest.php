@@ -32,7 +32,7 @@ class CombinedTdaSeedFormTest extends TestCase
 {
     use RefreshDatabase;
 
-    private const MIGRATION = __DIR__.'/../../../database/migrations/2026_09_21_000006_normalise_tda_invoice_type_flag.php';
+    private const MIGRATION = __DIR__.'/../../Fixtures/migrations/2026_09_21_000006_normalise_tda_invoice_type_flag.php';
 
     private function tenant(): Company
     {

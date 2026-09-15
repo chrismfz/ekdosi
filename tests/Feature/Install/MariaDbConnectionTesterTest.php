@@ -74,8 +74,9 @@ class MariaDbConnectionTesterTest extends TestCase
 
     public function test_migrated_but_no_admin_needs_override(): void
     {
-        // A partial ekdosi migrate: tables present, `users` empty.
-        $result = $this->tester($this->fakePdo(['users' => 0, 'companies' => 0]))
+        // A partial ekdosi migrate: schema built (so `migrations` IS populated —
+        // that is what makes the retry idempotent), `users` empty.
+        $result = $this->tester($this->fakePdo(['users' => 0, 'companies' => 0, 'invoices' => 0, 'migrations' => 220]))
             ->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
 
         $this->assertFalse($result->ok);
@@ -86,13 +87,55 @@ class MariaDbConnectionTesterTest extends TestCase
 
     public function test_existing_admin_is_already_installed(): void
     {
-        $result = $this->tester($this->fakePdo(['users' => 1, 'companies' => 1]))
+        $result = $this->tester($this->fakePdo(['users' => 1, 'companies' => 1, 'invoices' => 3, 'migrations' => 220]))
             ->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
 
         $this->assertFalse($result->ok);
         $this->assertSame('already_installed', $result->reason);
         $this->assertTrue($result->needsOverride);
         $this->assertTrue($result->alreadyInstalled);
+    }
+
+    /**
+     * The post-squash dead end: OUR schema is there but `migrations` is empty,
+     * so `migrate` will re-load the whole baseline and die on the first
+     * `CREATE TABLE … already exists` — forever. The override checkbox must NOT
+     * be offered (it cannot help), or the wizard just loops on an opaque error.
+     */
+    public function test_ekdosi_schema_with_an_empty_migrations_table_is_a_hard_stop(): void
+    {
+        $result = $this->tester($this->fakePdo(['users' => 0, 'companies' => 2, 'invoices' => 40, 'migrations' => 0]))
+            ->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
+
+        $this->assertFalse($result->ok);
+        $this->assertSame('unmigratable', $result->reason);
+        $this->assertFalse($result->needsOverride, 'the override checkbox cannot rescue this state — do not offer it');
+        $this->assertStringContainsString('migrations', $result->message);
+    }
+
+    /** Same, with the `migrations` table absent entirely (aborted restore). */
+    public function test_ekdosi_schema_with_no_migrations_table_at_all_is_a_hard_stop(): void
+    {
+        $result = $this->tester($this->fakePdo(['companies' => 2, 'invoices' => 40]))
+            ->test('127.0.0.1', 3306, 'ekdosi', 'u', 'p');
+
+        $this->assertSame('unmigratable', $result->reason);
+        $this->assertFalse($result->needsOverride);
+    }
+
+    /**
+     * The discrimination that keeps the hard stop from over-reaching: a foreign
+     * schema also has no `migrations` table, but it shares NO table name with
+     * the baseline, so `migrate` loads fine there. It must keep its overridable
+     * path (see test_foreign_non_ekdosi_database_… above for the same DB shape).
+     */
+    public function test_a_foreign_schema_without_migrations_is_not_mistaken_for_the_dead_end(): void
+    {
+        $result = $this->tester($this->fakePdo(['tblinvoices' => 10, 'tblclients' => 4]))
+            ->test('127.0.0.1', 3306, 'whmcs', 'u', 'p');
+
+        $this->assertSame('non_empty', $result->reason);
+        $this->assertTrue($result->needsOverride);
     }
 
     public function test_classifies_auth_failure(): void

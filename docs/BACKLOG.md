@@ -1126,6 +1126,27 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Schema baseline (v2.0.2 squash) — τα P2 που έμειναν συνειδητά ανοιχτά.** Μετά το squash
+  (`database/schema/{sqlite,mariadb}-schema.sql`) ισχύουν τρία πράγματα που ΔΕΝ έχουν guard:
+  **(α) `migrate:rollback` είναι πλέον μόνιμο no-op** για τα 220 baseline migrations σε κάθε υπάρχουσα βάση —
+  ο `Migrator::rollback` τυπώνει «Migration not found» και συνεχίζει, αφήνοντας τη γραμμή στο repository.
+  Εγγενές στο squash· το αναφέρουμε για να μη θεωρηθεί bug.
+  **(β) Βάση που έμεινε ΠΙΣΩ από τα 220** (dev/tenant που δεν πρόλαβε να κάνει migrate πριν το merge) δεν
+  μπορεί πια να προλάβει — τα αρχεία δεν υπάρχουν, το `migrate` λέει «Nothing to migrate» και το schema μένει
+  στάσιμο. Δεν το πιάνει ο `ops:health`. **Πριν από deploy σε τέτοιο host: `migrate` στο `main` ΠΡΙΝ το merge.**
+  _Review round 3 (2026-09-15): το mitigation είναι ΜΟΝΟ χειροκίνητο βήμα — μηδενική αυτόματη προστασία.
+  Φθηνός guard αν ποτέ ξαναχρειαστεί: σύγκρινε στο deploy το πλήθος (ή το max) των baseline migration rows με
+  το live `migrations` table και άρνηση αν η βάση είναι πίσω. Δεν υλοποιήθηκε — το παράθυρο κινδύνου κλείνει
+  μόλις κάθε host κάνει migrate μία φορά, και μετά ο guard είναι νεκρός κώδικας._
+  **(γ) Το `schema:dump` ΞΑΝΑΒΑΖΕΙ τα `DROP TABLE IF EXISTS`** (τα βγάζει by default ο `mariadb-dump`). Αυτά
+  είναι το data-loss footgun που έκλεισε το review: σε βάση με δεδομένα αλλά άδειο/απόν `migrations` table
+  (μισο-τελειωμένο `db-restore`) το `migrate --force` θα τα έσβηνε ΣΙΩΠΗΛΑ. Ο `SchemaBaselineTest` κοκκινίζει
+  αν επανέλθουν — **μετά από κάθε regeneration ξανα-strip-άρε τα** πριν το commit.
+  **(δ) Baseline υπάρχει ΜΟΝΟ για `mariadb` + `sqlite`.** Ο Laravel το βρίσκει με βάση το ΟΝΟΜΑ της
+  σύνδεσης (`MigrateCommand::schemaPath()`), οπότε ένα `DB_CONNECTION=mysql` (η σύνδεση υπάρχει ακόμη στο
+  `config/database.php` και υπάρχουν driver branches σε `DbSnapshot`/`DbRestore`/`CustomerLedger`) δεν
+  βρίσκει αρχείο. Ο guard στον `AppServiceProvider` πλέον **σκάει δυνατά** αντί να αφήσει κενή βάση, αλλά
+  αν ποτέ χρειαστεί πραγματικά MySQL θέλει είτε δικό του baseline είτε καθάρισμα της σύνδεσης.
 - **`system.update_token` (UI update token) δεν σαρώνεται από `secrets:reencrypt` (P2, DR edge).** Αποθηκεύεται
   στο `system_settings` κρυπτογραφημένο όταν `ekdosi.secrets.encrypt_at_rest` είναι on (ίδια απόφαση με το
   `MaybeEncrypted`). Όμως το `secrets:reencrypt` είναι model/cast-driven (σαρώνει MODELS + `isSecretCast`

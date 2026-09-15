@@ -103,11 +103,31 @@ class DbRestore extends Command
 
         if (! $process->isSuccessful()) {
             $this->error('Η επαναφορά απέτυχε: '.trim($process->getErrorOutput()));
+            // Since the v2.0.2 squash this matters, and it cuts BOTH ways —
+            // `mariadb-dump` restores tables ALPHABETICALLY and `migrations`
+            // sits mid-alphabet:
+            //   • abort with ZERO tables loaded → `migrate` finds a clean slate,
+            //     loads the whole baseline and exits 0: a COMPLETE schema with
+            //     every row of data gone. Green, and the worst of the three.
+            //   • abort BEFORE it  → no migrations table → `migrate` treats the
+            //     DB as «never migrated» and re-loads the baseline over the
+            //     tables already restored: it aborts loudly («Table ... already
+            //     exists») instead of wiping them, but can never succeed.
+            //   • abort AFTER it   → `migrations` is fully populated, so
+            //     `migrate` prints «Nothing to migrate» and exits 0 on a
+            //     database still MISSING every table from `model_has_permissions`
+            //     (54/105 — every role assignment) through `whmcs_*`. Green
+            //     output, half a schema.
+            // None is repairable by `migrate`. Only re-running the restore is.
+            $this->warn('⚠ Η βάση είναι ΗΜΙΤΕΛΗΣ. ΜΗΝ τρέξεις «php artisan migrate» για να το «φτιάξεις»: ανάλογα '
+                .'με το πού κόπηκε η επαναφορά, είτε θα αποτύχει σταθερά, είτε —χειρότερα— θα πει «Nothing to '
+                .'migrate» και θα βγει ΕΠΙΤΥΧΩΣ πάνω σε βάση που λείπουν πίνακες. ΠΡΑΣΙΝΟ migrate ΔΕΝ σημαίνει '
+                .'ότι η επαναφορά ολοκληρώθηκε. Ξανατρέξε την ΕΠΑΝΑΦΟΡΑ από το ίδιο (ή προηγούμενο) snapshot.');
 
             return self::FAILURE;
         }
 
-        $this->info('✓ Η ΒΔ επαναφέρθηκε. Αν το snapshot είναι παλιότερου schema τρέξε «php artisan migrate --force», και «php artisan up».');
+        $this->info('✓ Η ΒΔ επαναφέρθηκε ΠΛΗΡΩΣ. Αν το snapshot είναι παλιότερου schema τρέξε «php artisan migrate --force» (ασφαλές μόνο μετά από ΕΠΙΤΥΧΗ επαναφορά), και «php artisan up».');
 
         return self::SUCCESS;
     }

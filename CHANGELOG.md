@@ -18,7 +18,54 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Fixed
+- **Ο νέος guard «καμία πηγή schema» θα σιωπούσε με το πρώτο νέο migration.** Ήταν κλειδωμένος σε
+  «άδειο `database/migrations/` ΚΑΙ κανένα baseline», αλλά το δηλωμένο workflow είναι «νέα migrations
+  πάνω από το baseline» — οπότε το πρώτο τέτοιο αρχείο τον απενεργοποιούσε μόνιμα (και κοκκίνιζε το
+  CI με άσχετο `PDOException`). Πλέον κρίνεται **μόνο** στην ύπαρξη baseline.
+- **Ο installer δεν κολλάει πια σε ατέρμονο retry μετά από `migrate` που πέθανε στη μέση του
+  baseline.** Ο `loadSchemaState()` σβήνει το `migrations` ΠΡΙΝ φορτώσει το dump, οπότε κάθε
+  επανάληψη ξανα-χτυπούσε «Table … already exists» χωρίς καμία ένδειξη στον χειριστή. Το probe
+  αναγνωρίζει πλέον το αδιέξοδο (υπάρχει **οποιοσδήποτε** πίνακας του baseline + άδειο/απόν
+  `migrations` → `unmigratable`, **χωρίς** checkbox παράκαμψης, αφού δεν βοηθά) και λέει τη λύση που
+  δουλεύει. Η σύγκριση γίνεται με τα ονόματα πινάκων που διαβάζονται από το ίδιο το baseline — όχι με
+  δύο διαλεγμένους στο χέρι, που έπιαναν μόνο 6 από τα 52 σημεία διακοπής. Το `migrations` εξαιρείται
+  σκόπιμα (ο `migrate` το κάνει DROP πριν φορτώσει, άρα σκέτο δεν είναι αδιέξοδο). Ξένη βάση (WHMCS)
+  κρατά κανονικά τον overridable δρόμο της, και το μήνυμα δεν εμφανίζεται πια κάτω από «Η σύνδεση στη
+  βάση απέτυχε» (συνδεθήκαμε μια χαρά — η ΒΑΣΗ είναι το πρόβλημα). Το μήνυμα καλύπτει και την τρίτη
+  εκδοχή της ίδιας εικόνας: βάση **μοιρασμένη με άλλη εφαρμογή** (~30 από τα 105 ονόματα είναι γενικά
+  — `users`, `cache`, `products`…), όπου το stop είναι σωστό αλλά η διάγνωση «διακοπείσα επαναφορά» όχι.
+- **`INSTALL.md`: το go-live checklist ζητούσε κάτι αδύνατο μετά το squash.** Έλεγε ότι το
+  `migrate:status` πρέπει να δείχνει όλα τα migrations ως `Ran` — σε σωστή εγκατάσταση πλέον τυπώνει
+  «No migrations found», που ο χειριστής θα διάβαζε ως αποτυχία. Τώρα λέει τι είναι το αναμενόμενο και
+  πώς επαληθεύεται πραγματικά (`SELECT COUNT(*) FROM migrations` = 220).
+- **Η προειδοποίηση διακοπείσας `ekdosi:db-restore` έλεγε μισή αλήθεια.** Το `migrations` είναι στη
+  ΜΕΣΗ του αλφαβήτου, οπότε διακοπή **μετά** από αυτό αφήνει `migrate` που λέει «Nothing to migrate»
+  και βγαίνει με 0 πάνω σε βάση που λείπει η μισή — ο χειριστής συμπέραινε «πράσινο migrate = όλα
+  καλά». Command + runbook λένε τώρα και τις δύο εκδοχές ρητά.
+- **Το schema baseline δεν σβήνει πια πίνακες (data loss).** Το `mariadb-schema.sql` ξεκινούσε με 105
+  `DROP TABLE IF EXISTS`. Ο `migrate` φορτώνει το baseline όποτε το `migrations` table είναι άδειο/απόν
+  — **ανεξάρτητα από το αν υπάρχουν δεδομένα** — οπότε σε μια μισο-τελειωμένη `ekdosi:db-restore`
+  (πίνακες επαναφερμένοι, `migrations` όχι ακόμη) το `php artisan migrate --force` του deploy θα έσβηνε
+  **σιωπηλά** και τους 105 πίνακες αναφέροντας επιτυχία. Επαληθεύτηκε σε πραγματική MariaDB. Χωρίς τα
+  DROP, το πρώτο `CREATE TABLE` σκάει («Table ... already exists»), ο migrate βγαίνει με exit 1 και τα
+  δεδομένα επιζούν.
+
 ### Changed
+- **Migrations squashed σε schema baseline** (`database/schema/{sqlite,mariadb}-schema.sql`)
+  μετά το v2.0.2. Fresh installs φορτώνουν το schema dump + seeders· υπάρχουσες βάσεις ανέγγιχτες.
+  Νέες αλλαγές μπαίνουν ως κανονικά νέα migrations πάνω από το baseline. Τα `DROP TABLE IF EXISTS`
+  του `mariadb-dump` **αφαιρέθηκαν σκόπιμα** από το dump (βλ. Fixed) και ο νέος `SchemaBaselineTest`
+  κοκκινίζει αν επανέλθουν.
+- **Installer preflight: `proc_open` + πελάτης `mariadb` είναι πλέον ΥΠΟΧΡΕΩΤΙΚΑ** (ήταν προαιρετικό/
+  ανύπαρκτο). Το schema baseline φορτώνεται με shell-out στο `mariadb` binary, οπότε ένας host χωρίς
+  αυτά περνούσε πράσινο preflight και μετά έσκαγε στη μέση του `migrate`.
+- **`migrate` αρνείται σύνδεση χωρίς καμία πηγή schema.** Με άδειο `database/migrations/`, ένα
+  `DB_CONNECTION` για το οποίο δεν υπάρχει baseline (π.χ. `mysql`) θα έλεγε «Nothing to migrate», θα
+  έβγαινε με 0 και θα άφηνε **κενή** βάση — broken install που φαίνεται υγιής. Τώρα σκάει με σαφές μήνυμα.
+- **`ekdosi:db-restore`: σωστή καθοδήγηση σε διακοπή.** Ο dump επαναφέρει πίνακες αλφαβητικά, οπότε μια
+  διακοπή πριν το `migrations` αφήνει δεδομένα χωρίς `migrations` table· το «τρέξε migrate» ήταν πλέον
+  λάθος συμβουλή (αποτυγχάνει σταθερά). Η εντολή το λέει ρητά, όπως και το `docs/updates-runbook.md`.
 - **Combined ΤΔΑ — shared movement-header builder (Slice 3d-c).** Ο `DeliveryNoteSubmitter` (9.x) και ο
   `AadeInvoiceDocument::applyMovementHeader` (ΤΔΑ 1.1) περνούν πλέον από έναν κοινό
   `App\Services\EInvoice\MovementHeaderBuilder::applyCommon` για τα ΤΑΥΤΟΣΗΜΑ πεδία του movement header

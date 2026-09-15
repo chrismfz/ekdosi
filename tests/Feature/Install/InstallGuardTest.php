@@ -142,12 +142,18 @@ class InstallGuardTest extends TestCase
 
         $token = app(InstallTokenManager::class)->issue();
 
-        // Probe reports the DB already holds an ekdosi admin.
-        $this->bindProbeDb(['users' => 1, 'companies' => 1]);
+        // Probe reports the DB already holds an ekdosi admin. `migrations` must
+        // be populated for this to be the ALREADY-INSTALLED case: a schema with
+        // no migration rows is the `unmigratable` dead end instead (below), and
+        // gets no override checkbox.
+        $this->bindProbeDb(['users' => 1, 'companies' => 1, 'migrations' => 220]);
 
+        // NOT «Συνέχεια σε μη-κενή βάση»: that checkbox label is permanent markup
+        // in the wizard form, so asserting on it passes on ANY 422 redisplay.
+        // Assert the probe's own message — the only thing that differs.
         $this->post('/install', $this->validPayload($token))
             ->assertStatus(422)
-            ->assertSee('Συνέχεια σε μη-κενή βάση');
+            ->assertSee('περιέχει ΗΔΗ εγκατάσταση ekdosi', escape: false);
 
         $this->assertTrue(app(InstallState::class)->canInstall());
     }
@@ -163,7 +169,35 @@ class InstallGuardTest extends TestCase
 
         $this->post('/install', $this->validPayload($token))
             ->assertStatus(422)
-            ->assertSee('Συνέχεια σε μη-κενή βάση');
+            ->assertSee('η βάση ΔΕΝ είναι κενή', escape: false);
+
+        $this->assertTrue(app(InstallState::class)->canInstall());
+    }
+
+    /**
+     * The post-squash dead end, end to end through the real controller: baseline
+     * tables present, `migrations` empty. The wizard must NOT offer the override
+     * checkbox (it cannot help — every retry re-loads the baseline and dies on
+     * «Table … already exists»), and must NOT blame the connection: we connected
+     * fine, so «Η σύνδεση στη βάση απέτυχε» would send the operator off checking
+     * host/user/password.
+     */
+    public function test_a_half_built_schema_is_a_hard_stop_with_no_override_and_no_connection_blame(): void
+    {
+        config(['app.key' => '']);
+
+        $token = app(InstallTokenManager::class)->issue();
+
+        $this->bindProbeDb(['users' => 0, 'companies' => 2, 'customers' => 30]);
+
+        $this->post('/install', $this->validPayload($token))
+            ->assertStatus(422)
+            // The dead-end message, not the non-empty one (which would send the
+            // operator to the useless override checkbox)…
+            ->assertSee('ΔΕΝ διορθώνεται με επανάληψη', escape: false)
+            ->assertDontSee('Βεβαιώσου ότι έδωσες τη σωστή, κενή βάση', escape: false)
+            // …and no connection blame: we connected fine.
+            ->assertDontSee('Η σύνδεση στη βάση απέτυχε', escape: false);
 
         $this->assertTrue(app(InstallState::class)->canInstall());
     }

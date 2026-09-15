@@ -133,7 +133,7 @@ class BackupNoteSyncTest extends TestCase
         DB::table('customers')->where('id', $withRemark->id)->update(['details' => 'Legacy: κακοπληρωτής']);
         DB::table('customers')->where('id', $blank->id)->update(['details' => '   ']);
 
-        $migration = require database_path('migrations/2026_06_03_000002_migrate_customer_details_to_notes.php');
+        $migration = require base_path('tests/Fixtures/migrations/2026_06_03_000002_migrate_customer_details_to_notes.php');
         $migration->up();
         $migration->up();   // idempotent re-run
 
@@ -157,7 +157,7 @@ class BackupNoteSyncTest extends TestCase
         $c = $this->customer();
         DB::table('customers')->where('id', $c->id)->update(['details' => 'Δεν μεταφέρθηκε']);
 
-        $drop = require database_path('migrations/2026_06_03_000003_drop_details_from_customers_table.php');
+        $drop = require base_path('tests/Fixtures/migrations/2026_06_03_000003_drop_details_from_customers_table.php');
 
         // Un-migrated remark → guard throws, column stays.
         try {
@@ -193,7 +193,7 @@ class BackupNoteSyncTest extends TestCase
         BackupNoteSync::sync($this->tenant->id, $c->id, 'Μόνο σε trashed');
         Note::where('notable_id', $c->id)->first()->delete();   // soft-delete the only note
 
-        $drop = require database_path('migrations/2026_06_03_000003_drop_details_from_customers_table.php');
+        $drop = require base_path('tests/Fixtures/migrations/2026_06_03_000003_drop_details_from_customers_table.php');
 
         // Guard sees no LIVE backup note → refuses to drop.
         try {

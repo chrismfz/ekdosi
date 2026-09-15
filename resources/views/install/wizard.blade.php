@@ -365,7 +365,10 @@
                 } else if (d.needsOverride) {
                     box.className = 'alert alert-warn';         // connected but non-empty
                 } else {
-                    box.className = 'alert alert-err';          // connection failed
+                    // connection failed, OR a hard stop we connected fine for
+                    // (reason 'unmigratable'). Red is right for both — the
+                    // message says which; there is no override to offer.
+                    box.className = 'alert alert-err';
                 }
                 box.textContent = d.message || 'Άγνωστο αποτέλεσμα.';
             })
