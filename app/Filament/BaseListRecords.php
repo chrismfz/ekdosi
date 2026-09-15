@@ -22,7 +22,7 @@ use Filament\Support\Enums\Width;
  */
 abstract class BaseListRecords extends ListRecords
 {
-    public function getMaxContentWidth(): Width|string|null
+    public function getMaxContentWidth(): Width | string | null
     {
         return Width::Full;
     }
@@ -40,14 +40,24 @@ abstract class BaseListRecords extends ListRecords
      */
     public function removeTableFilter(string $filterName, ?string $field = null, bool $isRemovingAllFilters = false): void
     {
-        if ($this->getTable()->getFilter($filterName) === null) {
-            if (is_array($this->tableFilters)) {
-                unset($this->tableFilters[$filterName]);
-            }
+        if ($this->getTable()->getFilter($filterName) !== null) {
+            parent::removeTableFilter($filterName, $field, $isRemovingAllFilters);
 
             return;
         }
 
-        parent::removeTableFilter($filterName, $field, $isRemovingAllFilters);
+        // Orphaned key: drop it from the live state. Livewire re-syncs the URL-bound
+        // property, and handleTableFilterUpdates() rewrites a session-persisted copy
+        // too (the parent runs it as its tail; it's skipped when removing all
+        // filters). We deliberately do NOT call applyTableFilters() on the deferred
+        // path — it would overwrite tableFilters from tableDeferredFilters and could
+        // re-introduce the very key we just removed.
+        if (is_array($this->tableFilters)) {
+            unset($this->tableFilters[$filterName]);
+        }
+
+        if (! $isRemovingAllFilters) {
+            $this->handleTableFilterUpdates();
+        }
     }
 }

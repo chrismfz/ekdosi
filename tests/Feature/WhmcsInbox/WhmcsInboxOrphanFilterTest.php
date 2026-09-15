@@ -67,9 +67,13 @@ class WhmcsInboxOrphanFilterTest extends TestCase
         // The guard must only short-circuit unknown filters — a filter the table
         // still defines (`immediate` is a real SelectFilter on the inbox) has to go
         // through the normal parent removal path unchanged.
-        Livewire::test(ListWhmcsInbox::class)
+        $component = Livewire::test(ListWhmcsInbox::class)
             ->set('tableFilters', ['immediate' => ['value' => 'yes']])
             ->call('removeTableFilter', 'immediate')
             ->assertOk();
+
+        // Prove the parent path actually ran (reset the value) — not that the
+        // override silently swallowed a real filter and left 'yes' in place.
+        $this->assertNotSame('yes', $component->get('tableFilters')['immediate']['value'] ?? null);
     }
 }
