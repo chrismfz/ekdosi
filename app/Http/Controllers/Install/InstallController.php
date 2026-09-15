@@ -389,8 +389,11 @@ class InstallController
      * in-memory array store (nothing in an install needs a persistent cache),
      * forget the store the CacheManager already memoised against the placeholder
      * connection, and re-init the permission registrar so its held Repository is
-     * rebuilt against the array store. The NEXT request boots fresh from the
-     * written `.env` with the real database cache on MariaDB.
+     * rebuilt against the array store. Under the locked FPM stack (and the
+     * sequential queue worker) the NEXT request boots fresh from the written
+     * `.env` with the real database cache on MariaDB. (Under Octane a worker
+     * would keep this array binding for its lifetime — but Octane is out of scope
+     * for this app; see CLAUDE.md on firebed's static credential state.)
      */
     private function resetBootstrappedCaches(): void
     {

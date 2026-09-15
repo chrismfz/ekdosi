@@ -66,23 +66,31 @@ class MariaDbProbeResult
     }
 
     /**
-     * Non-empty, but the tables ARE the ekdosi baseline (they collide) and
-     * `migrations` is populated — a half-finished install (e.g. one whose role
-     * provisioning aborted) with no admin yet. Distinct from {@see nonEmpty()}
-     * because that one's «δεν φαίνονται εγκατάσταση ekdosi» is simply false here
-     * and misleads the operator into hunting for a «wrong» database — this IS
-     * their ekdosi database. Both still require the override; only the wording
-     * (and the recommended action) differ: here, ticking «Συνέχεια» actually
-     * completes the prior attempt.
+     * Non-empty, tables that COLLIDE with the ekdosi baseline, `migrations`
+     * populated, no admin yet — most likely a half-finished install (e.g. one
+     * whose role provisioning aborted). Distinct from {@see nonEmpty()} because
+     * that one's «δεν φαίνονται εγκατάσταση ekdosi» is simply false for our own
+     * half-built DB and sends the operator hunting for a «wrong» database.
+     *
+     * The diagnosis is HEDGED, exactly like {@see unmigratable()}: the collision
+     * test matches ANY baseline table name, and ~20 of the 105 are generic
+     * (`users`, `cache`, `jobs`, `sessions`, `migrations`, `products`,
+     * `payments`…), so a database SHARED with another Laravel/app that happens to
+     * carry those + a populated `migrations` + zero user rows lands here too.
+     * Both cases still require the override (no clobber without the explicit
+     * tick); the message names the ekdosi-resume path AND the shared-DB
+     * possibility rather than asserting the former as fact.
      */
     public static function partialEkdosi(int $tableCount): self
     {
         return new self(
             ok: false,
             reason: 'partial_ekdosi',
-            message: "Συνδέθηκε. Η βάση περιέχει ΗΔΗ το schema του ekdosi ({$tableCount} πίνακες) από ημιτελή προηγούμενη "
-                .'προσπάθεια εγκατάστασης, αλλά δεν έχει ακόμη διαχειριστή. Για ΚΑΘΑΡΗ εγκατάσταση δώσε κενή βάση· '
-                .'για να ΟΛΟΚΛΗΡΩΘΕΙ η προηγούμενη προσπάθεια, τσέκαρε «Συνέχεια σε μη-κενή βάση» και ξαναπροσπάθησε.',
+            message: "Συνδέθηκε. Η βάση περιέχει ήδη πίνακες του schema του ekdosi ({$tableCount} συνολικά) με γεμάτο "
+                .'`migrations` αλλά χωρίς διαχειριστή — πιθανότατα ημιτελής προηγούμενη προσπάθεια εγκατάστασης. '
+                .'(Αν όμως αυτή η βάση ΜΟΙΡΑΖΕΤΑΙ με άλλη εφαρμογή, ίσως απλώς συμπίπτουν γενικά ονόματα πινάκων — '
+                .'users, cache, jobs…) Αν ΕΙΝΑΙ ημιτελής προσπάθεια του ekdosi, τσέκαρε «Συνέχεια σε μη-κενή βάση» '
+                .'για να ολοκληρωθεί· διαφορετικά δώσε ΔΙΚΗ ΤΗΣ, κενή βάση στο ekdosi.',
             needsOverride: true,
             tableCount: $tableCount,
         );

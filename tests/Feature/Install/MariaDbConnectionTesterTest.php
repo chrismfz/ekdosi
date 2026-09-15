@@ -96,6 +96,23 @@ class MariaDbConnectionTesterTest extends TestCase
         $this->assertStringNotContainsString('δεν φαίνονται εγκατάσταση', $result->message);
     }
 
+    public function test_partial_ekdosi_hedges_the_shared_database_ambiguity(): void
+    {
+        // collidesWithBaseline() matches ANY baseline name, ~20 of which are
+        // generic (users/cache/jobs/sessions/migrations/products…). So a DB
+        // SHARED with another Laravel app — generic tables + populated migrations
+        // + zero user rows — also lands in partial_ekdosi. The message must NOT
+        // assert as fact that it's a half-finished ekdosi attempt; it hedges the
+        // shared-DB possibility (like unmigratable does), while still requiring
+        // the override so nothing is ever clobbered without an explicit tick.
+        $result = $this->tester($this->fakePdo(['users' => 0, 'cache' => 0, 'jobs' => 0, 'migrations' => 4]))
+            ->test('127.0.0.1', 3306, 'someapp', 'u', 'p');
+
+        $this->assertSame('partial_ekdosi', $result->reason);
+        $this->assertTrue($result->needsOverride, 'override always required — never auto-proceed on a non-empty DB');
+        $this->assertStringContainsString('ΜΟΙΡΑΖΕΤΑΙ', $result->message, 'must hedge: it may be a shared/foreign DB, not asserted-ekdosi');
+    }
+
     public function test_existing_admin_is_already_installed(): void
     {
         $result = $this->tester($this->fakePdo(['users' => 1, 'companies' => 1, 'invoices' => 3, 'migrations' => 220]))
