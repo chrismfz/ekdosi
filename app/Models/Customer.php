@@ -38,6 +38,15 @@ class Customer extends Model
     public const OUTSTANDING_BALANCE_SQL = '(COALESCE(cust_owed.owed, 0) - COALESCE(cust_credited_total.credited_total, 0) - COALESCE(cust_credit.credited, 0) - COALESCE(cust_paid.paid, 0))';
 
     /**
+     * Count of REAL issued παραστατικά per customer, over the `cust_stats` join
+     * alias attached by scopeWithInvoiceStats(). Defined once so the sortable
+     * «Αρ. Παρ/ων» column and the «Δραστηριότητα» filter (με/χωρίς παραστατικά)
+     * can't drift apart — same predicate, one place. Not usable as a bare alias
+     * in WHERE, so the filter repeats this expression.
+     */
+    public const INVOICE_COUNT_SQL = 'COALESCE(cust_stats.invoice_count, 0)';
+
+    /**
      * Audited identity/contact/terms columns. See TracksActivity.
      *
      * @return list<string>
@@ -444,5 +453,73 @@ class Customer extends Model
     public function scopeOnlyDebtors(Builder $query): Builder
     {
         return $query->whereRaw(self::OUTSTANDING_BALANCE_SQL.' > 0.005');
+    }
+
+    /**
+     * Attach per-customer sales-activity aliases to a Customer query, computed
+     * entirely in SQL (one grouped sub-select, left-joined) so they are sortable
+     * on a list of thousands of customers with no per-row PHP:
+     *
+     *   invoice_count    — COUNT of issued SALE παραστατικά (credit notes not counted)
+     *   turnover         — net κύκλος εργασιών: Σ net_total with credit notes
+     *                      signed NEGATIVE (sales − returns), «τζίρος»
+     *   last_invoiced_at — MAX(issued_at) of a sale, the dormancy signal
+     *
+     * The row set = the same LIVE + issued documents the canonical income book
+     * (Accounting\LedgerBook::incomeRows) records — not cancelled (local OR AADE),
+     * not an unissued sale draft. Turnover then signs credit notes negative EXACTLY
+     * like LedgerBook ($sign = -1 for isCreditNote()), so «Τζίρος» is the real net
+     * turnover, not inflated by returns. The count and last-date look at SALES only
+     * (a ΠΙΣ/return is not a sale), so «Αρ. Παρ/ων» reads as "how many τιμολόγια".
+     * Cash-term AND credit-term both count (this is activity, not a receivable —
+     * unlike scopeWithOutstandingBalance's due_days filter).
+     *
+     * A credit note is detected with the canonical predicate (Invoice::isCreditNote):
+     * a correlated `credited_invoice_id` OR a credit-TYPE document (`invoice_types.is_credit`,
+     * the legacy standalone ΠΙΣ shape) — hence the LEFT JOIN on invoice_types.
+     *
+     * NOT deduplicated against scopeWithOutstandingBalance's `$owed` sub-select on
+     * purpose: that one filters to credit-term (due_days>0/paid) receivables, this
+     * one counts ALL sales (cash + credit) — different row sets, can't share one
+     * grouped scan. The extra indexed aggregate is negligible on a customer list.
+     *
+     * MUST be chained AFTER scopeWithOutstandingBalance() (or any scope that has
+     * already `select('customers.*')`ed): this uses addSelect so it appends its
+     * aliases without clobbering `outstanding_balance`, but it does NOT itself
+     * select the base columns.
+     *
+     * @param  int  $companyId  Tenant scope for the DB::table() sub-select (the
+     *                          BelongsToCompany global scope covers Eloquent, not
+     *                          this raw subquery); works with no ambient context.
+     */
+    public function scopeWithInvoiceStats(Builder $query, int $companyId): Builder
+    {
+        // Canonical "is this a credit note?" over the joined invoice_types
+        // (mirrors Invoice::isCreditNote / InvoiceScope). A LEFT-JOIN miss
+        // (no type) → NULL → treated as a sale, which is correct.
+        $isCreditNote = '(invoices.credited_invoice_id IS NOT NULL OR invoice_types.is_credit = 1)';
+
+        $stats = DB::table('invoices')
+            ->leftJoin('invoice_types', 'invoice_types.id', '=', 'invoices.invoice_type_id')
+            ->where('invoices.company_id', $companyId)
+            ->whereNull('invoices.deleted_at')
+            ->whereNotNull('invoices.customer_id')
+            ->groupBy('invoices.customer_id')
+            ->select('invoices.customer_id')
+            // Sales only (a return is not a sale) for the count + last-date…
+            ->selectRaw("SUM(CASE WHEN {$isCreditNote} THEN 0 ELSE 1 END) as invoice_count")
+            ->selectRaw("MAX(CASE WHEN {$isCreditNote} THEN NULL ELSE invoices.issued_at END) as last_invoiced_at")
+            // …but net turnover signs credit notes negative (LedgerBook parity).
+            ->selectRaw("COALESCE(SUM(CASE WHEN {$isCreditNote} THEN -invoices.net_total ELSE invoices.net_total END), 0) as turnover");
+        InvoiceScope::excludeUnissuedDrafts($stats);
+        $stats = InvoiceScope::live($stats, 'invoices.');
+
+        return $query
+            ->leftJoinSub($stats, 'cust_stats', 'cust_stats.customer_id', '=', 'customers.id')
+            ->addSelect(
+                DB::raw(self::INVOICE_COUNT_SQL.' as invoice_count'),
+                DB::raw('COALESCE(cust_stats.turnover, 0) as turnover'),
+                DB::raw('cust_stats.last_invoiced_at as last_invoiced_at'),
+            );
     }
 }
