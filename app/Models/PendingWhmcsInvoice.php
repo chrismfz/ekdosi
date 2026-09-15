@@ -70,6 +70,13 @@ class PendingWhmcsInvoice extends Model
     // straight from the inbox.
     public const STATUS_DRAFTED = 'drafted';
 
+    // Terminal, no-issue state for a WHMCS mass-pay «container» once handled:
+    // its children were either CONSOLIDATED into one παραστατικό (the mass-pay
+    // row itself rewritten to carry them) or handled PER-ORDER as their own
+    // rows. Not «rejected» (nothing was refused) — «resolved»/«done». Never
+    // filed to AADE.
+    public const STATUS_RESOLVED = 'resolved';
+
     /**
      * Match-reason constants - mirror MatchResult::$reason values so
      * downstream consumers can pattern-match without typo risk.
@@ -121,6 +128,7 @@ class PendingWhmcsInvoice extends Model
         'whmcs_userid',
         'customer_id',
         'invoice_id',
+        'masspay_parent_id',
         'payload',
         'match_reason',
         'third_party_state',
@@ -148,6 +156,7 @@ class PendingWhmcsInvoice extends Model
             'whmcs_invoice_id' => 'integer',
             'whmcs_userid' => 'integer',
             'legacy_invoiced' => 'integer',
+            'masspay_parent_id' => 'integer',
         ];
     }
 
@@ -170,6 +179,29 @@ class PendingWhmcsInvoice extends Model
     public function customer(): BelongsTo
     {
         return $this->belongsTo(Customer::class);
+    }
+
+    /** The WHMCS mass-pay «container» this row was linked to (per-order path). */
+    public function massPayParent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'masspay_parent_id');
+    }
+
+    /** The child rows handled under this mass-pay (per-order path). */
+    public function massPayChildren(): HasMany
+    {
+        return $this->hasMany(self::class, 'masspay_parent_id');
+    }
+
+    /** True when this row is a WHMCS mass-pay «container» (references child invoices). */
+    public function isMassPay(): bool
+    {
+        return $this->isConsolidatedPayment();
+    }
+
+    public function isResolved(): bool
+    {
+        return $this->status === self::STATUS_RESOLVED;
     }
 
     public function filedByUser(): BelongsTo
