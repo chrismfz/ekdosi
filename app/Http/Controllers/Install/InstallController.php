@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Install;
 
+use App\Services\Install\MailConnectionTester;
 use App\Services\Install\MariaDbConnectionTester;
 use App\Services\Portability\BundleArchive;
 use App\Services\Portability\SecretsCodec;
@@ -33,6 +34,7 @@ class InstallController
         private readonly InstallState $state,
         private readonly InstallTokenManager $tokens,
         private readonly MariaDbConnectionTester $dbTester,
+        private readonly MailConnectionTester $mailTester,
         private readonly EnvWriter $env,
         private readonly RequirementsChecker $requirements,
     ) {}
@@ -81,6 +83,37 @@ class InstallController
             'reason' => $result->reason,
             'message' => $result->message,
             'needsOverride' => $result->needsOverride,
+        ]);
+    }
+
+    /** POST /install/test-mail — AJAX SMTP probe (connect+auth, optional send). Token-gated, JSON. */
+    public function testMail(Request $request): JsonResponse
+    {
+        $this->guardPristine();
+
+        if (! $this->tokens->verify($request->input('verify_token'))) {
+            return response()->json([
+                'ok' => false,
+                'reason' => 'token',
+                'message' => 'Λάθος κωδικός επιβεβαίωσης — δες το αρχείο στον διακομιστή.',
+            ], 403);
+        }
+
+        $result = $this->mailTester->test(
+            host: (string) $request->input('mail_host', ''),
+            port: (int) $request->input('mail_port', 587),
+            encryption: (string) $request->input('mail_encryption', 'tls'),
+            username: (string) $request->input('mail_username', ''),
+            password: (string) $request->input('mail_password', ''),
+            recipient: $request->filled('test_recipient') ? (string) $request->input('test_recipient') : null,
+            fromAddress: (string) $request->input('mail_from_address', ''),
+            fromName: (string) $request->input('mail_from_name', ''),
+        );
+
+        return response()->json([
+            'ok' => $result->ok,
+            'reason' => $result->reason,
+            'message' => $result->message,
         ]);
     }
 
