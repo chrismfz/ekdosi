@@ -103,14 +103,22 @@ class DbRestore extends Command
 
         if (! $process->isSuccessful()) {
             $this->error('Η επαναφορά απέτυχε: '.trim($process->getErrorOutput()));
-            // Since the v2.0.2 squash this matters: the dump restores tables
-            // ALPHABETICALLY, so an abort before `migrations` leaves data tables
-            // present with NO migrations table. `migrate` treats that as «never
-            // migrated» and tries to load the schema baseline over live data —
-            // it now aborts loudly («Table ... already exists») instead of
-            // wiping it, but it will NEVER succeed. Re-run the restore.
-            $this->warn('⚠ Η βάση είναι ΗΜΙΤΕΛΗΣ. ΜΗΝ τρέξεις «php artisan migrate» για να το «φτιάξεις» — '
-                .'θα αποτύχει σταθερά. Ξανατρέξε την ΕΠΑΝΑΦΟΡΑ από το ίδιο (ή προηγούμενο) snapshot.');
+            // Since the v2.0.2 squash this matters, and it cuts BOTH ways —
+            // `mariadb-dump` restores tables ALPHABETICALLY and `migrations`
+            // sits mid-alphabet:
+            //   • abort BEFORE it  → no migrations table → `migrate` treats the
+            //     DB as «never migrated» and re-loads the baseline over the
+            //     tables already restored: it aborts loudly («Table ... already
+            //     exists») instead of wiping them, but can never succeed.
+            //   • abort AFTER it   → `migrations` is fully populated, so
+            //     `migrate` prints «Nothing to migrate» and exits 0 on a
+            //     database still MISSING every table from `mydata_*` to
+            //     `whmcs_*`. The dangerous half: green output, half a schema.
+            // Neither is repairable by `migrate`. Only re-running the restore is.
+            $this->warn('⚠ Η βάση είναι ΗΜΙΤΕΛΗΣ. ΜΗΝ τρέξεις «php artisan migrate» για να το «φτιάξεις»: ανάλογα '
+                .'με το πού κόπηκε η επαναφορά, είτε θα αποτύχει σταθερά, είτε —χειρότερα— θα πει «Nothing to '
+                .'migrate» και θα βγει ΕΠΙΤΥΧΩΣ πάνω σε βάση που λείπουν πίνακες. ΠΡΑΣΙΝΟ migrate ΔΕΝ σημαίνει '
+                .'ότι η επαναφορά ολοκληρώθηκε. Ξανατρέξε την ΕΠΑΝΑΦΟΡΑ από το ίδιο (ή προηγούμενο) snapshot.');
 
             return self::FAILURE;
         }

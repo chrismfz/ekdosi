@@ -64,7 +64,22 @@ class SchemaBaselineTest extends TestCase
         $this->assertGreaterThan(100, substr_count($sql, 'CREATE TABLE'));
     }
 
-    /** The sqlite baseline is non-destructive for the same reason — keep it that way. */
+    /**
+     * The sqlite baseline is non-destructive for the same reason — keep it that
+     * way.
+     *
+     * NOTE the guarantee here is WEAKER than the MariaDB one above, and
+     * deliberately so. `schema:dump` emits sqlite's 105 statements as
+     * `CREATE TABLE IF NOT EXISTS`, so on a sqlite DB with data tables but an
+     * empty `migrations` table every CREATE silently no-ops, the migration rows
+     * are inserted anyway and `migrate` reports success — the DB gets MARKED
+     * fully migrated while its schema may be stale. Where MariaDB fails
+     * non-zero, sqlite records a lie. We accept that: sqlite is the test/CI
+     * connection only (prod is MariaDB — see CLAUDE.md «Stack»), it is always
+     * built fresh, and stripping the IF NOT EXISTS would be re-added by the
+     * next `schema:dump` for no real-world gain. So this test asserts only «no
+     * DROP TABLE», NOT «aborts loudly on a populated DB».
+     */
     public function test_the_sqlite_baseline_never_drops_tables(): void
     {
         $this->assertStringNotContainsStringIgnoringCase('DROP TABLE', $this->baseline('sqlite'));
@@ -98,12 +113,13 @@ class SchemaBaselineTest extends TestCase
 
     /**
      * Laravel resolves the baseline by CONNECTION NAME, not driver, and
-     * `loadSchemaState()` returns SILENTLY when no file matches. With an empty
-     * `database/migrations/`, `migrate` on a connection we ship no baseline for
-     * would print «Nothing to migrate», exit 0 and leave the database EMPTY —
-     * a broken install that looks healthy. AppServiceProvider refuses instead.
+     * `loadSchemaState()` returns SILENTLY when no file matches. On a
+     * connection we ship no baseline for, `migrate` would print «Nothing to
+     * migrate» (or apply only the post-squash deltas), exit 0 and leave the
+     * database EMPTY — a broken install that looks healthy. AppServiceProvider
+     * refuses instead.
      */
-    public function test_migrate_refuses_a_connection_with_no_migrations_and_no_baseline(): void
+    public function test_migrate_refuses_a_connection_with_no_baseline(): void
     {
         $this->assertFileDoesNotExist(database_path('schema/pgsql-schema.sql'));
 
@@ -114,6 +130,33 @@ class SchemaBaselineTest extends TestCase
         $this->expectExceptionMessageMatches('/Καμία πηγή schema/u');
 
         Artisan::call('migrate', ['--database' => 'pgsql', '--force' => true]);
+    }
+
+    /**
+     * The regression this guard is one condition away from: keying it on «and
+     * database/migrations/ is empty too» makes the FIRST new migration on top
+     * of the baseline silence it permanently — the operator then gets an
+     * exit-0 database holding that one delta and nothing else. The repo's
+     * whole stated workflow is «new migrations on top of the baseline», so
+     * that day is coming. Pin the behaviour with a real migration file on
+     * disk.
+     */
+    public function test_the_no_baseline_guard_survives_a_post_squash_migration(): void
+    {
+        $file = database_path('migrations/9999_12_31_000000_schema_baseline_guard_probe.php');
+        file_put_contents($file, "<?php\n\nreturn new class extends \\Illuminate\\Database\\Migrations\\Migration {};\n");
+
+        try {
+            $this->assertNotEmpty(glob(database_path('migrations/*.php')), 'the probe migration must be on disk');
+
+            Artisan::call('migrate', ['--database' => 'pgsql', '--force' => true]);
+
+            $this->fail('migrate on a baseline-less connection must still be refused once migrations exist');
+        } catch (RuntimeException $e) {
+            $this->assertMatchesRegularExpression('/Καμία πηγή schema/u', $e->getMessage());
+        } finally {
+            @unlink($file);
+        }
     }
 
     /** The connections we DO ship a baseline for must not trip that guard. */

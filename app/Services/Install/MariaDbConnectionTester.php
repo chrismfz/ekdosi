@@ -18,7 +18,10 @@ use Throwable;
  * installer must not get wrong: is this database SAFE to install into, or does
  * it already hold a finished ekdosi install we'd clobber? «Finished» = a
  * super-admin user exists; a merely-migrated DB (tables but no admin) is still
- * safe because both `migrate` and `ekdosi:install` are idempotent.
+ * safe because both `migrate` and `ekdosi:install` are idempotent — with ONE
+ * post-squash exception it also detects: an ekdosi schema whose `migrations`
+ * table is empty is NOT idempotently retryable, it is a dead end
+ * ({@see MariaDbProbeResult::unmigratable()}).
  */
 class MariaDbConnectionTester
 {
@@ -79,6 +82,9 @@ class MariaDbConnectionTester
      *  - ≥1 table AND ≥1 `users` row → an existing ekdosi admin → distinct
      *                   «already installed» message (still overridable to finish
      *                   a partial attempt).
+     *  - an ekdosi schema with an EMPTY/absent `migrations` table → a dead end
+     *                   the override cannot rescue → hard stop
+     *                   ({@see MariaDbProbeResult::unmigratable()}).
      */
     private function probe(PDO $pdo): MariaDbProbeResult
     {
@@ -88,7 +94,17 @@ class MariaDbConnectionTester
             return MariaDbProbeResult::emptyDatabase();
         }
 
-        // Non-empty. Does it already carry an ekdosi admin?
+        // Non-empty. Post-squash, OUR OWN tables + no migration rows is the one
+        // combination `migrate` can never get past (the baseline re-runs and
+        // collides), so it must not be offered the override checkbox. Keyed on
+        // ekdosi tables specifically, NOT on «non-empty»: a foreign schema
+        // (WHMCS, another app) shares no table names with the baseline, so that
+        // DB still loads it fine and keeps its existing overridable path.
+        if ($this->looksLikeEkdosi($pdo) && $this->migrationRows($pdo) === 0) {
+            return MariaDbProbeResult::unmigratable($tableCount);
+        }
+
+        // Does it already carry an ekdosi admin?
         try {
             $userRows = (int) $pdo->query('SELECT COUNT(*) FROM users')->fetchColumn();
         } catch (Throwable) {
@@ -121,6 +137,34 @@ class MariaDbConnectionTester
         }
 
         return 0;
+    }
+
+    /**
+     * Do ekdosi's OWN tables live here? Two of the baseline's earliest tables —
+     * one would be enough, but a foreign schema owning a table called `users`
+     * is entirely plausible, while `companies` + `invoices` together is not.
+     */
+    private function looksLikeEkdosi(PDO $pdo): bool
+    {
+        foreach (['companies', 'invoices'] as $table) {
+            try {
+                $pdo->query("SELECT 1 FROM {$table} LIMIT 1");
+            } catch (Throwable) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /** Rows in `migrations`; 0 when the table is empty OR absent — the same thing to `migrate`. */
+    private function migrationRows(PDO $pdo): int
+    {
+        try {
+            return (int) $pdo->query('SELECT COUNT(*) FROM migrations')->fetchColumn();
+        } catch (Throwable) {
+            return 0;
+        }
     }
 
     private function classify(Throwable $e): string

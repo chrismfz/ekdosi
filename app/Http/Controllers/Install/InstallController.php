@@ -180,6 +180,14 @@ class InstallController
         //     (migrate is additive, ekdosi:install is firstOrCreate + --force), so
         //     a retry after a mid-way failure is safe. `.env` is NOT written yet —
         //     a failure here leaves the wizard available for that retry.
+        //
+        //     Post-squash caveat, already screened out at (3): `migrate` is only
+        //     idempotent here while the `migrations` table survives. If it dies
+        //     mid-BASELINE, `loadSchemaState()` has already wiped the repository,
+        //     so the retry would re-load the dump onto the half-built tables and
+        //     fail forever. The probe refuses that state up front (reason
+        //     `unmigratable`, NOT overridable) and names the way out, instead of
+        //     looping the wizard on «Table … already exists».
         try {
             Artisan::call('migrate', ['--force' => true]);
 

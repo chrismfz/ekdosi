@@ -19,6 +19,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Fixed
+- **Ο νέος guard «καμία πηγή schema» θα σιωπούσε με το πρώτο νέο migration.** Ήταν κλειδωμένος σε
+  «άδειο `database/migrations/` ΚΑΙ κανένα baseline», αλλά το δηλωμένο workflow είναι «νέα migrations
+  πάνω από το baseline» — οπότε το πρώτο τέτοιο αρχείο τον απενεργοποιούσε μόνιμα (και κοκκίνιζε το
+  CI με άσχετο `PDOException`). Πλέον κρίνεται **μόνο** στην ύπαρξη baseline.
+- **Ο installer δεν κολλάει πια σε ατέρμονο retry μετά από `migrate` που πέθανε στη μέση του
+  baseline.** Ο `loadSchemaState()` σβήνει το `migrations` ΠΡΙΝ φορτώσει το dump, οπότε κάθε
+  επανάληψη ξανα-χτυπούσε «Table … already exists» χωρίς καμία ένδειξη στον χειριστή. Το probe
+  αναγνωρίζει πλέον το αδιέξοδο (schema ekdosi + άδειο/απόν `migrations` → `unmigratable`, **χωρίς**
+  checkbox παράκαμψης, αφού δεν βοηθά) και λέει τη μία λύση που δουλεύει. Ξένη βάση (WHMCS) κρατά
+  κανονικά τον overridable δρόμο της.
+- **Η προειδοποίηση διακοπείσας `ekdosi:db-restore` έλεγε μισή αλήθεια.** Το `migrations` είναι στη
+  ΜΕΣΗ του αλφαβήτου, οπότε διακοπή **μετά** από αυτό αφήνει `migrate` που λέει «Nothing to migrate»
+  και βγαίνει με 0 πάνω σε βάση που λείπει η μισή — ο χειριστής συμπέραινε «πράσινο migrate = όλα
+  καλά». Command + runbook λένε τώρα και τις δύο εκδοχές ρητά.
 - **Το schema baseline δεν σβήνει πια πίνακες (data loss).** Το `mariadb-schema.sql` ξεκινούσε με 105
   `DROP TABLE IF EXISTS`. Ο `migrate` φορτώνει το baseline όποτε το `migrations` table είναι άδειο/απόν
   — **ανεξάρτητα από το αν υπάρχουν δεδομένα** — οπότε σε μια μισο-τελειωμένη `ekdosi:db-restore`

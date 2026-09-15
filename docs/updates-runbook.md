@@ -221,10 +221,16 @@ actually recover». For a restore when the **APP_KEY is lost**, see
   **⚠ Αν η επαναφορά ΔΙΑΚΟΠΕΙ, μην «διορθώσεις» με `migrate`** — ξανατρέξε την
   επαναφορά. Μετά το v2.0.2 squash το schema έρχεται από το baseline
   (`database/schema/mariadb-schema.sql`) και το `migrate` το φορτώνει όποτε το
-  `migrations` table λείπει/είναι άδειο. Ο dump επαναφέρει πίνακες ΑΛΦΑΒΗΤΙΚΑ, οπότε
-  μια διακοπή πριν το `migrations` αφήνει ακριβώς αυτή την κατάσταση: δεδομένα χωρίς
-  `migrations`. Το `migrate` τότε **αποτυγχάνει σταθερά** («Table ... already exists»
-  — by design, ώστε να μη σβήσει τα δεδομένα) και δεν πρόκειται να πετύχει ποτέ.
+  `migrations` table λείπει/είναι άδειο. Ο dump επαναφέρει πίνακες ΑΛΦΑΒΗΤΙΚΑ και το
+  `migrations` βρίσκεται στη ΜΕΣΗ του αλφαβήτου, οπότε η διακοπή έχει **δύο** εκδοχές
+  — και οι δύο ανεπανόρθωτες από το `migrate`:
+  - **διακοπή ΠΡΙΝ το `migrations`** → δεδομένα χωρίς `migrations`. Το `migrate`
+    **αποτυγχάνει σταθερά** («Table ... already exists» — by design, ώστε να μη σβήσει
+    τα δεδομένα) και δεν πρόκειται να πετύχει ποτέ.
+  - **διακοπή ΜΕΤΑ το `migrations`** (η επικίνδυνη) → το `migrations` είναι ΠΛΗΡΕΣ,
+    οπότε το `migrate` λέει **«Nothing to migrate», βγαίνει με 0** και φαίνεται
+    πράσινο — πάνω σε βάση που λείπουν όλοι οι πίνακες από `mydata_*` ως `whmcs_*`.
+    **Πράσινο `migrate` ΔΕΝ είναι απόδειξη ότι η επαναφορά ολοκληρώθηκε.**
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.

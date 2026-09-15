@@ -1134,6 +1134,10 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   **(β) Βάση που έμεινε ΠΙΣΩ από τα 220** (dev/tenant που δεν πρόλαβε να κάνει migrate πριν το merge) δεν
   μπορεί πια να προλάβει — τα αρχεία δεν υπάρχουν, το `migrate` λέει «Nothing to migrate» και το schema μένει
   στάσιμο. Δεν το πιάνει ο `ops:health`. **Πριν από deploy σε τέτοιο host: `migrate` στο `main` ΠΡΙΝ το merge.**
+  _Review round 3 (2026-09-15): το mitigation είναι ΜΟΝΟ χειροκίνητο βήμα — μηδενική αυτόματη προστασία.
+  Φθηνός guard αν ποτέ ξαναχρειαστεί: σύγκρινε στο deploy το πλήθος (ή το max) των baseline migration rows με
+  το live `migrations` table και άρνηση αν η βάση είναι πίσω. Δεν υλοποιήθηκε — το παράθυρο κινδύνου κλείνει
+  μόλις κάθε host κάνει migrate μία φορά, και μετά ο guard είναι νεκρός κώδικας._
   **(γ) Το `schema:dump` ΞΑΝΑΒΑΖΕΙ τα `DROP TABLE IF EXISTS`** (τα βγάζει by default ο `mariadb-dump`). Αυτά
   είναι το data-loss footgun που έκλεισε το review: σε βάση με δεδομένα αλλά άδειο/απόν `migrations` table
   (μισο-τελειωμένο `db-restore`) το `migrate --force` θα τα έσβηνε ΣΙΩΠΗΛΑ. Ο `SchemaBaselineTest` κοκκινίζει

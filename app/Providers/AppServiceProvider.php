@@ -109,7 +109,12 @@ class AppServiceProvider extends ServiceProvider
          * «Nothing to migrate», exits 0, and leaves a broken install that looks
          * healthy. Pre-squash the same command built the whole schema.
          *
-         * Refuse instead: no migrations AND no baseline = nothing can be built.
+         * Refuse instead: NO BASELINE for the connection = the schema can never
+         * be built, full stop. Deliberately NOT «and database/migrations/ is
+         * also empty»: post-squash that directory only ever carries DELTAS on
+         * top of the baseline, so the first new migration would silence the
+         * guard forever and hand the operator the exact same empty-but-exit-0
+         * database with one delta applied on top of nothing.
          *
          * Scope: CommandStarting is re-routed from the Symfony console
          * dispatcher, which Kernel::__construct wires up at boot EXCEPT while
@@ -132,16 +137,16 @@ class AppServiceProvider extends ServiceProvider
             $connection = $event->input->getParameterOption('--database')
                 ?: config('database.default');
 
-            $hasMigrations = count(glob(database_path('migrations/*.php')) ?: []) > 0;
             $hasBaseline = file_exists(database_path("schema/{$connection}-schema.sql"))
                 || file_exists(database_path("schema/{$connection}-schema.dump"));
 
-            if (! $hasMigrations && ! $hasBaseline) {
+            if (! $hasBaseline) {
                 throw new RuntimeException(
-                    "Καμία πηγή schema για τη σύνδεση «{$connection}»: το database/migrations/ είναι άδειο "
-                    ."(squash v2.0.2) και δεν υπάρχει database/schema/{$connection}-schema.sql. Το migrate θα "
-                    .'έλεγε «Nothing to migrate» και θα άφηνε ΚΕΝΗ βάση. Χρησιμοποίησε DB_CONNECTION=mariadb '
-                    .'(ή sqlite), ή πρόσθεσε baseline για αυτή τη σύνδεση.'
+                    "Καμία πηγή schema για τη σύνδεση «{$connection}»: δεν υπάρχει "
+                    ."database/schema/{$connection}-schema.sql. Από το squash v2.0.2 το baseline ΕΙΝΑΙ το "
+                    .'schema — το database/migrations/ κρατά μόνο τα deltas από εκεί και πέρα, οπότε το '
+                    .'migrate θα έχτιζε ΚΕΝΗ βάση (ή μόνο τα deltas) και θα έβγαινε με 0. Χρησιμοποίησε '
+                    .'DB_CONNECTION=mariadb (ή sqlite), ή πρόσθεσε baseline για αυτή τη σύνδεση.'
                 );
             }
         });
