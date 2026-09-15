@@ -354,7 +354,7 @@ class InvoiceInfolist
 
                 // «Παρατηρήσεις» + «Logistics» share the bottom row (both short), which
                 // frees the full page width above for «myDATA / Πάροχος» to spread out.
-                // Παρατηρήσεις stays on the left (where it was), Logistics moves to its right.
+                // Παρατηρήσεις is listed first so it takes the left cell, Logistics the right.
                 Section::make('Παρατηρήσεις (εκτύπωσης)')
                     ->description('Εμφανίζονται στο PDF/email του πελάτη.')
                     ->schema([
