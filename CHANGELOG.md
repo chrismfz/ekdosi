@@ -29,6 +29,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   η *χρήση* (ο seeder δίνει σε κάθε tenant μια αχρησιμοποίητη «POS / e-POS» εγγραφή — δεν κοκκινίζει τζάμπα).
 
 ### Fixed
+- **`deploy/update.sh`: το `git ls-files … < <(…)` (process substitution) έσκαγε σε CloudLinux CageFS
+  με «/dev/fd/63: No such file or directory».** Το CageFS δεν εκθέτει το `/dev/fd`, οπότε το process
+  substitution δεν μπορούσε να ανοίξει το descriptor και ο deploy σταματούσε στο βήμα αναφοράς untracked
+  αρχείων (πριν το maintenance / composer / migrate — το site έμενε ΠΑΝΩ). Πλέον διαβάζουμε τη NUL-separated
+  λίστα από **προσωρινό αρχείο** (`mktemp`) αντί για process substitution — δουλεύει παντού, κρατά τον
+  χειρισμό των non-ASCII (ελληνικών) ονομάτων. (Bug προϋπήρχε· φάνηκε μόλις ξεμπλόκαρε το `.htaccess` gate.)
 - **`deploy/update.sh`: το cPanel MultiPHP «βρόμιζε» το tracked `public/.htaccess` και μπλόκαρε ΚΑΘΕ deploy.**
   Το cPanel γράφει το `# php -- BEGIN cPanel-generated handler` block (ορίζει την **έκδοση PHP**) μέσα στο
   `public/.htaccess`, που είναι tracked — οπότε ο pre-flight «Working tree not clean» αρνιόταν το deploy κάθε

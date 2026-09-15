@@ -193,10 +193,16 @@ echo "Current: $CURRENT   →   Target: $REF ($(git rev-parse --short "$TARGET_S
 # NUL-separated + quotePath=off: git C-quotes non-ASCII paths by default
 # («Πελάτες.md» → "\316\240…"), which would break the cat-file probe below on a
 # Greek filename — exactly the kind we have.
+# Read via a temp file, NOT process substitution `< <(...)`: CloudLinux CageFS
+# does not expose /dev/fd, so `< <(…)` dies with «/dev/fd/63: No such file or
+# directory». A real file works everywhere and preserves the NUL separation.
 _untracked=()
+_untracked_list="$(mktemp)"
+git -c core.quotePath=false ls-files --others --exclude-standard -z > "$_untracked_list"
 while IFS= read -r -d '' f; do
   _untracked+=("$f")
-done < <(git -c core.quotePath=false ls-files --others --exclude-standard -z)
+done < "$_untracked_list"
+rm -f "$_untracked_list"
 
 if [[ ${#_untracked[@]} -gt 0 ]]; then
   _clobbered=()
