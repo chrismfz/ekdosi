@@ -50,6 +50,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   χωρίς tag, εντοπίζοντας το WHMCS id από το κείμενο· ασφαλές να ξανα-τρέξει).
 
 ### Changed
+- **«Ρυθμίσεις χρονοπρογραμματιστή»: πλήρης κάλυψη + «Καθολικό» ξεκαθάρισμα.** Μπήκαν στη σελίδα τρία tasks που
+  «ζούσαν» εκτός UI (μόνο env): **Ψηφιακό ΔΑ — άντληση εισερχόμενων** (`delivery_fetch_inbound`, τώρα **default ON**,
+  read-only staging), **Πληρωμές — λήξη εκκρεμών intents** (`intent_expiry`), **AI Βοηθός — υπενθυμίσεις**
+  (`ai_reminders`) — με cron/toggle. Νέο **`SchedulerCoverageTest`** σπάει αν προστεθεί schedule flag που δεν
+  εμφανίζεται στη σελίδα (ή δεν δηλωθεί ρητά ως hidden infra: `prune_auth_events`, `self_update`). Οι δύο
+  **καθολικές** σελίδες («Χρονοπρογραμματιστής», «Ρυθμίσεις συστήματος») παίρνουν badge **«Καθολικό»** +
+  subheading «ισχύει για ΟΛΟΥΣ τους tenants», ώστε να μη μπερδεύονται με τις per-company «Ρυθμίσεις εταιρείας»·
+  τα «διπλά κλειδιά» (myDATA άντληση εξόδων, WHMCS αυτόματη έκδοση) δείχνουν ρητά τον per-company διακόπτη τους.
 - **Dependency maintenance (minor/patch, εντός constraints).** `composer update` σε: Filament 5.8.1→5.8.2,
   Laravel 13.31→13.32, Passport 13.7.6→13.8.0, Flux 2.19→2.20, spatie/laravel-backup 10.3.2→10.3.3 (+ transitive:
   symfony 8.1.7, carbon 3.14, livewire 4.4.5, monolog 3.12 κ.λπ.). Μόνο `composer.lock` — καμία αλλαγή στο

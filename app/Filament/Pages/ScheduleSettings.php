@@ -64,14 +64,16 @@ class ScheduleSettings extends Page implements HasForms
         // WHMCS
         'whmcs_fetch_enabled' => ['WHMCS — άντληση εκκρεμών', 'Φέρνει πληρωμένα/αδήλωτα WHMCS τιμολόγια στο inbox (μόνο staging, ΔΕΝ δηλώνει στην ΑΑΔΕ).', false],
         'whmcs_fetch_unpaid_enabled' => ['WHMCS — άντληση ΑΠΛΗΡΩΤΩΝ', 'Φέρνει ΑΠΛΗΡΩΤΑ WHMCS τιμολόγια πελατών «invoice-before-pay» (επί πιστώσει) στο inbox — μόνο staging.', false],
-        'whmcs_auto_issue_enabled' => ['WHMCS — αυτόματη έκδοση', 'Δηλώνει ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ για πελάτες άμεσης τιμολόγησης σε οπλισμένους tenants. Διπλό κλειδί με την per-tenant ρύθμιση.', true],
+        'whmcs_auto_issue_enabled' => ['WHMCS — αυτόματη έκδοση', 'Δηλώνει ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ για πελάτες άμεσης τιμολόγησης σε οπλισμένους tenants. Διπλό κλειδί: ισχύει ΚΑΙ ανά εταιρεία → «Εταιρείες» → πεδίο «άμεση τιμολόγηση».', true],
         'whmcs_payment_sync_enabled' => ['WHMCS — συγχρονισμός πληρωμών', 'Όταν ένα επί-πιστώσει WHMCS τιμολόγιο πληρωθεί στο WHMCS, καταγράφει την πληρωμή στο ekdosi και κλείνει την οφειλή. Γράφει ΜΟΝΟ στο ekdosi (ποτέ στο WHMCS)· καταγράφει μόνο ανοιχτά υπόλοιπα.', false],
         'whmcs_payment_reconcile_enabled' => ['WHMCS — εντοπισμός πληρωμών (read-only)', 'Εντοπίζει ποια ανοιχτά επί-πιστώσει τιμολόγια πληρώθηκαν στο WHMCS και τα δείχνει στο dashboard + στη σελίδα «Συγχρονισμός πληρωμών» με ειδοποίηση. ΔΕΝ γράφει χρήμα — ο χειριστής τα κλείνει με ένα κλικ.', false],
         // myDATA
         'mydata_reconcile_enabled' => ['myDATA — αντιπαραβολή πωλήσεων', 'Καθημερινός read-only έλεγχος local↔ΑΑΔΕ.', false],
         'mydata_vat_picture_enabled' => ['myDATA — εικόνα ΦΠΑ', 'Ανανεώνει το cache του widget «Εικόνα από myDATA» (βαρύ AADE pull).', false],
-        'mydata_fetch_expenses_enabled' => ['myDATA — άντληση εξόδων (read-only)', 'Ανανεώνει την αντιπαραβολή εξόδων κάθε λίγες ώρες ώστε το badge «αδέσποτα έξοδα» να είναι φρέσκο. ΔΕΝ δημιουργεί εγγραφές.', false],
+        'mydata_fetch_expenses_enabled' => ['myDATA — άντληση εξόδων (read-only)', 'Ανανεώνει την αντιπαραβολή εξόδων κάθε λίγες ώρες ώστε το badge «αδέσποτα έξοδα» να είναι φρέσκο. ΔΕΝ δημιουργεί εγγραφές. Διπλό κλειδί: ισχύει ΚΑΙ ανά εταιρεία → «Ρυθμίσεις εταιρείας» → «Αυτόματη άντληση εξόδων».', false],
         'mydata_console_refresh_enabled' => ['myDATA — ανανέωση κονσόλας (όλα)', 'Ζεσταίνει ΟΛΑ τα δεδομένα της Κονσόλας myDATA (Πωλήσεις/Έξοδα/Ε3/Εικόνα ΦΠΑ) ώστε να ανοίγει φρέσκια. Το βαρύτερο AADE pull — καλύπτει και τα «εικόνα ΦΠΑ»/«άντληση εξόδων», οπότε άφησέ τα κλειστά αν ανάψεις αυτό. ΔΕΝ δημιουργεί εγγραφές.', false],
+        // Ψηφιακή Διακίνηση (ΔΑ)
+        'delivery_fetch_inbound_enabled' => ['Ψηφιακό ΔΑ — άντληση εισερχόμενων', 'Φέρνει στο staging «Εισερχόμενα Διακίνησης» τα Δελτία Αποστολής που έκοψαν ΑΛΛΟΙ σε βάρος μας (παραλαβές), ανά myDATA-readable εταιρεία. Read-only — ΔΕΝ αποδέχεται/απορρίπτει/εκδίδει τίποτα (μένουν operator-gated).', false],
         // Αντίγραφα ασφαλείας
         'backup_run_enabled' => ['Backup — λήψη', 'Τρέχει το spatie backup:run (όλη η ΒΔ). Άφησέ το κλειστό αν τα backups τα τρέχει το systemd/cron.', false],
         'backup_cleanup_enabled' => ['Backup — καθαρισμός', 'spatie backup:clean — εφαρμόζει την πολιτική διατήρησης.', false],
@@ -82,6 +84,8 @@ class ScheduleSettings extends Page implements HasForms
         'leads_notify_due_enabled' => ['Leads — υπενθύμιση επόμενου βήματος', 'Καθημερινό «καμπανάκι» στον χειριστή για leads με επόμενο βήμα σήμερα ή ληξιπρόθεσμο (χωρίς email).', false],
         'service_renewals_enabled' => ['Ανανεώσεις υπηρεσιών (πρόχειρα)', 'Δημιουργεί ΠΡΟΧΕΙΡΑ τιμολόγια ανανέωσης για συμβόλαια που λήγουν. ΔΕΝ δηλώνει αυτόματα.', true],
         'service_dunning_enabled' => ['Dunning υπηρεσιών', 'Auto suspend/terminate ληξιπρόθεσμων συμβολαίων. Πραγματικός διακόπτης = το per-product dunning_enabled.', false],
+        'intent_expiry_enabled' => ['Πληρωμές — λήξη εκκρεμών intents', 'Σημειώνει «Έληξε» τα εγκαταλελειμμένα online payment intents της Πύλης πέρα από το όριο, ώστε οι «Εκκρεμείς Πληρωμές Πύλης» να μένουν πραγματικές. Μόνο αλλαγή κατάστασης — μια καθυστερημένη επιβεβαίωση εξοφλεί κανονικά.', false],
+        'ai_reminders_enabled' => ['AI Βοηθός — υπενθυμίσεις', 'Παραδίδει τις ώριμες (operator-confirmed) υπενθυμίσεις του AI «Βοηθού» ως ειδοποιήσεις-καμπανάκι. Τρέχει κάθε λεπτό.', false],
         // Υποστήριξη & domains
         'tickets_poll_imap_enabled' => ['Υποστήριξη — polling email (IMAP)', 'Διαβάζει τα mailboxes των τμημάτων υποστήριξης (IMAP) και δρομολογεί εισερχόμενα email σε tickets.', false],
         'domain_sync_enabled' => ['Συγχρονισμός domains', 'Συγχρονίζει καταστάσεις/λήξεις domains (νυχτερινό).', false],
@@ -96,8 +100,9 @@ class ScheduleSettings extends Page implements HasForms
         'Email & ουρά εργασιών' => ['mail_sweep_enabled', 'queue_heartbeat_enabled', 'resend_failed_emails_enabled'],
         'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_fetch_unpaid_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
         'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_console_refresh_enabled'],
+        'Ψηφιακή Διακίνηση (ΔΑ)' => ['delivery_fetch_inbound_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
-        'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled'],
+        'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled', 'intent_expiry_enabled', 'ai_reminders_enabled'],
         'Υποστήριξη & domains' => ['tickets_poll_imap_enabled', 'domain_sync_enabled'],
     ];
 
@@ -120,6 +125,8 @@ class ScheduleSettings extends Page implements HasForms
         'mydata_vat_picture_cron' => ['myDATA — εικόνα ΦΠΑ', 'cron'],
         'mydata_fetch_expenses_cron' => ['myDATA — άντληση εξόδων', 'cron'],
         'mydata_console_refresh_cron' => ['myDATA — ανανέωση κονσόλας', 'cron'],
+        'delivery_fetch_inbound_cron' => ['Ψηφιακό ΔΑ — άντληση εισερχόμενων', 'cron'],
+        'intent_expiry_cron' => ['Πληρωμές — λήξη εκκρεμών intents', 'cron'],
         'overdue_notifications_time' => ['Ειδοποιήσεις ληξιπρόθεσμων', 'time'],
         'leads_notify_due_time' => ['Leads — υπενθύμιση επόμενου βήματος', 'time'],
         'service_renewals_time' => ['Ανανεώσεις υπηρεσιών', 'time'],
@@ -203,6 +210,39 @@ class ScheduleSettings extends Page implements HasForms
     public function getTitle(): string
     {
         return 'Ρυθμίσεις χρονοπρογραμματιστή';
+    }
+
+    /**
+     * Καθολικές (deploy-wide) ρυθμίσεις — ισχύουν για ΟΛΟΥΣ τους tenants, παρόλο
+     * που η σελίδα κάθεται κάτω από tenant-scoped URL. Το badge + το subheading το
+     * κάνουν ρητό ώστε να μη μπερδεύεται με τις per-company «Ρυθμίσεις εταιρείας».
+     */
+    public static function getNavigationBadge(): ?string
+    {
+        return 'Καθολικό';
+    }
+
+    public function getSubheading(): ?string
+    {
+        return '⚠ Καθολικές ρυθμίσεις — ισχύουν για ΟΛΟΥΣ τους tenants του deployment (όχι μόνο την τρέχουσα εταιρεία). Οι per-company διακόπτες είναι στις «Ρυθμίσεις εταιρείας».';
+    }
+
+    /**
+     * The on/off task keys the page exposes — the single source SchedulerCoverageTest
+     * checks against config('ekdosi.schedule') so a new scheduled flag can't be added
+     * without either surfacing it here or documenting it as intentionally hidden.
+     *
+     * @return list<string>
+     */
+    public static function taskKeys(): array
+    {
+        return array_keys(self::TASKS);
+    }
+
+    /** @return list<string> */
+    public static function timingKeys(): array
+    {
+        return array_keys(self::TIMINGS);
     }
 
     public static function shouldRegisterNavigation(): bool
