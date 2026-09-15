@@ -276,6 +276,17 @@ class GeneralSettings extends Page implements HasForms
         return 'Ρυθμίσεις συστήματος';
     }
 
+    /** Καθολικές (deploy-wide) ρυθμίσεις — βλ. ScheduleSettings για το «γιατί». */
+    public static function getNavigationBadge(): ?string
+    {
+        return 'Καθολικό';
+    }
+
+    public function getSubheading(): ?string
+    {
+        return '⚠ Καθολικές ρυθμίσεις — ισχύουν για ΟΛΟΥΣ τους tenants του deployment (όχι μόνο την τρέχουσα εταιρεία). Οι per-company ρυθμίσεις είναι στις «Ρυθμίσεις εταιρείας».';
+    }
+
     public static function shouldRegisterNavigation(): bool
     {
         return static::canAccess();

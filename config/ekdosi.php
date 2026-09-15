@@ -226,8 +226,8 @@ return [
         // OTHERS filed against us (goods we are RECEIVING) into «Εισερχόμενα
         // Διακίνησης», per myDATA-readable tenant. Only stages — never rejects /
         // confirms / mutates any AADE state (those stay operator-gated). Default
-        // OFF (we are almost always the issuer; opt-in per deploy).
-        'delivery_fetch_inbound_enabled' => env('EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND', false),
+        // ON (read-only staging; surfaced in the «Χρονοπρογραμματιστής» page).
+        'delivery_fetch_inbound_enabled' => env('EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND', true),
         'delivery_fetch_inbound_cron' => env('EKDOSI_DELIVERY_FETCH_INBOUND_CRON', '0 */6 * * *'),
 
         // spatie/laravel-backup tasks — the WHOLE-DB (all tenants + files)
@@ -292,6 +292,7 @@ return [
         // «Εκκρεμείς Πληρωμές Πύλης» stays real. Default ON (a status flip only;
         // a late verified capture still settles). Cross-tenant, cheap.
         'intent_expiry_enabled' => env('EKDOSI_SCHEDULE_INTENT_EXPIRY', true),
+        'intent_expiry_cron' => env('EKDOSI_INTENT_EXPIRY_CRON', '*/30 * * * *'),
 
         // ai:dispatch-reminders — deliver due AI «Βοηθός» reminders (the bell).
         // Default ON: a confirmed reminder is expected to fire (still inert until
