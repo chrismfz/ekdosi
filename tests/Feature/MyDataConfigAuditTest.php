@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\VatCategory;
@@ -18,9 +20,9 @@ class MyDataConfigAuditTest extends TestCase
 {
     use RefreshDatabase;
 
-    private function tenant(): Company
+    private function tenant(array $attrs = []): Company
     {
-        return Company::create([
+        return Company::create(array_merge([
             'name' => 'Audit OE',
             'slug' => 'audit-'.uniqid(),
             'country_code' => 'GR',
@@ -29,7 +31,7 @@ class MyDataConfigAuditTest extends TestCase
             'afm' => '800561849',
             'mydata_aade_id_sandbox' => 'TESTUSER',
             'mydata_subscription_key_sandbox' => 'TESTKEY',
-        ]);
+        ], $attrs));
     }
 
     private function type(Company $c, array $attrs = []): InvoiceType
@@ -180,6 +182,99 @@ class MyDataConfigAuditTest extends TestCase
         $messages = implode(' | ', app(MyDataConfigAudit::class)->audit($c)->tenant->messages());
 
         $this->assertStringNotContainsString('Τρόποι πληρωμής χωρίς αντιστοίχιση', $messages);
+    }
+
+    public function test_type_7_pos_method_in_use_by_a_provider_tenant_is_an_error(): void
+    {
+        // POS-1: a type-7 (POS) method referenced by an invoice on a PROVIDER tenant
+        // → ERROR. The provider (InvoSign) rejects a bare type-7 outright («88-007 —
+        // η υπογραφή δεν είναι έγκυρη») because ekdosi emits no §5.2 POS signature.
+        $c = $this->tenant(['einvoice_provider' => 'gr-provider']);
+        $pos = PaymentMethod::create([
+            'company_id' => $c->id, 'description' => 'Ηλεκτρονικά μέσα Πληρωμών',
+            'due_days' => 0, 'mydata_payment_type' => 7,
+        ]);
+        $this->invoiceUsing($c, $pos);
+
+        $result = app(MyDataConfigAudit::class)->audit($c);
+        $posMsg = collect($result->tenant->messages())->first(fn ($m) => str_contains($m, 'POS'));
+
+        $this->assertNotNull($posMsg, 'a type-7 method in use must be flagged');
+        $this->assertStringContainsString('«Ηλεκτρονικά μέσα Πληρωμών»', $posMsg);
+        $this->assertStringContainsString('88-007', $posMsg);
+        $this->assertGreaterThanOrEqual(1, $result->errorCount(), 'provider → ERROR');
+    }
+
+    public function test_type_7_pos_method_in_use_by_a_direct_my_data_tenant_warns_not_errors(): void
+    {
+        // Direct gr-mydata: the SendInvoices signature fields are optional and AADE
+        // rejection is unconfirmed, so this is a WARN — surfaced, but NOT a blocking
+        // red that would wrongly push the operator to relabel a card payment as cash.
+        $c = $this->tenant(); // default einvoice_provider = gr-mydata
+        $pos = PaymentMethod::create([
+            'company_id' => $c->id, 'description' => 'Ηλεκτρονικά μέσα Πληρωμών',
+            'due_days' => 0, 'mydata_payment_type' => 7,
+        ]);
+        $this->invoiceUsing($c, $pos);
+
+        $result = app(MyDataConfigAudit::class)->audit($c);
+        $posMsg = collect($result->tenant->messages())->first(fn ($m) => str_contains($m, 'τύπου 7 (POS) σε χρήση'));
+
+        $this->assertNotNull($posMsg, 'a type-7 method in use is still surfaced for a direct tenant');
+        $this->assertSame(0, $result->errorCount(), 'direct → WARN, not a blocking error');
+    }
+
+    public function test_pos_guard_flags_only_the_used_method_not_an_unused_type_7(): void
+    {
+        // Correlation proof: the tenant HAS an invoice (on a NON-POS method) and a
+        // SEPARATE, unused type-7 method. A broken subquery that flagged any type-7
+        // whenever the tenant has any invoice would name the unused one — it must not.
+        $c = $this->tenant(['einvoice_provider' => 'gr-provider']);
+        $used = PaymentMethod::create([
+            'company_id' => $c->id, 'description' => 'Επαγγ. Λογαριασμός',
+            'due_days' => 0, 'mydata_payment_type' => 1,
+        ]);
+        PaymentMethod::create([
+            'company_id' => $c->id, 'description' => 'POS αχρησιμοποίητο',
+            'due_days' => 0, 'mydata_payment_type' => 7,
+        ]);
+        $this->invoiceUsing($c, $used);
+
+        $messages = implode(' | ', app(MyDataConfigAudit::class)->audit($c)->tenant->messages());
+
+        $this->assertStringNotContainsString('POS αχρησιμοποίητο', $messages, 'an unused type-7 method must not flag');
+        $this->assertStringNotContainsString('τύπου 7 (POS) σε χρήση', $messages);
+    }
+
+    public function test_type_7_pos_method_not_used_is_not_flagged(): void
+    {
+        // The seeder ships a type-7 «POS / e-POS» row for every tenant; UNUSED it
+        // must not turn the audit red — only actual use is the problem (no noise).
+        $c = $this->tenant();
+        PaymentMethod::create([
+            'company_id' => $c->id, 'description' => 'POS / e-POS',
+            'due_days' => 0, 'mydata_payment_type' => 7,
+        ]);
+
+        $messages = implode(' | ', app(MyDataConfigAudit::class)->audit($c)->tenant->messages());
+
+        $this->assertStringNotContainsString('τύπου 7 (POS) σε χρήση', $messages);
+    }
+
+    private function invoiceUsing(Company $c, PaymentMethod $pm): Invoice
+    {
+        $customer = Customer::create(['company_id' => $c->id, 'name' => 'Πελάτης', 'afm' => '123456789']);
+
+        return Invoice::create([
+            'company_id' => $c->id,
+            'invcode' => 'TPY'.uniqid(),
+            'code' => 1,
+            'invoice_type_id' => $this->type($c)->id,
+            'customer_id' => $customer->id,
+            'payment_method_id' => $pm->id,
+            'issued_at' => now(),
+            'header_discount_percent' => 0,
+        ]);
     }
 
     public function test_full_audit_rolls_up_counts(): void

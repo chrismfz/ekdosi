@@ -18,6 +18,29 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Preflight guard: τρόπος πληρωμής τύπου 7 (POS / e-POS) σε χρήση → error.** Το §5.2 (v2.0.2)
+  απαιτεί για κάθε πληρωμή `type=7` την **υπογραφή πληρωμής POS** (`ProvidersSignature` όταν φιλάρουμε
+  μέσω παρόχου, ή `ECRToken` από ERP) + `tid` + `transactionId`. Το ekdosi δεν παράγει κανένα από αυτά
+  (δεν υπάρχει ακόμη διασύνδεση POS), οπότε η ΑΑΔΕ/ο πάροχος απορρίπτει την υποβολή (InvoSign «88-007 —
+  η υπογραφή δεν είναι έγκυρη»). Ο `MyDataConfigAudit` (πίσω από `mydata:preflight` / «Έλεγχος ρυθμίσεων»
+  / go-live) πλέον flag-άρει ως **error** κάθε τρόπο πληρωμής τύπου 7 **που χρησιμοποιείται από παραστατικό**,
+  με οδηγία να αλλάξει σε 1 (επαγγ. λογαριασμός), 3 (μετρητά), 6 (web banking) ή 8 (IRIS). Ελέγχεται μόνο
+  η *χρήση* (ο seeder δίνει σε κάθε tenant μια αχρησιμοποίητη «POS / e-POS» εγγραφή — δεν κοκκινίζει τζάμπα).
+
+### Fixed
+- **`deploy/update.sh`: το cPanel MultiPHP «βρόμιζε» το tracked `public/.htaccess` και μπλόκαρε ΚΑΘΕ deploy.**
+  Το cPanel γράφει το `# php -- BEGIN cPanel-generated handler` block (ορίζει την **έκδοση PHP**) μέσα στο
+  `public/.htaccess`, που είναι tracked — οπότε ο pre-flight «Working tree not clean» αρνιόταν το deploy κάθε
+  φορά, και το `git checkout --force` θα έσβηνε το block. Πλέον ο deploy μαρκάρει το αρχείο **skip-worktree**
+  (idempotent, πριν τον έλεγχο): το git αγνοεί τις αλλαγές του cPanel — ο pre-flight βλέπει καθαρό δέντρο ΚΑΙ
+  το force-checkout **αφήνει το block ανέπαφο** (η έκδοση PHP δεν χάνεται). **⚠ Σκληρό caveat:** όσο είναι
+  set το skip-worktree, έκδοση που **αλλάζει** το `public/.htaccess` από το repo δεν εφαρμόζεται εδώ και το
+  force-checkout **σκάει** (`Entry not uptodate`, exit 128) αφήνοντας το site σε maintenance — οπότε αν ποτέ
+  χρειαστεί, καθάρισε το flag στον server **ΠΡΙΝ** το deploy: `git update-index --no-skip-worktree public/.htaccess`
+  (ο deploy το ξανα-set-άρει μετά). Το πρώτο deploy που φέρνει το fix τρέχει με τον ΠΑΛΙΟ script, οπότε τότε
+  set-άρεις το flag μια φορά με το χέρι. Στην πράξη το `public/.htaccess` είναι Laravel boilerplate που δεν αλλάζει.
+
 ## [2.1.1] - 2026-09-15
 
 ### Fixed

@@ -94,6 +94,47 @@ class MyDataConfigAudit
                     'Τρόποι πληρωμής χωρίς αντιστοίχιση myDATA («'.$sample.'»'.$more.') — θα δηλωθούν ως '
                     .'«Μετρητά» (τύπος 3). Όρισε τον τύπο §8.12 στους «Τρόποι πληρωμής».');
             }
+
+            // POS-1: a payment method mapped to §8.12 type 7 (POS / e-POS) that is
+            // ACTUALLY USED by an invoice. Per §5.2 (v2.0.2) a type-7 payment needs a
+            // POS payment signature (ProvidersSignature via a provider channel, or
+            // ECRToken from an ERP) + the POS `tid` + a `transactionId`. ekdosi emits
+            // NONE of these yet (no POS-interconnection integration).
+            //   - PROVIDER channel (gr-provider): the provider rejects a bare type-7
+            //     outright — sandbox/prod-confirmed InvoSign «88-007 — η υπογραφή δεν
+            //     είναι έγκυρη» — so this WILL fail a real filing → ERROR.
+            //   - DIRECT gr-mydata: the SendInvoices signature fields are OPTIONAL in
+            //     the spec and we have NOT confirmed AADE rejects a bare type-7, so it
+            //     is a WARN (not a blocking red) — but the POS signature may be
+            //     enforced in production, so still surface it.
+            // Only IN-USE methods flag (the seeder ships an unused type-7 «POS/e-POS»
+            // row per tenant — its mere existence is not the problem, using it is);
+            // soft-deleted invoices are excluded so a discarded doc can't pin the
+            // tenant red forever.
+            $posInUse = PaymentMethod::query()
+                ->where('company_id', $company->getKey())
+                ->where('mydata_payment_type', 7)
+                ->whereExists(function ($query) use ($company) {
+                    $query->from('invoices')
+                        ->whereColumn('invoices.payment_method_id', 'payment_methods.id')
+                        ->where('invoices.company_id', $company->getKey())
+                        ->whereNull('invoices.deleted_at');
+                })
+                ->orderBy('id')
+                ->pluck('description');
+            if ($posInUse->isNotEmpty()) {
+                $sample = $posInUse->take(3)->implode('», «');
+                $more = $posInUse->count() > 3 ? ' (+'.($posInUse->count() - 3).')' : '';
+                $viaProvider = $company->einvoice_provider === 'gr-provider';
+                $consequence = $viaProvider
+                    ? 'ο πάροχος την απορρίπτει («88-007 — η υπογραφή δεν είναι έγκυρη»)'
+                    : 'αν η ΑΑΔΕ επιβάλλει την υπογραφή POS στην παραγωγή, θα απορριφθεί';
+                $findings[] = new ConfigAuditFinding($viaProvider ? 'error' : 'warn',
+                    'Τρόπος πληρωμής τύπου 7 (POS) σε χρήση («'.$sample.'»'.$more.'). Το ekdosi δεν παράγει '
+                    .'ακόμη την υπογραφή POS (ProvidersSignature/ECRToken + tid + transactionId) του §5.2, οπότε '
+                    .$consequence.'. Άλλαξε τον τύπο σε 1 (επαγγ. λογαριασμός), 3 (μετρητά), 6 (web banking) ή 8 '
+                    .'(IRIS) στους «Τρόποι πληρωμής», μέχρι να στηθεί η διασύνδεση POS.');
+            }
         }
 
         return new ConfigAuditRow('tenant', $company->name, $findings);
