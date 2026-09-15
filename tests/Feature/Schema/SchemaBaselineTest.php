@@ -147,6 +147,14 @@ class SchemaBaselineTest extends TestCase
     public function test_the_no_baseline_guard_survives_a_post_squash_migration(): void
     {
         $file = database_path('migrations/'.self::PROBE_MIGRATION.'.php');
+
+        // BEFORE writing: a probe file already sitting here leaked from a
+        // crashed run (`finally` covers a throw, not a SIGKILL/fatal) and may
+        // even have been committed — on a fresh CI checkout this is where that
+        // shows up. Asserting AFTER, or in a later test, cannot catch it: this
+        // test unlinks the file, and PHPUnit runs in declaration order.
+        $this->assertFileDoesNotExist($file, 'a guard-probe migration leaked from an earlier run — delete it');
+
         file_put_contents($file, "<?php\n\nreturn new class extends \\Illuminate\\Database\\Migrations\\Migration {};\n");
 
         // NOTE: catch ONLY around the Artisan call, and assert afterwards.
@@ -168,20 +176,6 @@ class SchemaBaselineTest extends TestCase
 
         $this->assertNotNull($thrown, 'migrate on a baseline-less connection must still be refused once migrations exist');
         $this->assertMatchesRegularExpression('/Καμία πηγή schema/u', $thrown->getMessage());
-    }
-
-    /**
-     * Belt and braces for the test above: `finally` covers a throw but not a
-     * SIGKILL/fatal, and a leaked probe file is invisible — it is not in the
-     * baseline, so the «already inside the baseline» test happily passes on it,
-     * and it would ship as a phantom migration row on prod.
-     */
-    public function test_no_leftover_guard_probe_migration_was_committed(): void
-    {
-        $this->assertFileDoesNotExist(
-            database_path('migrations/'.self::PROBE_MIGRATION.'.php'),
-            'a guard-probe migration leaked from test_the_no_baseline_guard_survives_a_post_squash_migration — delete it'
-        );
     }
 
     /** The connections we DO ship a baseline for must not trip that guard. */

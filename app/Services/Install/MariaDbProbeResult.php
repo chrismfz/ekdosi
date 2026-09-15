@@ -88,11 +88,16 @@ class MariaDbProbeResult
      * Ticking «Συνέχεια σε μη-κενή βάση» just loops. Say so, and name the
      * actions that work.
      *
-     * The advice is deliberately ordered restore-first: all the probe knows is
-     * «baseline tables + no migration rows», which is ALSO the shape of a
-     * COMPLETE database whose `migrations` table was truncated or dropped out of
-     * band. It cannot prove this DB is junk, so it must not tell the operator to
-     * drop it without qualification — those tables may hold live παραστατικά.
+     * The advice is deliberately hedged: all the probe knows is «a baseline
+     * table name exists + no migration rows». That is ALSO the shape of (a) a
+     * COMPLETE database whose `migrations` was truncated or dropped out of band,
+     * and (b) a database SHARED with another application — ~30 of the 105
+     * baseline names are generic enough to collide (`users`, `cache`, `notes`,
+     * `tags`, `products`, `payments`…). The hard stop is right in all three
+     * cases (`CREATE TABLE users` would genuinely fail), but the DIAGNOSIS is a
+     * guess, so name the alternatives and never tell the operator to drop a
+     * database unconditionally — those tables may hold live παραστατικά, or
+     * another app's data.
      */
     public static function unmigratable(int $tableCount): self
     {
@@ -101,8 +106,11 @@ class MariaDbProbeResult
             reason: 'unmigratable',
             message: "Συνδέθηκε, και η βάση περιέχει ήδη πίνακες του schema ({$tableCount} συνολικά), αλλά ο πίνακας `migrations` "
                 .'λείπει ή είναι άδειος. Αυτό είναι υπόλειμμα ημιτελούς εγκατάστασης ή διακοπείσας επαναφοράς '
-                .'(ekdosi:db-restore) και ΔΕΝ διορθώνεται με επανάληψη — το migrate θα ξαναπροσπαθήσει να χτίσει '
-                .'το schema από την αρχή και θα σκάσει σε «Table … already exists». Η λύση: ξανατρέξε την ΕΠΑΝΑΦΟΡΑ '
+                .'(ekdosi:db-restore) — ή, αν αυτή η βάση ΜΟΙΡΑΖΕΤΑΙ με άλλη εφαρμογή, σύγκρουση ονομάτων πινάκων '
+                .'(το schema μας έχει γενικά ονόματα: users, cache, notes, products…). Σε κάθε περίπτωση ΔΕΝ '
+                .'διορθώνεται με επανάληψη — το migrate θα ξαναπροσπαθήσει να χτίσει '
+                .'το schema από την αρχή και θα σκάσει σε «Table … already exists». Η λύση: δώσε ΔΙΚΗ ΤΗΣ, κενή βάση '
+                .'στο ekdosi· αν επρόκειτο για διακοπείσα επαναφορά, ξανατρέξε την ΕΠΑΝΑΦΟΡΑ '
                 .'(ekdosi:db-restore) από την αρχή. ΜΟΝΟ αν είσαι βέβαιος ότι αυτή η βάση δεν κρατά δεδομένα που '
                 .'χρειάζεσαι (έλεγξε πρώτα π.χ. SELECT COUNT(*) FROM invoices), δώσε ΚΕΝΗ βάση με DROP DATABASE / '
                 .'CREATE DATABASE.',

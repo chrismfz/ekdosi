@@ -190,6 +190,12 @@ class MariaDbConnectionTester
      * 105 tables; whichever file is present wins. Memoised — the probe reads it
      * at most once per process.
      *
+     * The memo is static with no reset seam ON PURPOSE: it is derived from a
+     * committed file that cannot change within a process, and the only caller is
+     * the one-shot web installer. A flush method would have no caller today, so
+     * it is not written — if a future test ever needs to swap the baseline
+     * directory, add it then (it would otherwise be order-dependent).
+     *
      * @return list<string>
      */
     private function baselineTables(): array
