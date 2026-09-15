@@ -18,6 +18,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **`INSTALL.md §17` — εγκατάσταση σε cPanel / CloudLinux (shared hosting).** Συγκεντρώνει τα gotchas
+  από το στήσιμο του `invoicer.myip.gr`: CLI PHP 8.4 μέσω `PATH` στο `ea-php84` (το MultiPHP ρυθμίζει
+  μόνο τον web handler), αφαίρεση `proc_open` από τα `disable_functions` + `cagefsctl --force-update`/`-M`
+  (αλλιώς σκάει το `composer` στο `package:discover`), out-of-tree compile του bundled `pdo_firebird`
+  ext πάνω στο ea-php84 (δεν υπάρχει EA4/PECL πακέτο) με το caveat «ίδια ΑΚΡΙΒΩΣ έκδοση PHP → rebuild σε
+  κάθε PHP update», και ο δρόμος του `/install` wizard + bundle-import ως εναλλακτική που γλιτώνει τελείως
+  το Firebird/ETL στο prod. Symptom-first πίνακας + pointer από την εισαγωγή. Docs-only.
+
 ### Fixed
 - **Ο νέος guard «καμία πηγή schema» θα σιωπούσε με το πρώτο νέο migration.** Ήταν κλειδωμένος σε
   «άδειο `database/migrations/` ΚΑΙ κανένα baseline», αλλά το δηλωμένο workflow είναι «νέα migrations

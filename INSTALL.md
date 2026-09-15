@@ -12,6 +12,13 @@ Throughout, replace the placeholders:
   (generate a real password for production; the dev one in
   `.env.example` is for local sandboxes only).
 
+> **On cPanel / CloudLinux shared hosting** (no root shell for the app user,
+> MultiPHP/PHP-Selector, CageFS, no systemd) the app, `.env`, DB and the
+> `/install` wizard are identical — only *how you get PHP 8.4 on the CLI, why
+> `proc_open` matters, and how to install `pdo_firebird`* differ. Those
+> differences (found standing up `invoicer.myip.gr`) are collected in **§17** —
+> read that alongside §5–§7 instead of the VM-specific §8–§13.
+
 ## 0. What you'll end up with
 
 ```
@@ -1458,3 +1465,201 @@ After install:
   selects the right submitter (`gr-mydata`, `ee-peppol`, `none`).
 
 For the full design discussion, see `CLAUDE.md`.
+
+## 17. cPanel / CloudLinux (shared hosting) — the differences
+
+This is **not** a separate runbook. The app code, `.env` (§6), the DB (§4, but
+created via cPanel → MySQL® Databases instead of the CLI), and the `/install`
+wizard (§7b) are all identical. What a cPanel/CloudLinux box changes is the
+*plumbing around* PHP: there's no root shell for the account user, PHP is
+selected through **MultiPHP Manager / PHP Selector**, the account runs inside a
+**CageFS** jail, and there's **no systemd**. The four gotchas below were all hit
+standing up `invoicer.myip.gr` on such a host — a symptom-first index:
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| `composer install` → wall of `requires php >=8.4` | CLI `php` is the system default (e.g. 8.2), MultiPHP only set the *web* handler | §17a |
+| `composer install` dies at `package:discover` with `proc_open() has been disabled` | `proc_open` in `disable_functions` for ea-php84 | §17b |
+| Need `pdo_firebird` for the ETL, no RPM anywhere | bundled core ext, not PECL; EA4 ships no package | §17d |
+| No shell / no root to run the §7b tinker recipe | — | use the `/install` wizard, §17e |
+
+Convention below: a step the **account user** runs needs no `sudo`; a step marked
+**(root / WHM)** needs the server admin (WHM has it; a pure reseller/account may
+have to ask the host).
+
+### 17a. CLI PHP must be 8.4 — MultiPHP only sets the *web* handler
+
+MultiPHP Manager points the domain's **web** requests at `ea-php84`, but the SSH
+shell's `php` / `composer` still resolve to the stack default (on rigel that was
+8.2.33), so `composer install` fails against our PHP-8.4 `composer.lock`. Put the
+ea-php84 binaries first on `PATH` for the account:
+
+```bash
+# ~/.bashrc  (the cPanel account user)
+export PATH="/opt/cpanel/ea-php84/root/usr/bin:$PATH"
+```
+
+Then `source ~/.bashrc` (or re-login) and confirm:
+
+```bash
+php -v          # PHP 8.4.x
+which php        # /opt/cpanel/ea-php84/root/usr/bin/php
+```
+
+Composer: cPanel ships one at `/opt/cpanel/composer/bin/composer`. Once `PATH` is
+set, a `composer` on it runs under ea-php84; otherwise invoke it explicitly,
+`php /opt/cpanel/composer/bin/composer install …`.
+
+> **ea-php vs alt-php.** EasyApache's **ea-php84** (used here) and CloudLinux's
+> **PHP Selector / alt-php** are two *different* toolchains, with different ini
+> and extension dirs. Stay on ea-php — the same binary the web handler uses — so
+> the CLI (queue/artisan) and the web SAPI see the same extensions and config.
+> Mixing them is a subtle source of "works on the web, missing extension on the
+> CLI" bugs. Everything in this section assumes **ea-php**.
+
+### 17b. `proc_open` must NOT be in `disable_functions`
+
+Composer's post-autoload step runs `@php artisan package:discover`, which — like
+artisan itself, the queue worker, and `spatie/laravel-backup` — shells out via
+Symfony Process → `proc_open()`. Many cPanel/CloudLinux ini presets disable
+`proc_open` "for security", so `composer install` dies with
+`proc_open() has been disabled for security reasons`.
+
+**Fix (root / WHM)** — drop `proc_open` from ea-php84's `disable_functions`,
+then rebuild the CageFS skeleton so the jailed account actually sees the new ini
+(editing the ini alone is **not** enough under CageFS):
+
+```bash
+# (root/WHM) edit /opt/cpanel/ea-php84/root/etc/php.ini →
+#   remove proc_open (and, if listed, proc_close / proc_get_status) from
+#   disable_functions. WHM → MultiPHP INI Editor can toggle the same value.
+cagefsctl --force-update      # rebuild the CageFS template from the new ini
+cagefsctl -M                   # remount/refresh every CageFS-jailed user
+```
+
+Verify from the **account** shell (not root — CageFS makes them differ):
+
+```bash
+php -r 'var_dump(function_exists("proc_open"));'   # must be bool(true)
+```
+
+Then `composer install` gets past `package:discover`.
+
+### 17c. `composer install`, not `composer update`
+
+Same rule as the VM: install the pinned `composer.lock` — `composer update`
+re-resolves and can pull versions the app was never tested against.
+
+```bash
+composer install --no-dev --optimize-autoloader --no-interaction
+php artisan filament:assets      # republish Filament CSS/JS/fonts to public/
+```
+
+### 17d. `pdo_firebird` — compile the bundled ext against ea-php84
+
+**You likely don't need this on prod.** `pdo_firebird` is only for the one-time
+`migrate:firebird` ETL (§12). If you instead provision the tenant from a
+**portability bundle** — `/install` → «Εισαγωγή από .zip» (§7b) — no
+Firebird, no ETL, and none of this section is needed. On shared hosting that's
+the recommended path.
+
+If you *do* need the ETL on this box: `pdo_firebird` is a **bundled PHP core
+extension** (not on PECL), and EasyApache ships **no** `ea-php84-php-pdo-firebird`
+RPM (alt-php doesn't carry it either). The path that worked on rigel is to build
+the bundled ext **out-of-tree** against the ea-php84 binary:
+
+```bash
+# 0) (root/WHM) Firebird client lib + headers must be present
+#    (libfbclient + development headers, e.g. the OS `firebird-devel`).
+
+# 1) PHP source matching ea-php84's EXACT version — the ABI must match.
+php -v                                         # note the exact 8.4.z
+cd ~/src                                        # any writable dir
+curl -LO https://www.php.net/distributions/php-8.4.24.tar.gz    # ← use YOUR 8.4.z
+tar xf php-8.4.24.tar.gz
+cd php-8.4.24/ext/pdo_firebird
+
+# 2) Build JUST this ext with the ea-php84 toolchain.
+/opt/cpanel/ea-php84/root/usr/bin/phpize
+./configure \
+    --with-php-config=/opt/cpanel/ea-php84/root/usr/bin/php-config \
+    --with-pdo-firebird           # append =/path/to/firebird if libfbclient
+                                  # isn't on the default search path
+make
+
+# 3) (root/WHM) install the .so + load it, then refresh CageFS.
+sudo make install                 # → ea-php84's extension dir
+echo 'extension=pdo_firebird.so' \
+    | sudo tee /opt/cpanel/ea-php84/root/etc/php.d/30-pdo_firebird.ini
+sudo cagefsctl --force-update && sudo cagefsctl -M
+
+# 4) Confirm (account shell).
+php -m | grep -i firebird          # expect: pdo_firebird
+```
+
+Caveats — this is fragile, which is why the bundle-import path above is preferred
+on prod:
+- **The source version must equal ea-php84's exactly.** A `.so` built against
+  8.4.24 won't load on 8.4.25 (`undefined symbol` / API-version mismatch), so
+  **every EasyApache PHP update means rebuilding it**. Note the `.so` in your own
+  runbook — cPanel doesn't track it and won't warn you.
+- If the box is on **alt-php** (PHP Selector) rather than ea-php, the whole recipe
+  changes (`selectorctl`, alt-php paths) — out of scope here.
+
+### 17e. The `/install` web wizard — the no-shell / minimal-shell path
+
+Once the code is cloned, `composer install` succeeds, and an **empty** MariaDB
+exists (create it in cPanel → MySQL® Databases, note the `user`/`db` name-prefix
+cPanel adds), you do **not** need the §7b tinker recipes. Browse to
+`https://<site>/install`:
+
+- **Token-gated** — no login exists yet, so the wizard proves filesystem access
+  instead: it reads a one-time token from
+  `storage/app/install/verify-token.txt` (created on first hit); `cat` it over
+  SSH, or via cPanel File Manager, and paste it.
+- It writes `.env` + `APP_KEY`, runs `migrate --force`, creates the first company
+  + super_admin, and **hardcodes `DB_CONNECTION=mariadb`** (the squash guard in
+  `AppServiceProvider` refuses `mysql`/blank), all atomically — `.env` is written
+  **last**, so a half-finished run leaves no broken `.env` behind.
+- **«Νέα εταιρία»** = a blank company; **«Εισαγωγή από .zip»** = import a
+  portability bundle exported elsewhere with `company:export` (identity,
+  settings, sealed credentials, lookups, assigned operators). The bundle path is
+  what lets you skip Firebird/`pdo_firebird` on prod (§17d).
+- It **refuses a non-empty DB** (unless you tick «allow existing») and an
+  interrupted-restore DB (`unmigratable`) — guardrails, not bugs.
+- Its final screen is the post-install checklist (§17f).
+
+### 17f. Post-install on cPanel (no systemd)
+
+The account user owns the tree, so no `chown` dance (§8) — just perms + the
+no-systemd cron variants:
+
+```bash
+chmod -R 775 storage bootstrap/cache
+php artisan storage:link
+```
+
+- **DocumentRoot → `public/`.** Point the domain/subdomain at
+  `…/ekdosi/public`, not the repo root (cPanel → Domains → Document Root). The
+  shipped `public/.htaccess` handles the front-controller rewrite; a repo-root
+  redirect is a last resort only.
+- **Scheduler + queue via cron** (no systemd — this is the §11 "No systemd"
+  path, with the ea-php84 binary spelled out):
+
+  ```cron
+  * * * * * cd /home/USER/ekdosi && /opt/cpanel/ea-php84/root/usr/bin/php artisan schedule:run >/dev/null 2>&1
+  * * * * * cd /home/USER/ekdosi && /opt/cpanel/ea-php84/root/usr/bin/php artisan queue:work --stop-when-empty --max-time=55 >/dev/null 2>&1
+  ```
+
+  `php artisan ops:cron` prints these two lines pre-filled for **this** host
+  (real binary + path) — paste rather than hand-edit.
+- **Permissions/roles**: if `/install` didn't do it,
+  `php artisan shield:generate --all --panel=admin --no-interaction`, then
+  `php artisan shield:sync-super-admin` to re-assert the global super_admin.
+- **HTTPS**: cPanel AutoSSL usually already covers the domain — confirm the cert
+  is issued before go-live.
+- **After any `.env` edit**: `php artisan config:clear` (shared hosting caches
+  config too).
+- **Health**: `php artisan ops:health` (§11) is the one-shot check — the
+  queue/scheduler rows go green only once the two cron lines above are live. Then
+  run §14's verification checklist.
