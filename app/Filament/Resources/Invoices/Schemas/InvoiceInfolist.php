@@ -263,7 +263,11 @@ class InvoiceInfolist
                             ->helperText('Η διακίνηση των ειδών αυτού του παραστατικού.')
                             ->visible(fn ($record) => $record->deliveryNotes->isNotEmpty()),
                     ])
-                    ->columns(2),
+                    ->columns(2)
+                    // Full-width panel: a related-documents list reads better across the
+                    // page than squeezed into a half column — and keeps the grid clean
+                    // next to the now full-width «myDATA / Πάροχος» below (no orphan half-row).
+                    ->columnSpanFull(),
 
                 Section::make('myDATA / Πάροχος')
                     ->description('Κατάσταση τελευταίας υποβολής (άμεσα ή μέσω παρόχου). Πλήρες ιστορικό + Request/Response XML στην καρτέλα «Ιστορικό υποβολών».')
@@ -342,7 +346,25 @@ class InvoiceInfolist
                             ->extraAttributes(['class' => 'break-all'])
                             ->copyable(),
                     ])
-                    ->columns(4),
+                    ->columns(4)
+                    // Full width so the provider fields (MARK, QR/URL, licence, UID,
+                    // signature — long unbreakable strings) stop cramming into a
+                    // half-page column and get room to breathe.
+                    ->columnSpanFull(),
+
+                // «Παρατηρήσεις» + «Logistics» share the bottom row (both short), which
+                // frees the full page width above for «myDATA / Πάροχος» to spread out.
+                // Παρατηρήσεις stays on the left (where it was), Logistics moves to its right.
+                Section::make('Παρατηρήσεις (εκτύπωσης)')
+                    ->description('Εμφανίζονται στο PDF/email του πελάτη.')
+                    ->schema([
+                        TextEntry::make('notes')
+                            ->label(false)
+                            ->placeholder('—')
+                            ->columnSpanFull(),
+                    ])
+                    ->collapsible()
+                    ->collapsed(fn ($record) => empty($record->notes)),
 
                 Section::make('Logistics')
                     ->schema([
@@ -368,17 +390,6 @@ class InvoiceInfolist
                     ])
                     ->columns(3)
                     ->collapsible(),
-
-                Section::make('Παρατηρήσεις (εκτύπωσης)')
-                    ->description('Εμφανίζονται στο PDF/email του πελάτη.')
-                    ->schema([
-                        TextEntry::make('notes')
-                            ->label(false)
-                            ->placeholder('—')
-                            ->columnSpanFull(),
-                    ])
-                    ->collapsible()
-                    ->collapsed(fn ($record) => empty($record->notes)),
             ]);
     }
 }
