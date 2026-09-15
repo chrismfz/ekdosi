@@ -1043,9 +1043,11 @@ assertion). Ό,τι απέμεινε:
   αυτο-φιλαριστεί χωρίς το manual review. **Τα χρήματα είναι σωστά** (ισχύουν όλα τα file-guards) και είναι
   συνεπές με το ρητό opt-in του tenant στο auto-issue — γι' αυτό αφήνεται. Αν θέλουμε «manual issue μετά το
   consolidate», ο guard είναι one-liner: κράτα rows που φέρουν `ekdosi_consolidated_children` στο payload.
-- **Reduced-rate flatten (P2-4, μη-reachable):** το ενοποιημένο stampάρει ένα `taxrate` (child[0]) κι ο mapper
-  εφαρμόζει το tenant default σε κάθε taxed γραμμή — μείξη 24%+13% θα έβγαζε λάθος per-rate ΦΠΑ. Κανένας tenant
-  με reduced rates σήμερα· ήδη documented στον κώδικα. (Άσε — ίδιος περιορισμός με τον single-rate mapper.)
+- **Reduced-rate flatten (P2-4, μη-reachable):** το ενοποιημένο stampάρει ΕΝΑ `taxrate` (το **max** child rate —
+  βλ. round-2 review FINDING A: ήταν `child[0]` και ένα exempt-first τέκνο flatten-άριζε το rate σε 0· τώρα max),
+  κι ο mapper το εφαρμόζει σε κάθε taxed γραμμή — μείξη 24%+13% θα έβγαζε λάθος per-rate ΦΠΑ (το 13% → 24%).
+  Κανένας tenant με reduced rates σήμερα (mainland-only seeding)· exempt+taxed μείξη **είναι** σωστή (per-line
+  `taxed` flag → 0% vs max rate). Ίδιος περιορισμός με τον single-rate mapper — άσε μέχρι να μπει reduced-rate tenant.
 - **Text-only refs χωρίς relid (P2-7):** στο heuristic-text detection path (slimmed bridge feed, χωρίς per-line
   `relid`) `referenceGross=0` → το CONSOLIDATE αρνείται (reconcile fails). Fails safe (το EXPLODE δουλεύει —
   εκεί ο reconcile guard τρέχει μόνο όταν `referenceGross>0`). Fix: parse το child id από το description της

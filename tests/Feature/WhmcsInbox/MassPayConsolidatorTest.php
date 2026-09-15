@@ -4,10 +4,14 @@ namespace Tests\Feature\WhmcsInbox;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
+use App\Models\VatCategory;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\WhmcsInbox\MassPayConsolidator;
+use App\Services\WhmcsInbox\WhmcsInvoiceMapper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
 use Tests\TestCase;
@@ -32,6 +36,8 @@ class MassPayConsolidatorTest extends TestCase
 
     private Customer $customer;
 
+    private InvoiceType $invoiceType;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -41,6 +47,14 @@ class MassPayConsolidatorTest extends TestCase
         ]);
         $this->customer = Customer::create([
             'company_id' => $this->tenant->id, 'name' => 'Γ.Λαουνάρος και ΣΙΑ Ο.Ε.', 'afm' => '997890734',
+            'address1' => 'Πατησίων 1', 'city' => 'Αθήνα', 'postcode' => '10101', 'country' => 'GR',
+        ]);
+        // For the end-to-end VAT test that maps a merged row to a filed invoice.
+        VatCategory::create(['company_id' => $this->tenant->id, 'name' => 'ΦΠΑ 24%', 'rate' => 24.00, 'is_default' => true]);
+        VatCategory::create(['company_id' => $this->tenant->id, 'name' => 'ΦΠΑ 0%', 'rate' => 0.00, 'is_default' => false]);
+        $pm = PaymentMethod::create(['company_id' => $this->tenant->id, 'name' => 'Bank', 'due_days' => 0, 'is_active' => true]);
+        $this->invoiceType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 0, 'payment_method_id' => $pm->id,
         ]);
     }
 
@@ -380,5 +394,66 @@ class MassPayConsolidatorTest extends TestCase
         $this->expectExceptionMessage('tenant mismatch');
 
         $this->consolidator($fetcher)->consolidate($other, $massPay);
+    }
+
+    public function test_exempt_first_mixed_bundle_files_correct_vat_end_to_end(): void
+    {
+        // P1 (second review): the mass-pay's FIRST referenced child is fully-exempt
+        // (rate 0) but a later child is taxed 24%. The merged rate must be the MAX
+        // child rate (24), NOT the first child's 0 — else (a) the taxed lines file at
+        // 0% and (b) taxrate=0 drives the mapper to fall back to the tenant's
+        // tax-inclusive flag and mis-divide the net. This tenant IS tax-inclusive
+        // (like myip), so the bug would under-declare net+VAT on a legal document.
+        // Traced end-to-end: consolidate → map → the filed totals must be 300/48/348.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $massPay = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 40000, 'whmcs_userid' => 979,
+            'customer_id' => $this->customer->id, 'status' => PendingWhmcsInvoice::STATUS_HELD,
+            'match_reason' => PendingWhmcsInvoice::REASON_AFM,
+            'payload' => [
+                'invoiceid' => 40000, 'userid' => 979, 'total' => '348.00', 'taxrate' => '0.000', 'status' => 'Paid',
+                'items' => ['item' => [
+                    // Exempt child referenced FIRST → would flatten the merged rate to 0.
+                    ['id' => 1, 'type' => 'Invoice', 'relid' => 40001, 'description' => 'Αρ. #40001', 'amount' => '100.00', 'taxed' => '0'],
+                    ['id' => 2, 'type' => 'Invoice', 'relid' => 40002, 'description' => 'Αρ. #40002', 'amount' => '248.00', 'taxed' => '0'],
+                ]],
+            ],
+        ]);
+        $fetcher = $this->fetcherReturning([
+            // Exempt child: net 100 == gross 100 (rate 0).
+            40001 => [
+                'invoiceid' => 40001, 'userid' => 979, 'total' => '0.00', 'taxrate' => '0.000', 'status' => 'Paid',
+                'items' => ['item' => [['type' => 'Domain', 'relid' => 1, 'description' => 'Domain otgrowup.gr', 'amount' => '100.00', 'taxed' => '0']]],
+            ],
+            // Taxed child: net 200 → gross 248 (rate 24).
+            40002 => [
+                'invoiceid' => 40002, 'userid' => 979, 'total' => '0.00', 'taxrate' => '24.000', 'status' => 'Paid',
+                'items' => ['item' => [['type' => 'Hosting', 'relid' => 1, 'description' => 'Semi Dedicated', 'amount' => '200.00', 'taxed' => '1']]],
+            ],
+        ]);
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+
+        $merged = $massPay->fresh();
+        // The merged header carries the TAXED rate, not the exempt-first 0, and the
+        // explicit net declaration so the tenant's tax-inclusive flag can't apply.
+        $this->assertSame('24.000', $merged->payload['taxrate']);
+        $this->assertFalse($merged->payload['ekdosi_amount_includes_tax']);
+
+        // Map it as the operator's «Δημιουργία Παραστατικού» would: the filed invoice
+        // must be net 300 / VAT 48 / gross 348 — the exempt 100 at 0%, the 200 at 24%.
+        $totals = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $merged, $this->customer, $this->invoiceType)['totals'];
+
+        $this->assertSame(300.0, $totals['net_total'], 'net = 100 exempt + 200 taxed');
+        $this->assertSame(48.0, $totals['vat_total'], 'VAT = 24% of the 200 taxed line only');
+        $this->assertSame(348.0, $totals['gross_total']);
+
+        // Split VAT: a 0% bucket (net 100) and a 24% bucket (net 200 / VAT 48).
+        $byRate = collect($totals['vat_breakdown'])->keyBy(fn ($b) => (int) $b['rate']);
+        $this->assertSame(100.0, $byRate[0]['net'], 'exempt line stays at 0%, never taxed');
+        $this->assertSame(200.0, $byRate[24]['net']);
+        $this->assertSame(48.0, $byRate[24]['vat']);
     }
 }

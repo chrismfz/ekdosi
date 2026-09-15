@@ -313,6 +313,10 @@ class MassPayConsolidator
         // The child's own `taxrate` is preserved (do NOT overwrite from the container).
         $payload['total'] = number_format($gross, 2, '.', '');
         $payload['status'] = 'Paid';
+        // Synthetic, net-by-construction — same explicit declaration as the
+        // consolidated payload (see buildConsolidatedPayload) so a tax-inclusive
+        // tenant flag can't reinterpret these reconstructed net amounts as gross.
+        $payload['ekdosi_amount_includes_tax'] = false;
 
         return $payload;
     }
@@ -328,11 +332,18 @@ class MassPayConsolidator
     public function buildConsolidatedPayload(array $basePayload, MassPayConsolidation $plan): array
     {
         // Rate from a CHILD (a real taxed invoice), never the mass-pay container
-        // (which can report 0%). Same-party children share the rate; a reduced-rate
-        // mix flattens to this (documented P2 — the mapper is single-rate anyway).
-        $rate = $plan->sameParty === []
-            ? 0.0
-            : $this->taxRateOf($plan->sameParty[0]->payload);
+        // (which can report 0%). Take the MAX child rate, not sameParty[0]: if the
+        // container's FIRST referenced child is fully-exempt (rate 0) but a later
+        // child is taxed, stamping the first child's 0 would (a) file the taxed
+        // lines at 0% and (b) drive the mapper's detectAmountIncludesTax to bail on
+        // rate<=0 and fall back to the tenant's tax-inclusive flag — under-declaring
+        // the taxed net+VAT on a real tenant (myip). Same-party children share the
+        // rate; a reduced-rate mix flattens to the max (documented P2 — the mapper is
+        // single-rate anyway; not reachable, no reduced-rate tenants).
+        $rate = 0.0;
+        foreach ($plan->sameParty as $child) {
+            $rate = max($rate, $this->taxRateOf($child->payload));
+        }
         $items = [];
         $childIds = [];
         $childNotes = [];
@@ -357,6 +368,13 @@ class MassPayConsolidator
         $merged['taxrate'] = number_format($rate, 3, '.', '');
         $merged['total'] = number_format($gross, 2, '.', '');
         $merged['status'] = 'Paid';
+        // This is a SYNTHETIC payload we fully control — the line `amount`s ARE net
+        // (Σ items == subtotal by construction). Declare it explicitly so the mapper
+        // never falls back to the tenant's tax-inclusive flag (which would treat the
+        // net lines as gross). Belt-and-suspenders with the max-rate above: even if
+        // the whole bundle is exempt (rate 0) and detection can't tell, the tenant
+        // flag can't mis-apply here.
+        $merged['ekdosi_amount_includes_tax'] = false;
 
         // Rich comment on the παραστατικό (PDF + admin): «Από συγκεντρωτικό #X —
         // εξοφλεί τα προτιμολόγια #a (…), #b (…), #c (…)». The mapper prefers this
