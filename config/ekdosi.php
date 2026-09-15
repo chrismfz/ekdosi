@@ -230,6 +230,18 @@ return [
         'delivery_fetch_inbound_enabled' => env('EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND', true),
         'delivery_fetch_inbound_cron' => env('EKDOSI_DELIVERY_FETCH_INBOUND_CRON', '0 */6 * * *'),
 
+        // suppliers:sync / customers:sync — build the Προμηθευτές / Πελάτες μητρώο
+        // from myDATA issuer AFMs (RequestDocs) / sales counterpart AFMs
+        // (RequestTransmittedDocs), per myDATA-readable tenant. READ-from-AADE,
+        // write-ONLY-to-suppliers/customers (idempotent; creates only missing rows,
+        // touches no invoice/expense/money). Default OFF: unlike the read-only
+        // refreshes above, these WRITE master data, so they are opt-in per deploy
+        // (and controllable per-run from the «Χρονοπρογραμματιστής» page).
+        'suppliers_sync_enabled' => env('EKDOSI_SCHEDULE_SUPPLIERS_SYNC', false),
+        'suppliers_sync_cron' => env('EKDOSI_SUPPLIERS_SYNC_CRON', '0 4 * * *'),
+        'customers_sync_enabled' => env('EKDOSI_SCHEDULE_CUSTOMERS_SYNC', false),
+        'customers_sync_cron' => env('EKDOSI_CUSTOMERS_SYNC_CRON', '30 4 * * *'),
+
         // spatie/laravel-backup tasks — the WHOLE-DB (all tenants + files)
         // safety net, distinct from the per-company backups below.
         //

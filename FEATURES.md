@@ -176,7 +176,9 @@
 - **Προμηθευτές** (`Supplier`) — CRUD + «Άντληση από ΑΑΔΕ» (GSIS) + **`suppliers:sync`**
   (μοναδικά issuer ΑΦΜ από `RequestDocs`) + **«Συμπλήρωση επωνυμιών από ΑΑΔΕ»** (κουμπί στη
   λίστα + CLI `suppliers:backfill-names` — γεμίζει επωνυμία από GSIS σε παλιούς «αδέσποτους»
-  μόνο-ΑΦΜ, fill-only-empty· κοινός `SupplierNameBackfiller`).
+  μόνο-ΑΦΜ, fill-only-empty· κοινός `SupplierNameBackfiller`). Ο `suppliers:sync` (και ο
+  δίδυμος `customers:sync`) τρέχει πλέον και **αυτόματα** ανά myDATA εταιρεία, ελεγχόμενος από
+  τη σελίδα «Χρονοπρογραμματιστής» (default OFF — γράφει μητρώο).
 - **Συγχρονισμός κατάστασης εξόδων από ΑΑΔΕ** (`SyncExpenseStateFromAade` + action
   «Συγχρονισμός κατάστασης από ΑΑΔΕ» στην κονσόλα Εξόδων) — εφαρμόζει ακύρωση προμηθευτή
   σε υπάρχον έξοδο (VALID↔CANCELLED, audited μέσω `ExpenseMark`, χωρίς επανεισαγωγή).
