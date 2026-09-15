@@ -63,13 +63,21 @@ class WhmcsInboxArchiveActionTest extends TestCase
         $this->assertSame('δική μας υπηρεσία', $row->rejected_reason);
     }
 
-    public function test_archive_action_is_available_on_held_rows_too(): void
+    public function test_archiving_a_held_row_is_available_and_sets_rejected_status(): void
     {
         $this->boot();
         $held = $this->row(PendingWhmcsInvoice::STATUS_HELD);
 
+        // Visible AND the write path actually runs for a HELD row (the action is
+        // enabled for both pending_review and held) — not just pending_review.
         Livewire::test(ListWhmcsInbox::class)
             ->set('activeTab', 'held')
-            ->assertTableActionVisible('reject', $held);
+            ->assertTableActionVisible('reject', $held)
+            ->callTableAction('reject', $held, data: ['rejected_reason' => 'φίλου'])
+            ->assertHasNoTableActionErrors();
+
+        $held->refresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $held->status);
+        $this->assertSame('φίλου', $held->rejected_reason);
     }
 }
