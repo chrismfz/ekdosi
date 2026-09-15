@@ -336,9 +336,21 @@ class WhmcsWritebackService
 
         try {
             $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
+
+            // 1→N (mass-pay CONSOLIDATION): one ekdosi παραστατικό covers N WHMCS
+            // child invoices. Push the SAME MARK to each child id too, so every
+            // rolled-up WHMCS invoice shows the consolidated MARK — not just the
+            // mass-pay «container». setInvoiced is idempotent on an identical mark
+            // (inbound.php only refuses a DIFFERENT one), so a retry re-pushes safely.
+            $children = $this->consolidatedChildIds($pending);
+            foreach ($children as $childId) {
+                $client->setInvoiced($childId, $mark, $invoice->invcode, $state, $pdfUrl);
+            }
+
             Log::info('WHMCS write-back succeeded', [
                 'pending_id' => $pending->id,
                 'whmcs_invoice_id' => $pending->whmcs_invoice_id,
+                'consolidated_children' => $children,
                 'mydata_mark' => $mark,
                 'ekdosi_invoice' => $invoice->invcode,
                 'state' => $state,
@@ -366,5 +378,20 @@ class WhmcsWritebackService
                 'whmcs_writeback_error' => $e->getMessage(),
             ]);
         }
+    }
+
+    /**
+     * The WHMCS child invoice ids a CONSOLIDATED row rolled up (set by
+     * MassPayConsolidator::consolidate). Empty for an ordinary single-invoice row.
+     *
+     * @return array<int, int>
+     */
+    private function consolidatedChildIds(PendingWhmcsInvoice $pending): array
+    {
+        $ids = $pending->payload['ekdosi_consolidated_children'] ?? [];
+
+        return is_array($ids)
+            ? array_values(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0))
+            : [];
     }
 }

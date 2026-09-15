@@ -82,6 +82,11 @@ class ListWhmcsInbox extends BaseListRecords
                 ->badgeColor('info')
                 ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_SPLIT)),
 
+            'resolved' => Tab::make('Ολοκληρωμένα')
+                ->badge($n(PendingWhmcsInvoice::STATUS_RESOLVED) ?: null)
+                ->badgeColor('success')
+                ->modifyQueryUsing(fn (Builder $query) => $query->where('status', PendingWhmcsInvoice::STATUS_RESOLVED)),
+
             // No modifier → every status for this tenant. Total badge, CFM-style.
             'all' => Tab::make('Όλα')
                 ->badge((int) $counts->sum() ?: null),

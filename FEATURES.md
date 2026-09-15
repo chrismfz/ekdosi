@@ -431,8 +431,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Inbox draft-first** (`WhmcsInbox`) — webhook/poll → `pending_whmcs_invoices` →
   «Δημιουργία Παραστατικού» (editable draft) → lifecycle → write-back `invoiced=MARK`.
 - **Inbox status tabs** (CFM-style, με live counts): Ανοιχτά · Προς έλεγχο · Σε αναμονή · Προσχέδια ·
-  Καταχωρημένα · Απορρίφθηκαν · Διαχωρισμένα · Όλα. Default **«Ανοιχτά» = pending_review + held μαζί**,
-  ώστε ένα «Σε αναμονή» να μη κρύβεται· nav badge = pending_review + held.
+  Καταχωρημένα · Απορρίφθηκαν · Διαχωρισμένα · Ολοκληρωμένα · Όλα. Default **«Ανοιχτά» = pending_review + held
+  μαζί**, ώστε ένα «Σε αναμονή» να μη κρύβεται· nav badge = pending_review + held.
+- **Mass-pay (συγκεντρωτικό πληρωμής)**: μια κατάθεση για πολλά προτιμολόγια → **«Ενοποίηση σε ένα»** (ένα
+  παραστατικό με τις πραγματικές γραμμές όλων, νόμιμο συγκεντρωτικό) ή **«Ανάλυση σε επιμέρους»** (ένα ανά
+  παραγγελία). Τρίτου πελάτη → εξαιρείται/split. Το mass-pay κλείνει «Ολοκληρώθηκε», ποτέ δεν φιλάρεται·
+  write-back 1→N (MARK σε όλα τα επιμέρους WHMCS invoices). `MassPayConsolidator`.
 - **Αυτόματη κατηγορία εσόδων ανά ομάδα προϊόντων** (MYD-006 bridge) — σελίδα «Αντιστοίχιση WHMCS
   (έσοδα)»: αντλεί τον κατάλογο (`GetProducts`), ο χειριστής ορίζει §8.6 bucket **ανά ομάδα** («Web
   Hosting → υπηρεσία»· νέα πακέτα κληρονομούν). Ο mapper γεμίζει per-line snapshot
