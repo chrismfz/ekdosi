@@ -1101,6 +1101,26 @@ assertion). Ό,τι απέμεινε:
 - **Force-delete (P2-5, nit):** breakglass force-delete μιας pending immediate γραμμής δεν τρέχει `deleted()` →
   το bell μένει μέχρι το επόμενο `whmcs:resolve-immediate-bells` (που το καθαρίζει ως orphan). Αποδεκτό.
 
+### Suppliers/Customers auto-sync (slice B) — surviving P2s (από το review, 2026-09-15)
+Το wiring (scheduled `suppliers:sync`/`customers:sync` ανά myDATA tenant, default OFF) πέρασε **χωρίς P0/P1** —
+create-only, tenant-scoped, idempotent. Ό,τι απέμεινε αγγίζει **προϋπάρχοντα** service shape, όχι το B diff:
+- **Supplier dedup/placeholder asymmetry:** ο `SupplierSyncFromMyData` κάνει skip μόνο κενό ΑΦΜ + dedup στο raw
+  `afm`, ενώ ο customer twin φιλτράρει `Afm::uniqueKey()===null` + dedup στο canonical `afm_key`. Ένα
+  placeholder/format-variant issuer ΑΦΜ θα μπορούσε να φτιάξει junk/duplicate supplier. Χαμηλό ρίσκο (οι εκδότες
+  RequestDocs είναι επιχειρήσεις με πραγματικό δομημένο ΑΦΜ). Fix: πέρνα το issuer ΑΦΜ από `Afm::uniqueKey()`.
+- **Supplier create όχι race-hardened:** ο customer sync πιάνει `UniqueConstraintViolationException` (skip), ο
+  supplier όχι — race sweep↔κουμπί «Άντληση» θα πετούσε (το `TenantScheduleSweep` το απομονώνει per-tenant).
+  Fix: wrap το `Supplier::create` όπως ο customer.
+- **Per-tenant failures αόρατα στο ops:health:** και τα δύο sweeps περνούν `$onError = fn () => null`, οπότε το
+  `$trackSchedule` μαρκάρει το task 'ok' ακόμη κι αν κάθε tenant απέτυχε (μόνο `report()` στο log). Consistent με
+  το `whmcs:fetch-unpaid`. Αν βγουν από opt-in → HealthRecorder key.
+- **customers:sync cadence:** τρέχει με το default `--months=12`, οπότε re-pull ενός rolling 12μηνου κάθε βράδυ
+  (idempotent αλλά wasteful). Read-only, off-peak, default OFF. Fix (θέλει `TenantScheduleSweep` extra-args ή
+  command default): στενότερο recurring window (π.χ. 1 μήνα) αφού seeded ο tenant.
+- **First-run GSIS burst + self-AFM raw compare:** προϋπάρχοντα service behaviors (ίδια με το κουμπί)· nameless
+  `«ΑΦΜ …»` rows δεν re-enrichάρονται (θέλει customer equivalent του `suppliers:backfill-names`). Quality, όχι
+  correctness.
+
 ## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
 _Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._
 

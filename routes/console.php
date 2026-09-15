@@ -299,7 +299,7 @@ $trackSchedule(
 // delivery:fetch-inbound — READ-ONLY staging of the ψηφιακή-διακίνηση docs OTHERS
 // filed against us (goods we are RECEIVING) into «Εισερχόμενα Διακίνησης», per
 // myDATA-readable tenant. Only stages — reject/confirm stay operator-gated inbox
-// actions. Default OFF (we are almost always the issuer; opt-in per deploy).
+// actions. Default ON (read-only; surfaced in the «Χρονοπρογραμματιστής» page).
 $trackSchedule(
     Schedule::command('delivery:fetch-inbound')
         ->cron($scheduleCron('delivery_fetch_inbound_cron', '0 */6 * * *'))
@@ -307,6 +307,46 @@ $trackSchedule(
         ->when(fn () => $scheduleEnabled('delivery_fetch_inbound_enabled'))
         ->withoutOverlapping(30),
     'delivery_fetch_inbound'
+);
+
+// suppliers:sync — build the Προμηθευτές μητρώο from myDATA RequestDocs issuer
+// AFMs, once per myDATA-readable tenant (--tenant passed by TenantScheduleSweep).
+// READ-from-AADE, write-ONLY-to-suppliers (idempotent — creates only missing
+// rows; touches no invoice/expense/money). Default OFF (it writes master data —
+// opt-in per deploy + per the page toggle). Window: the command's default (last
+// month).
+$trackSchedule(
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::myDataReadable(),
+            'suppliers:sync',
+            fn (Company $c) => null,
+        );
+    })
+        ->cron($scheduleCron('suppliers_sync_cron', '0 4 * * *'))
+        ->name('suppliers-sync-all')
+        ->when(fn () => $scheduleEnabled('suppliers_sync_enabled'))
+        ->withoutOverlapping(30),
+    'suppliers_sync'
+);
+
+// customers:sync — the twin: build the Πελάτες μητρώο from the counterpart AFMs
+// of our sales (RequestTransmittedDocs), per myDATA-readable tenant. Same
+// READ-from-AADE, write-ONLY-to-customers, idempotent contract. Default OFF.
+// Window: the command's default (last 12 months — a heavier AADE pull).
+$trackSchedule(
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::myDataReadable(),
+            'customers:sync',
+            fn (Company $c) => null,
+        );
+    })
+        ->cron($scheduleCron('customers_sync_cron', '30 4 * * *'))
+        ->name('customers-sync-all')
+        ->when(fn () => $scheduleEnabled('customers_sync_enabled'))
+        ->withoutOverlapping(30),
+    'customers_sync'
 );
 
 // invoices:notify-overdue — daily «bell» digest of ληξιπρόθεσμα τιμολόγια per
