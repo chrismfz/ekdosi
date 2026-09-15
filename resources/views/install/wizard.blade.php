@@ -209,6 +209,16 @@
                         <input type="password" id="mail_password" name="mail_password" autocomplete="new-password">
                     </div>
                 </div>
+                <div class="row">
+                    <div class="field" style="flex: 2;">
+                        <label for="test_recipient">Στείλε δοκιμαστικό σε (προαιρετικό)</label>
+                        {{-- No `name`: test-only, NOT submitted with the install form. --}}
+                        <input type="email" id="test_recipient" placeholder="π.χ. εσύ@example.gr" autocomplete="off">
+                    </div>
+                </div>
+                <button type="button" class="btn-secondary" id="test-mail-btn">Δοκιμή email</button>
+                <div id="mail-test-result" class="alert hidden" style="margin-top: 12px;"></div>
+                <p class="hint" style="margin-top: 8px;">Ελέγχει host/port/κρυπτογράφηση/credentials με σύνδεση SMTP. Άφησε κενή τη διεύθυνση δοκιμής για έλεγχο χωρίς αποστολή· συμπλήρωσέ την για πραγματικό δοκιμαστικό email.</p>
             </div>
             {{-- Το select mail_encryption υποβάλλεται πάντα (ακόμη κι όταν είναι κρυμμένο),
                  με έγκυρη τιμή null/tls/ssl — καλύπτει τον κανόνα επικύρωσης χωρίς διπλό πεδίο. --}}
@@ -381,6 +391,51 @@
                 btn.textContent = 'Δοκιμή σύνδεσης';
             });
         });
+
+        // Δοκιμή email (AJAX). Connect+auth, and a real send when a test
+        // recipient is filled. Green on ok, red otherwise — the message says why.
+        var mailBtn = document.getElementById('test-mail-btn');
+        var mailBox = document.getElementById('mail-test-result');
+        if (mailBtn) {
+            mailBtn.addEventListener('click', function () {
+                var payload = {
+                    verify_token: document.getElementById('verify_token').value,
+                    mail_host: document.getElementById('mail_host').value,
+                    mail_port: document.getElementById('mail_port').value,
+                    mail_encryption: document.getElementById('mail_encryption').value,
+                    mail_username: document.getElementById('mail_username').value,
+                    mail_password: document.getElementById('mail_password').value,
+                    mail_from_address: document.getElementById('mail_from_address').value,
+                    mail_from_name: document.getElementById('mail_from_name').value,
+                    test_recipient: document.getElementById('test_recipient').value
+                };
+                mailBtn.disabled = true;
+                mailBtn.textContent = 'Έλεγχος…';
+                mailBox.className = 'alert';
+                mailBox.classList.remove('hidden');
+                mailBox.textContent = 'Δοκιμή email…';
+
+                fetch('{{ url('/install/test-mail') }}', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify(payload)
+                })
+                .then(function (r) { return r.json().then(function (d) { return { status: r.status, body: d }; }); })
+                .then(function (res) {
+                    var d = res.body;
+                    mailBox.className = d.ok ? 'alert alert-ok' : 'alert alert-err';
+                    mailBox.textContent = d.message || 'Άγνωστο αποτέλεσμα.';
+                })
+                .catch(function () {
+                    mailBox.className = 'alert alert-err';
+                    mailBox.textContent = 'Αποτυχία επικοινωνίας με τον διακομιστή.';
+                })
+                .finally(function () {
+                    mailBtn.disabled = false;
+                    mailBtn.textContent = 'Δοκιμή email';
+                });
+            });
+        }
 
         // Απόφυγε διπλό submit (η εγκατάσταση αργεί λίγο).
         document.getElementById('install-form').addEventListener('submit', function () {

@@ -19,4 +19,5 @@ use Illuminate\Support\Facades\Route;
 
 Route::get('/install', [InstallController::class, 'show'])->name('install.show');
 Route::post('/install/test-db', [InstallController::class, 'testDb'])->name('install.test-db');
+Route::post('/install/test-mail', [InstallController::class, 'testMail'])->name('install.test-mail');
 Route::post('/install', [InstallController::class, 'run'])->name('install.run');

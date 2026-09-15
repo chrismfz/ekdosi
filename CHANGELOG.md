@@ -43,6 +43,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   βεβαιότητα. Ίδια ασφάλεια (override πάντα απαιτείται — καμία μη-κενή βάση δεν migrate-άρεται χωρίς ρητό tick).
 
 ### Added
+- **Κουμπί «Δοκιμή email» στον web installer (`/install`) — SMTP probe, όπως το «Δοκιμή σύνδεσης» της βάσης.**
+  Ανοίγει SMTP session με τα στοιχεία της φόρμας (connect + κρυπτογράφηση + AUTH) και λέει **ακριβώς** ποιο
+  βήμα έσκασε: `auth` (λάθος credentials), `tls` (λάθος συνδυασμός κρυπτογράφησης/port — 587+TLS vs 465+SSL),
+  `unreachable` (host/port/firewall). Προαιρετικό πεδίο «στείλε δοκιμαστικό σε [email]» για πραγματική
+  end-to-end αποστολή. Νέα `POST /install/test-mail` (token-gated, session/CSRF-free), `MailConnectionTester`
+  + `MailProbeResult` πάνω σε injectable `SmtpProbe` seam (Symfony Mailer· short timeout ώστε λάθος host να
+  μη κρεμάει τον wizard), unit + endpoint tests.
 - **`INSTALL.md §17` — εγκατάσταση σε cPanel / CloudLinux (shared hosting).** Συγκεντρώνει τα gotchas
   από το στήσιμο του `invoicer.myip.gr`: CLI PHP 8.4 μέσω `PATH` στο `ea-php84` (το MultiPHP ρυθμίζει
   μόνο τον web handler), αφαίρεση `proc_open` από τα `disable_functions` + `cagefsctl --force-update`/`-M`

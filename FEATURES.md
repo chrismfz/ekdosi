@@ -818,6 +818,11 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
     το `secrets.mode` του αρχείου)· το bundle διαβάζεται + επαληθεύεται **πριν** το `migrate` και η
     εγκατάσταση περνά μέσα από το `ekdosi:install --bundle`. Έτσι στήνεται προ-ρυθμισμένο box **χωρίς κονσόλα**
     (κώδικας + .zip + κενή MariaDB → ανέβασμα → τέλος).
+  - **«Δοκιμή email»** — το SMTP αντίστοιχο του «Δοκιμή σύνδεσης» της βάσης: ανοίγει SMTP session με τα
+    στοιχεία της φόρμας (connect + κρυπτογράφηση + AUTH) και ξεχωρίζει **ποιο** βήμα έσκασε — `auth` (λάθος
+    credentials), `tls` (λάθος συνδυασμός «Κρυπτογράφηση»/port: 587+TLS vs 465+SSL), `unreachable`
+    (host/port/firewall). Προαιρετικό «στείλε δοκιμαστικό σε [email]» για πραγματική end-to-end αποστολή.
+    Token-gated `POST /install/test-mail`, short timeout ώστε λάθος host να μη κρεμάει τον οδηγό.
   - **Preflight «Έλεγχος συστήματος»** στην κορυφή του οδηγού — read-only έλεγχος περιβάλλοντος που **δεν
     αλλάζει τίποτα** (το `composer install`/ενεργοποίηση επεκτάσεων μένει στο shell· ο installer απλώς
     επαληθεύει το αποτέλεσμα). **Υποχρεωτικά** (PHP ≥ 8.4, εγγράψιμα `storage/`+`bootstrap/cache/`, και οι
