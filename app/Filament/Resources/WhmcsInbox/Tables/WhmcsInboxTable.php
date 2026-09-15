@@ -409,6 +409,9 @@ class WhmcsInboxTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
+                    // Archive first: it's the operator-safe bulk op (Update), unlike
+                    // the admin-only bulk delete below it.
+                    self::archiveSelectedAction(),
                     self::deleteSelectedAction(),
                 ]),
             ]);
@@ -449,6 +452,21 @@ class WhmcsInboxTable
                 PendingWhmcsInvoice::STATUS_HELD,
                 PendingWhmcsInvoice::STATUS_REJECTED,
             ], true);
+    }
+
+    /**
+     * Which rows the bulk «Αρχειοθέτηση» touches — the same states the per-row
+     * archive action targets: still-actionable rows (προς έλεγχο / σε αναμονή).
+     * Everything else (already archived, filed, drafted, split, resolved) is left
+     * alone and reported as skipped, so a mixed selection can't disturb a legal
+     * or in-flight record.
+     */
+    private static function isArchivable(PendingWhmcsInvoice $r): bool
+    {
+        return in_array($r->status, [
+            PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            PendingWhmcsInvoice::STATUS_HELD,
+        ], true);
     }
 
     /**
@@ -511,6 +529,59 @@ class WhmcsInboxTable
 
                 Notification::make()
                     ->title("Διαγράφηκαν: {$deleted}".($skipped > 0 ? " · Παραλείφθηκαν: {$skipped}" : ''))
+                    ->{$skipped > 0 ? 'warning' : 'success'}()
+                    ->send();
+            })
+            ->deselectRecordsAfterCompletion();
+    }
+
+    /**
+     * Bulk archive — checkboxes → «Αρχειοθέτηση επιλεγμένων»: set the same
+     * `rejected` state the per-row «Αρχειοθέτηση» writes, on every selected row
+     * that's still «προς έλεγχο»/«σε αναμονή», with one optional shared note.
+     * The point over bulk delete: delete frees the (company_id, whmcs_invoice_id)
+     * slot so the next sync re-creates the row, whereas archive is audit-frozen —
+     * it stays out of «Ανοιχτά» and never comes back (the «δικά μας/φίλων» case).
+     * Operator-level (Update), so it's usable without the admin-only delete right;
+     * a no-record bulk action checks the shield permission directly, mirroring the
+     * list's header actions. Non-archivable rows are skipped and counted.
+     */
+    private static function archiveSelectedAction(): BulkAction
+    {
+        return BulkAction::make('archive_selected')
+            ->label('Αρχειοθέτηση επιλεγμένων')
+            ->icon('heroicon-o-archive-box-arrow-down')
+            ->color('gray')
+            ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
+            ->requiresConfirmation()
+            ->modalHeading('Αρχειοθέτηση επιλεγμένων εγγραφών inbox')
+            ->modalDescription('Αρχειοθετούνται όσες είναι «προς έλεγχο» ή «σε αναμονή»: φεύγουν από τα «Ανοιχτά», ΔΕΝ καταχωρούνται στην ΑΑΔΕ και δεν ξαναέρχονται στο sync (σε αντίθεση με τη διαγραφή). Επαναφέρονται όποτε θες. Ό,τι έχει ήδη εκδοθεί/αρχειοθετηθεί παραλείπεται.')
+            ->modalSubmitActionLabel('Αρχειοθέτηση')
+            ->form([
+                Textarea::make('rejected_reason')
+                    ->label('Κοινή σημείωση (προαιρετικό)')
+                    ->placeholder('π.χ. δικά μας / φίλου — να μην καταχωρηθούν στην ΑΑΔΕ')
+                    ->rows(2)
+                    ->maxLength(200),
+            ])
+            ->action(function (Collection $records, array $data): void {
+                $note = trim((string) ($data['rejected_reason'] ?? '')) ?: null;
+                $archived = 0;
+                $skipped = 0;
+                foreach ($records as $record) {
+                    if (self::isArchivable($record)) {
+                        $record->update([
+                            'status' => PendingWhmcsInvoice::STATUS_REJECTED,
+                            'rejected_reason' => $note,
+                        ]);
+                        $archived++;
+                    } else {
+                        $skipped++;
+                    }
+                }
+
+                Notification::make()
+                    ->title("Αρχειοθετήθηκαν: {$archived}".($skipped > 0 ? " · Παραλείφθηκαν: {$skipped}" : ''))
                     ->{$skipped > 0 ? 'warning' : 'success'}()
                     ->send();
             })
