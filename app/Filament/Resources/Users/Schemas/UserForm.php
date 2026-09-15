@@ -3,7 +3,6 @@
 namespace App\Filament\Resources\Users\Schemas;
 
 use App\Models\User;
-use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
@@ -54,21 +53,23 @@ class UserForm
                                 ? 'Leave blank to keep the current password (min 8 if changing).'
                                 : 'At least 8 characters.'),
 
-                        Toggle::make('email_verified')
+                        // Bind the toggle DIRECTLY to the `email_verified_at`
+                        // timestamp: display the stored timestamp as a bool, and on
+                        // save dehydrate the bool back to a timestamp|null. (The old
+                        // proxy toggle + hidden DateTimePicker never persisted — a
+                        // hidden field is NOT dehydrated by default in Filament v5
+                        // (isDehydratedWhenHidden defaults to false), so both create
+                        // and edit silently kept the user «unverified» despite the
+                        // «Αποθηκεύτηκε» toast.)
+                        Toggle::make('email_verified_at')
                             ->label('Email verified')
                             ->default(true)
-                            ->dehydrated(false)
-                            // Keep the toggle in sync with the underlying timestamp.
-                            ->afterStateHydrated(fn (Toggle $component, $record) =>
-                                $component->state(filled($record?->email_verified_at)))
-                            ->live()
-                            ->afterStateUpdated(function (bool $state, callable $set) {
-                                $set('email_verified_at', $state ? now() : null);
-                            }),
-
-                        DateTimePicker::make('email_verified_at')
-                            ->label('Verified at')
-                            ->hidden(),
+                            ->formatStateUsing(fn ($state): bool => filled($state))
+                            // Preserve the existing verified-at when already verified,
+                            // so an unrelated edit+save doesn't bump the timestamp.
+                            ->dehydrateStateUsing(fn ($state, ?User $record) => $state
+                                ? ($record?->email_verified_at ?? now())
+                                : null),
                     ]),
 
                 // Read-only 2FA status. Enabling is inherently self-service

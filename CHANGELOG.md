@@ -63,6 +63,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
   ζευγαρώνουν σε μία σειρά κάτω. Καθαρά layout — κανένα πεδίο/δεδομένο δεν άλλαξε.
 
 ### Fixed
+- **Users: το toggle «Email verified» τώρα αποθηκεύεται όντως.** Ήταν proxy toggle που τάιζε ένα **κρυφό**
+  DateTimePicker· ένα hidden field ΔΕΝ γίνεται dehydrate by default στο Filament v5 (`isDehydratedWhenHidden`
+  = false), οπότε το save έριχνε σιωπηλά το `email_verified_at` — το toast «Αποθηκεύτηκε» έβγαινε αλλά ο χρήστης
+  έμενε «unverified» (και στη λίστα και μέσα στο record), και σε create **και** σε edit. Πλέον το toggle δένει
+  **απευθείας** στο `email_verified_at` (format timestamp→bool, dehydrate bool→timestamp|null· κρατά το υπάρχον
+  verified-at σε άσχετο save). Regression tests: on/off/create + «δεν πειράζει το timestamp σε άσχετο save».
 - **Λίστες Filament: δεν σκάει πλέον (500) όταν ζητηθεί καθαρισμός φίλτρου που δεν υπάρχει πια.** Μετά το PR
   που μετέφερε το status φίλτρο των «Εισερχομένων» σε tabs, ένα ανοιχτό tab του browser / bookmarked
   `?filters[status]=…` URL από πριν το deploy κρατούσε το `status` κλειδί στο URL-bound `tableFilters` state·
