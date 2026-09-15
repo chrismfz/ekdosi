@@ -376,11 +376,13 @@ class MassPayConsolidator
         // flag can't mis-apply here.
         $merged['ekdosi_amount_includes_tax'] = false;
 
-        // Rich comment on the παραστατικό (PDF + admin): «Από συγκεντρωτικό #X —
-        // εξοφλεί τα προτιμολόγια #a (…), #b (…), #c (…)». The mapper prefers this
-        // over its default «Από προτιμολόγιο #…» when present.
+        // Rich comment on the παραστατικό (PDF + admin): «Από συγκεντρωτικό
+        // προτιμολόγιο #X — εξοφλεί τα προτιμολόγια #a (…), #b (…), #c (…)». Uses
+        // the business term «προτιμολόγιο» (like the single-invoice «Από
+        // προτιμολόγιο #…»), NOT «WHMCS» — this prints on the customer's PDF. The
+        // mapper prefers this over its default note when present.
         $container = (int) ($basePayload['invoiceid'] ?? $basePayload['id'] ?? 0);
-        $merged['ekdosi_invoice_note'] = 'Από συγκεντρωτική πληρωμή WHMCS #'.$container
+        $merged['ekdosi_invoice_note'] = 'Από συγκεντρωτικό προτιμολόγιο #'.$container
             .' — εξοφλεί τα προτιμολόγια '.implode(', ', $childNotes).'.';
 
         // Bookkeeping for the write-back (MARK → every source child).
