@@ -8,6 +8,7 @@ use App\Exceptions\EInvoice\ProviderTransportException;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\MyDataMark;
+use App\Services\EInvoice\Concerns\DispatchesAcceptanceEmail;
 use App\Services\InvoiceNumberer;
 use App\Services\MyDataRejected;
 use App\Services\Whmcs\WhmcsWritebackService;
@@ -44,12 +45,14 @@ use Throwable;
  *   - a duplicate INSERT MARK for the same invoice is de-duped on persist.
  *
  * WHMCS write-back fires on filing + cancel (parity with MyDataSubmitter, keyed on
- * whmcs_pending_id — no-op for non-WHMCS). The ONE remaining parity follow-up is
- * auto-email on VALID (a best-effort UX nicety MyDataSubmitter does); a provider
- * tenant gets it in a later pass.
+ * whmcs_pending_id — no-op for non-WHMCS). Auto-email on VALID is at PARITY too now:
+ * a fresh provider acceptance queues the customer PDF email via the shared
+ * {@see DispatchesAcceptanceEmail} trait, under the same tenant + per-customer gate.
  */
 class GrProviderSubmitter implements EInvoiceSubmitter
 {
+    use DispatchesAcceptanceEmail;
+
     public function __construct(
         private readonly Company $tenant,
         private readonly EInvoiceProviderTransport $transport,
@@ -198,6 +201,15 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         }
 
         $this->syncWhmcsFiled($invoice, $mark);
+
+        // Parity with MyDataSubmitter: on a FRESH provider acceptance, queue the
+        // customer PDF email IF the tenant opted in (auto_email_on_mydata_accept)
+        // and the customer accepts it (the trait gates both). Guarded on
+        // wasRecentlyCreated so an idempotent adopt-on-retry (persistSuccess reuses
+        // the existing MARK row) never re-emails a document already sent.
+        if ($mark->wasRecentlyCreated) {
+            $this->dispatchAutoEmailIfEnabled($invoice);
+        }
 
         return $mark;
     }

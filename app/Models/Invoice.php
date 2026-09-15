@@ -16,6 +16,7 @@ use App\Services\Stock\StockService;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
 use App\Support\EInvoice\ProviderEvidence;
+use App\Support\EInvoice\SendChannel;
 use App\Support\InvoiceScope;
 use App\Support\IsoCountry;
 use App\Support\ProvisionalCode;
@@ -1313,10 +1314,14 @@ class Invoice extends Model implements MovableDocument
 
     /**
      * G6: should finalizing this DRAFT auto-email the customer? This is
-     * the NON-myDATA issue path. True only when:
-     *   - the tenant does NOT file via myDATA (sandbox/production) — those
-     *     invoices get the mail on the VALID response instead, so firing
-     *     here too would double-send;
+     * the NON-electronic issue path. True only when:
+     *   - the tenant does NOT file electronically — a tenant that files, whether
+     *     DIRECT to myDATA (gr-mydata, sandbox/production) OR through a PROVIDER
+     *     (gr-provider, InvoSign…), gets the mail on the acceptance/VALID response
+     *     instead, so firing here too would double-send. Keyed on the canonical
+     *     {@see SendChannel} brain so «files electronically» has ONE definition
+     *     (a provider tenant has mydata_mode='off', so a raw mydata_mode check
+     *     alone would miss it — the exact double-send hazard this guards);
      *   - the tenant opted in (companies.auto_email_on_issue); and
      *   - the customer hasn't opted out (customers.auto_email_invoices).
      */
@@ -1328,9 +1333,10 @@ class Invoice extends Model implements MovableDocument
             return false;
         }
 
-        $filesViaMyData = in_array($company->mydata_mode, ['sandbox', 'production'], true);
+        $channel = SendChannel::fromCompany($company);
+        $filesElectronically = SendChannel::isDirectMyData($channel) || SendChannel::isProvider($channel);
 
-        return ! $filesViaMyData
+        return ! $filesElectronically
             && (bool) $company->auto_email_on_issue
             && $this->customerAcceptsAutoEmail();
     }

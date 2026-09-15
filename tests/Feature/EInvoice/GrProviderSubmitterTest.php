@@ -3,6 +3,7 @@
 namespace Tests\Feature\EInvoice;
 
 use App\Contracts\EInvoiceProviderTransport;
+use App\Jobs\SendInvoiceEmail;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DeliveryNote;
@@ -16,6 +17,7 @@ use App\Support\EInvoice\ProviderCredentials;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\EInvoice\ProviderResult;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Queue;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -460,6 +462,31 @@ class GrProviderSubmitterTest extends TestCase
     {
         $this->assertTrue((new GrProviderSubmitter($this->tenant, new FakeGrTransport))->testConnection());
         $this->assertFalse((new GrProviderSubmitter($this->tenant, new FakeGrTransport(ping: false)))->testConnection());
+    }
+
+    public function test_fresh_provider_acceptance_queues_the_customer_email_when_opted_in(): void
+    {
+        // Parity with the direct myDATA path: a provider tenant that opted in
+        // (auto_email_on_mydata_accept) queues the customer PDF email when a
+        // provider filing reaches VALID.
+        Queue::fake();
+        $this->tenant->forceFill(['auto_email_on_mydata_accept' => true])->save();
+        $this->customer->forceFill(['email' => 'c@example.test'])->save();
+
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($this->makeInvoice());
+
+        Queue::assertPushed(SendInvoiceEmail::class, 1);
+    }
+
+    public function test_no_customer_email_when_the_tenant_has_not_opted_in(): void
+    {
+        // Default: the tenant flag is off → no auto-email, even on a clean filing.
+        Queue::fake();
+        $this->customer->forceFill(['email' => 'c@example.test'])->save();
+
+        (new GrProviderSubmitter($this->tenant, new FakeGrTransport))->submit($this->makeInvoice());
+
+        Queue::assertNotPushed(SendInvoiceEmail::class);
     }
 
     private function makeInvoice(int $code = 1): Invoice

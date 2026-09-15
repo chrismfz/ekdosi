@@ -136,4 +136,24 @@ class AutoEmailGateTest extends TestCase
 
         $this->assertFalse($invoice->shouldAutoEmailOnFinalize());
     }
+
+    public function test_finalize_blocked_for_provider_tenants_to_avoid_double_send(): void
+    {
+        // A gr-provider (InvoSign…) tenant files ELECTRONICALLY too, but its
+        // mydata_mode is 'off' — so a raw mydata_mode check would miss it and
+        // auto-email on finalize, on top of the provider's own acceptance email
+        // (GrProviderSubmitter now queues it), double-sending. shouldAutoEmail-
+        // OnFinalize must treat the provider as electronic and return false.
+        $tenant = $this->tenant([
+            'einvoice_provider' => 'gr-provider',
+            'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'production',
+            'mydata_mode' => 'off',
+            'auto_email_on_issue' => true,
+        ]);
+        $customer = $this->customerFor($tenant);
+        $invoice = $this->invoiceFor($tenant, $customer);
+
+        $this->assertFalse($invoice->shouldAutoEmailOnFinalize());
+    }
 }

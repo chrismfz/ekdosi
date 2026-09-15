@@ -287,6 +287,11 @@
   παραστατικό στον πελάτη μπαίνει στο XML **μόνο** όταν ο tenant το ανάψει· σβηστό → κενό πεδίο (δεν φεύγει
   email δοκιμαστικά σε πραγματικούς πελάτες). Ισχύει σε τιμολόγια + δελτία αποστολής, μόνο στον δίαυλο
   παρόχου· η δική του ροή email του ekdosi (`SendInvoiceEmail`) είναι ανεξάρτητη.
+- **Auto-email πελάτη στην αποδοχή — parity με direct myDATA.** Όταν μια φρέσκια έκδοση μέσω παρόχου
+  γίνει αποδεκτή (VALID) και ο tenant το έχει ανοιχτό (`auto_email_on_mydata_accept`, με per-customer
+  opt-out), μπαίνει στην ουρά το email με το PDF — από κοινό trait `DispatchesAcceptanceEmail` με τον
+  απευθείας δρόμο. Ο `shouldAutoEmailOnFinalize` θεωρεί τον πάροχο «φιλάρει ηλεκτρονικά» (μέσω
+  `SendChannel`), οπότε ΔΕΝ στέλνει δεύτερο email στο finalize.
 - **PEPPOL Phase 1** (Εσθονία) — provider-independent **BIS Billing 3.0 / EN 16931 UBL**
   builder (`PeppolInvoiceDocument` μέσω `josemmo/einvoicing`) + `peppol:test-submit`
   (dry-run + validate). Phase 2 (Access-Point transport) = backlog.

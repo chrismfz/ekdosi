@@ -43,6 +43,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   βεβαιότητα. Ίδια ασφάλεια (override πάντα απαιτείται — καμία μη-κενή βάση δεν migrate-άρεται χωρίς ρητό tick).
 
 ### Added
+- **Auto-email στην αποδοχή τώρα και για τον δρόμο του παρόχου (InvoSign/`gr-provider`) — parity με το direct myDATA.**
+  Μια φρέσκια αποδοχή μέσω παρόχου (VALID) βάζει στην ουρά το email με το PDF στον πελάτη, με το ΙΔΙΟ gate
+  (`auto_email_on_mydata_accept` + per-customer opt-out), μέσα από κοινό trait `DispatchesAcceptanceEmail`
+  ώστε οι δύο submitters να μη ξανα-αποκλίνουν. Guarded σε φρέσκο MARK (`wasRecentlyCreated`) — καμία διπλή
+  αποστολή στο idempotent adopt-on-retry. **Μαζί, διόρθωση κινδύνου διπλού email:** ο
+  `Invoice::shouldAutoEmailOnFinalize()` έκρινε με `mydata_mode`, οπότε ένας provider tenant (που έχει
+  `mydata_mode='off'`) θα έστελνε auto-email και στο **finalize** ΚΑΙ στην αποδοχή· πλέον κρίνει «φιλάρει
+  ηλεκτρονικά» με το κανονικό `SendChannel` brain (direct myDATA Ή πάροχος), άρα στέλνει μόνο μία φορά.
+  Ενημερώθηκαν και τα help-texts («myDATA» → «myDATA ή πάροχος»).
 - **Κουμπί «Δοκιμή email» στον web installer (`/install`) — SMTP probe, όπως το «Δοκιμή σύνδεσης» της βάσης.**
   Ανοίγει SMTP session με τα στοιχεία της φόρμας (connect + κρυπτογράφηση + AUTH) και λέει **ακριβώς** ποιο
   βήμα έσκασε: `auth` (λάθος credentials), `tls` (λάθος συνδυασμός κρυπτογράφησης/port — 587+TLS vs 465+SSL),
