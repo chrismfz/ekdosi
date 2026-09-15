@@ -220,6 +220,29 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(124.0, $line['gross_price']);
     }
 
+    public function test_explicit_amount_mode_flag_overrides_a_tax_inclusive_tenant(): void
+    {
+        // A SYNTHETIC payload we built ourselves (mass-pay consolidate/explode
+        // reconstructs net-by-construction line amounts) declares its mode via
+        // `ekdosi_amount_includes_tax=false`. That must WIN over the tenant's
+        // tax-inclusive toggle even when the payload has no detectable breakdown —
+        // else a tax-inclusive tenant (myip) would re-divide the net line and
+        // under-declare. Amount 100 taxed → net 100 / gross 124, NOT net 80.65.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 1010, 'userid' => 5, 'date' => '2026-05-20', 'total' => '124.00',
+            'ekdosi_amount_includes_tax' => false,
+            'items' => ['item' => [['description' => 'Reconstructed net line', 'amount' => '100.00', 'taxed' => '1']]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame(100.0, $line['net_price'], 'explicit net flag beats the tax-inclusive toggle');
+        $this->assertSame(124.0, $line['gross_price'], 'VAT added on top, not divided out');
+    }
+
     public function test_tax_exclusive_flag_applies_on_the_split_subset_path_too(): void
     {
         // G3 belt-and-suspenders: the flag must hold when map() is called with

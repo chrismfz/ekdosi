@@ -115,8 +115,17 @@ class WhmcsInvoiceMapper
         // have to guess. Only fall back to the per-tenant toggle when the
         // payload has no usable breakdown. detectAmountIncludesTax returns
         // null when it can't tell.
+        // An EXPLICIT declaration wins over both detection and the tenant toggle:
+        // a synthetic payload we built ourselves (mass-pay consolidate/explode
+        // reconstructs net-by-construction line amounts) says so via
+        // `ekdosi_amount_includes_tax`, so the tenant's tax-inclusive flag can never
+        // reinterpret its net lines as gross.
+        $explicit = array_key_exists('ekdosi_amount_includes_tax', $linePayload)
+            ? (bool) $linePayload['ekdosi_amount_includes_tax']
+            : null;
         $detected = $this->detectAmountIncludesTax($linePayload);
-        $amountIncludesTax = $detected
+        $amountIncludesTax = $explicit
+            ?? $detected
             ?? (bool) ($tenant->whmcs_amount_includes_tax ?? true);
 
         $lines = $this->buildLines($linePayload, $defaultVat, $amountIncludesTax);
@@ -179,8 +188,12 @@ class WhmcsInvoiceMapper
                 // «Προτιμολόγιο» = how the operator refers to a WHMCS invoice
                 // internally; this note is customer-facing (prints on the PDF
                 // ΠΑΡΑΤΗΡΗΣΕΙΣ), so the business term reads better than the
-                // billing-system name «WHMCS».
-                'notes' => 'Από προτιμολόγιο #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
+                // billing-system name «WHMCS». A consolidated (mass-pay) source
+                // supplies a richer `ekdosi_invoice_note` («…εξοφλεί τα προτιμολόγια
+                // #a, #b, #c»); prefer it when present.
+                'notes' => ! empty($payload['ekdosi_invoice_note'])
+                    ? (string) $payload['ekdosi_invoice_note']
+                    : 'Από προτιμολόγιο #'.($payload['invoiceid'] ?? $payload['id'] ?? '?'),
             ],
             'lines' => $lines,
             'totals' => $totals,
