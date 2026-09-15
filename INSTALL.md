@@ -1482,6 +1482,7 @@ standing up `invoicer.myip.gr` on such a host — a symptom-first index:
 | `composer install` dies at `package:discover` with `proc_open() has been disabled` | `proc_open` in `disable_functions` for ea-php84 | §17b |
 | Need `pdo_firebird` for the ETL, no RPM anywhere | bundled core ext, not PECL; EA4 ships no package | §17d |
 | No shell / no root to run the §7b tinker recipe | — | use the `/install` wizard, §17e |
+| `deploy/update.sh` → `Working tree not clean … M public/.htaccess` every time | cPanel MultiPHP rewrites the tracked `public/.htaccess` (its PHP-handler block) | §17f (auto-fixed) |
 
 Convention below: a step the **account user** runs needs no `sudo`; a step marked
 **(root / WHM)** needs the server admin (WHM has it; a pure reseller/account may
@@ -1663,3 +1664,41 @@ php artisan storage:link
 - **Health**: `php artisan ops:health` (§11) is the one-shot check — the
   queue/scheduler rows go green only once the two cron lines above are live. Then
   run §14's verification checklist.
+
+### 17g. Deploys: cPanel keeps rewriting `public/.htaccess`
+
+cPanel's **MultiPHP Manager** writes a `# php -- BEGIN cPanel-generated handler`
+block into `public/.htaccess` — that block is what selects the **PHP version**
+for the domain, so it must stay. But `public/.htaccess` is tracked in git, so the
+edit makes the working tree "dirty" and `deploy/update.sh` used to refuse every
+run with `Working tree not clean … M public/.htaccess` (and a plain
+`git checkout --force` would wipe the block, breaking PHP handling).
+
+`deploy/update.sh` now **auto-handles** it: before its clean-tree check it marks
+the file `git update-index --skip-worktree public/.htaccess`, so git ignores
+cPanel's edits — the deploy proceeds AND the handler block is left untouched.
+
+**Bootstrapping (once):** the deploy that *delivers* this fix still runs under the
+**old** blocking script, so that one time you must clear the dirty file by hand
+first — mark it skip-worktree yourself, then deploy:
+
+```bash
+git update-index --skip-worktree public/.htaccess   # once, to land the fix
+```
+
+After that it's automatic on every deploy.
+
+**⚠ The one hard caveat.** While `skip-worktree` is set, a release that *changes*
+`public/.htaccess` in the repo will **not** apply here — and worse, the deploy's
+`git checkout --force` then **hard-errors** (`Entry 'public/.htaccess' not
+uptodate. Cannot merge.`) and aborts with the **site left in maintenance mode**.
+So if a release ever touches that file, treat clearing the flag as a **required
+pre-step on the server, before deploying** (the deploy re-sets it afterwards):
+
+```bash
+git update-index --no-skip-worktree public/.htaccess   # BEFORE deploying such a release
+```
+
+In practice `public/.htaccess` is Laravel boilerplate we essentially never change
+(touched exactly once, at the initial import), so this stays a rare edge — but
+it's a site-down abort if forgotten, not a silent no-op.

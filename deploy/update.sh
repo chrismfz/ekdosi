@@ -119,8 +119,32 @@ start_queue_worker() {
   fail "The queue worker was stopped but could not be started back — START IT YOURSELF NOW."
 }
 
+# --- environment-managed files ---------------------------------------------
+# cPanel's MultiPHP rewrites public/.htaccess (its «# php -- BEGIN cPanel-
+# generated handler» block) whenever the PHP handler is (re)applied — a tracked
+# file, so its edit makes the tree "dirty" and the pre-flight below would refuse
+# to deploy EVERY time (and the force-checkout would wipe the handler block).
+# Mark such files skip-worktree so git ignores the environment's edits: the
+# pre-flight sees a clean tree AND the force-checkout leaves the block in place.
+# Idempotent, and a no-op on hosts where nothing external touches the file.
+# ⚠ HARD PRE-STEP: while skip-worktree is set, a release that CHANGES one of these
+# files in the repo will NOT apply here — worse, the force-checkout below then
+# HARD-ERRORS ("Entry '<file>' not uptodate. Cannot merge.", exit 128) and, since
+# we're already in maintenance mode, the deploy ABORTS with the site DOWN. So if a
+# release touches one of these files, clear the flag ON THE SERVER *before*
+# deploying: git update-index --no-skip-worktree <file>  (this step re-sets it
+# after). In practice public/.htaccess is Laravel boilerplate we ~never change.
+ENV_MANAGED_FILES=(public/.htaccess)
+for _envfile in "${ENV_MANAGED_FILES[@]}"; do
+  if git ls-files --error-unmatch "$_envfile" >/dev/null 2>&1; then
+    git update-index --skip-worktree "$_envfile" 2>/dev/null \
+      && log "Ignoring environment-managed $_envfile (skip-worktree)"
+  fi
+done
+
 # --- pre-flight -------------------------------------------------------------
 # TRACKED changes are a hard stop: the checkout below would clobber real edits.
+# (Environment-managed files above are already skip-worktree, so they don't count.)
 if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   fail "Working tree not clean — commit/stash changes on the server first (don't edit code on prod)."
   git status --short --untracked-files=no | sed 's/^/    /' >&2

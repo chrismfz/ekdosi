@@ -196,6 +196,21 @@ the myDATA/Provider sections lower down — not repeated here.
 
 - **PROV-011 (P2/VERIFY)** — ask InvoSign for a **versioned/written** API contract; the
   cancellation-endpoint ambiguity is already resolved empirically (`[283]`). *Blocked on vendor.*
+- **POS-1 (P2/VERIFY + FEATURE)** — myDATA §5.2 (v2.0.2): a POS payment (`paymentMethods/type=7`)
+  needs a **POS payment signature** in the invoice XML — `ProvidersSignature` (via a provider
+  channel), or `ECRToken` (from an ERP) — plus the POS `tid` + a `transactionId`. ekdosi emits NONE
+  (`AadeInvoiceDocument` sends bare `type`+`amount`). **Confirmed** the provider path (InvoSign)
+  rejects a bare type-7 (`88-007 — η υπογραφή δεν είναι έγκυρη`, prod, myip ΑΦΜ 800561849, 2026-09-15).
+  Shipped guard: `MyDataConfigAudit` flags an **in-use** type-7 method (ERROR for `gr-provider`, WARN
+  for `gr-mydata`). Open items: **(a) VERIFY** whether **direct** `gr-mydata` `SendInvoices` also
+  rejects a bare type-7 (the §5.2 fields are `Όχι`/optional and the "≥1 POS object" rule is scoped to
+  the separate `SendPaymentsMethod`, not `SendInvoices`) → if it does, promote the direct WARN to
+  ERROR; if not, the WARN stays advisory. **(b)** the guard's "in use" subquery excludes only
+  soft-deleted invoices — it still counts drafts/cancelled/credit-notes; tighten to "will actually
+  be filed" if the WARN/ERROR proves noisy. **(c) FEATURE** — real POS interconnection (ν.5073/2023):
+  capture the acquirer's `ProvidersSignature` + `tid` + `transactionId` (natural path: **Cardlink/
+  Eurobank vPOS** return → pass through `InvoSignDocument`/`AadeInvoiceDocument`) so type-7 can file.
+  Until (c), operators map card/vPOS/PayPal to §8.12 **1** (επαγγ. λογαριασμός ημεδαπής), 3, 6 or 8.
 - **DEP-001 (WATCH → ✅ SATISFIED 2026-09-12 → ✅ WIRED 2026-09-12)** — AADE **v2.0.2**
   delivery-lifecycle spec gated a durable attempt-record for MYD-026/PROV-002 (only a
   protocol-agnostic cache-lock was safe until then). v2.0.2 shipped, `firebed/aade-mydata` 5.12.0
