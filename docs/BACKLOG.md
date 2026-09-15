@@ -1703,7 +1703,10 @@ fail-closed/self-disabling, filesystem-token gate — βλ. FEATURES §17) · `e
   attaching the admin, and a re-run can't finish: `--new` refuses an existing slug. The importer already prints
   «τρέξε shield:sync-super-admin», and manual attach + that command recover it, but there's no clean re-run path.
   Fix = on a `--force` re-run where the slug exists, attach the admin + re-provision (or route through `--into`)
-  instead of refusing. Rare (role provisioning seldom throws after a clean company commit).
+  instead of refusing. Rare (role provisioning seldom throws after a clean company commit) — but on the WEB
+  installer it USED to throw deterministically (Spatie's permission cache bound to the boot-time sqlite default,
+  fixed by `InstallController::resetBootstrappedCaches`), so this recovery gap was hit on every real bundle
+  install until that fix. Still worth closing for the residual cases; workaround remains empty DB + fresh `/install`.
 - **Web installer — follow-ups:** (α) προαιρετικό `CREATE DATABASE` όταν ο DB χρήστης έχει δικαίωμα (τώρα
   απαιτεί προ-δημιουργημένη κενή βάση — το σωστό default σε shared hosting)· (β) ~~auto-detect writable
   dirs / PHP extensions ως preflight βήμα~~ **DONE** (`RequirementsChecker`, incl. `env_writable` OPS-002)·
