@@ -64,6 +64,8 @@ class MailConnectionTester
         try {
             $probe->start();
         } catch (Throwable $e) {
+            $probe->stop();   // close a half-opened socket (best-effort, never throws)
+
             return $this->classify($e);
         }
 
@@ -95,10 +97,18 @@ class MailConnectionTester
     }
 
     /**
-     * Map an SMTP/transport exception to a reason. Order matters: a plain
-     * connection failure whose URL is `ssl://host:465` carries "ssl" in its text,
-     * so the connection-phrase checks run BEFORE the TLS ones; auth is checked
-     * first since its markers (535 / "authentication") are unambiguous.
+     * Map an SMTP/transport exception to a reason. Order is load-bearing, because
+     * Symfony wraps BOTH a dead-port connect AND a TLS-handshake failure in the
+     * same «Connection could not be established with host "ssl://host:port": …»
+     * text (the URL carries "ssl" even for a plain refused connection). So:
+     *   1. auth — unambiguous markers (535 / "authentication").
+     *   2. SPECIFIC connection failures (refused / timed out / DNS / reset) — the
+     *      host/port, even when the failing URL is ssl://… .
+     *   3. TLS-handshake markers — checked BEFORE the broad «could not be
+     *      established» wrapper, so «SSL» pointed at a STARTTLS/plaintext port
+     *      (→ "wrong version number") reads as an encryption/port mismatch, not a
+     *      dead host — the headline case this button exists to diagnose.
+     *   4. the broad wrapper with no TLS marker → host/port.
      */
     private function classify(Throwable $e): MailProbeResult
     {
@@ -111,10 +121,11 @@ class MailConnectionTester
 
         return match (true) {
             $has('authentication failed', 'authentication', '535', '5.7.8', 'username and password not accepted', 'auth ') => MailProbeResult::auth(),
-            $has('connection refused', 'connection could not be established', 'timed out', 'timeout',
-                'could not connect', 'network is unreachable', 'no route to host', 'getaddrinfo',
-                'name or service not known', 'name does not resolve', 'connection reset') => MailProbeResult::unreachable(),
-            $has('starttls', 'wrong version number', 'certificate', 'crypto', 'peer', 'handshake', 'ssl', 'tls') => MailProbeResult::tls(),
+            $has('connection refused', 'timed out', 'timeout', 'could not connect', 'network is unreachable',
+                'no route to host', 'getaddrinfo', 'name or service not known', 'name does not resolve', 'connection reset') => MailProbeResult::unreachable(),
+            $has('wrong version number', 'ssl routines', 'starttls', 'certificate', 'handshake',
+                'decryption failed', 'sslv', 'tlsv', 'ssl3', 'crypto', 'peer') => MailProbeResult::tls(),
+            $has('connection could not be established', 'unable to connect', 'connection to server') => MailProbeResult::unreachable(),
             default => MailProbeResult::error($e->getMessage()),
         };
     }

@@ -70,10 +70,28 @@ class MailConnectionTesterTest extends TestCase
         $this->assertSame('unreachable', $result->reason);
     }
 
-    public function test_tls_handshake_failure_is_classified(): void
+    public function test_ssl_pointed_at_a_starttls_port_is_classified_as_tls_not_unreachable(): void
     {
-        $probe = new FakeSmtpProbe(startError: new \RuntimeException('SSL routines::wrong version number'));
-        $result = $this->tester($probe)->test('h', 465, 'ssl', 'user', 'pass');
+        // The headline case: «SSL» chosen but pointed at a 587/plaintext port.
+        // Symfony connects ssl://host:587 and the handshake fails INSIDE the
+        // «Connection could not be established» wrapper — so the classifier must
+        // see the TLS marker before the broad connection-failed phrase, or the
+        // operator is wrongly told «host not answering» instead of «wrong
+        // Κρυπτογράφηση/port». This is the exact ordering the feature depends on.
+        $probe = new FakeSmtpProbe(startError: new \RuntimeException(
+            'Connection could not be established with host "ssl://mail.example.gr:587": '
+            .'stream_socket_client(): SSL operation failed with code 1. '
+            .'OpenSSL Error messages: error:0A00010B:SSL routines::wrong version number'
+        ));
+        $result = $this->tester($probe)->test('mail.example.gr', 587, 'ssl', 'user', 'pass');
+
+        $this->assertSame('tls', $result->reason);
+    }
+
+    public function test_starttls_required_but_unsupported_is_classified_as_tls(): void
+    {
+        $probe = new FakeSmtpProbe(startError: new \RuntimeException('Unable to connect with STARTTLS: the SMTP server does not support TLS.'));
+        $result = $this->tester($probe)->test('mail.example.gr', 587, 'tls', 'user', 'pass');
 
         $this->assertSame('tls', $result->reason);
     }

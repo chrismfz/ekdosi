@@ -36,7 +36,10 @@ class MailProbeResult
         return new self(
             ok: true,
             reason: 'connected',
-            message: 'Επιτυχία: συνδεθήκαμε και αυθεντικοποιηθήκαμε στον SMTP διακομιστή. '
+            // «and authenticated WHERE the server requires it» — EsmtpTransport only
+            // runs AUTH when the server advertises it, so we don't assert auth as a
+            // fact for a server that offers none / blank credentials.
+            message: 'Επιτυχία: η σύνδεση στον SMTP διακομιστή (και ο έλεγχος ταυτότητας, όπου απαιτείται) ολοκληρώθηκε. '
                 .'(Δεν στάλθηκε email — συμπλήρωσε διεύθυνση δοκιμής για πραγματική αποστολή.)',
         );
     }
