@@ -50,6 +50,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   χωρίς tag, εντοπίζοντας το WHMCS id από το κείμενο· ασφαλές να ξανα-τρέξει).
 
 ### Changed
+- **Dependency maintenance (minor/patch, εντός constraints).** `composer update` σε: Filament 5.8.1→5.8.2,
+  Laravel 13.31→13.32, Passport 13.7.6→13.8.0, Flux 2.19→2.20, spatie/laravel-backup 10.3.2→10.3.3 (+ transitive:
+  symfony 8.1.7, carbon 3.14, livewire 4.4.5, monolog 3.12 κ.λπ.). Μόνο `composer.lock` — καμία αλλαγή στο
+  `composer.json`. Πλήρες suite πράσινο. (Τα majors `spatie/laravel-permission` ^8 και `laravel/mcp` 1.0
+  ΔΕΝ μπαίνουν εδώ — βλ. BACKLOG/ξεχωριστό PR· το mcp είναι μπλοκαρισμένο από `laravel/boost`.)
 - **WHMCS «Εισερχόμενα»: το «Απόρριψη» έγινε «Αρχειοθέτηση» (αλλαγή κειμένων μόνο).** Το κουμπί, το tab
   («Απορρίφθηκαν» → «Αρχειοθετημένα»), η ειδοποίηση και τα modal/tooltip κείμενα μιλούν πλέον για
   «αρχειοθέτηση» — πιο εύστοχο για τη συνήθη χρήση (παραστατικά που αγνοούμε επίτηδες: δικά μας, φίλων,
