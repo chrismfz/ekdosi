@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-09-16
+
 ### Changed
 - **WHMCS inbox: το cut-over μετράει πλέον κατά ΗΜΕΡΟΜΗΝΙΑ ΠΛΗΡΩΜΗΣ, όχι έκδοσης.** Το feed
   (`paid_unfiled`) φιλτράρει κατά `datepaid` — έτσι ένα renewal που εκδόθηκε πριν το cut-over αλλά
