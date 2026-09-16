@@ -785,7 +785,14 @@ claude.ai connector, άλλος agent). **Universal auth**: Sanctum bearer (πά
 cross-tenant αδύνατο. `list_companies` δίνει τα slugs. **Per-tool Shield permission** ισχύει (adapter
 `AssistantMcpTool` → `ToolRegistry`, ίδιο harness). Τα **write tools** (`send_customer_statement`,
 `create_reminder`) είναι **propose-only** εξωτερικά: στήνουν `AiPendingAction`, ο χειριστής
-επιβεβαιώνει **μέσα** στο ekdosi (καμία εξωτερική auto-εκτέλεση). **Νέα ops/debug tools για remote
+επιβεβαιώνει **μέσα** στο ekdosi (καμία εξωτερική auto-εκτέλεση). **Line-level tools παραστατικών &
+εισερχομένων** (read-only, `View:Invoice`/`View:PendingWhmcsInvoice`): `invoice_get` (ένα παραστατικό
+με ΓΡΑΜΜΕΣ + εσωτερικές σημειώσεις + myDATA/whmcs ids· lookup by ΤΠΥ/id/whmcs_invoice_id),
+`search_invoices` (αναζήτηση σε γραμμές ή/και σημειώσεις ή κατά whmcs_invoice_id → πλήθος + δείγμα με
+matched snippet· «πόσα παραστατικά ανανέωσαν το X»), `whmcs_inbox_list` (τα «Εισερχόμενα» αναλυτικά με
+γραμμές + **έλεγχος διπλότυπου**: υπάρχον ekdosi παραστατικό ίδιου whmcs id / legacy `whmcs_invoice_log`
+hit / ίδιος πελάτης+ποσό, + πρόταση file/archive/check βάσει cut-over `whmcs_invoice_min_date` κατά ημ.
+πληρωμής· `status=archived` σημαίνει «mis_archived» — αρχειοθετημένα που μάλλον θέλουν έκδοση). **Νέα ops/debug tools για remote
 troubleshooting** (super_admin, read-only): `app_health` (= `ops:health`: queues/crons/backup/mail/
 WHMCS/myDATA/disk + severity), `failed_jobs` (failed queue jobs + κεφαλή exception), `log_tail`
 (Laravel log με φίλτρα level/substring), `error_log_tail` (το PHP/FPM/web-server ERROR log — fatals/
