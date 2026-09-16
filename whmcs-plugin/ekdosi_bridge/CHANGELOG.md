@@ -10,6 +10,15 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.49.0] — 2026-09-16
+### Added
+- **Η λίστα «Τιμολόγια WHMCS → Ekdosi» δείχνει πλέον πλήρη WHMCS στοιχεία** — τρεις στήλες
+  ημερομηνιών (**«Ημ/νία»** έκδοσης, **«Λήξη»** = `duedate`, **«Ημ. πληρωμής»** = `datepaid`) και
+  **«Τρόπος πληρωμής»** (friendly name του gateway από `tblpaymentgateways`, με fallback στο slug).
+  Parity με το ekdosi panel + εύκολος διαχωρισμός «πότε/πώς πληρώθηκε» χωρίς να φεύγεις από το addon.
+  Οι κενές ημερομηνίες (`0000-00-00` = ανοιχτό/μη-πληρωμένο) εμφανίζονται ως «—». Ένα batched query
+  για τα ονόματα gateway ανά σελίδα· καμία επιπλέον κλήση στο ekdosi.
+
 ## [0.48.0] — 2026-09-16
 ### Changed
 - **Το inbox feed (`op=invoices`, `paid_unfiled`) φιλτράρει πλέον κατά ΗΜΕΡΟΜΗΝΙΑ ΠΛΗΡΩΜΗΣ
