@@ -9,8 +9,8 @@ use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\InvoiceVatBreakdown;
 use App\Support\Afm;
-use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyData\Codes;
+use App\Support\MyData\IncomeClassResolver;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
@@ -633,90 +633,31 @@ class AadeInvoiceDocument
      * ΑΠΥ for an AFM-bearing customer) is a common AADE rejection.
      */
     /**
-     * MYD-5: the (E3 income class, category) pair for a line. Resolved field by
-     * field so a product's CATEGORY can override just the goods/services BUCKET
-     * (`mydata_income_class_category`, e.g. category1_1 goods vs category1_3
-     * services) while the E3 TYPE keeps coming from the invoice type — because the
-     * type (E3_561_001 wholesale vs E3_561_003 retail) is CHANNEL-driven, not
-     * item-driven, so a fixed per-item type would misfile the same product across
-     * channels. A product category MAY also override the E3 type (advanced), but
-     * the common mixed-invoice case only sets the bucket. Free-text lines (no
-     * product) use the type default for both.
+     * MYD-5 / MYD-006: the (E3 income class, category) pair for a line. Delegates
+     * to {@see IncomeClassResolver} — the single source shared with the read-only
+     * display surfaces (the «Έλεγχος ΜΑΡΚ» detail + the invoice-line table) so what
+     * an operator sees is exactly what is filed.
      *
      * @return array{0: ?string, 1: ?string}
      */
     private function resolveIncomeClass(InvoiceLine $line, ?string $typeClass, ?string $typeCat): array
     {
-        $category = $line->product?->productCategory;
-
-        // Priority, field by field: the per-line snapshot (WHMCS bridge / explicit)
-        // wins → then the product category override → then the invoice-type default.
-        // A source that sets only the BUCKET keeps the type's E3 class.
-        $lineClass = filled($line->mydata_income_class) ? $line->mydata_income_class : null;
-        $lineCat = filled($line->mydata_income_class_category) ? $line->mydata_income_class_category : null;
-
-        $class = $lineClass ?? (filled($category?->mydata_income_class) ? $category->mydata_income_class : $typeClass);
-        $cat = $lineCat ?? (filled($category?->mydata_income_class_category) ? $category->mydata_income_class_category : $typeCat);
-
-        // MYD-006: when the bucket falls back to the GENERIC merchandise default
-        // (category1_1) with NO explicit source — neither a per-line snapshot nor a
-        // per-product-category override — the tenant's business policy decides the
-        // goods bucket: a manufacturer files own products as category1_2, a reseller
-        // keeps category1_1. Services / mixed / unset → null → no change. An explicit
-        // line or product classification always wins over the policy.
-        if ($cat === ClassificationGuidance::MERCHANDISE_DEFAULT
-            && $lineCat === null
-            && ! filled($category?->mydata_income_class_category)) {
-            $policyCat = ClassificationGuidance::goodsCategoryFor($this->tenant->business_activity_type);
-            if ($policyCat !== null) {
-                $cat = $policyCat;
-            }
-        }
-
-        return [$class, $cat];
+        return app(IncomeClassResolver::class)
+            ->forLine($line, $typeClass, $typeCat, $this->tenant->business_activity_type);
     }
 
     /**
      * MYD-006: the base (E3 income class, §8.6 category) a line inherits BEFORE
-     * per-line product-category / business-policy resolution.
-     *
-     * For a CREDIT note it is the ORIGINAL invoice's classification — a credit
-     * reverses the exact income line it credits, so crediting a retail sale files
-     * E3_561_003 and crediting a goods sale keeps its goods bucket, instead of the
-     * credit type's generic E3_561_001/category1_3 default (the "generic credit
-     * default" MYD-006 calls out as wrong). Falls back to the credit type's own
-     * default when the original is missing or carries no classification. A plain
-     * invoice just uses its own type.
+     * per-line product-category / business-policy resolution — the invoice type's
+     * default, or, for a CREDIT note, the ORIGINAL document's classification (a
+     * credit reverses the same income line). Delegates to {@see IncomeClassResolver}
+     * (the single source shared with the display surfaces).
      *
      * @return array{0: ?string, 1: ?string}
      */
     private function baseClassificationFor(Invoice $invoice): array
     {
-        $typeClass = $invoice->invoiceType?->mydata_income_class;
-        $typeCat = $invoice->invoiceType?->mydata_income_class_category;
-
-        if ($invoice->credited_invoice_id === null) {
-            return [$typeClass, $typeCat];
-        }
-
-        // Same-tenant lookup: credited_invoice_id is a global PK, but the
-        // CompanyScope is a no-op off-request (queue/CLI submit), so scope
-        // explicitly — a credit whose original belongs to another tenant must
-        // never borrow its classification (mirrors originalInsertMark's MYD-008
-        // reasoning).
-        $original = Invoice::query()
-            ->where('company_id', $invoice->company_id)
-            ->whereKey($invoice->credited_invoice_id)
-            ->with('invoiceType:id,mydata_income_class,mydata_income_class_category')
-            ->first();
-
-        $origClass = $original?->invoiceType?->mydata_income_class;
-        $origCat = $original?->invoiceType?->mydata_income_class_category;
-
-        return [
-            filled($origClass) ? $origClass : $typeClass,
-            filled($origCat) ? $origCat : $typeCat,
-        ];
+        return app(IncomeClassResolver::class)->baseFor($invoice);
     }
 
     /**

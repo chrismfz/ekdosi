@@ -263,27 +263,34 @@
                                 <tr class="border-b border-gray-100 dark:border-white/5">
                                     <td class="py-2 pr-4">{{ $line['lineNumber'] ?? $loop->iteration }}</td>
                                     <td class="py-2 pr-4">
-                                        @if ($line['itemDescr'] ?? null)
+                                        @php $hasDescr = (bool) ($line['itemDescr'] ?? null); @endphp
+                                        @if ($hasDescr)
                                             {{ $line['itemDescr'] }}
                                             @if ($line['itemCode'] ?? null)
                                                 <span class="text-xs text-gray-400">({{ $line['itemCode'] }})</span>
                                             @endif
-                                        @elseif (! empty($line['classifications']))
-                                            {{-- myDATA carries no free-text description for these docs;
-                                                 the E3 classification is the "what is this" signal. --}}
-                                            @foreach ($line['classifications'] as $cls)
-                                                <div>
-                                                    <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ $cls['type'] }}</span>
-                                                    @if ($cls['typeLabel'])
-                                                        — {{ $cls['typeLabel'] }}
-                                                    @endif
-                                                    @if ($cls['categoryLabel'])
-                                                        <span class="text-xs text-gray-400">({{ $cls['categoryLabel'] }})</span>
-                                                    @endif
-                                                </div>
-                                            @endforeach
-                                        @else
+                                        @elseif (empty($line['classifications']))
                                             —
+                                        @endif
+
+                                        @if (! empty($line['classifications']))
+                                            {{-- The E3 income classification: the "what is this" signal for
+                                                 an AADE orphan (no free-text description), and a DISCREET
+                                                 audit sub-line under OUR own lines (below the description) so
+                                                 the operator sees what is filed without opening the raw XML. --}}
+                                            <div @class(['mt-0.5' => $hasDescr])>
+                                                @foreach ($line['classifications'] as $cls)
+                                                    <div class="{{ $hasDescr ? 'text-xs text-gray-400 dark:text-gray-500' : '' }}">
+                                                        <span class="font-mono text-xs text-gray-500 dark:text-gray-400">{{ $cls['type'] }}</span>
+                                                        @if ($cls['typeLabel'])
+                                                            — {{ $cls['typeLabel'] }}
+                                                        @endif
+                                                        @if ($cls['categoryLabel'])
+                                                            <span class="text-xs text-gray-400">({{ $cls['categoryLabel'] }})</span>
+                                                        @endif
+                                                    </div>
+                                                @endforeach
+                                            </div>
                                         @endif
                                     </td>
                                     <td class="py-2 pr-4 text-right whitespace-nowrap">
