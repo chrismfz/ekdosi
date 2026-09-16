@@ -74,36 +74,49 @@ class SearchInvoicesTool implements AssistantTool
             return ['error' => 'Δώσε `query` (κείμενο) ή `whmcs_invoice_id`.'];
         }
 
-        $base = Invoice::query()->where('invoices.company_id', $tenant->getKey());
-
-        if ($whmcsId > 0) {
-            // Deterministic doc lookup — return it even if cancelled (parity with
-            // invoice_get). A text search stays limited to LIVE invoices so
-            // «πόσα παραστατικά ανανέωσαν το X» counts only real ones.
-            $base->where('whmcs_invoice_id', $whmcsId);
-        } else {
-            InvoiceScope::live($base, 'invoices.');
-        }
-
-        if ($from !== '') {
-            $base->whereDate('invoices.issued_at', '>=', $from);
-        }
-        if ($to !== '') {
-            $base->whereDate('invoices.issued_at', '<=', $to);
-        }
-
         $searchLines = in_array($in, ['lines', 'both'], true);
         $searchNotes = in_array($in, ['notes', 'both'], true);
 
-        if ($query !== '') {
-            $base->where(function (Builder $w) use ($query, $searchLines, $searchNotes): void {
-                if ($searchLines) {
-                    $w->orWhereHas('lines', fn (Builder $l) => $l->where('product_descr', 'like', "%{$query}%"));
-                }
-                if ($searchNotes) {
-                    $w->orWhereHas('internalNotes', fn (Builder $n) => $n->where('body', 'like', "%{$query}%"));
-                }
-            });
+        // A whmcs-id lookup is deterministic and IGNORES the text query — so the
+        // text is neither echoed nor used to build snippets (else the result would
+        // claim rows «matched» a query that never filtered them).
+        $textQuery = $whmcsId > 0 ? '' : $query;
+
+        $base = Invoice::query()->where('invoices.company_id', $tenant->getKey());
+
+        if ($whmcsId > 0) {
+            // Deterministic doc lookup — the whmcs id IS the filter; a stray
+            // query/date is ignored so «το ekdosi του whmcs X» can't false-negative.
+            // Returns it even if cancelled (parity with invoice_get).
+            $base->where('whmcs_invoice_id', $whmcsId);
+        } else {
+            // A text search stays limited to LIVE invoices so «πόσα παραστατικά
+            // ανανέωσαν το X» counts only real ones.
+            InvoiceScope::live($base, 'invoices.');
+
+            if ($from !== '') {
+                $base->whereDate('invoices.issued_at', '>=', $from);
+            }
+            if ($to !== '') {
+                $base->whereDate('invoices.issued_at', '<=', $to);
+            }
+
+            if ($query !== '') {
+                // Escape the LIKE metacharacters so a query containing them matches
+                // LITERALLY (this is a count tool — a stray % must not inflate the
+                // headline). The escape char is '!' (NOT '\'): a backslash escape is
+                // an unterminated-string syntax error on default-mode MariaDB, while
+                // ESCAPE '!' is portable across MariaDB and sqlite.
+                $like = '%'.str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $query).'%';
+                $base->where(function (Builder $w) use ($like, $searchLines, $searchNotes): void {
+                    if ($searchLines) {
+                        $w->orWhereHas('lines', fn (Builder $l) => $l->whereRaw("product_descr LIKE ? ESCAPE '!'", [$like]));
+                    }
+                    if ($searchNotes) {
+                        $w->orWhereHas('internalNotes', fn (Builder $n) => $n->whereRaw("body LIKE ? ESCAPE '!'", [$like]));
+                    }
+                });
+            }
         }
 
         // Full count first (headline), then a capped, detail-loaded sample.
@@ -116,26 +129,38 @@ class SearchInvoicesTool implements AssistantTool
             ->get(['invoices.id', 'invoices.invcode', 'invoices.customer_id', 'invoices.issued_at', 'invoices.gross_total', 'invoices.mydata_state', 'invoices.whmcs_invoice_id']);
 
         return [
-            'query' => $query !== '' ? $query : null,
-            'in' => $query !== '' ? $in : null,
+            'query' => $textQuery !== '' ? $textQuery : null,
+            'in' => $textQuery !== '' ? $in : null,
             'whmcs_invoice_id' => $whmcsId > 0 ? $whmcsId : null,
             'count' => $count,
             'sample_size' => $invoices->count(),
             'currency' => 'EUR',
-            'invoices' => $invoices->map(function (Invoice $inv) use ($tenant, $query, $searchLines, $searchNotes): array {
+            'invoices' => $invoices->map(function (Invoice $inv) use ($tenant, $textQuery, $searchLines, $searchNotes): array {
                 $matches = [];
-                if ($query !== '' && $searchLines) {
+                // mb_stripos: the DB matched (accent/case-insensitive collation);
+                // a multibyte-aware re-check keeps the Greek snippet from coming
+                // back empty where byte-wise stripos would miss.
+                if ($textQuery !== '' && $searchLines) {
                     foreach ($inv->lines as $l) {
-                        if ($l->product_descr !== null && stripos($l->product_descr, $query) !== false) {
+                        if ($l->product_descr !== null && self::contains($l->product_descr, $textQuery)) {
                             $matches[] = 'γραμμή: '.$l->product_descr;
                         }
                     }
                 }
-                if ($query !== '' && $searchNotes) {
+                if ($textQuery !== '' && $searchNotes) {
                     foreach ($inv->internalNotes as $n) {
-                        if ($n->body !== null && stripos($n->body, $query) !== false) {
+                        if ($n->body !== null && self::contains($n->body, $textQuery)) {
                             $matches[] = 'σημείωση: '.$n->body;
                         }
+                    }
+                }
+                if ($matches === [] && $textQuery !== '') {
+                    // Defensive: the DB matched but the folded re-check didn't (an
+                    // exotic collation fold). Show context from the SAME field
+                    // searched (never an unsearched field) so a hit isn't evidence-free.
+                    $ctx = $searchLines ? $inv->lines->first()?->product_descr : $inv->internalNotes->first()?->body;
+                    if ($ctx !== null) {
+                        $matches[] = '≈ '.$ctx;
                     }
                 }
 
@@ -152,5 +177,25 @@ class SearchInvoicesTool implements AssistantTool
                 ];
             })->all(),
         ];
+    }
+
+    /**
+     * Does $haystack contain $needle, matching the DB's accent- and
+     * case-insensitive Greek collation (utf8mb4_unicode_ci) — so the snippet
+     * re-check agrees with the LIKE that produced the hit? `mb_stripos` alone is
+     * only case-insensitive, so «Ανανέωση» would fail a match on «ανανεωση».
+     */
+    private static function contains(string $haystack, string $needle): bool
+    {
+        return $needle === '' || str_contains(self::fold($haystack), self::fold($needle));
+    }
+
+    /** Lowercase + strip Greek tonal diacritics (and final sigma) for folded compare. */
+    private static function fold(string $s): string
+    {
+        return strtr(mb_strtolower($s, 'UTF-8'), [
+            'ά' => 'α', 'έ' => 'ε', 'ή' => 'η', 'ί' => 'ι', 'ό' => 'ο', 'ύ' => 'υ', 'ώ' => 'ω',
+            'ϊ' => 'ι', 'ϋ' => 'υ', 'ΐ' => 'ι', 'ΰ' => 'υ', 'ς' => 'σ',
+        ]);
     }
 }

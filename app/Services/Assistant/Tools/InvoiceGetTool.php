@@ -65,22 +65,18 @@ class InvoiceGetTool implements AssistantTool
             ]);
 
         if ($whmcsId > 0) {
-            $q->where('whmcs_invoice_id', $whmcsId);
+            $inv = $q->where('whmcs_invoice_id', $whmcsId)->orderByDesc('invoices.id')->first();
         } elseif ($ref !== '') {
-            // Digits could be either the printed invcode or the surrogate id —
-            // try both; a plain string is an invcode only.
-            if (ctype_digit($ref)) {
-                $q->where(fn ($w) => $w->where('invcode', $ref)->orWhere('id', (int) $ref));
-            } else {
-                $q->where('invcode', $ref);
+            // Prefer the printed invcode; fall back to the surrogate id ONLY when no
+            // invcode matches — a numeric invcode must never be shadowed by an
+            // unrelated row whose id equals the typed value.
+            $inv = (clone $q)->where('invcode', $ref)->orderByDesc('invoices.id')->first();
+            if ($inv === null && ctype_digit($ref)) {
+                $inv = $q->where('id', (int) $ref)->first();
             }
         } else {
             return ['error' => 'Δώσε `invoice` (κωδικός ΤΠΥ ή id) ή `whmcs_invoice_id`.'];
         }
-
-        // Newest first so an ambiguous digit ref (rare invcode==id collision)
-        // returns the most recent, deterministically.
-        $inv = $q->orderByDesc('invoices.id')->first();
         if ($inv === null) {
             return ['found' => false];
         }

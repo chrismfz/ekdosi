@@ -15,7 +15,7 @@ use Illuminate\Support\Facades\DB;
  * clean up a cut-over backlog without double-issuing (or mis-archiving).
  *
  * Duplicate signals, strongest first:
- *   - existing_ekdosi_invoice : an ekdosi invoice already carries this
+ *   - existing_ekdosi_invoices : a LIVE ekdosi invoice already carries this
  *     whmcs_invoice_id (deterministic — new-app link or backfill).
  *   - legacy_log              : the imported legacy AUTO_INVOICE_LOG has a row
  *     for this WHMCS id → the OLD app processed it.
@@ -97,17 +97,25 @@ class WhmcsInboxListTool implements AssistantTool
         // so a huge backlog isn't silently under-reported.
         $scanCap = $duplicatesOnly ? min(500, max($limit * 8, $limit)) : $limit;
 
-        $rows = PendingWhmcsInvoice::query()
+        // One base query for both the scan and the total count — no duplicated
+        // filter chain to drift out of sync.
+        $matching = PendingWhmcsInvoice::query()
             ->where('company_id', $tenant->getKey())
             ->when($statuses !== null, fn ($q) => $q->whereIn('status', $statuses))
-            ->when($whmcsId > 0, fn ($q) => $q->where('whmcs_invoice_id', $whmcsId))
+            ->when($whmcsId > 0, fn ($q) => $q->where('whmcs_invoice_id', $whmcsId));
+
+        // Full count of the matching set (independent of the scan window) so the
+        // caller always sees how many rows exist in this status, not just returned.
+        $total = (clone $matching)->count();
+
+        $rows = $matching
             ->with('customer:id,name,afm')
             ->orderByDesc('id')
             ->limit($scanCap)
             ->get();
 
         if ($rows->isEmpty()) {
-            return ['status' => $statusKey, 'cutover' => $cutover, 'count' => 0, 'scanned' => 0, 'truncated' => false, 'rows' => []];
+            return ['status' => $statusKey, 'cutover' => $cutover, 'cutover_matches' => 'datepaid', 'total' => $total, 'count' => 0, 'scanned' => 0, 'truncated' => false, 'rows' => []];
         }
 
         $whmcsIds = $rows->pluck('whmcs_invoice_id')->filter()->map(fn ($v) => (int) $v)->unique()->values()->all();
@@ -121,10 +129,22 @@ class WhmcsInboxListTool implements AssistantTool
             ->get()
             ->keyBy('whmcs_invoice_id');
 
-        $existingLinks = $whmcsIds === [] ? collect() : Invoice::query()
-            ->where('company_id', $tenant->getKey())
-            ->whereIn('whmcs_invoice_id', $whmcsIds)
-            ->pluck('invcode', 'whmcs_invoice_id');
+        // Existing ekdosi invoice(s) already carrying this whmcs id — the strong
+        // duplicate signal. LIVE only: a CANCELLED ekdosi invoice is void and must
+        // NOT read as «already invoiced» (else the operator archives a row that
+        // needs re-filing) — consistent with the same-amount signal below. Grouped
+        // (not pluck) so multiple docs sharing one whmcs id all surface, not one
+        // arbitrary invcode.
+        $existingLinks = collect();
+        if ($whmcsIds !== []) {
+            $eq = Invoice::query()
+                ->where('invoices.company_id', $tenant->getKey())
+                ->whereIn('invoices.whmcs_invoice_id', $whmcsIds);
+            InvoiceScope::live($eq, 'invoices.');
+            $existingLinks = $eq->get(['invoices.invcode', 'invoices.whmcs_invoice_id'])
+                ->groupBy('whmcs_invoice_id')
+                ->map(fn ($g) => $g->pluck('invcode')->values()->all());
+        }
 
         // Batch the soft same-amount signal: all LIVE invoices of the page's
         // customers, matched in PHP by gross — one query instead of one per row.
@@ -140,7 +160,8 @@ class WhmcsInboxListTool implements AssistantTool
         }
 
         $out = [];
-        foreach ($rows as $row) {
+        $cappedAtLimit = false;
+        foreach ($rows as $i => $row) {
             $payload = is_array($row->payload) ? $row->payload : [];
             $amount = round((float) ($payload['total'] ?? 0), 2);
             $datepaid = (string) ($payload['datepaid'] ?? '');
@@ -149,15 +170,18 @@ class WhmcsInboxListTool implements AssistantTool
             // real pre-cut-over date, or every unpaid row reads as probable-legacy.
             $paidDate = ($datepaid !== '' && ! str_starts_with($datepaid, '0000')) ? substr($datepaid, 0, 10) : '';
 
-            $existing = $existingLinks[$row->whmcs_invoice_id] ?? null;
+            $existing = $existingLinks[$row->whmcs_invoice_id] ?? [];
             $log = $legacyLog[$row->whmcs_invoice_id] ?? null;
             $sameAmount = ($amount > 0.005 && $row->customer_id !== null)
                 ? ($custInvoices[$row->customer_id] ?? collect())
                     ->filter(fn ($i): bool => abs((float) $i->gross_total - $amount) < 0.01)
                     ->pluck('invcode')->take(5)->values()->all()
                 : [];
+            // Don't double-report the invoice already named as the existing link
+            // under both signals — same_amount is the SOFT (other-doc) signal.
+            $sameAmount = array_values(array_diff($sameAmount, $existing));
 
-            $hasDup = $existing !== null || ($log?->hits ?? 0) > 0 || $sameAmount !== [];
+            $hasDup = $existing !== [] || ($log?->hits ?? 0) > 0 || $sameAmount !== [];
             if ($duplicatesOnly && ! $hasDup) {
                 continue;
             }
@@ -174,7 +198,7 @@ class WhmcsInboxListTool implements AssistantTool
                 'datepaid' => $datepaid ?: null,
                 'lines' => $this->lines($payload),
                 'duplicate' => [
-                    'existing_ekdosi_invoice' => $existing,
+                    'existing_ekdosi_invoices' => $existing ?: null,
                     'legacy_log_hits' => (int) ($log?->hits ?? 0),
                     'legacy_log_sample' => $log?->sample,
                     'same_amount_invoices' => $sameAmount,
@@ -184,6 +208,9 @@ class WhmcsInboxListTool implements AssistantTool
             ];
 
             if (count($out) >= $limit) {
+                // Stopped early if scanned rows remain after this one — in
+                // duplicates_only that tail may hold more flagged rows.
+                $cappedAtLimit = ($i + 1) < $rows->count();
                 break;
             }
         }
@@ -192,11 +219,17 @@ class WhmcsInboxListTool implements AssistantTool
             'status' => $statusKey,
             'cutover' => $cutover,
             'cutover_matches' => 'datepaid',
+            'total' => $total,
             'count' => count($out),
             'scanned' => $rows->count(),
-            // duplicates_only fills a bounded window; when it fills, older flagged
-            // rows may exist beyond it — narrow by status/whmcs_invoice_id.
-            'truncated' => $duplicatesOnly && $rows->count() >= $scanCap,
+            // More rows may exist beyond what's returned. In duplicates_only that
+            // means the scan window filled (more unscanned rows could hold dupes) OR
+            // the output cap hit mid-window — NOT merely that the status has more
+            // non-duplicate rows. In normal mode it means the status has more than
+            // the page. Narrow by status/whmcs_invoice_id or raise limit.
+            'truncated' => $duplicatesOnly
+                ? ($rows->count() >= $scanCap || $cappedAtLimit)
+                : ($total > $rows->count()),
             'rows' => $out,
         ];
     }

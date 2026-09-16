@@ -126,6 +126,22 @@ class InvoiceInboxToolsTest extends TestCase
         $this->assertFalse($res['found']);
     }
 
+    public function test_invoice_get_prefers_invcode_over_a_colliding_surrogate_id(): void
+    {
+        $a = $this->invoice($this->customer('A'), 124);
+        // B's PRINTED invcode equals A's surrogate id — a lookup of that value must
+        // return B (invcode match), never A (id match).
+        $b = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => (string) $a->id, 'code' => random_int(1, 99999),
+            'invoice_type_id' => $this->type->id, 'payment_method_id' => $this->method->id,
+            'customer_id' => $this->customer('B')->id, 'issued_at' => now(), 'local_status' => 'active',
+            'net_total' => 100, 'gross_total' => 124, 'header_discount_percent' => 0,
+        ]);
+
+        $res = (new InvoiceGetTool)->run($this->tenant, ['invoice' => (string) $a->id]);
+        $this->assertSame($b->id, $res['id']);
+    }
+
     // ---- search_invoices ---------------------------------------------------
 
     public function test_search_invoices_matches_line_text_and_counts(): void
@@ -165,6 +181,20 @@ class InvoiceInboxToolsTest extends TestCase
         $this->assertSame($hit->invcode, $res['invoices'][0]['code']);
     }
 
+    public function test_search_invoices_escapes_like_wildcards(): void
+    {
+        $lit = $this->invoice($this->customer('Lit'), 124);
+        $this->line($lit, 'Plan 100% off', 100);
+        $other = $this->invoice($this->customer('Oth'), 124);
+        $this->line($other, 'Plan 100 200', 100);
+
+        // '100%' must match LITERALLY (the % is data, not a wildcard) → only the
+        // first line, not everything containing '100'.
+        $res = (new SearchInvoicesTool)->run($this->tenant, ['query' => '100%', 'in' => 'lines']);
+        $this->assertSame(1, $res['count']);
+        $this->assertSame($lit->invcode, $res['invoices'][0]['code']);
+    }
+
     public function test_search_invoices_by_whmcs_id_finds_a_cancelled_invoice(): void
     {
         $inv = $this->invoice($this->customer('Cancel'), 124, whmcsId: 71000);
@@ -173,6 +203,18 @@ class InvoiceInboxToolsTest extends TestCase
         // Deterministic whmcs-id lookup ignores the live() filter (parity with
         // invoice_get) — a cancelled bound invoice must still surface.
         $res = (new SearchInvoicesTool)->run($this->tenant, ['whmcs_invoice_id' => 71000]);
+        $this->assertSame(1, $res['count']);
+        $this->assertSame($inv->invcode, $res['invoices'][0]['code']);
+    }
+
+    public function test_search_invoices_whmcs_id_lookup_ignores_a_stray_query(): void
+    {
+        $inv = $this->invoice($this->customer('W'), 124, whmcsId: 92000);
+        $this->line($inv, 'Κάτι άσχετο', 100);
+
+        // whmcs id + a query absent from the lines → the deterministic link still
+        // resolves (the id is the filter; the text is ignored).
+        $res = (new SearchInvoicesTool)->run($this->tenant, ['whmcs_invoice_id' => 92000, 'query' => 'ΔΕΝ-ΥΠΑΡΧΕΙ-ΠΟΥΘΕΝΑ']);
         $this->assertSame(1, $res['count']);
         $this->assertSame($inv->invcode, $res['invoices'][0]['code']);
     }
@@ -205,9 +247,24 @@ class InvoiceInboxToolsTest extends TestCase
 
         $this->assertSame('file', $rows[40001]['suggestion']);
         $this->assertSame('archive', $rows[40002]['suggestion']);
-        $this->assertNotNull($rows[40002]['duplicate']['existing_ekdosi_invoice']);
+        $this->assertNotNull($rows[40002]['duplicate']['existing_ekdosi_invoices']);
         $this->assertSame('archive', $rows[40003]['suggestion']);
         $this->assertSame(1, $rows[40003]['duplicate']['legacy_log_hits']);
+    }
+
+    public function test_inbox_list_ignores_a_cancelled_existing_invoice(): void
+    {
+        $this->tenant->update(['whmcs_invoice_min_date' => '2026-09-14']);
+        $cust = $this->customer('Recut');
+        // An ekdosi invoice for this whmcs id exists but was CANCELLED (void) —
+        // it must NOT read as «already invoiced»; the row still needs re-filing.
+        $this->invoice($cust, 90, whmcsId: 80001)->forceFill(['local_status' => 'cancelled'])->save();
+        $this->pending(80001, $cust, 90.00, '2026-09-15 10:00:00', 'Χρειάζεται επανέκδοση');
+
+        $res = (new WhmcsInboxListTool)->run($this->tenant, ['status' => 'open']);
+        $row = collect($res['rows'])->firstWhere('whmcs_invoice_id', 80001);
+        $this->assertNull($row['duplicate']['existing_ekdosi_invoices']);
+        $this->assertSame('file', $row['suggestion']);
     }
 
     public function test_inbox_list_flags_mis_archived_rows(): void
@@ -232,6 +289,32 @@ class InvoiceInboxToolsTest extends TestCase
 
         $res = (new WhmcsInboxListTool)->run($this->tenant, ['status' => 'open']);
         $this->assertSame('review', $res['rows'][0]['suggestion']);
+    }
+
+    public function test_inbox_list_reports_total_and_truncation(): void
+    {
+        foreach ([90001, 90002, 90003] as $i => $id) {
+            $this->pending($id, $this->customer('R'.$i), 10.00, '2026-09-15 10:00:00', 'Row');
+        }
+
+        $res = (new WhmcsInboxListTool)->run($this->tenant, ['status' => 'open', 'limit' => 2]);
+        $this->assertSame(3, $res['total']);
+        $this->assertSame(2, $res['count']);
+        $this->assertTrue($res['truncated']);
+    }
+
+    public function test_inbox_list_does_not_double_report_existing_as_same_amount(): void
+    {
+        $cust = $this->customer('Same');
+        // One LIVE invoice carrying the whmcs id AND the same gross — it's the
+        // existing link, so it must not ALSO appear under same_amount.
+        $this->invoice($cust, 124, whmcsId: 91000);
+        $this->pending(91000, $cust, 124.00, '2026-09-15 10:00:00', 'Ίδιο');
+
+        $res = (new WhmcsInboxListTool)->run($this->tenant, ['status' => 'open']);
+        $row = collect($res['rows'])->firstWhere('whmcs_invoice_id', 91000);
+        $this->assertNotNull($row['duplicate']['existing_ekdosi_invoices']);
+        $this->assertSame([], $row['duplicate']['same_amount_invoices']);
     }
 
     public function test_inbox_list_duplicates_only_filters(): void
