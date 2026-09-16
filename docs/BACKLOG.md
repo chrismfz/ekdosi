@@ -1014,6 +1014,12 @@ data model + phase gates: **`PLAN.md`**.
 - **Pro-forma numbering (draft = προτιμολόγιο)** — σήμερα ο ΑΑ εκχωρείται στη ΔΗΜΙΟΥΡΓΙΑ (`InvoiceNumberer`, `CreateInvoice`), οπότε κάθε draft «καίει» έναν αριθμό της νόμιμης σειράς τιμολογίων → gap αν διαγραφεί/δεν πληρωθεί. Για service-manager pro-forma ροή (στέλνεις πολλά προτιμολόγια, πληρώνονται κάποια) χρειάζεται **δικό τους reference**: είτε ξεχωριστός μετρητής «ΠΡΟΤ-N» (ο πραγματικός ΑΑ μπαίνει στην έκδοση/πληρωμή), είτε το σταθερό `id`. Σημαίνει μετακίνηση εκχώρησης ΑΑ create→issue (ο `InvoiceNumberer` συνειδητά το απέφυγε — τεκμηρίωση εκεί). Το immediate «ο πελάτης χρειάζεται αριθμό-αναφορά» ΗΔΗ καλύπτεται (το draft έχει `invcode` + banner «ΠΡΟΧΕΙΡΟ» στο PDF). Surfaced από το MON-5.
 
 ## 🟣 WHMCS loose ends (βλ. `whmcs-legacy-plugin-map.md`)
+- **Native fetch path: align το cut-over με `datepaid` (P2).** Το bridge feed (`InvoiceFeed`, plugin ≥ 0.48.0)
+  φιλτράρει πλέον το `paid_unfiled` κατά **ημερομηνία πληρωμής** (`datepaid`), ώστε αργοπληρωμές παλιών invoices
+  να έρχονται. Ο **native** `WhmcsClient::getPendingInvoices` (για plugin-less tenants) φιλτράρει ακόμη κατά
+  ημερομηνία **έκδοσης** (`orderby=date` + minDate early-stop) → ίδιο late-payment gap εκεί. Όλοι οι τρέχοντες
+  tenants χρησιμοποιούν τη γέφυρα, οπότε χαμηλή προτεραιότητα· αλλά αν κάποιος γυρίσει σε native, χρειάζεται η ίδια
+  αλλαγή (ordering/early-stop κατά datepaid, ή client-side keep κατά datepaid).
 - **T-3 cutover** — legacy timologia → ekdosi Customers (match `gr_vatno`, upsert, back-ref).
 - **Multi-party SPLIT write-back** στο WHMCS (ένα MARK ≠ N invoices).
 - **T-4 manual split tools** (transfer_invoice / relid_remover) — χαμηλή προτεραιότητα.

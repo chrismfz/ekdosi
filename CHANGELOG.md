@@ -18,7 +18,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- **WHMCS inbox: το cut-over μετράει πλέον κατά ΗΜΕΡΟΜΗΝΙΑ ΠΛΗΡΩΜΗΣ, όχι έκδοσης.** Το feed
+  (`paid_unfiled`) φιλτράρει κατά `datepaid` — έτσι ένα renewal που εκδόθηκε πριν το cut-over αλλά
+  πληρώθηκε μετά (αργός πελάτης) **εμφανίζεται τη μέρα που πληρώνεται**, χωρίς να χρειάζεται να ρίξεις
+  το cut-over πίσω (που θα «πλημμύριζε» το inbox με ιστορικά). Το ιστορικό (πληρωμένο πριν το cut-over)
+  μένει έξω. Το πεδίο «Skip invoices …» στις ρυθμίσεις WHMCS έγινε «Cut-over: skip invoices PAID before».
+  **Απαιτεί plugin ≥ 0.48.0.** (Ο native fetch path παραμένει creation-date → BACKLOG.)
+
 ### Added
+- **WHMCS inbox: ημερομηνία πληρωμής + transaction id.** Στο modal του WHMCS τιμολογίου προστέθηκαν
+  «Ημ. πληρωμής» + ενότητα «Πληρωμή / Συναλλαγές» (transaction id / gateway / ημ/νία / ποσό)· στη λίστα, η
+  ημ. πληρωμής διπλώνει μέσα στο κελί «Ποσό» («Πληρωμένο · 15/09»). Οι συναλλαγές έρχονται από το feed
+  (`tblaccounts`, plugin ≥ 0.48.0)· το `whmcs_inbox_list` MCP tool τις εκθέτει κιόλας (insights). Τα παλιά
+  staged rows δείχνουν την ημ. πληρωμής (πάντα στο payload) αλλά όχι transactions μέχρι να ξανασυγχρονιστούν.
 - **MCP/«Βοηθός» — line-level εργαλεία παραστατικών & εισερχομένων (3 νέα read-only tools).** Ο MCP έβλεπε
   μόνο σύνολα· τώρα βλέπει και το ΠΕΡΙΕΧΟΜΕΝΟ: **`invoice_get`** (ένα παραστατικό με γραμμές + εσωτερικές
   σημειώσεις + myDATA/whmcs ids, αναζήτηση by ΤΠΥ/id/whmcs_invoice_id), **`search_invoices`** (αναζήτηση σε
