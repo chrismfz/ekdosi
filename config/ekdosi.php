@@ -145,9 +145,9 @@ return [
 
         // whmcs:fetch-pending — pull paid+unfiled WHMCS invoices into the
         // inbox, per WHMCS-configured tenant. Cron expression (default
-        // every 15 min).
+        // every 5 min).
         'whmcs_fetch_enabled' => env('EKDOSI_SCHEDULE_WHMCS_FETCH', true),
-        'whmcs_fetch_cron' => env('EKDOSI_WHMCS_FETCH_CRON', '*/15 * * * *'),
+        'whmcs_fetch_cron' => env('EKDOSI_WHMCS_FETCH_CRON', '*/5 * * * *'),
 
         // whmcs:fetch-unpaid — stage the UNPAID invoices of «τιμολόγιο πριν την
         // πληρωμή» customers (needs_invoice_before_payment) into the inbox for

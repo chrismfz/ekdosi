@@ -141,7 +141,7 @@ $trackSchedule(
             fn (Company $c) => app(HealthRecorder::class)->recordWhmcsFetch($c, 1),
         );
     })
-        ->cron($scheduleCron('whmcs_fetch_cron', '*/15 * * * *'))
+        ->cron($scheduleCron('whmcs_fetch_cron', '*/5 * * * *'))
         ->name('whmcs-fetch-all')
         ->when(fn () => $scheduleEnabled('whmcs_fetch_enabled'))
         ->withoutOverlapping(30),
