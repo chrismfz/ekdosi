@@ -309,7 +309,8 @@ EOF;
             $q->where('date', '>=', $cutoff);
         }
         $total = (clone $q)->count();
-        $invoices = $q->forPage($page, $perPage)->get(['id', 'userid', 'date', 'total', 'status', 'invoiced']);
+        $invoices = $q->forPage($page, $perPage)
+            ->get(['id', 'userid', 'date', 'duedate', 'datepaid', 'paymentmethod', 'total', 'status', 'invoiced']);
 
         if ($invoices->isEmpty()) {
             return '<p><a class="btn btn-default" href="'.$link.'">&larr; Back</a></p>'
@@ -322,6 +323,23 @@ EOF;
             ? collect()
             : Capsule::table('tblclients')->whereIn('id', $userIds)
                 ->get(['id', 'firstname', 'lastname', 'companyname'])->keyBy('id');
+
+        // Payment-method friendly names (slug → «Κατάθεση …») for THIS page's
+        // gateways, in one batch. `tblinvoices.paymentmethod` stores the module
+        // slug; the display name lives in tblpaymentgateways(setting='name').
+        $methodSlugs = $invoices->pluck('paymentmethod')
+            ->map(static fn ($v) => trim((string) $v))->filter()->unique()->values()->all();
+        $methodNames = [];
+        if ($methodSlugs !== []) {
+            foreach (
+                Capsule::table('tblpaymentgateways')
+                    ->where('setting', 'name')
+                    ->whereIn('gateway', $methodSlugs)
+                    ->get(['gateway', 'value']) as $g
+            ) {
+                $methodNames[(string) $g->gateway] = (string) $g->value;
+            }
+        }
 
         // Batch ekdosi state for this page's ids (one call; degrades to empty).
         $states = [];
@@ -440,7 +458,10 @@ EOF;
 
             $rows .= '<tr'.$rowClass.'>'
                 .'<td><a href="'.$invHref.'">#'.$id.'</a></td>'
-                .'<td>'.htmlspecialchars((string) $inv->date).'</td>'
+                .'<td>'.$this->dateCell($inv->date ?? null).'</td>'
+                .'<td>'.$this->dateCell($inv->duedate ?? null).'</td>'
+                .'<td>'.$this->dateCell($inv->datepaid ?? null).'</td>'
+                .'<td>'.$this->paymentMethodCell($inv->paymentmethod ?? null, $methodNames).'</td>'
                 .'<td>'.$name.'</td>'
                 .'<td>'.$tpCell.'</td>'
                 .'<td>'.$kind.'</td>'
@@ -480,13 +501,52 @@ EOF;
 <p class="text-muted">Εμφάνιση {$from}–{$to} από {$total}.</p>
 <table class="table table-striped table-condensed">
   <thead><tr>
-    <th>WHMCS #</th><th>Ημ/νία</th><th>Πελάτης</th><th>Τρίτος (δικαιούχος)</th><th>Είδος</th>
+    <th>WHMCS #</th><th>Ημ/νία</th><th>Λήξη</th><th>Ημ. πληρωμής</th><th>Τρόπος πληρωμής</th><th>Πελάτης</th><th>Τρίτος (δικαιούχος)</th><th>Είδος</th>
     <th class="text-right">Σύνολο</th><th>Κατάσταση ekdosi</th><th>ΤΠΥ</th><th>ΜΑΡΚ</th><th>relid</th><th></th>
   </tr></thead>
   <tbody>{$rows}</tbody>
 </table>
 {$pager}
 EOF;
+    }
+
+    /**
+     * A WHMCS date cell, shown DATE-only so the «Ημ/νία» (issue) / «Λήξη» (due) /
+     * «Ημ. πληρωμής» (paid) columns line up. WHMCS stores an unset date (an unpaid
+     * or admin-marked-paid invoice's `datepaid`, an open `duedate`) as the
+     * '0000-00-00 …' placeholder — that (and empty/null) renders as «—», the same
+     * convention the ekdosi side uses (PendingWhmcsInvoice::whmcsDatePaid()).
+     */
+    private function dateCell(?string $value): string
+    {
+        $dash = '<span class="text-muted">—</span>';
+        $d = trim((string) $value);
+        if ($d === '' || str_starts_with($d, '0000-00-00')) {
+            return $dash;
+        }
+
+        // 'YYYY-MM-DD HH:MM:SS' → 'YYYY-MM-DD' (keep it narrow); anything shorter
+        // is shown as-is.
+        return htmlspecialchars(substr($d, 0, 10));
+    }
+
+    /**
+     * The «Τρόπος πληρωμής» cell: WHMCS stores the gateway MODULE slug on the
+     * invoice (`tblinvoices.paymentmethod`, e.g. 'banktransfer'); the operator-
+     * friendly name (e.g. «Κατάθεση σε τραπεζικό λογαριασμό») lives in
+     * `tblpaymentgateways` (setting='name'), pre-fetched into $names by the caller
+     * in one batch. Falls back to the raw slug so an un-named gateway still reads.
+     *
+     * @param  array<string, string>  $names  slug => friendly name
+     */
+    private function paymentMethodCell(?string $slug, array $names): string
+    {
+        $s = trim((string) $slug);
+        if ($s === '') {
+            return '<span class="text-muted">—</span>';
+        }
+
+        return htmlspecialchars($names[$s] ?? $s);
     }
 
     /**
