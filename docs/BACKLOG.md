@@ -144,6 +144,15 @@ already fixed: `resolveWhmcsCustomField` has its `is_array` guard, `AgedReceivab
 `mark_date`, not a bare `'date'`. Remaining CSV item = the shared `Csv::stream()` DRY,
 below.)*
 
+**P2 (Καρτέλα NULL-pay_date payment, review 2026-09-16, deferred — pre-existing):** το `computeStats`
+αθροίζει στο `totalPaidLifetime` και πληρωμές με **NULL `pay_date`** (`CustomerLedgerBuilder` payments
+loop, χωρίς guard), ενώ το `computeYearly` και το `computeLedger` τις **παραλείπουν** (skip όταν
+`! $p->pay_date`). Άρα ένας πελάτης με πληρωμή χωρίς ημερομηνία (μόνο μέσω raw ETL insert που
+παρακάμπτει το μοντέλο — οι κανονικές πληρωμές έχουν πάντα `pay_date`) θα είχε `stats.balance` ≠
+`year_end_balance`/τελική running balance κατά αυτό το ποσό. Orthogonal στον credit-term gate,
+δεν αγγίζει normal-path γραμμή. Fix αν θέλουμε byte-identical: guard την ίδια `! pay_date` και στο
+`computeStats` (ή δώσε fallback ημερομηνία). Δεν μπλοκάρει.
+
 **P2 (Καρτέλα order — ✅ RESOLVED 2026-09-16):** η οθόνη + η **εξαγωγή CSV** + το **statement PDF** +
 η **πύλη «Η καρτέλα μου»** εμφανίζονται πλέον όλα **χρονολογικά (παλιά→νέα)** μέσω κοινού
 `CustomerLedgerResult::chronologicalLedger()`. Απομένει μόνο (αποδεκτό): το πρώτο κλικ στην
