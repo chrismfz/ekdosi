@@ -23,6 +23,7 @@
 
             <p style="margin-top:.75rem; font-size:.8rem; opacity:.7;">
                 Δώσ' το στον MCP client σου ως <code>Authorization: Bearer &lt;token&gt;</code>.
+                Αν το κουμπί αντιγραφής δεν δουλέψει (π.χ. χωρίς HTTPS), επίλεξε το κείμενο και αντίγραψέ το χειροκίνητα.
             </p>
         </x-filament::section>
     @endif

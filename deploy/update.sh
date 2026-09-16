@@ -375,8 +375,20 @@ $ART migrate --force
 # keypair, that would invalidate every live OAuth token. Skipped when the keys are
 # supplied via PASSPORT_PRIVATE_KEY/PASSPORT_PUBLIC_KEY (multi-node shared keypair).
 if $ART list --raw 2>/dev/null | grep -q '^passport:keys'; then
-  if [[ -f storage/oauth-private.key ]] || grep -qE '^PASSPORT_PRIVATE_KEY=.' .env 2>/dev/null; then
+  _pk=storage/oauth-private.key
+  _pub=storage/oauth-public.key
+  if [[ -n "${PASSPORT_PRIVATE_KEY:-}" ]] || grep -qE '^PASSPORT_PRIVATE_KEY=.' .env 2>/dev/null; then
+    # Keys supplied via env (multi-node shared keypair) — checked in the deploy
+    # shell AND .env; don't write files (a systemd-only Environment= we can't see
+    # is still harmless: config env wins over the file at runtime).
+    ok "Passport OAuth keys come from PASSPORT_*_KEY env — not generating files."
+  elif [[ -f "$_pk" && -f "$_pub" ]]; then
     ok "Passport OAuth keys already present — leaving them untouched."
+  elif [[ -f "$_pk" || -f "$_pub" ]]; then
+    # Half a keypair (interrupted gen / partial restore): `passport:keys` without
+    # --force ABORTS because one file exists, so we won't silently no-op. We also
+    # won't auto --force (it could clobber a key live tokens rely on) — surface it.
+    warn "Partial Passport keypair — one of ${_pk}/${_pub} is missing. NOT auto-generating. Fix by hand: $ART passport:keys --force (see MCP.md §8)."
   else
     log "Generating Passport OAuth keys (first time on this host — MCP claude.ai connector)"
     $ART passport:keys --no-interaction \

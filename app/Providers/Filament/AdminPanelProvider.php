@@ -61,19 +61,21 @@ class AdminPanelProvider extends PanelProvider
                         return $tenant ? MySessions::getUrl(tenant: $tenant) : null;
                     }),
                 // «Τα κλειδιά MCP μου» — self-service MCP bearer tokens, admin-gated
-                // (a token bypasses login + 2FA). Off the sidebar, in the user menu,
-                // and shown ONLY to users who hold View:McpTokens (canAccess); the
-                // token binds to whichever tenant the page is opened under.
+                // (a token bypasses login + 2FA). Off the sidebar, in the user menu.
+                // INTENTIONALLY tenant-page-only: a token binds to the tenant you're
+                // in, so canAccess() (active Company + View:McpTokens) is also the
+                // visibility gate — the item is hidden on tenant-LESS pages (e.g.
+                // /admin/profile), where there is no tenant to bind to. (Unlike
+                // MySessions, which is per-USER and shown everywhere.) Because
+                // visible() guarantees a tenant, url() reads it directly — the null
+                // branch is only a defensive guard against a stray tenant-less eval.
                 'mcp_tokens' => MenuItem::make()
                     ->label('Τα κλειδιά MCP μου')
                     ->icon('heroicon-o-key')
                     ->visible(fn (): bool => McpTokens::canAccess())
-                    ->url(function (): ?string {
-                        $tenant = Filament::getTenant()
-                            ?? (($user = Filament::auth()->user()) ? Filament::getUserDefaultTenant($user) : null);
-
-                        return $tenant ? McpTokens::getUrl(tenant: $tenant) : null;
-                    }),
+                    ->url(fn (): ?string => Filament::getTenant() instanceof Company
+                        ? McpTokens::getUrl(tenant: Filament::getTenant())
+                        : null),
             ])
             // TOTP two-factor (authenticator app) + recovery codes. The setup,
             // QR enrollment, recovery-code generation and disable/regenerate

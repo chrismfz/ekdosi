@@ -147,6 +147,18 @@ class McpTokensPageTest extends TestCase
     }
 
     #[Test]
+    public function a_literal_zero_is_kept_as_the_token_name(): void
+    {
+        [$user] = $this->actAsAuthorized();
+
+        Livewire::test(McpTokens::class)
+            ->callAction('create', ['name' => '0'])
+            ->assertHasNoActionErrors();
+
+        $this->assertSame('0', $user->tokens()->first()->name, '"0" is a valid name, not empty');
+    }
+
+    #[Test]
     public function the_list_and_revoke_are_scoped_to_the_current_tenant(): void
     {
         [$user, $company] = $this->actAsAuthorized();

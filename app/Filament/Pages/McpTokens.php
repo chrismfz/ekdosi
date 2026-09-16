@@ -67,7 +67,9 @@ class McpTokens extends Page
     /**
      * This user's MCP tokens bound to the ACTIVE tenant, newest first. Filtered in
      * PHP on the abilities array — NEVER whereJsonContains (unsupported on sqlite,
-     * which the test suite runs on).
+     * which the test suite runs on). Fetching all-then-filter is a deliberate
+     * small-N call: a user holds a handful of tokens, so a DB-specific narrowing
+     * isn't worth the portability cost.
      *
      * @return list<array<string, mixed>>
      */
@@ -116,7 +118,11 @@ class McpTokens extends Page
                     }
 
                     $company = $this->tenant();
-                    $name = trim((string) ($data['name'] ?? '')) ?: 'mcp:'.$company->slug;
+                    // Fall back to a slug label only on a TRULY empty name — an
+                    // explicit "0" is a valid name, so test the trimmed string, not
+                    // its truthiness (?: would relabel "0").
+                    $name = trim((string) ($data['name'] ?? ''));
+                    $name = $name === '' ? 'mcp:'.$company->slug : $name;
 
                     $new = $user->createToken($name, ['tenant:'.$company->getKey()]);
                     $this->plainToken = $new->plainTextToken;
