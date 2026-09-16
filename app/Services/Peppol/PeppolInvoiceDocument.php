@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Support\Peppol\PeppolEndpoint;
 use App\Support\Peppol\PeppolVatCategory;
+use Einvoicing\Exceptions\ValidationException;
 use Einvoicing\Identifier;
 use Einvoicing\Invoice as UblInvoice;
 use Einvoicing\InvoiceLine as UblLine;
@@ -84,7 +85,7 @@ class PeppolInvoiceDocument
      * means "passed the subset", not "the Access Point will accept it" — the
      * authoritative validation is the AP's (Phase 2).
      *
-     * @return ?string  null when it passes, else "[RULE] message" of the first failure
+     * @return ?string null when it passes, else "[RULE] message" of the first failure
      */
     public function validate(Invoice $invoice): ?string
     {
@@ -92,7 +93,7 @@ class PeppolInvoiceDocument
             $this->build($invoice)->validate();
 
             return null;
-        } catch (\Einvoicing\Exceptions\ValidationException $e) {
+        } catch (ValidationException $e) {
             return '['.$e->getKey().'] '.$e->getMessage();
         }
     }
@@ -135,7 +136,7 @@ class PeppolInvoiceDocument
             ->setName($customer->name)
             ->setCountry($country);
 
-        $vatId = trim((string) ($customer->vat_vies ?: $customer->afm));
+        $vatId = $this->fixGreekVatPrefix((string) ($customer->vat_vies ?: $customer->afm));
         if ($vatId !== '') {
             $party->setVatNumber($this->vatNumber($vatId, $customer->country ?: $sellerCountry));
             $party->setCompanyId(new Identifier($vatId));
@@ -195,13 +196,29 @@ class PeppolInvoiceDocument
     /** Prefix a bare tax id with its VAT prefix (EL123…, EE123… ) if not already prefixed. */
     private function vatNumber(string $id, ?string $country): string
     {
-        $id = strtoupper(trim($id));
+        $id = $this->fixGreekVatPrefix($id);
+
         $prefix = $this->vatPrefix($country) ?? '';
         if ($prefix !== '' && ! preg_match('/^[A-Z]{2}/', $id)) {
             return $prefix.$id;
         }
 
         return $id;
+    }
+
+    /**
+     * Correct a mistyped 'GR…' tax id → 'EL…' (and upper-case/trim). A VAT
+     * identifier is NEVER prefixed 'GR' — Greece uses 'EL' (BR-CO-9), while 'GR'
+     * is the ISO country code. Legacy ETL / WHMCS copy a supplied VIES value
+     * verbatim, so a wrong 'GR…' can reach us; applied at every point a
+     * customer-supplied id is consumed (VAT number, legal-entity id, endpoint)
+     * so no invalid identifier is ever emitted.
+     */
+    private function fixGreekVatPrefix(string $id): string
+    {
+        $id = strtoupper(trim($id));
+
+        return preg_match('/^GR\d/', $id) ? 'EL'.substr($id, 2) : $id;
     }
 
     /**

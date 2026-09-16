@@ -137,6 +137,26 @@ class PeppolInvoiceDocumentTest extends TestCase
     }
 
     #[Test]
+    public function a_mistyped_gr_prefixed_buyer_vat_is_normalised_to_el(): void
+    {
+        // Legacy/WHMCS data can carry a VIES value verbatim as 'GR…' (invalid — a
+        // VAT id is never GR-prefixed). We must still emit the correct EL prefix.
+        $company = $this->grCompany();
+        $customer = Customer::create([
+            'company_id' => $company->id, 'type' => 'company', 'name' => 'Πελάτης ΑΕ',
+            'vat_vies' => 'GR094512345', 'country' => 'GR', 'city' => 'Αθήνα', 'postcode' => '10563',
+        ]);
+
+        $invoice = $this->invoiceWith($company, $customer, [
+            ['name' => 'Υπηρεσίες', 'qty' => 1, 'price' => 100, 'vat' => 24],
+        ]);
+
+        $xml = app(PeppolInvoiceDocument::class)->xml($invoice);
+        $this->assertStringContainsString('EL094512345', $xml, 'a GR-prefixed VAT must be normalised to EL');
+        $this->assertStringNotContainsString('GR094512345', $xml, 'the invalid GR-prefixed VAT must not survive');
+    }
+
+    #[Test]
     public function gr_retail_invoice_without_buyer_vat_is_valid(): void
     {
         // Retail (ιδιώτης) buyer: no VAT id, still a valid EN 16931 document.
