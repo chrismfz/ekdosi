@@ -19,6 +19,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **MCP/«Βοηθός» — line-level εργαλεία παραστατικών & εισερχομένων (3 νέα read-only tools).** Ο MCP έβλεπε
+  μόνο σύνολα· τώρα βλέπει και το ΠΕΡΙΕΧΟΜΕΝΟ: **`invoice_get`** (ένα παραστατικό με γραμμές + εσωτερικές
+  σημειώσεις + myDATA/whmcs ids, αναζήτηση by ΤΠΥ/id/whmcs_invoice_id), **`search_invoices`** (αναζήτηση σε
+  γραμμές ή/και σημειώσεις ή κατά whmcs_invoice_id — «πόσα παραστατικά ανανέωσαν το X», πλήθος + δείγμα με
+  matched snippet), και **`whmcs_inbox_list`** (τα «Εισερχόμενα» αναλυτικά: πελάτης/ποσό/ημ.πληρωμής/status/
+  γραμμές + **έλεγχος διπλότυπου** — υπάρχον ekdosi παραστατικό ίδιου whmcs id / legacy AUTO_INVOICE_LOG hit /
+  ίδιος πελάτης+ποσό — και πρόταση file/archive/check βάσει cut-over· `status=archived` σημαίνει τα
+  «mis_archived»). Κοινή λογική «ένας πυρήνας, δύο κανάλια»: τα ίδια tools τρέχουν και στον in-app «Βοηθό» και
+  στο εξωτερικό MCP (parity guard). Read-only, tenant-scoped, Shield-gated (`View:Invoice` /
+  `View:PendingWhmcsInvoice`).
 - **Πελάτες — περισσότερη πληροφορία στη λίστα (στήλες δραστηριότητας + φίλτρα ποιότητας).** Νέες
   **sortable** στήλες: **«Αρ. Παρ/ων»** (πλήθος εκδομένων παραστατικών — χωρίς πρόχειρα/ακυρωμένα/πιστωτικά·
   ορατή, ξεχωρίζει με ένα sort τους «νεκρούς» με 0 και τους πιο busy), **«Τζίρος»** (καθαρός κύκλος εργασιών —

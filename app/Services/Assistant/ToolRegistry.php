@@ -11,6 +11,7 @@ use App\Services\Assistant\Tools\CountSalesTool;
 use App\Services\Assistant\Tools\CreateReminderTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
 use App\Services\Assistant\Tools\IncomeVsExpenseTool;
+use App\Services\Assistant\Tools\InvoiceGetTool;
 use App\Services\Assistant\Tools\KnowledgeSearchTool;
 use App\Services\Assistant\Tools\LeadsPulseTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
@@ -18,9 +19,11 @@ use App\Services\Assistant\Tools\OutstandingReceivablesTool;
 use App\Services\Assistant\Tools\RecentActivityTool;
 use App\Services\Assistant\Tools\RecentInvoicesTool;
 use App\Services\Assistant\Tools\RecordPaymentTool;
+use App\Services\Assistant\Tools\SearchInvoicesTool;
 use App\Services\Assistant\Tools\SendCustomerStatementTool;
 use App\Services\Assistant\Tools\TopProductsTool;
 use App\Services\Assistant\Tools\VatSummaryTool;
+use App\Services\Assistant\Tools\WhmcsInboxListTool;
 use App\Services\Assistant\Tools\WhmcsInboxTool;
 use App\Support\Tenancy\CompanyContext;
 use Illuminate\Support\Facades\Gate;
@@ -48,12 +51,15 @@ class ToolRegistry
             new ListTopDebtorsTool,
             new FindCustomerTool,
             new RecentInvoicesTool,
+            new InvoiceGetTool,
+            new SearchInvoicesTool,
             new VatSummaryTool,
             new RecentActivityTool,
             new LeadsPulseTool,
             new IncomeVsExpenseTool,
             new TopProductsTool,
             new WhmcsInboxTool,
+            new WhmcsInboxListTool,
             new AiUsageTool,
             new KnowledgeSearchTool,
             new AppVersionTool,
