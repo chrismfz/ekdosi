@@ -146,6 +146,23 @@ class CustomerLedgerBuilderTest extends TestCase
         $this->assertSame(100.0, $paymentRows[0]['credit']);
     }
 
+    public function test_yearly_year_end_balance_excludes_cash_term_no_payment_invoices(): void
+    {
+        // The year-end balance (and the «Υπόλοιπο από μεταφορά» carry-over that reads
+        // it) must use the same credit-term gate as the canonical balance — a cash sale
+        // with no recorded payment is settled at issue and must NOT inflate it.
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2024-01-01', 100.0, $this->cash);    // cash, no payment → excluded from balance
+        $this->makeInvoice($c, '2024-06-01', 200.0, $this->credit);  // credit, unpaid → counts
+
+        $r = app(CustomerLedgerBuilder::class)->build($c);
+        $y2024 = collect($r->yearly)->firstWhere('year', 2024);
+
+        $this->assertSame(200.0, $y2024['year_end_balance']);   // NOT 300 (cash excluded)
+        $this->assertSame(300.0, $y2024['gross']);              // turnover still counts both
+        $this->assertSame(200.0, $r->stats['balance']);         // reconciles with the canonical balance
+    }
+
     public function test_chronological_ledger_is_oldest_first_for_statements(): void
     {
         $c = $this->makeCustomer();

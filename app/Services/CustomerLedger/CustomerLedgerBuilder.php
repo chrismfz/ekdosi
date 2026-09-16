@@ -487,6 +487,7 @@ class CustomerLedgerBuilder
     private function computeYearly(Collection $invoices, Collection $payments): array
     {
         $byYear = [];
+        $paidIds = $this->paidInvoiceIds($payments);
 
         foreach ($invoices as $inv) {
             $year = (int) Carbon::parse($inv->issued_at)->year;
@@ -499,7 +500,15 @@ class CustomerLedgerBuilder
             $byYear[$year]['invoice_count']++;
             $byYear[$year]['net'] += $sign * (float) $inv->net_total;
             $byYear[$year]['gross'] += $sign * (float) $inv->gross_total;
-            $byYear[$year]['payable'] += $sign * $this->payable($inv);
+            // The year-end BALANCE must use the SAME credit-term gate as computeStats
+            // / the ledger running balance: cash-term invoices with no recorded payment
+            // are settled at issue and never enter the receivables balance. Without this
+            // gate `year_end_balance` (and the carry-over that reads it) is inflated by
+            // every no-payment cash sale — the common Greek-retail case. Turnover
+            // (net/gross) still counts every invoice above.
+            if ($this->isCreditNote($inv) || $this->isTracked($inv, $paidIds)) {
+                $byYear[$year]['payable'] += $sign * $this->payable($inv);
+            }
         }
 
         foreach ($payments as $p) {
