@@ -231,6 +231,14 @@
                  above; reuses the cached per-year breakdown (no extra query). --}}
             @php($period = $this->getPeriodSummary())
             @if ($period)
+                {{-- «Υπόλοιπο από μεταφορά»: opening balance for the picked period
+                     (closing balance of the prior year) — the λογιστική carry-over. --}}
+                <div class="mb-3 rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                    <span class="text-xs fi-color-gray">Υπόλοιπο από μεταφορά (πριν το {{ $period['year'] }}):</span>
+                    <span class="font-bold {{ ($period['opening_balance'] ?? 0) > 0.005 ? 'text-danger-600 dark:text-danger-400' : '' }}">
+                        {{ \App\Support\Money::eur((float) ($period['opening_balance'] ?? 0)) }}
+                    </span>
+                </div>
                 <div class="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4">
                     <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
                         <div class="text-xs fi-color-gray">Τζίρος {{ $period['year'] }} (καθαρό)</div>

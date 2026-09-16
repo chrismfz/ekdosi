@@ -91,6 +91,20 @@ final readonly class CustomerLedgerResult implements Wireable
     }
 
     /**
+     * The ledger oldest→newest — the λογιστική-καρτέλα reading for a printed or
+     * exported STATEMENT (CSV / PDF / portal): you read top→bottom as the balance
+     * builds to the final figure. `$ledger` itself stays newest-first (the operator
+     * Καρτέλα table's own default, which it reverses for display). running_balance is
+     * per-row and order-independent, so reversing changes no figure.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function chronologicalLedger(): array
+    {
+        return array_reverse($this->ledger);
+    }
+
+    /**
      * Livewire Wireable: snapshot serialization (page → frontend) and
      * hydration (frontend → page). Required because the Καρτέλα Page
      * stores this DTO in a public Livewire property; without this,

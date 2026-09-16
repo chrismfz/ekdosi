@@ -9,6 +9,7 @@ use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
+use App\Services\CustomerLedger\CustomerStatementCsv;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -115,6 +116,62 @@ class CustomerLedgerBuilderTest extends TestCase
         $p->delete();   // soft delete — must stop reducing the balance
 
         $this->assertSame(124.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
+    }
+
+    public function test_zero_or_null_amount_payments_do_not_create_empty_ledger_rows(): void
+    {
+        // #377: legacy ETL raw-inserts bypassed the form's minValue(0.01) guard and
+        // left 0/NULL-amount payments → empty ledger rows. They must be skipped.
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2026-01-01', 124.0, $this->credit);
+        $this->makePayment($c, '2026-01-02', 100.0);   // a real payment — shows
+
+        // The model's MON-8 guard rejects amount ≤ 0, so blanks can only arrive via
+        // the ETL's raw insert (Eloquent bypassed) — reproduce that here.
+        foreach ([['2026-01-03', 0], ['2026-01-04', null]] as [$date, $amount]) {
+            DB::table('payments')->insert([
+                'company_id' => $this->tenant->id, 'customer_id' => $c->id,
+                'kind' => 'payment', 'pay_date' => $date, 'amount' => $amount,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+        }
+
+        $ledger = app(CustomerLedgerBuilder::class)->build($c)->ledger;
+        $paymentRows = array_values(array_filter(
+            $ledger,
+            fn ($e) => in_array($e['type'], ['payment', 'refund'], true),
+        ));
+
+        $this->assertCount(1, $paymentRows);
+        $this->assertSame(100.0, $paymentRows[0]['credit']);
+    }
+
+    public function test_chronological_ledger_is_oldest_first_for_statements(): void
+    {
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2020-01-01', 124.0, $this->credit);
+        $this->makeInvoice($c, '2025-01-01', 124.0, $this->credit);
+
+        $result = app(CustomerLedgerBuilder::class)->build($c);
+
+        // Operator-table default stays newest-first.
+        $this->assertSame('2025-01-01', $result->ledger[0]['date']);
+        // Statement reading is oldest→newest.
+        $chrono = $result->chronologicalLedger();
+        $this->assertSame('2020-01-01', $chrono[0]['date']);
+        $this->assertSame('2025-01-01', $chrono[count($chrono) - 1]['date']);
+    }
+
+    public function test_csv_export_renders_chronological(): void
+    {
+        $c = $this->makeCustomer();
+        $this->makeInvoice($c, '2020-01-01', 124.0, $this->credit);
+        $this->makeInvoice($c, '2025-01-01', 124.0, $this->credit);
+
+        $csv = app(CustomerStatementCsv::class)->build($c);
+
+        // The older date must appear BEFORE the newer one in the exported file.
+        $this->assertLessThan(strpos($csv, '2025-01-01'), strpos($csv, '2020-01-01'));
     }
 
     public function test_ledger_rows_carry_cash_credit_term_and_payment_presence(): void

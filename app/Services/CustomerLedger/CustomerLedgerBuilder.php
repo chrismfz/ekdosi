@@ -640,6 +640,14 @@ class CustomerLedgerBuilder
                 continue;
             }
 
+            // #377: a zero/NULL-amount payment (legacy ETL raw-insert bypassed the
+            // form's minValue(0.01) guard) would otherwise render as an EMPTY ledger
+            // row (blank Χρέωση + blank Πίστωση). Skip it — it contributes 0 to the
+            // running balance and to every total, so dropping the row changes no figure.
+            if ((float) $p->amount <= 0.0) {
+                continue;
+            }
+
             // A refund (money OUT, back to the customer) is the reverse of a
             // payment: a DEBIT that raises the balance again. Always an
             // individual row — never folded into an έμβασμα group.
@@ -762,9 +770,20 @@ class CustomerLedgerBuilder
             ];
         }
 
-        // Walk oldest-first to compute running balance. Tiebreak same-date rows by
-        // creation order (created_sort) so a payment + a same-day refund never flip.
-        usort($events, fn ($a, $b) => [$a['date_sort'], $a['created_sort']] <=> [$b['date_sort'], $b['created_sort']]);
+        // Explicit, deterministic ordering key: date, then creation order, then a
+        // stable (type, id, reference) tiebreak. Same-date rows are common in imported
+        // data (every ETL payment shares one created_at artifact timestamp), so relying
+        // on PHP's sort stability alone was fragile — this pins the order outright.
+        $sortKey = static fn (array $e): array => [
+            $e['date_sort'],
+            $e['created_sort'],
+            (string) $e['type'],
+            (int) ($e['invoice_id'] ?? $e['payment_id'] ?? 0),
+            (string) ($e['reference'] ?? ''),
+        ];
+
+        // Walk oldest-first to compute the running balance.
+        usort($events, static fn ($a, $b) => $sortKey($a) <=> $sortKey($b));
         $running = 0.0;
         foreach ($events as $i => $e) {
             // Only credit-term invoices change the receivables balance;
@@ -808,9 +827,9 @@ class CustomerLedgerBuilder
             ));
         }
 
-        // Newest first for display — same tiebreak, reversed, so the LATER of two
+        // Newest first for display — same key, reversed, so the LATER of two
         // same-date rows sits on top (its running balance is the current one).
-        usort($events, fn ($a, $b) => [$b['date_sort'], $b['created_sort']] <=> [$a['date_sort'], $a['created_sort']]);
+        usort($events, static fn ($a, $b) => $sortKey($b) <=> $sortKey($a));
 
         // Strip the internal sort cols from the returned shape - view doesn't need them.
         foreach ($events as &$e) {

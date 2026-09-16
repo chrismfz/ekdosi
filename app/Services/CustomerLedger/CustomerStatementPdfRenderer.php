@@ -35,7 +35,8 @@ class CustomerStatementPdfRenderer
                 'stats' => $result->stats,
                 'aging' => $result->aging,
                 'yearly' => $result->yearly,
-                'ledger' => $result->ledger,
+                // Chronological (old→new) — a printed statement reads top→bottom.
+                'ledger' => $result->chronologicalLedger(),
                 'generatedAt' => now(),
             ])
                 ->setPaper('a4', 'portrait')

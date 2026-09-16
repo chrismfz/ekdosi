@@ -144,14 +144,11 @@ already fixed: `resolveWhmcsCustomField` has its `is_array` guard, `AgedReceivab
 `mark_date`, not a bare `'date'`. Remaining CSV item = the shared `Csv::stream()` DRY,
 below.)*
 
-**P2 (Καρτέλα order, review 2026-09-16, deferred):** η οθόνη Καρτέλας γύρισε σε **χρονολογική
-(παλιά→νέα) εξ ορισμού**, αλλά η **εξαγωγή CSV** (`CustomerStatementCsv`) και το **statement PDF**
-(`resources/views/customers/statement-pdf.blade.php`) εξακολουθούν να τυπώνουν **νεότερα-πρώτα**
-(running balance σωστό σε κάθε γραμμή). Cross-surface ασυνέπεια — αν θέλουμε ενιαία «λογιστική
-καρτέλα» ανάγνωση, `array_reverse` του `$result->ledger` πριν το render (outward-facing artifact →
-θέλει ρητό ΟΚ, γι' αυτό δεν άλλαξε στο ίδιο PR). Επίσης: το πρώτο κλικ στην «Ημερομηνία» είναι
-visual no-op (κύκλος default(παλιά)→asc(παλιά)→desc(νέα)) — τεκμηριωμένο στο σχόλιο του κώδικα,
-αποδεκτό.
+**P2 (Καρτέλα order — ✅ RESOLVED 2026-09-16):** η οθόνη + η **εξαγωγή CSV** + το **statement PDF** +
+η **πύλη «Η καρτέλα μου»** εμφανίζονται πλέον όλα **χρονολογικά (παλιά→νέα)** μέσω κοινού
+`CustomerLedgerResult::chronologicalLedger()`. Απομένει μόνο (αποδεκτό): το πρώτο κλικ στην
+«Ημερομηνία» είναι visual no-op (κύκλος default(παλιά)→asc(παλιά)→desc(νέα)) — τεκμηριωμένο στο
+σχόλιο του κώδικα.
 
 **P2 (review 2026-09-15, deferred — cosmetic/latent):** `BaseListRecords::removeTableFilter()`
 guards a request to clear a filter that no longer exists (fixed the reported 500) and, on the
