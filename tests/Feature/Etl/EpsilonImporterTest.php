@@ -4,10 +4,18 @@ namespace Tests\Feature\Etl;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceLine;
+use App\Models\InvoiceType;
+use App\Models\MyDataMark;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\VatCategory;
 use App\Services\Etl\EpsilonImporter;
+use App\Services\InvoiceBalance;
 use App\Services\MyData\MyDataLookupSeeder;
+use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -140,7 +148,7 @@ class EpsilonImporterTest extends TestCase
         $r = $importer->importSales($this->load('Sales'));
         $this->assertSame(15, $r['created']);
 
-        $inv = \App\Models\Invoice::where('company_id', $this->tenant->id)->where('invcode', 'ΤΙΜ385')
+        $inv = Invoice::where('company_id', $this->tenant->id)->where('invcode', 'ΤΙΜ385')
             ->with(['lines', 'customer'])->first();
         $this->assertNotNull($inv);
         $this->assertSame(385, (int) $inv->code);
@@ -155,11 +163,11 @@ class EpsilonImporterTest extends TestCase
 
         // A myDATA audit mark row was recorded with action INSERT (NOT 'SEND' —
         // cancel / credit-note correlation queries mydata_action='INSERT').
-        $this->assertSame(1, \App\Models\MyDataMark::where('invoice_id', $inv->id)
+        $this->assertSame(1, MyDataMark::where('invoice_id', $inv->id)
             ->where('mark', '400013744877362')->where('mydata_action', 'INSERT')->count());
 
         // The ΤΙΜ counter advanced past the imported numbers (next ΑΑ = 386).
-        $this->assertSame(386, (int) \App\Models\InvoiceType::where('company_id', $this->tenant->id)->where('code', 'ΤΙΜ')->value('invcount'));
+        $this->assertSame(386, (int) InvoiceType::where('company_id', $this->tenant->id)->where('code', 'ΤΙΜ')->value('invcount'));
 
         // MYD-018: these are raw query-builder writes, so the model's creating
         // hook never fires — the importer must freeze the series itself. Every
@@ -168,7 +176,7 @@ class EpsilonImporterTest extends TestCase
         $this->assertSame('ΤΙΜ', $inv->series);
         $this->assertSame('ΤΙΜ', $inv->filedSeries());
 
-        \App\Models\InvoiceType::where('company_id', $this->tenant->id)
+        InvoiceType::where('company_id', $this->tenant->id)
             ->where('code', 'ΤΙΜ')->update(['code' => 'ΤΙΜ2']);
 
         $this->assertSame('ΤΙΜ', $inv->fresh()->filedSeries(), 'a rename must not rewrite an imported filing');
@@ -182,13 +190,13 @@ class EpsilonImporterTest extends TestCase
         $importer->importCustomers($this->load('Customers'));
         $importer->importSales($this->load('Sales'));
 
-        $line = \App\Models\InvoiceLine::where('company_id', $this->tenant->id)
+        $line = InvoiceLine::where('company_id', $this->tenant->id)
             ->where('price_per_item', 68.40)->where('vat_percent', 24.00)->first();
         $this->assertNotNull($line, 'the 68.40 @24% line exists');
         $this->assertEquals(84.81, (float) $line->gross_price, 'filed gross kept verbatim (not recomputed to 84.82)');
 
         // And the invoice header gross equals the sum of its own lines.
-        $inv = \App\Models\Invoice::find($line->invoice_id);
+        $inv = Invoice::find($line->invoice_id);
         $sumGross = round((float) $inv->lines()->sum('gross_price'), 2);
         $this->assertEquals((float) $inv->gross_total, $sumGross, 'header gross == Σ line gross');
     }
@@ -201,8 +209,8 @@ class EpsilonImporterTest extends TestCase
 
         // Every imported invoice carries a non-null payment_status (cache filled)
         // and zero outstanding balance — none is a phantom open receivable.
-        $balance = app(\App\Services\InvoiceBalance::class);
-        foreach (\App\Models\Invoice::where('company_id', $this->tenant->id)->get() as $inv) {
+        $balance = app(InvoiceBalance::class);
+        foreach (Invoice::where('company_id', $this->tenant->id)->get() as $inv) {
             $this->assertNotNull($inv->payment_status, "payment_status cached for {$inv->invcode}");
             $this->assertEqualsWithDelta(0.0, $balance->for($inv)->balance, 0.001, "{$inv->invcode} settled");
         }
@@ -215,14 +223,14 @@ class EpsilonImporterTest extends TestCase
         $importer->importProducts($this->load('Items'), $this->load('Services'));
         $importer->importSales($this->load('Sales'));
 
-        $invBefore = \App\Models\Invoice::where('company_id', $this->tenant->id)->count();
-        $linesBefore = \App\Models\InvoiceLine::where('company_id', $this->tenant->id)->count();
+        $invBefore = Invoice::where('company_id', $this->tenant->id)->count();
+        $linesBefore = InvoiceLine::where('company_id', $this->tenant->id)->count();
 
         $r2 = (new EpsilonImporter($this->tenant))->importSales($this->load('Sales'));
         $this->assertSame(0, $r2['created']);
         $this->assertSame(15, $r2['updated']);
-        $this->assertSame($invBefore, \App\Models\Invoice::where('company_id', $this->tenant->id)->count());
-        $this->assertSame($linesBefore, \App\Models\InvoiceLine::where('company_id', $this->tenant->id)->count(), 'lines replaced, not duplicated');
+        $this->assertSame($invBefore, Invoice::where('company_id', $this->tenant->id)->count());
+        $this->assertSame($linesBefore, InvoiceLine::where('company_id', $this->tenant->id)->count(), 'lines replaced, not duplicated');
     }
 
     public function test_rerun_is_idempotent(): void
@@ -241,5 +249,365 @@ class EpsilonImporterTest extends TestCase
         $this->assertSame(0, $r2p['created'], 'second run creates no new products');
         $this->assertSame($custBefore, Customer::where('company_id', $this->tenant->id)->count());
         $this->assertSame($prodBefore, Product::where('company_id', $this->tenant->id)->count());
+    }
+
+    /* ===================== payments (εμβάσματα / εισπράξεις) ===================== */
+
+    /** A credit-term active sale (line net 100 @24% → gross/payable 124) for $c. */
+    private function makeCreditSale(Customer $c): Invoice
+    {
+        $type = InvoiceType::where('company_id', $this->tenant->id)->where('code', 'ΤΙΜ')->first();
+        $pm = PaymentMethod::where('company_id', $this->tenant->id)->where('description', 'Επί Πιστώσει')->first();
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΙΜ'.uniqid(), 'code' => 1,
+            'invoice_type_id' => $type->id, 'customer_id' => $c->id,
+            'payment_method_id' => $pm->id, 'issued_at' => '2026-05-10 10:00:00',
+            'local_status' => 'active',
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24, 'product_descr' => 'W',
+        ]);
+
+        return app(RecomputeInvoiceTotals::class)($inv);
+    }
+
+    private function outstanding(Customer $c): float
+    {
+        return (float) Customer::query()
+            ->where('customers.company_id', $this->tenant->id)
+            ->withOutstandingBalance($this->tenant->id)
+            ->where('customers.id', $c->id)
+            ->value('outstanding_balance');
+    }
+
+    public function test_remittances_and_receipts_land_as_on_account_payments_reducing_balance(): void
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'ΟΦΕΙΛΕΤΗΣ', 'afm' => '199999999']);
+        $this->makeCreditSale($c); // owed 124.00
+        $this->assertEqualsWithDelta(124.0, $this->outstanding($c), 0.001);
+
+        $importer = new EpsilonImporter($this->tenant);
+        $r = $importer->importPayments([
+            'CustomerRemittances' => [[
+                'DocCode' => 'ΕΜΒΠΛΑ-0000000001', 'Date' => '10/06/2026',
+                'TraderTIN' => '199999999', 'TraderName' => 'ΟΦΕΙΛΕΤΗΣ',
+                'BankAccount' => 'Πειραιώς', 'TotalVal' => 100, 'DocStatus' => 'Έγκυρο',
+                'UID' => 'uid-remit-1',
+            ]],
+            'CustomerReceipts' => [[
+                'DocCode' => 'ΕΙΣΠ-0000000001', 'Date' => '11/06/2026',
+                'TraderTIN' => '199999999', 'TotalVal' => 24, 'DocStatus' => 'Έγκυρο',
+                'UID' => 'uid-recv-1',
+            ]],
+            'CustomerBalances' => [[
+                'TraderTIN' => '199999999', 'TraderName' => 'ΟΦΕΙΛΕΤΗΣ', 'EpsilonBalance' => 0,
+            ]],
+        ]);
+
+        $this->assertSame(2, $r['created']);
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($c), 0.001, 'έναντι πληρωμές μηδένισαν το υπόλοιπο');
+
+        // On-account (invoice_id null), positive magnitude, keyed by section+DocCode.
+        $remit = Payment::where('company_id', $this->tenant->id)
+            ->where('transaction_id', 'EPS:R:ΕΜΒΠΛΑ-0000000001')->first();
+        $this->assertNotNull($remit);
+        $this->assertNull($remit->invoice_id);
+        $this->assertSame('payment', $remit->kind);
+        $this->assertEquals(100.0, (float) $remit->amount);
+        $this->assertSame('ΕΜΒΠΛΑ-0000000001', $remit->reference);
+
+        // Reconciliation matched Epsilon (target 0) → no balance warning.
+        $this->assertEmpty(array_filter($importer->warnings(), fn ($w) => str_contains($w, 'Συμφωνία')));
+    }
+
+    public function test_payments_are_idempotent_by_uid(): void
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'X', 'afm' => '199999999']);
+        $this->makeCreditSale($c); // owed 124
+
+        $payload = [
+            'CustomerRemittances' => [[
+                'DocCode' => 'ΕΜΒΠΛΑ-0000000001', 'Date' => '10/06/2026',
+                'TraderTIN' => '199999999', 'TotalVal' => 50, 'DocStatus' => 'Έγκυρο', 'UID' => 'uid-1',
+            ]],
+        ];
+        (new EpsilonImporter($this->tenant))->importPayments($payload);
+        $r2 = (new EpsilonImporter($this->tenant))->importPayments($payload);
+
+        $this->assertSame(0, $r2['created']);
+        $this->assertSame(1, $r2['updated']);
+        $this->assertSame(1, Payment::where('company_id', $this->tenant->id)
+            ->where('transaction_id', 'EPS:R:ΕΜΒΠΛΑ-0000000001')->count(), 'no duplicate payment');
+        $this->assertEqualsWithDelta(74.0, $this->outstanding($c), 0.001, '124 − 50 once, not twice');
+    }
+
+    public function test_cancelled_and_cancelling_receipts_are_skipped(): void
+    {
+        Customer::create(['company_id' => $this->tenant->id, 'name' => 'X', 'afm' => '199999999']);
+
+        $r = (new EpsilonImporter($this->tenant))->importPayments([
+            'CustomerReceipts' => [
+                ['DocCode' => 'ΕΙΣΠ-1', 'TraderTIN' => '199999999', 'TotalVal' => 10, 'DocStatus' => 'Ακυρωμένο', 'UID' => 'c1'],
+                ['DocCode' => 'ΕΙΣΠ-2', 'TraderTIN' => '199999999', 'TotalVal' => 10, 'DocStatus' => 'Ακυρωτικό', 'UID' => 'c2'],
+                ['DocCode' => 'ΕΙΣΠ-3', 'TraderTIN' => '199999999', 'TotalVal' => 10, 'DocStatus' => 'Έγκυρο', 'UID' => 'ok', 'Date' => '10/06/2026'],
+            ],
+        ]);
+
+        $this->assertSame(1, $r['created']);
+        $this->assertSame(2, $r['skipped']);
+    }
+
+    public function test_reconciliation_warns_when_ekdosi_diverges_from_epsilon(): void
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'ΑΠΟΚΛΙΣΗ', 'afm' => '199999999']);
+        $this->makeCreditSale($c); // owed 124
+
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importPayments([
+            'CustomerRemittances' => [[
+                'DocCode' => 'ΕΜΒΠΛΑ-U1', 'TraderTIN' => '199999999', 'TotalVal' => 100, 'Date' => '10/06/2026',
+                'DocStatus' => 'Έγκυρο', 'UID' => 'u1',
+            ]],
+            // ekdosi will be 24; claim Epsilon says 0 → a 24€ divergence must warn.
+            'CustomerBalances' => [[
+                'TraderTIN' => '199999999', 'TraderName' => 'ΑΠΟΚΛΙΣΗ', 'EpsilonBalance' => 0,
+            ]],
+        ]);
+
+        $warned = array_filter($importer->warnings(), fn ($w) => str_contains($w, 'Συμφωνία'));
+        $this->assertNotEmpty($warned, 'divergence surfaced as a reconciliation warning');
+    }
+
+    public function test_payment_for_unknown_afm_is_skipped_and_warned(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $r = $importer->importPayments([
+            'CustomerRemittances' => [[
+                'TraderTIN' => '199999999', 'TotalVal' => 50, 'DocStatus' => 'Έγκυρο', 'UID' => 'u1',
+            ]],
+        ]);
+
+        $this->assertSame(0, $r['created']);
+        $this->assertSame(1, $r['skipped']);
+        $this->assertNotEmpty($importer->warnings());
+    }
+
+    public function test_cancelled_remittance_is_skipped(): void
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'X', 'afm' => '199999999']);
+        $this->makeCreditSale($c); // owed 124
+
+        $r = (new EpsilonImporter($this->tenant))->importPayments([
+            'CustomerRemittances' => [
+                ['DocCode' => 'ΕΜΒΠΛΑ-C1', 'TraderTIN' => '199999999', 'TotalVal' => 50, 'DocStatus' => 'Ακυρωμένο', 'UID' => 'x1', 'Date' => '10/06/2026'],
+                ['DocCode' => 'ΕΜΒΠΛΑ-C2', 'TraderTIN' => '199999999', 'TotalVal' => 50, 'DocStatus' => 'Έγκυρο', 'UID' => 'x2', 'Date' => '10/06/2026'],
+            ],
+        ]);
+
+        $this->assertSame(1, $r['created']);
+        $this->assertSame(1, $r['skipped']);
+        $this->assertEqualsWithDelta(74.0, $this->outstanding($c), 0.001, 'only the valid remittance reduced the balance');
+    }
+
+    public function test_payment_without_uid_or_doccode_is_skipped_not_duplicated(): void
+    {
+        Customer::create(['company_id' => $this->tenant->id, 'name' => 'X', 'afm' => '199999999']);
+
+        $importer = new EpsilonImporter($this->tenant);
+        $r = $importer->importPayments([
+            'CustomerRemittances' => [
+                ['TraderTIN' => '199999999', 'TotalVal' => 50, 'DocStatus' => 'Έγκυρο', 'Date' => '10/06/2026'], // no UID, no DocCode
+            ],
+        ]);
+
+        $this->assertSame(0, $r['created']);
+        $this->assertSame(1, $r['skipped']);
+        $this->assertNotEmpty(array_filter($importer->warnings(), fn ($w) => str_contains($w, 'idempotent')));
+    }
+
+    public function test_reconciliation_warns_for_epsilon_balance_of_a_missing_customer(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importPayments([
+            // No customer imported for this ΑΦΜ, but Epsilon says they still owe 500.
+            'CustomerBalances' => [[
+                'TraderTIN' => '199999999', 'TraderName' => 'ΑΓΝΩΣΤΟΣ', 'EpsilonBalance' => 500,
+            ]],
+        ]);
+
+        $this->assertNotEmpty(array_filter($importer->warnings(), fn ($w) => str_contains($w, 'δεν βρέθηκε πελάτης')));
+    }
+
+    public function test_reconciliation_ignores_zero_balance_of_a_missing_customer(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importPayments([
+            'CustomerBalances' => [[
+                'TraderTIN' => '199999999', 'TraderName' => 'ΜΗΔΕΝΙΚΟΣ', 'EpsilonBalance' => 0,
+            ]],
+        ]);
+
+        $this->assertEmpty(array_filter($importer->warnings(), fn ($w) => str_contains($w, 'δεν βρέθηκε')));
+    }
+
+    public function test_real_payments_supersede_synthetic_settlements_no_double_count(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers([['Name' => 'ΟΦ', 'TIN' => '199999999']]);
+        // importSales' settleImportedSale writes a FULL settlement payment for this
+        // credit-term historical sale → balance 0.
+        $importer->importSales([[
+            'DocNum' => 900, 'DocSeriesShortcut' => 'ΤΙΜ', 'DocSerie' => 'Τιμολόγιο',
+            'Date' => '10/05/2026', 'TraderTIN' => '199999999', 'TraderName' => 'ΟΦ',
+            'PmtMethod' => 'Επί Πιστώσει', 'NetVal' => 100, 'TotalVal' => 124,
+            'CommLines' => [[
+                'EntityName' => 'X', 'Quantity' => 1, 'Price' => 100, 'VATPercent' => 24,
+                'NetVal' => 100, 'TotalVal' => 124,
+            ]],
+        ]]);
+        $c = Customer::where('company_id', $this->tenant->id)->where('afm', '199999999')->first();
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($c), 0.001, 'credit-term sale settled at issue by importSales');
+
+        // The REAL remittance (partial 100) must SUPERSEDE the synthetic 124
+        // settlement, not stack on it: balance = 124 owed − 100 paid = 24
+        // (NOT −100 double-count, NOT 0 ignored).
+        $importer->importPayments([
+            'CustomerRemittances' => [[
+                'DocCode' => 'ΕΜΒΠΛΑ-900', 'Date' => '11/05/2026', 'TraderTIN' => '199999999',
+                'TotalVal' => 100, 'DocStatus' => 'Έγκυρο', 'UID' => 'u-remit-900',
+            ]],
+        ]);
+
+        $this->assertEqualsWithDelta(24.0, $this->outstanding($c->fresh()), 0.001, 'real payment superseded synthetic settlement');
+        // The synthetic placeholder is gone; only the real on-account payment remains.
+        $this->assertSame(0, Payment::where('company_id', $this->tenant->id)
+            ->where('notes', 'like', '%εξοφλημένο κατά την έκδοση%')->count());
+        $this->assertSame(1, Payment::where('company_id', $this->tenant->id)
+            ->whereNull('invoice_id')->where('kind', 'payment')->count());
+    }
+
+    public function test_payment_date_with_time_component_is_parsed_not_today(): void
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'X', 'afm' => '199999999']);
+        $this->makeCreditSale($c);
+
+        (new EpsilonImporter($this->tenant))->importPayments([
+            'CustomerRemittances' => [[
+                'DocCode' => 'ΕΜΒΠΛΑ-T1', 'TraderTIN' => '199999999', 'TotalVal' => 10,
+                'DocStatus' => 'Έγκυρο', 'Date' => '15/03/2022 08:28:06',
+            ]],
+        ]);
+
+        $p = Payment::where('company_id', $this->tenant->id)->where('transaction_id', 'EPS:R:ΕΜΒΠΛΑ-T1')->first();
+        $this->assertNotNull($p);
+        $this->assertSame('2022-03-15', $p->pay_date->toDateString(), 'the real (historical) date, not today');
+    }
+
+    public function test_settlement_placeholder_kept_for_customer_not_in_payments_file(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers([
+            ['Name' => 'ΜΕΣΑ', 'TIN' => '199999999'],
+            ['Name' => 'ΕΞΩ', 'TIN' => '188888888'],
+        ]);
+        // Both credit-term sales are settled at issue by importSales.
+        $importer->importSales([
+            ['DocNum' => 901, 'DocSeriesShortcut' => 'ΤΙΜ', 'DocSerie' => 'Τιμολόγιο', 'Date' => '10/05/2026',
+                'TraderTIN' => '199999999', 'TraderName' => 'ΜΕΣΑ', 'PmtMethod' => 'Επί Πιστώσει', 'NetVal' => 100, 'TotalVal' => 124,
+                'CommLines' => [['EntityName' => 'X', 'Quantity' => 1, 'Price' => 100, 'VATPercent' => 24, 'NetVal' => 100, 'TotalVal' => 124]]],
+            ['DocNum' => 902, 'DocSeriesShortcut' => 'ΤΙΜ', 'DocSerie' => 'Τιμολόγιο', 'Date' => '10/05/2026',
+                'TraderTIN' => '188888888', 'TraderName' => 'ΕΞΩ', 'PmtMethod' => 'Επί Πιστώσει', 'NetVal' => 100, 'TotalVal' => 124,
+                'CommLines' => [['EntityName' => 'X', 'Quantity' => 1, 'Price' => 100, 'VATPercent' => 24, 'NetVal' => 100, 'TotalVal' => 124]]],
+        ]);
+        $mesa = Customer::where('company_id', $this->tenant->id)->where('afm', '199999999')->first();
+        $exo = Customer::where('company_id', $this->tenant->id)->where('afm', '188888888')->first();
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($mesa), 0.001);
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($exo), 0.001);
+
+        // The payments file mentions ONLY ΜΕΣΑ.
+        $importer->importPayments([
+            'CustomerRemittances' => [[
+                'DocCode' => 'ΕΜΒΠΛΑ-901', 'TraderTIN' => '199999999', 'TotalVal' => 100, 'DocStatus' => 'Έγκυρο', 'Date' => '11/05/2026',
+            ]],
+        ]);
+
+        // ΜΕΣΑ: placeholder dropped, real 100 applied → 24. ΕΞΩ: untouched, still 0.
+        $this->assertEqualsWithDelta(24.0, $this->outstanding($mesa->fresh()), 0.001);
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($exo->fresh()), 0.001, 'a customer absent from the file keeps its settled state');
+        $this->assertSame(1, Payment::where('company_id', $this->tenant->id)->where('customer_id', $exo->id)
+            ->where('notes', 'like', '%εξοφλημένο κατά την έκδοση%')->count(), 'ΕΞΩ settlement placeholder preserved');
+    }
+
+    public function test_debtor_present_only_in_balances_is_unsettled_and_reconciles(): void
+    {
+        // A debtor: owes on a credit sale that importSales settled with a
+        // placeholder, appears ONLY in CustomerBalances (no remittance/receipt).
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers([['Name' => 'ΧΡΕΩΣΤΗΣ', 'TIN' => '199999999']]);
+        $importer->importSales([[
+            'DocNum' => 903, 'DocSeriesShortcut' => 'ΤΙΜ', 'DocSerie' => 'Τιμολόγιο', 'Date' => '10/05/2026',
+            'TraderTIN' => '199999999', 'TraderName' => 'ΧΡΕΩΣΤΗΣ', 'PmtMethod' => 'Επί Πιστώσει', 'NetVal' => 100, 'TotalVal' => 124,
+            'CommLines' => [['EntityName' => 'X', 'Quantity' => 1, 'Price' => 100, 'VATPercent' => 24, 'NetVal' => 100, 'TotalVal' => 124]],
+        ]]);
+        $c = Customer::where('company_id', $this->tenant->id)->where('afm', '199999999')->first();
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($c), 0.001, 'settled by importSales placeholder');
+
+        $importer2 = new EpsilonImporter($this->tenant);
+        $importer2->importPayments([
+            'CustomerRemittances' => [],
+            'CustomerBalances' => [[
+                'TraderTIN' => '199999999', 'TraderName' => 'ΧΡΕΩΣΤΗΣ', 'EpsilonBalance' => 124,
+            ]],
+        ]);
+
+        // Placeholder dropped → the REAL (unpaid) receivable surfaces = 124, and it
+        // reconciles exactly to Epsilon (no false 0, no divergence warning).
+        $this->assertEqualsWithDelta(124.0, $this->outstanding($c->fresh()), 0.001, 'debtor shows the real owed, not a false 0');
+        $this->assertEmpty(array_filter($importer2->warnings(), fn ($w) => str_contains($w, 'Συμφωνία')), 'reconciles to Epsilon');
+    }
+
+    public function test_skipped_payment_does_not_unsettle_its_customer(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers([['Name' => 'ΑΤΥΧΟΣ', 'TIN' => '199999999']]);
+        $importer->importSales([[
+            'DocNum' => 904, 'DocSeriesShortcut' => 'ΤΙΜ', 'DocSerie' => 'Τιμολόγιο', 'Date' => '10/05/2026',
+            'TraderTIN' => '199999999', 'TraderName' => 'ΑΤΥΧΟΣ', 'PmtMethod' => 'Επί Πιστώσει', 'NetVal' => 100, 'TotalVal' => 124,
+            'CommLines' => [['EntityName' => 'X', 'Quantity' => 1, 'Price' => 100, 'VATPercent' => 24, 'NetVal' => 100, 'TotalVal' => 124]],
+        ]]);
+        $c = Customer::where('company_id', $this->tenant->id)->where('afm', '199999999')->first();
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($c), 0.001, 'settled by importSales placeholder');
+
+        // A valid remittance but WITHOUT DocCode → skipped (can't be idempotent),
+        // and the customer is NOT in CustomerBalances. Their placeholder must NOT be
+        // dropped — else the receivable would resurface with nothing to offset it.
+        $importer2 = new EpsilonImporter($this->tenant);
+        $r = $importer2->importPayments([
+            'CustomerRemittances' => [[
+                'TraderTIN' => '199999999', 'TotalVal' => 50, 'DocStatus' => 'Έγκυρο', 'Date' => '11/05/2026',
+            ]],
+        ]);
+
+        $this->assertSame(0, $r['created']);
+        $this->assertSame(1, $r['skipped']);
+        $this->assertEqualsWithDelta(0.0, $this->outstanding($c->fresh()), 0.001, 'a skipped payment leaves its customer settled');
+    }
+
+    public function test_non_final_status_payment_is_not_credited(): void
+    {
+        $c = Customer::create(['company_id' => $this->tenant->id, 'name' => 'X', 'afm' => '199999999']);
+        $this->makeCreditSale($c); // owed 124
+
+        $r = (new EpsilonImporter($this->tenant))->importPayments([
+            'CustomerRemittances' => [[
+                'DocCode' => 'ΕΜΒΠΛΑ-P1', 'TraderTIN' => '199999999', 'TotalVal' => 50,
+                'DocStatus' => 'Προσωρινό', 'Date' => '11/05/2026',
+            ]],
+        ]);
+
+        $this->assertSame(0, $r['created'], 'a non-final (provisional) status books no money');
+        $this->assertSame(1, $r['skipped']);
+        $this->assertEqualsWithDelta(124.0, $this->outstanding($c), 0.001, 'balance untouched by a non-«Έγκυρο» doc');
     }
 }

@@ -19,6 +19,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Εισαγωγή Epsilon πληρωμών (εμβάσματα/εισπράξεις) → «έναντι» (on-account) + αναφορά συμφωνίας.**
+  Νέο πεδίο «Πληρωμές/Υπόλοιπα» στο Epsilon Smart tab της φόρμας εισαγωγής: κάθε έμβασμα/είσπραξη
+  γίνεται on-account πληρωμή (match ΑΦΜ, `invoice_id` null → μειώνει άμεσα το υπόλοιπο πελάτη),
+  **idempotent** με το Epsilon DocCode (`payments.transaction_id` = `EPS:` + section + DocCode). Μόνο
+  έγκυρα έγγραφα πιστώνουν (ακυρωμένα/ακυρωτικά/προσωρινά παραλείπονται)· οι πραγματικές πληρωμές
+  **αντικαθιστούν** τις synthetic settlements του `importSales` (καμία διπλομέτρηση). Στο τέλος τρέχει
+  **read-only reconciliation** του ζωντανού υπολοίπου ekdosi vs `EpsilonBalance` ανά πελάτη και
+  προειδοποιεί για κάθε απόκλιση (καρφώνει τα μετασχηματισμένα ΔΑ / cash-bank πιστωτικά).
 - **Panel: self-service «Τα κλειδιά MCP μου» (κόψιμο MCP bearer token χωρίς CLI).** Νέα σελίδα στο
   user menu που κόβει/ανακαλεί το tenant-bound Sanctum token για MCP clients (Claude Desktop/CLI/curl)
   — δεμένο στην τρέχουσα εταιρεία, με το plaintext ορατό **μία φορά**, λίστα + «Τελευταία χρήση» +
