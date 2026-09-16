@@ -4,6 +4,7 @@ namespace App\Providers\Filament;
 
 use App\Filament\Pages\Assistant;
 use App\Filament\Pages\Dashboard;
+use App\Filament\Pages\McpTokens;
 use App\Filament\Pages\MySessions;
 use App\Models\Company;
 use App\Support\BuildInfo;
@@ -58,6 +59,20 @@ class AdminPanelProvider extends PanelProvider
                             ?? (($user = Filament::auth()->user()) ? Filament::getUserDefaultTenant($user) : null);
 
                         return $tenant ? MySessions::getUrl(tenant: $tenant) : null;
+                    }),
+                // «Τα κλειδιά MCP μου» — self-service MCP bearer tokens, admin-gated
+                // (a token bypasses login + 2FA). Off the sidebar, in the user menu,
+                // and shown ONLY to users who hold View:McpTokens (canAccess); the
+                // token binds to whichever tenant the page is opened under.
+                'mcp_tokens' => MenuItem::make()
+                    ->label('Τα κλειδιά MCP μου')
+                    ->icon('heroicon-o-key')
+                    ->visible(fn (): bool => McpTokens::canAccess())
+                    ->url(function (): ?string {
+                        $tenant = Filament::getTenant()
+                            ?? (($user = Filament::auth()->user()) ? Filament::getUserDefaultTenant($user) : null);
+
+                        return $tenant ? McpTokens::getUrl(tenant: $tenant) : null;
                     }),
             ])
             // TOTP two-factor (authenticator app) + recovery codes. The setup,

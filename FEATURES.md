@@ -816,7 +816,12 @@ read-only — «γιατί έσκασε ΑΥΤΟ το παραστατικό;» 
 επιπλέον logging (OBS-001· βλ. `docs/BACKLOG.md §MCP forensics`). **Νέα state tools** (και στα δύο κανάλια): `app_version`
 (τρέχον build + διαθέσιμη ενημέρωση) και `recent_activity` (audit trail). Τα write tools ΔΕΝ κάνουν
 fan-out (`"all"` απαγορεύεται — blast-radius). **Always-on** (χωρίς env flag· η ασφάλεια είναι το auth
-+ token). Πλήρες: **`MCP.md`**.
++ token). **Self-service κλειδί από το panel:** «Τα κλειδιά MCP μου» (user menu, `View:McpTokens` →
+super_admin + company_admin εξ ορισμού· operator μόνο αν του δοθεί ρητά, γιατί το bearer token
+παρακάμπτει login + 2FA) κόβει/ανακαλεί το tenant-bound Sanctum token χωρίς CLI — δεμένο στην
+τρέχουσα εταιρεία, plaintext **μία φορά**, λίστα + «Τελευταία χρήση» + ανάκληση (μόνο τα δικά σου, μόνο
+αυτού του tenant). Ο CLI δρόμος (`ekdosi:mcp-token`) μένει· για τον claude.ai OAuth connector δεν
+χρειάζεται token εδώ. Πλήρες: **`MCP.md`**.
 
 ## 17. Setup / lookups
 VAT categories · invoice types · payment/delivery methods · distribution aims · metric

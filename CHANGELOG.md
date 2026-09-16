@@ -19,6 +19,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Panel: self-service «Τα κλειδιά MCP μου» (κόψιμο MCP bearer token χωρίς CLI).** Νέα σελίδα στο
+  user menu που κόβει/ανακαλεί το tenant-bound Sanctum token για MCP clients (Claude Desktop/CLI/curl)
+  — δεμένο στην τρέχουσα εταιρεία, με το plaintext ορατό **μία φορά**, λίστα + «Τελευταία χρήση» +
+  ανάκληση (αυστηρά μόνο τα δικά σου tokens αυτού του tenant). Gated σε `View:McpTokens` (super_admin +
+  company_admin εξ ορισμού· ο operator ΟΧΙ, γιατί ένα bearer token παρακάμπτει login + 2FA). Το panel
+  αντίστοιχο του `ekdosi:mcp-token`· για τον claude.ai OAuth connector δεν χρειάζεται token.
 - **Deploy: αυτόματη δημιουργία των Passport OAuth keys για τον MCP claude.ai connector.** Το
   `deploy/update.sh` παράγει πλέον το RSA keypair (`storage/oauth-*.key`) την πρώτη φορά που λείπει
   από έναν host (βήμα 7b) — idempotent (ποτέ δεν κάνει rotate υπάρχοντα κλειδιά, που θα ακύρωναν
