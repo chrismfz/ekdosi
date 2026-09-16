@@ -18,6 +18,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Added
+- **Deploy: αυτόματη δημιουργία των Passport OAuth keys για τον MCP claude.ai connector.** Το
+  `deploy/update.sh` παράγει πλέον το RSA keypair (`storage/oauth-*.key`) την πρώτη φορά που λείπει
+  από έναν host (βήμα 7b) — idempotent (ποτέ δεν κάνει rotate υπάρχοντα κλειδιά, που θα ακύρωναν
+  ζωντανά OAuth tokens) και το προσπερνά όταν τα κλειδιά έρχονται από
+  `PASSPORT_PRIVATE_KEY`/`PASSPORT_PUBLIC_KEY` (shared keypair σε multi-node). Το βήμα «key
+  generation» που ξεχνιόταν (ζούσε μόνο στο `MCP.md §8`) τεκμηριώθηκε και στο `INSTALL.md §7c`, μαζί
+  με τη διάκριση bearer-token (Desktop/CLI) vs OAuth (claude.ai).
+
 ## [2.3.0] - 2026-09-16
 
 ### Changed

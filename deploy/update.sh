@@ -20,6 +20,7 @@
 #   6. composer install --no-dev
 #   6b. pre-migration data checks (customers:afm-duplicates)
 #   7. php artisan migrate --force
+#   7b. passport:keys  (create the MCP/claude.ai OAuth keypair once, if missing)
 #   8. build assets (only if a package-lock.json exists)
 #   9. php artisan optimize  (config/route/view cache)
 #  10. shield:generate          (create permission rows for any NEW resources)
@@ -363,6 +364,25 @@ fi
 
 log "Database migrations"
 $ART migrate --force
+
+# --- MCP OAuth (Passport) keys: create once if missing (idempotent) ---------
+# The claude.ai remote connector authenticates via OAuth 2.1, for which Passport
+# needs an RSA keypair (storage/oauth-private.key + oauth-public.key — a per-host
+# secret, gitignored via /storage/*.key). laravel/passport is a committed dep and
+# the oauth_* tables ship in the baseline schema, so composer+migrate already put
+# everything in place EXCEPT the keys — the one step everyone forgets (it lived
+# only in MCP.md §8). Generate them ONLY when absent: never rotate an existing
+# keypair, that would invalidate every live OAuth token. Skipped when the keys are
+# supplied via PASSPORT_PRIVATE_KEY/PASSPORT_PUBLIC_KEY (multi-node shared keypair).
+if $ART list --raw 2>/dev/null | grep -q '^passport:keys'; then
+  if [[ -f storage/oauth-private.key ]] || grep -qE '^PASSPORT_PRIVATE_KEY=.' .env 2>/dev/null; then
+    ok "Passport OAuth keys already present — leaving them untouched."
+  else
+    log "Generating Passport OAuth keys (first time on this host — MCP claude.ai connector)"
+    $ART passport:keys --no-interaction \
+      || warn "passport:keys failed — the claude.ai MCP connector stays down until keys exist (see MCP.md §8)."
+  fi
+fi
 
 # Front-end build only when there's a committed lockfile (skipped on a repo
 # that still uses Filament's pre-built assets).

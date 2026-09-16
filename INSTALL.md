@@ -535,6 +535,42 @@ you're in the panel, day-to-day operations happen there:
   `accountant_readonly`, pick which Resources/actions they can use,
   and attach to users.
 
+## 7c. MCP endpoint — OAuth keys (only if you'll connect claude.ai)
+
+The `/mcp` endpoint is always on once the app is installed (full picture:
+`MCP.md`). How you reach it decides whether you need this step:
+
+- **Claude Desktop / CLI / curl** → a static bearer token, **no key
+  generation**. Mint one (tenant-bound), give it as `Authorization: Bearer …`:
+  ```bash
+  sudo -u ekdosi php artisan ekdosi:mcp-token you@example.com --tenant=myip
+  ```
+- **claude.ai remote connector** → OAuth 2.1, for which Passport needs a
+  per-host RSA keypair. `laravel/passport` is a committed dependency and the
+  `oauth_*` tables ship in the baseline schema, so `composer install` + `migrate`
+  (§7) already put everything in place **except the keys** — the step that's easy
+  to forget:
+  ```bash
+  sudo -u ekdosi php artisan passport:keys   # writes storage/oauth-private.key + oauth-public.key
+  ```
+
+`passport:keys` is safe to leave to habit: it **refuses to overwrite** an existing
+keypair (rotating it would invalidate every live OAuth token). And you rarely need
+to remember it at all — **`deploy/update.sh` now generates the keypair
+automatically** on the first deploy of any host that lacks it (step 7b), so a
+forgotten fresh-install self-heals on the next update. The manual line above is
+only for a brand-new box before its first `deploy/update.sh`.
+
+- The keys are **secrets** — `/storage/*.key` is gitignored; never commit them.
+- **Multi-node:** share ONE keypair across nodes, either via a shared `storage/`
+  or by setting `PASSPORT_PRIVATE_KEY` / `PASSPORT_PUBLIC_KEY` in `.env` (then you
+  skip `passport:keys` entirely — the deploy script skips it too when that env is
+  present).
+- Then add a custom connector at `https://<host>/mcp` and approve the consent
+  screen while logged into ekdosi. The two version-sensitive things to confirm
+  live (the `OAuthenticatable` interface on `User`, the `WWW-Authenticate`
+  discovery header) are documented in `MCP.md §8`.
+
 ## 8. Filesystem ownership
 
 The dedicated `ekdosi` FPM pool (set up in §9) runs as the `ekdosi`
