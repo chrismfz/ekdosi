@@ -99,9 +99,12 @@ class PeppolInvoiceDocument
 
     private function seller(Company $company): Party
     {
+        // Fallback country only when the tenant's country_code is somehow blank
+        // (a misconfig — every real tenant has one). Default to the deployment's
+        // primary country (GR) rather than a foreign default on a legal document.
         $party = (new Party)
             ->setName($company->name)
-            ->setCountry($this->iso($company->country_code) ?? 'EE');
+            ->setCountry($this->iso($company->country_code) ?? 'GR');
 
         if (filled($company->afm)) {
             $vat = $this->vatNumber($company->afm, $company->country_code);
@@ -123,7 +126,10 @@ class PeppolInvoiceDocument
 
     private function buyer(Customer $customer, ?string $sellerCountry): Party
     {
-        $country = $this->iso($customer->country) ?? $this->iso($sellerCountry) ?? 'EE';
+        // Fall back to the seller's country, then to the deployment's primary
+        // country (GR) — never a foreign default — when the customer has no
+        // country_code on file (a misconfig; every real customer has one).
+        $country = $this->iso($customer->country) ?? $this->iso($sellerCountry) ?? 'GR';
 
         $party = (new Party)
             ->setName($customer->name)
@@ -157,7 +163,7 @@ class PeppolInvoiceDocument
         $buyerHasVat = trim((string) ($customer->vat_vies ?: $customer->afm)) !== '';
         $vat = PeppolVatCategory::resolve(
             (float) $line->vat_percent,
-            $this->iso($sellerCountry) ?? 'EE',
+            $this->iso($sellerCountry) ?? 'GR',
             $customer->country,
             $buyerHasVat,
         );
@@ -186,18 +192,22 @@ class PeppolInvoiceDocument
         return $hd > 0 && $hd < 100 ? 1 - ($hd / 100) : 1.0;
     }
 
-    /** Prefix a bare tax id with its ISO country code (EE123… ) if not already prefixed. */
+    /** Prefix a bare tax id with its VAT prefix (EL123…, EE123… ) if not already prefixed. */
     private function vatNumber(string $id, ?string $country): string
     {
         $id = strtoupper(trim($id));
-        $iso = $this->iso($country) ?? '';
-        if ($iso !== '' && ! preg_match('/^[A-Z]{2}/', $id)) {
-            return $iso.$id;
+        $prefix = $this->vatPrefix($country) ?? '';
+        if ($prefix !== '' && ! preg_match('/^[A-Z]{2}/', $id)) {
+            return $prefix.$id;
         }
 
         return $id;
     }
 
+    /**
+     * ISO 3166-1 alpha-2 country code (BT-40/BT-55, the <Country> fields):
+     * Greece is 'GR'. Note this is NOT the VAT prefix — see vatPrefix().
+     */
     private function iso(?string $country): ?string
     {
         $c = strtoupper(trim((string) $country));
@@ -206,5 +216,21 @@ class PeppolInvoiceDocument
         }
 
         return $c === 'EL' ? 'GR' : $c;
+    }
+
+    /**
+     * VAT-identifier prefix (BT-31 seller / BT-48 buyer): equals the ISO 3166-1
+     * code for every EU country EXCEPT Greece, which uses 'EL' not 'GR'
+     * (EN 16931 BR-CO-9). So the <Country> field says GR while the VAT number
+     * says EL800561849 — deliberately the mirror image of iso().
+     */
+    private function vatPrefix(?string $country): ?string
+    {
+        $c = strtoupper(trim((string) $country));
+        if ($c === '') {
+            return null;
+        }
+
+        return ($c === 'GR' || $c === 'EL') ? 'EL' : $c;
     }
 }

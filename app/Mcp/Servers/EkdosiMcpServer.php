@@ -23,6 +23,7 @@ use App\Mcp\Tools\MyDataFailuresMcpTool;
 use App\Mcp\Tools\MyDataPreflightMcpTool;
 use App\Mcp\Tools\MyDataSettingsMcpTool;
 use App\Mcp\Tools\OutstandingReceivablesMcpTool;
+use App\Mcp\Tools\PeppolUblMcpTool;
 use App\Mcp\Tools\RecentActivityMcpTool;
 use App\Mcp\Tools\RecentInvoicesMcpTool;
 use App\Mcp\Tools\RecordPaymentMcpTool;
@@ -75,6 +76,10 @@ Business (tenant-scoped, offered only if your user holds the permission):
 - search_invoices — find invoices by what's INSIDE them: text in line descriptions and/or internal
   notes, or an exact whmcs_invoice_id. Returns the total match count + a sample. For «πόσα παραστατικά
   ανανέωσαν το X» (search lines) or «ποιο παραστατικό αναφέρει WHMCS #N».
+- invoice_ubl — ONE invoice as a UBL / PEPPOL BIS Billing 3.0 (EN 16931) document: the generated XML
+  + the library's validation result (EN 16931 + a PEPPOL SUBSET, NOT the Access Point's authoritative
+  check). Read-only, same bytes as the invoice's «Προβολή/Λήψη UBL» buttons. For «δες/έλεγξε το UBL/
+  e-invoice του ΤΠΥ…». Provider-independent (every tenant, GR included); the actual send is Phase 2.
 - income_vs_expense — έσοδα vs έξοδα for a period (Βιβλίο Εσόδων-Εξόδων): net/VAT/gross per
   side + the VAT balance (output − input). The expense side vat_summary doesn't cover.
 - top_products — the company's best-selling products/services for a period (times, qty, net).
@@ -150,6 +155,7 @@ class EkdosiMcpServer extends Server
         RecentInvoicesMcpTool::class,
         InvoiceGetMcpTool::class,
         SearchInvoicesMcpTool::class,
+        PeppolUblMcpTool::class,
         VatSummaryMcpTool::class,
         OutstandingReceivablesMcpTool::class,
         ListTopDebtorsMcpTool::class,

@@ -19,6 +19,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **UBL / PEPPOL BIS Billing 3.0 (EN 16931) — Phase 1 (προβολή + λήψη).** Νέα κουμπιά «Προβολή UBL»
+  (modal με το XML + αποτέλεσμα ελέγχου) και «Λήψη UBL» (.xml) σε κάθε παραστατικό — **ανεξάρτητα**
+  από τον `einvoice_provider`, ώστε ΟΛΕΣ οι εταιρίες (και οι ελληνικές mainland) να έχουν έτοιμο το
+  τυποποιημένο e-invoice· η αποστολή μέσω Access Point είναι Phase 2. Νέο read-only MCP/«Βοηθός»
+  εργαλείο `invoice_ubl` (ίδια bytes με τα κουμπιά, για έλεγχο εκτός panel). Ο builder
+  (`PeppolInvoiceDocument`) σκληρύνθηκε για ελληνικό tenant: το `<Country>` παραμένει **GR** (ISO
+  3166-1) αλλά ο **ΑΦΜ φέρει το πρόθεμα EL** στο VAT identifier (EN 16931 BR-CO-9 — π.χ. `EL800561849`),
+  και τα fallback χωρών γύρισαν από EE σε GR.
 - **Εισαγωγή Epsilon πληρωμών (εμβάσματα/εισπράξεις) → «έναντι» (on-account) + αναφορά συμφωνίας.**
   Νέο πεδίο «Πληρωμές/Υπόλοιπα» στο Epsilon Smart tab της φόρμας εισαγωγής: κάθε έμβασμα/είσπραξη
   γίνεται on-account πληρωμή (match ΑΦΜ, `invoice_id` null → μειώνει άμεσα το υπόλοιπο πελάτη),
