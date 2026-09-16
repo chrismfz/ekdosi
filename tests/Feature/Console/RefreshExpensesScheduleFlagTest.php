@@ -10,7 +10,7 @@ use Tests\TestCase;
  * flag as ['--auto-only' => true]. Laravel's Event::compileParameters serializes
  * a string key to "{$key}={$value}", so that became --auto-only='1' — which
  * Symfony then rejects ("The '--auto-only' option does not accept a value.") on
- * EVERY scheduled run, spamming logs/mail 3×/day. The fix passes the flag as the
+ * EVERY scheduled run, spamming logs/mail (default every 6h). The fix passes the flag as the
  * value-less ['--auto-only'] (numeric key → bare token). This pins the COMPILED
  * command string so a text-only diff can't silently reintroduce the '=1' form.
  */

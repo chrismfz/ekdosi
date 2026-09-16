@@ -27,7 +27,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
   **Απαιτεί plugin ≥ 0.48.0.** (Ο native fetch path παραμένει creation-date → BACKLOG.)
 
 ### Fixed
-- **Scheduler: το `mydata:refresh-expenses` δεν σκάει πλέον 3×/μέρα.** Το task το καλούσε με
+- **Scheduler: το `mydata:refresh-expenses` δεν σκάει πλέον σε κάθε προγραμματισμένη εκτέλεση** (default
+  κάθε 6 ώρες). Το task το καλούσε με
   `['--auto-only' => true]`, που ο Laravel το σειριοποιεί σε `--auto-only='1'` — αλλά το flag είναι
   `VALUE_NONE`, οπότε η εντολή απέτυχε («does not accept a value») σε κάθε προγραμματισμένη εκτέλεση
   (θόρυβος στα logs / email). Διορθώθηκε σε `['--auto-only']` (numeric key = value-less flag).
