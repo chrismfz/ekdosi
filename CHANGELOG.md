@@ -22,16 +22,35 @@ from `[Unreleased]`; `--major` explicit for milestones).
 - **Εισαγωγή Epsilon πληρωμών (εμβάσματα/εισπράξεις) → «έναντι» (on-account) + αναφορά συμφωνίας.**
   Νέο πεδίο «Πληρωμές/Υπόλοιπα» στο Epsilon Smart tab της φόρμας εισαγωγής: κάθε έμβασμα/είσπραξη
   γίνεται on-account πληρωμή (match ΑΦΜ, `invoice_id` null → μειώνει άμεσα το υπόλοιπο πελάτη),
-  **idempotent** με το Epsilon UID (`payments.transaction_id` με πρόθεμα `EPS:`). Οι ακυρωμένες/
-  ακυρωτικές εισπράξεις (DocStatus ≠ «Έγκυρο») παραλείπονται. Στο τέλος τρέχει **read-only
-  reconciliation** του ζωντανού υπολοίπου ekdosi vs `EpsilonBalance` ανά πελάτη και προειδοποιεί
-  για κάθε απόκλιση (καρφώνει τα μετασχηματισμένα ΔΑ / cash-bank πιστωτικά που θέλουν διόρθωση).
+  **idempotent** με το Epsilon DocCode (`payments.transaction_id` = `EPS:` + section + DocCode). Μόνο
+  έγκυρα έγγραφα πιστώνουν (ακυρωμένα/ακυρωτικά/προσωρινά παραλείπονται)· οι πραγματικές πληρωμές
+  **αντικαθιστούν** τις synthetic settlements του `importSales` (καμία διπλομέτρηση). Στο τέλος τρέχει
+  **read-only reconciliation** του ζωντανού υπολοίπου ekdosi vs `EpsilonBalance` ανά πελάτη και
+  προειδοποιεί για κάθε απόκλιση (καρφώνει τα μετασχηματισμένα ΔΑ / cash-bank πιστωτικά).
+- **Panel: self-service «Τα κλειδιά MCP μου» (κόψιμο MCP bearer token χωρίς CLI).** Νέα σελίδα στο
+  user menu που κόβει/ανακαλεί το tenant-bound Sanctum token για MCP clients (Claude Desktop/CLI/curl)
+  — δεμένο στην τρέχουσα εταιρεία, με το plaintext ορατό **μία φορά**, λίστα + «Τελευταία χρήση» +
+  ανάκληση (αυστηρά μόνο τα δικά σου tokens αυτού του tenant). Gated σε `View:McpTokens` (super_admin +
+  company_admin εξ ορισμού· ο operator ΟΧΙ, γιατί ένα bearer token παρακάμπτει login + 2FA). Το panel
+  αντίστοιχο του `ekdosi:mcp-token`· για τον claude.ai OAuth connector δεν χρειάζεται token.
+- **Deploy: αυτόματη δημιουργία των Passport OAuth keys για τον MCP claude.ai connector.** Το
+  `deploy/update.sh` παράγει πλέον το RSA keypair (`storage/oauth-*.key`) την πρώτη φορά που λείπει
+  από έναν host (βήμα 7b) — idempotent (ποτέ δεν κάνει rotate υπάρχοντα κλειδιά, που θα ακύρωναν
+  ζωντανά OAuth tokens) και το προσπερνά όταν τα κλειδιά έρχονται από
+  `PASSPORT_PRIVATE_KEY`/`PASSPORT_PUBLIC_KEY` (shared keypair σε multi-node). Το βήμα «key
+  generation» που ξεχνιόταν (ζούσε μόνο στο `MCP.md §8`) τεκμηριώθηκε και στο `INSTALL.md §7c`, μαζί
+  με τη διάκριση bearer-token (Desktop/CLI) vs OAuth (claude.ai).
+- **Η σελίδα «Ρυθμίσεις → Ενημερώσεις» απέκτησε δύο κουμπιά.** «Έλεγχος ενημερώσεων» (τρέχει τον ίδιο
+  read-only `UpdateChecker` με την «Υγεία συστήματος» — bust του 6h cache, toast· ΠΟΤΕ δεν εφαρμόζει,
+  η αναβάθμιση μένει στο `deploy/update.sh`) και «Ρυθμίσεις ενημερώσεων» (deep-link στη σελίδα με το
+  repo/token/toggle). Απλώς φέρνει τον έλεγχο εκεί που είναι πιο βολικό· super_admin-only, μηδέν νέα λογική.
 - **Η ταξινόμηση εσόδων (E3) είναι πλέον ορατή, όχι μόνο στο raw XML.** Στο «Έλεγχος ΜΑΡΚ», κάθε
   γραμμή δικού μας παραστατικού δείχνει το E3 (τύπος + §8.6 κατηγορία, με ελληνικές ετικέτες) ως
   **διακριτική υπο-γραμμή κάτω από την περιγραφή** (πριν φαινόταν μόνο στα «αδέσποτα» που δεν έχουν
   περιγραφή). Στις γραμμές του παραστατικού (view) μπήκε **compact στήλη «E3 (ΑΑΔΕ)»** — μόνο ο
   κωδικός, με πλήρεις ετικέτες + κατηγορία στο **tooltip (mouseover)**, toggleable ώστε να μη
   χαλάει τη στοίχιση. Ώστε ο χειριστής να βλέπει «τι στέλνω / αν έχω λάθος» με μια ματιά.
+
 ### Changed
 - **Ο υπολογισμός E3 βγήκε σε κοινό `App\Support\MyData\IncomeClassResolver`** — μία πηγή που
   μοιράζονται η υποβολή (`AadeInvoiceDocument`) και οι οθόνες εμφάνισης, ώστε αυτό που ΒΛΕΠΕΙΣ να είναι
