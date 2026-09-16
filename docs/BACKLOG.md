@@ -599,8 +599,15 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
 ---
 
 ## 🔵 Big features (blueprints kept — see index above)
-- **PEPPOL Phase 2** — Access-Point transport («send»). Phase 1 (UBL) DONE· θέλει EE provider +
-  sandbox creds (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`.
+- **PEPPOL Phase 2** — Access-Point transport («send»). Phase 1 (UBL: builder + «Προβολή/Λήψη UBL»
+  κουμπιά + `invoice_ubl` tool + `peppol:test-submit`) DONE· θέλει EE provider + sandbox creds
+  (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`.
+  - **Endpoint format για scheme 9933 (GR:VAT)** — ο `PeppolEndpoint` βγάζει τον **seller** endpoint
+    bare (`9933:800561849`) ενώ ο **buyer** μπορεί να είναι EL-prefixed (`9933:EL…`) όταν το `vat_vies`
+    έχει πρόθεμα. Εσωτερικά συνεπές (και τα δύο περνούν από την ίδια `fromVat`), ο invalid `GR…` έχει
+    ήδη διορθωθεί σε `EL…`, αλλά **η επιλογή bare-vs-EL-prefixed** για το 9933 είναι απόφαση transport —
+    κλείδωσέ τη με τον πραγματικό AP/Schematron πριν το «send» (η library `validate()` δεν ελέγχει
+    endpoints). Αόρατο στο Phase 1 (show/download).
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
   (InvoSign/SBZ). `paroxos/`.
 - **PROV-003 archive half** (print ✅ #406· snapshot + invoice-page evidence ✅ 2026-09-03) —

@@ -64,6 +64,14 @@ class PeppolEndpoint
             return null;
         }
 
+        // 'GR' is never a valid VAT prefix (Greece uses 'EL', EN 16931 BR-CO-9) —
+        // correct a mistyped value so the participant id matches its 9933 (GR:VAT)
+        // scheme. (The bare-vs-EL-prefixed format choice for scheme 9933 is a
+        // Phase-2 transport decision; here we only reject the invalid prefix.)
+        if (preg_match('/^GR\d/', $vat)) {
+            $vat = 'EL'.substr($vat, 2);
+        }
+
         // A prefixed VAT (EE123…) implies its own country scheme.
         if (preg_match('/^([A-Z]{2})(.+)$/', $vat, $m)) {
             $scheme = self::schemeFor($m[1]);

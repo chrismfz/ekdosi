@@ -16,6 +16,7 @@ use App\Services\Assistant\Tools\KnowledgeSearchTool;
 use App\Services\Assistant\Tools\LeadsPulseTool;
 use App\Services\Assistant\Tools\ListTopDebtorsTool;
 use App\Services\Assistant\Tools\OutstandingReceivablesTool;
+use App\Services\Assistant\Tools\PeppolUblTool;
 use App\Services\Assistant\Tools\RecentActivityTool;
 use App\Services\Assistant\Tools\RecentInvoicesTool;
 use App\Services\Assistant\Tools\RecordPaymentTool;
@@ -53,6 +54,7 @@ class ToolRegistry
             new RecentInvoicesTool,
             new InvoiceGetTool,
             new SearchInvoicesTool,
+            new PeppolUblTool,
             new VatSummaryTool,
             new RecentActivityTool,
             new LeadsPulseTool,

@@ -13,9 +13,11 @@ use PHPUnit\Framework\Attributes\Test;
 use Tests\TestCase;
 
 /**
- * The provider-independent PEPPOL BIS 3.0 (EN 16931) UBL builder for an Estonian
- * tenant — validates against the library's EN 16931 + PEPPOL rules and carries
- * the right BT values / VAT categories.
+ * The provider-independent PEPPOL BIS 3.0 (EN 16931) UBL builder — validates
+ * against the library's EN 16931 + PEPPOL rules and carries the right BT values /
+ * VAT categories, for both an Estonian and a Greek (mainland myDATA) tenant. The
+ * Greek cases pin the EL-vs-GR subtlety: the <Country> code is GR (ISO 3166-1) but
+ * the VAT identifier prefix is EL (EN 16931 BR-CO-9).
  */
 class PeppolInvoiceDocumentTest extends TestCase
 {
@@ -27,6 +29,15 @@ class PeppolInvoiceDocumentTest extends TestCase
             'name' => 'Nixpal OÜ', 'slug' => 'nixpal-ee-'.uniqid(), 'country_code' => 'EE',
             'einvoice_provider' => 'ee-peppol', 'afm' => '101234567',
             'address' => 'Tartu mnt 1', 'city' => 'Tallinn', 'postcode' => '10115',
+        ]);
+    }
+
+    private function grCompany(): Company
+    {
+        return Company::create([
+            'name' => 'MyIP ΙΚΕ', 'slug' => 'myip-gr-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'afm' => '800561849',
+            'address' => 'Λεωφ. Κηφισίας 1', 'city' => 'Αθήνα', 'postcode' => '11523',
         ]);
     }
 
@@ -86,6 +97,85 @@ class PeppolInvoiceDocumentTest extends TestCase
         $this->assertEqualsWithDelta(200.0, $totals->netAmount, 0.01);
         $this->assertEqualsWithDelta(44.0, $totals->vatAmount, 0.01);
         $this->assertEqualsWithDelta(244.0, $totals->payableAmount, 0.01);
+    }
+
+    #[Test]
+    public function gr_invoice_uses_el_vat_prefix_but_gr_country_code(): void
+    {
+        // Greek tenant → Greek B2B customer, both with a bare 9-digit ΑΦΜ.
+        $company = $this->grCompany();
+        $customer = Customer::create([
+            'company_id' => $company->id, 'type' => 'company', 'name' => 'Πελάτης ΑΕ',
+            'afm' => '094512345', 'country' => 'GR', 'address1' => 'Ερμού 5',
+            'city' => 'Αθήνα', 'postcode' => '10563',
+        ]);
+
+        $invoice = $this->invoiceWith($company, $customer, [
+            ['name' => 'Υπηρεσίες φιλοξενίας', 'qty' => 1, 'price' => 100, 'vat' => 24],
+        ]);
+
+        $doc = app(PeppolInvoiceDocument::class);
+        $this->assertNull($doc->validate($invoice), 'expected a valid PEPPOL document');
+
+        $xml = $doc->xml($invoice);
+        // VAT identifiers carry the EL prefix (BR-CO-9), for BOTH seller and buyer…
+        $this->assertStringContainsString('EL800561849', $xml, 'seller VAT must use the EL prefix');
+        $this->assertStringContainsString('EL094512345', $xml, 'buyer VAT must use the EL prefix');
+        // …but the <Country> code is the ISO 3166-1 alpha-2 'GR', never 'EL'.
+        $this->assertMatchesRegularExpression('/<cbc:IdentificationCode[^>]*>GR<\/cbc:IdentificationCode>/', $xml);
+        $this->assertDoesNotMatchRegularExpression('/<cbc:IdentificationCode[^>]*>EL<\/cbc:IdentificationCode>/', $xml);
+        // The old bug: never emit a GR-prefixed VAT number.
+        $this->assertStringNotContainsString('GR800561849', $xml, 'VAT number must not be GR-prefixed');
+        $this->assertStringNotContainsString('GR094512345', $xml, 'VAT number must not be GR-prefixed');
+        // 24% standard-rated domestic → category S.
+        $this->assertStringContainsString('>S<', $xml);
+
+        $totals = $doc->build($invoice)->getTotals();
+        $this->assertEqualsWithDelta(100.0, $totals->netAmount, 0.01);
+        $this->assertEqualsWithDelta(24.0, $totals->vatAmount, 0.01);
+        $this->assertEqualsWithDelta(124.0, $totals->payableAmount, 0.01);
+    }
+
+    #[Test]
+    public function a_mistyped_gr_prefixed_buyer_vat_is_normalised_to_el(): void
+    {
+        // Legacy/WHMCS data can carry a VIES value verbatim as 'GR…' (invalid — a
+        // VAT id is never GR-prefixed). We must still emit the correct EL prefix.
+        $company = $this->grCompany();
+        $customer = Customer::create([
+            'company_id' => $company->id, 'type' => 'company', 'name' => 'Πελάτης ΑΕ',
+            'vat_vies' => 'GR094512345', 'country' => 'GR', 'city' => 'Αθήνα', 'postcode' => '10563',
+        ]);
+
+        $invoice = $this->invoiceWith($company, $customer, [
+            ['name' => 'Υπηρεσίες', 'qty' => 1, 'price' => 100, 'vat' => 24],
+        ]);
+
+        $xml = app(PeppolInvoiceDocument::class)->xml($invoice);
+        $this->assertStringContainsString('EL094512345', $xml, 'a GR-prefixed VAT must be normalised to EL');
+        $this->assertStringNotContainsString('GR094512345', $xml, 'the invalid GR-prefixed VAT must not survive');
+    }
+
+    #[Test]
+    public function gr_retail_invoice_without_buyer_vat_is_valid(): void
+    {
+        // Retail (ιδιώτης) buyer: no VAT id, still a valid EN 16931 document.
+        $company = $this->grCompany();
+        $customer = Customer::create([
+            'company_id' => $company->id, 'type' => 'person', 'name' => 'Ιδιώτης Πελάτης',
+            'country' => 'GR', 'city' => 'Θεσσαλονίκη', 'postcode' => '54622',
+        ]);
+
+        $invoice = $this->invoiceWith($company, $customer, [
+            ['name' => 'Domain renewal', 'qty' => 1, 'price' => 12, 'vat' => 24],
+        ]);
+
+        $doc = app(PeppolInvoiceDocument::class);
+        $this->assertNull($doc->validate($invoice), 'retail GR document should be valid');
+
+        $xml = $doc->xml($invoice);
+        $this->assertStringContainsString('EL800561849', $xml, 'seller VAT still EL-prefixed');
+        $this->assertStringContainsString('>S<', $xml);
     }
 
     #[Test]

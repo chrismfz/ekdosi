@@ -23,6 +23,7 @@ use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MyDataSubmitter;
+use App\Services\Peppol\PeppolInvoiceDocument;
 use App\Services\Stock\StockService;
 use App\Services\Whmcs\PaymentPushResult;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
@@ -48,6 +49,7 @@ use Filament\Schemas\Components\Utilities\Get;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\HtmlString;
 use Throwable;
 
 class ViewInvoice extends ViewRecord
@@ -1241,6 +1243,69 @@ class ViewInvoice extends ViewRecord
                         },
                         'invoice-'.$record->invcode.'.pdf',
                         ['Content-Type' => 'application/pdf'],
+                    );
+                }),
+
+            // UBL / PEPPOL BIS Billing 3.0 (EN 16931) preview. Phase 1: show +
+            // download only — no transport/Access-Point send yet. Deliberately
+            // NOT gated on einvoice_provider: we produce the standard document
+            // for every tenant (GR mainland included), so a provider can be
+            // plugged in later without touching the mapping.
+            Action::make('preview_ubl')
+                ->label('Προβολή UBL')
+                ->icon('heroicon-o-code-bracket')
+                ->color('gray')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
+                ->modalHeading('UBL — PEPPOL BIS Billing 3.0')
+                ->modalSubmitAction(false)
+                ->modalCancelActionLabel('Κλείσιμο')
+                ->modalWidth('5xl')
+                ->modalContent(function (Invoice $record): HtmlString {
+                    $doc = app(PeppolInvoiceDocument::class);
+
+                    try {
+                        $xml = $doc->xml($record);
+                        $error = $doc->validate($record);
+                    } catch (Throwable $e) {
+                        return new HtmlString(
+                            '<div style="padding:.75rem 1rem;border-radius:.5rem;background:#fee2e2;color:#991b1b;">'
+                            .'Αδυναμία παραγωγής UBL: '.e($e->getMessage()).'</div>'
+                        );
+                    }
+
+                    $status = $error === null
+                        ? '<div style="padding:.5rem .75rem;border-radius:.5rem;background:#dcfce7;color:#166534;'
+                            .'font-size:.8125rem;margin-bottom:.75rem;">✓ Πέρασε τον έλεγχο EN 16931 + PEPPOL '
+                            .'(υποσύνολο). Ο οριστικός έλεγχος γίνεται από το Access Point (Phase 2).</div>'
+                        : '<div style="padding:.5rem .75rem;border-radius:.5rem;background:#fef9c3;color:#854d0e;'
+                            .'font-size:.8125rem;margin-bottom:.75rem;">⚠ '.e($error).'</div>';
+
+                    return new HtmlString(
+                        $status
+                        .'<div style="max-height:60vh;overflow:auto;border:1px solid #e5e7eb;border-radius:.5rem;">'
+                        .'<pre style="margin:0;padding:.75rem;font-size:.75rem;line-height:1.4;'
+                        .'white-space:pre-wrap;word-break:break-word;">'.e($xml).'</pre></div>'
+                    );
+                }),
+
+            // UBL download — same document as the preview, as a .xml file.
+            Action::make('download_ubl')
+                ->label('Λήψη UBL')
+                ->icon('heroicon-o-arrow-down-tray')
+                ->color('gray')
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
+                ->action(function (Invoice $record) {
+                    // Build UP-FRONT so a mapping/validation error surfaces as a
+                    // Filament notification, not a half-streamed corrupt file
+                    // (same reasoning as download_pdf above).
+                    $xml = app(PeppolInvoiceDocument::class)->xml($record);
+
+                    return response()->streamDownload(
+                        function () use ($xml): void {
+                            echo $xml;
+                        },
+                        'invoice-'.$record->invcode.'.xml',
+                        ['Content-Type' => 'application/xml'],
                     );
                 }),
         ];

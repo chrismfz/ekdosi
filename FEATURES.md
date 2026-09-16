@@ -297,9 +297,16 @@
   opt-out), μπαίνει στην ουρά το email με το PDF — από κοινό trait `DispatchesAcceptanceEmail` με τον
   απευθείας δρόμο. Ο `shouldAutoEmailOnFinalize` θεωρεί τον πάροχο «φιλάρει ηλεκτρονικά» (μέσω
   `SendChannel`), οπότε ΔΕΝ στέλνει δεύτερο email στο finalize.
-- **PEPPOL Phase 1** (Εσθονία) — provider-independent **BIS Billing 3.0 / EN 16931 UBL**
-  builder (`PeppolInvoiceDocument` μέσω `josemmo/einvoicing`) + `peppol:test-submit`
-  (dry-run + validate). Phase 2 (Access-Point transport) = backlog.
+- **UBL / PEPPOL BIS Billing 3.0 (EN 16931) — Phase 1 (προβολή + λήψη, ΟΛΕΣ οι εταιρίες).**
+  Provider-independent builder (`PeppolInvoiceDocument` μέσω `josemmo/einvoicing`): κουμπιά
+  **«Προβολή UBL»** (modal με το XML + αποτέλεσμα ελέγχου εγκυρότητας) και **«Λήψη UBL»** (.xml) σε
+  κάθε παραστατικό — **ανεξάρτητα από τον `einvoice_provider`**, ώστε κάθε tenant (και GR mainland)
+  να έχει έτοιμο το τυποποιημένο e-invoice και να «κουμπώνει» εύκολα πάροχο/Access Point αργότερα.
+  Ελληνικό-σωστό: `<Country>` = **GR** (ISO 3166-1) αλλά VAT identifier με πρόθεμα **EL**
+  (`EL800561849`, EN 16931 BR-CO-9). CLI `peppol:test-submit` (dry-run + validate) + read-only
+  MCP/«Βοηθός» εργαλείο **`invoice_ubl`** (ίδια bytes, για έλεγχο εκτός panel). Ο έλεγχος του
+  builder είναι υποσύνολο EN 16931 + PEPPOL — ο οριστικός γίνεται από το Access Point (Phase 2:
+  transport, backlog).
 
 ## 7. Πελάτες & Καρτέλα
 - **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ».
