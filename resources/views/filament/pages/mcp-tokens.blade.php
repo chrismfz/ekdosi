@@ -1,5 +1,5 @@
 <x-filament-panels::page>
-    {{-- Freshly-minted token — shown ONCE, this request only (public $plainToken). --}}
+    {{-- Freshly-minted token — shown right after minting, cleared on the next action or reload. --}}
     @if ($this->plainToken)
         <x-filament::section>
             <x-slot name="heading">Το νέο σου token</x-slot>
@@ -15,7 +15,7 @@
                 <x-filament::button
                     size="sm"
                     icon="heroicon-o-clipboard-document"
-                    x-on:click="navigator.clipboard?.writeText(token); copied = true; setTimeout(() => copied = false, 1500)"
+                    x-on:click="if (navigator.clipboard) { navigator.clipboard.writeText(token).then(() => { copied = true; setTimeout(() => copied = false, 1500) }).catch(() => {}) }"
                 >
                     <span x-text="copied ? 'Αντιγράφηκε!' : 'Αντιγραφή'">Αντιγραφή</span>
                 </x-filament::button>

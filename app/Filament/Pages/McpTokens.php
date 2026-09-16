@@ -9,7 +9,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
-use Illuminate\Support\Carbon;
+use Livewire\Attributes\Locked;
 
 /**
  * «Τα κλειδιά MCP μου» — self-service minting of the tenant-bound Sanctum bearer
@@ -40,7 +40,12 @@ class McpTokens extends Page
 
     protected string $view = 'filament.pages.mcp-tokens';
 
-    /** The freshly-minted plaintext token — shown ONCE, for this request only. */
+    /**
+     * The freshly-minted plaintext token. Shown immediately after minting and
+     * cleared on the next action or a page reload — never re-fetchable. #[Locked]
+     * so the client cannot tamper with (or inject) it across Livewire roundtrips.
+     */
+    #[Locked]
     public ?string $plainToken = null;
 
     public static function shouldRegisterNavigation(): bool
@@ -83,9 +88,7 @@ class McpTokens extends Page
                 'id' => $token->getKey(),
                 'name' => (string) $token->name,
                 'created' => optional($token->created_at)->format('Y-m-d H:i') ?? '—',
-                'last_used' => $token->last_used_at
-                    ? Carbon::parse($token->last_used_at)->diffForHumans()
-                    : 'Ποτέ',
+                'last_used' => $token->last_used_at?->diffForHumans() ?? 'Ποτέ',
             ])
             ->values()
             ->all();
@@ -103,9 +106,8 @@ class McpTokens extends Page
                 ->schema([
                     TextInput::make('name')
                         ->label('Όνομα (για να το ξεχωρίζεις)')
-                        ->placeholder('π.χ. laptop, claude-desktop')
-                        ->maxLength(120)
-                        ->default('mcp'),
+                        ->placeholder('π.χ. laptop, claude-desktop (κενό → mcp:<εταιρεία>)')
+                        ->maxLength(120),
                 ])
                 ->action(function (array $data): void {
                     $user = auth()->user();
@@ -134,6 +136,9 @@ class McpTokens extends Page
      */
     public function revoke(int|string $id): void
     {
+        // A prior mint's one-time reveal must not linger once the operator acts again.
+        $this->plainToken = null;
+
         $user = auth()->user();
         if ($user === null) {
             return;

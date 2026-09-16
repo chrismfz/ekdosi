@@ -131,6 +131,22 @@ class McpTokensPageTest extends TestCase
     }
 
     #[Test]
+    public function a_later_action_clears_the_one_time_plaintext_reveal(): void
+    {
+        [$user, $company] = $this->actAsAuthorized();
+        $keep = $user->createToken('keep', ['tenant:'.$company->getKey()])->accessToken;
+
+        $component = Livewire::test(McpTokens::class)
+            ->callAction('create', ['name' => 'fresh']);
+        $this->assertIsString($component->get('plainToken'), 'the mint reveals the plaintext');
+
+        // Revoking another token is a fresh roundtrip — the one-time reveal must
+        // not linger in component state.
+        $component->call('revoke', $keep->getKey());
+        $this->assertNull($component->get('plainToken'), 'the reveal is cleared on the next action');
+    }
+
+    #[Test]
     public function the_list_and_revoke_are_scoped_to_the_current_tenant(): void
     {
         [$user, $company] = $this->actAsAuthorized();
