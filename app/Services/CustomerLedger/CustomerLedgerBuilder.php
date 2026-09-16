@@ -612,8 +612,10 @@ class CustomerLedgerBuilder
                 // payment is settled-at-issue (excluded from the balance); a
                 // cash-term invoice WITH a payment posts both its debit and that
                 // payment (net zero) — never double-counted either way.
-                'payment_term' => ((int) ($inv->due_days ?? 0)) > 0 ? 'credit' : 'cash',
-                'has_payment' => isset($paidIds[(int) $inv->id]),
+                // Credit notes sit in the Πίστωση column and aren't a «χρέωση» with a
+                // term — leave their «Κατάσταση» blank (the badge is invoice-only).
+                'payment_term' => $isCreditNote ? null : (((int) ($inv->due_days ?? 0)) > 0 ? 'credit' : 'cash'),
+                'has_payment' => ! $isCreditNote && isset($paidIds[(int) $inv->id]),
                 'is_receipt_group' => false,
                 'allocations' => null,
             ];

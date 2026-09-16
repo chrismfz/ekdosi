@@ -264,7 +264,7 @@
             @php($b = (float) ($stats['balance'] ?? 0))
             <div class="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
                 <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
-                    <div class="text-xs fi-color-gray">Σύνολο χρεώσεων (επί πιστώσει)</div>
+                    <div class="text-xs fi-color-gray">Σύνολο χρεώσεων (στο υπόλοιπο)</div>
                     <div class="text-lg font-bold">{{ \App\Support\Money::eur((float) ($stats['charges'] ?? 0)) }}</div>
                 </div>
                 <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
@@ -287,7 +287,7 @@
 
         {{-- ============= Γραφήματα (compact, κάτω από την καρτέλα) ============= --}}
         @if ($this->hasBalanceTrend())
-            <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
                 @livewire(
                     \App\Filament\Resources\Customers\Widgets\CustomerLedgerRevenueChart::class,
                     ['ledgerYearly' => $yearly],

@@ -520,11 +520,15 @@ class CustomerLedger extends Page implements HasTable
             }));
         }
 
-        // buildLedgerOnly already returns newest-first (date + creation-order
-        // tiebreak). Flipping to ascending just reverses it — array_reverse keeps
-        // the same-day creation-order tiebreak intact (strcmp on the date string
-        // would collapse same-day rows into an arbitrary order again).
-        if ($sortColumn === 'date' && $sortDirection === 'asc') {
+        // buildLedgerOnly returns newest-first (date + creation-order tiebreak). The
+        // Καρτέλα shows oldest-first by DEFAULT (χρονολογικά — λογιστική ανάγνωση):
+        // reverse it UNLESS the operator explicitly picked a descending sort.
+        // A records()-backed table does NOT seed defaultSort() into the sort state,
+        // so the no-click default arrives here as (null, null) — that must count as
+        // the ascending default, not fall through to newest-first. array_reverse
+        // keeps the same-day creation-order tiebreak intact (strcmp on the date
+        // string would collapse same-day rows into an arbitrary order again).
+        if ($sortDirection !== 'desc') {
             $rows = array_reverse($rows);
         }
 
