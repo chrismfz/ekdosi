@@ -7,6 +7,7 @@ use App\Services\Delivery\InboundDeliveryFetcher;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 use Throwable;
 
@@ -19,8 +20,13 @@ use Throwable;
  * rejects/confirms/mutates a legal state at AADE — those are the operator-gated
  * inbox actions (Slice 4b/4c).
  *
- * Scheduled (default OFF, `EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND`), or run
+ * Scheduled (default ON, `EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND`), or run
  * manually. Same tenant-resolution + spacing as `mydata:refresh-expenses`.
+ *
+ * Resilience: a per-tenant fetch failure is a transient AADE hiccup on a
+ * read-only, self-healing 6-hourly poll — it is LOGGED (warning, with the real
+ * exception) but NEVER fails the run, so the scheduler's failure alert doesn't
+ * fire for a blip that the next run clears.
  *
  * Usage:
  *   php artisan delivery:fetch-inbound                         # all myDATA-readable tenants
@@ -52,19 +58,37 @@ class DeliveryFetchInbound extends Command
         $dryRun = (bool) $this->option('dry-run');
         $gap = max(0, (int) $this->option('gap'));
         $last = $tenants->count() - 1;
-        $hadError = false;
 
         foreach ($tenants->values() as $i => $tenant) {
             try {
-                $result = (new InboundDeliveryFetcher($tenant))->fetch($from, $to, $dryRun);
+                $result = $this->fetcherFor($tenant)->fetch($from, $to, $dryRun);
                 $prefix = $dryRun ? '[dry-run] ' : '';
                 $this->line("✓ {$tenant->slug}: {$prefix}{$result->summary()}");
             } catch (RuntimeException $e) {
-                // Guard messages (mode off / missing creds) — expected, skip.
+                // Guard messages (mode off / missing creds) — expected config
+                // states, not errors. Skip quietly; nothing to log or alert on.
                 $this->warn("• {$tenant->slug}: {$e->getMessage()}");
             } catch (Throwable $e) {
-                $hadError = true;
-                $this->error("✗ {$tenant->slug}: {$e->getMessage()}");
+                // A per-tenant fetch failure — almost always a transient AADE
+                // hiccup (firebed's MyDataConnection/Timeout/InvalidResponse all
+                // extend \Exception, so they land HERE, not the RuntimeException
+                // guard above). This poll is READ-ONLY, idempotent and runs every
+                // 6h, so the failure self-heals on the next run: we must NOT fail
+                // the whole scheduled task (its onFailure hook records a `failed`
+                // run and the OS-cron alerts on the non-zero exit — the midnight
+                // false alarm this fixes). We LOG it at warning level with the
+                // real exception (the old stdout-only $this->error() left
+                // laravel.log empty, so the cause was undiagnosable) and keep it
+                // visible on a manual run, but the command still exits 0. A
+                // persistent problem then shows up as a warning every run rather
+                // than a page.
+                Log::warning('delivery:fetch-inbound: tenant fetch failed (transient; staged nothing this run)', [
+                    'company' => $tenant->slug,
+                    'exception' => get_class($e),
+                    'at' => $e->getFile().':'.$e->getLine(),
+                    'message' => $e->getMessage(),
+                ]);
+                $this->warn("• {$tenant->slug}: {$e->getMessage()} (καταγράφηκε — θα ξαναδοκιμαστεί στην επόμενη εκτέλεση)");
             }
 
             if ($gap > 0 && $i < $last) {
@@ -72,7 +96,16 @@ class DeliveryFetchInbound extends Command
             }
         }
 
-        return $hadError ? self::FAILURE : self::SUCCESS;
+        return self::SUCCESS;
+    }
+
+    /**
+     * Build the fetcher for one tenant. A tiny seam so a test can inject a
+     * fetcher that throws (the transient-failure path) without a live AADE call.
+     */
+    protected function fetcherFor(Company $tenant): InboundDeliveryFetcher
+    {
+        return new InboundDeliveryFetcher($tenant);
     }
 
     /**

@@ -102,6 +102,45 @@ TXT;
     }
 
     /**
+     * Wrap bare http(s) URLs in an ALREADY HTML-escaped string with a clickable
+     * `<a href>`. The invoice mail's HTML body is emitted via `{!! nl2br(e($body)) !!}`
+     * — so the body is HTML-escaped, and although this IS a markdown mailable
+     * (CommonMark runs on the view), CommonMark does not autolink a BARE
+     * `http://…` URL — so the AADE verification URL (from `{verify_url}`/
+     * `{mark_section}`) would otherwise render as dead plain text. We link the
+     * escaped text on purpose:
+     *   - the URL run carries NO raw `"`/`<`/`>` (they are already `&quot;`/`&lt;`/
+     *     `&gt;` entities, which stay INSIDE the attribute value and cannot break
+     *     out of `href="…"`), and `&` is the `&amp;` entity — valid in an href;
+     *   - ONLY `http`/`https` are linked (never `javascript:`/`data:`), and since
+     *     the body is escaped FIRST, operator-typed markup can never smuggle a tag
+     *     or a scheme through this path — the DOC-8 boundary is preserved.
+     * A sentence-final `.,!?` is left OUT of the link (but never `;`/`)`, which can
+     * belong to an entity like `&amp;` or to the URL itself).
+     */
+    public static function autolink(string $escapedHtml): string
+    {
+        // `(?:&amp;|[^\s<&])+` — consume normal URL chars, KEEP `&amp;` (a real
+        // query `&`), but STOP at any other entity (`&quot;`/`&lt;`/`&gt;`/`&#039;`
+        // from escaped operator input) so the link never over-consumes escaped
+        // markup that happens to follow a URL.
+        return preg_replace_callback(
+            '#\bhttps?://(?:&amp;|[^\s<&])+#i',
+            static function (array $m): string {
+                $url = $m[0];
+                $trail = '';
+                while ($url !== '' && str_contains('.,!?', substr($url, -1))) {
+                    $trail = substr($url, -1).$trail;
+                    $url = substr($url, 0, -1);
+                }
+
+                return '<a href="'.$url.'" target="_blank" rel="noopener noreferrer">'.$url.'</a>'.$trail;
+            },
+            $escapedHtml,
+        ) ?? $escapedHtml;
+    }
+
+    /**
      * @param  array<string, string>  $vars
      */
     private function interpolate(string $template, array $vars, bool $escapeMarkdown = false): string
