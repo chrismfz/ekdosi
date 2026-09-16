@@ -605,6 +605,15 @@ class CustomerLedgerBuilder
                 'mydata_state' => $inv->mydata_state,
                 'mydata_mark' => $inv->mydata_mark,
                 'is_credit_term' => ! $isCreditNote && $this->isTracked($inv, $paidIds),
+                // Display-only «Κατάσταση» hints (they do NOT touch the money math):
+                // whether the document is cash- or credit-term, and whether a real
+                // payment row is allocated to it — so the operator SEES why the
+                // running balance did or didn't move. A cash-term invoice with no
+                // payment is settled-at-issue (excluded from the balance); a
+                // cash-term invoice WITH a payment posts both its debit and that
+                // payment (net zero) — never double-counted either way.
+                'payment_term' => ((int) ($inv->due_days ?? 0)) > 0 ? 'credit' : 'cash',
+                'has_payment' => isset($paidIds[(int) $inv->id]),
                 'is_receipt_group' => false,
                 'allocations' => null,
             ];
@@ -805,9 +814,12 @@ class CustomerLedgerBuilder
         foreach ($events as &$e) {
             unset($e['date_sort'], $e['created_sort'], $e['is_credit_term']);
             $e['net'] = $e['debit'];   // for backward-compat / view convenience
-            // Uniform shape: payment/refund rows carry no document breakdown.
+            // Uniform shape: payment/refund rows carry no document breakdown and no
+            // cash/credit «Κατάσταση» (that hint is invoice-only).
             $e['document_gross'] ??= null;
             $e['tax_adjustment'] ??= 0.0;
+            $e['payment_term'] ??= null;
+            $e['has_payment'] ??= false;
         }
         unset($e);
 

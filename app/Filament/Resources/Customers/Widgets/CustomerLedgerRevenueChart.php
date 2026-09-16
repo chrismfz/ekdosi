@@ -21,6 +21,10 @@ class CustomerLedgerRevenueChart extends ChartWidget
 
     protected int | string | array $columnSpan = 'full';
 
+    // Compact (dashboard-style miniature): capped height so the chart sits below
+    // the ledger without dominating the page. The blade lays two of these side-by-side.
+    protected ?string $maxHeight = '240px';
+
     protected function getType(): string
     {
         return 'bar';
