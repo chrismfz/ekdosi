@@ -2,10 +2,14 @@
 
 namespace App\Filament\Resources\Invoices\RelationManagers;
 
+use App\Models\InvoiceLine;
+use App\Support\MyData\Codes;
+use App\Support\MyData\IncomeClassResolver;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 /**
  * Invoice lines, READ-ONLY display. No create/edit/delete actions —
@@ -25,6 +29,14 @@ class LinesRelationManager extends RelationManager
 
     protected static ?string $recordTitleAttribute = 'product_descr';
 
+    /**
+     * The owner invoice's base (E3 class, §8.6 category, business-activity type),
+     * computed once — a credit note's base is a DB query, so don't repeat it per row.
+     *
+     * @var array{0: ?string, 1: ?string, 2: ?string}|null
+     */
+    private ?array $incomeBaseCache = null;
+
     public function form(Schema $schema): Schema
     {
         // Required by the RelationManager contract but unused — the
@@ -35,6 +47,8 @@ class LinesRelationManager extends RelationManager
     public function table(Table $table): Table
     {
         return $table
+            // product.productCategory feeds the per-line E3 income class (MYD-5).
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('product.productCategory'))
             ->columns([
                 TextColumn::make('id')
                     ->label('#')
@@ -43,6 +57,17 @@ class LinesRelationManager extends RelationManager
                 TextColumn::make('product_descr')
                     ->label('Description')
                     ->wrap(),
+
+                // The E3 income classification this line FILES at myDATA — the same
+                // value the filing path sends (via IncomeClassResolver), so the
+                // operator sees «τι στέλνω / αν έχω λάθος» at a glance. Compact: the
+                // code only, with the full Greek labels + §8.6 category on hover.
+                // Toggleable so it never gets in the way.
+                TextColumn::make('income_class')
+                    ->label('E3 (ΑΑΔΕ)')
+                    ->state(fn (InvoiceLine $record): string => $this->incomeClassLabel($record))
+                    ->tooltip(fn (InvoiceLine $record): string => $this->incomeClassTooltip($record))
+                    ->toggleable(),
 
                 TextColumn::make('qty')
                     ->numeric(decimalPlaces: 3)
@@ -87,5 +112,59 @@ class LinesRelationManager extends RelationManager
             ->recordActions([])
             ->toolbarActions([])
             ->defaultSort('id');
+    }
+
+    /**
+     * The (E3 class, §8.6 category) this line files — resolved through the SAME
+     * IncomeClassResolver the filing path uses, so the column reads exactly what
+     * gets sent. The invoice-level base pair is computed once and cached.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private function resolveLineClass(InvoiceLine $line): array
+    {
+        [$baseClass, $baseCat, $businessType] = $this->incomeBase();
+
+        return app(IncomeClassResolver::class)->forLine($line, $baseClass, $baseCat, $businessType);
+    }
+
+    /**
+     * @return array{0: ?string, 1: ?string, 2: ?string} [base class, base category, business-activity type]
+     */
+    private function incomeBase(): array
+    {
+        if ($this->incomeBaseCache === null) {
+            $invoice = $this->getOwnerRecord();
+            [$class, $cat] = app(IncomeClassResolver::class)->baseFor($invoice);
+            $this->incomeBaseCache = [$class, $cat, $invoice->company?->business_activity_type];
+        }
+
+        return $this->incomeBaseCache;
+    }
+
+    /**
+     * The visible cell: the E3 class code, but ONLY when the pair actually files
+     * (both parts truthy — mirrors AadeInvoiceDocument's `$lineClass && $lineCat`),
+     * so an empty/half pair reads «—» exactly as the filed document omits it.
+     */
+    private function incomeClassLabel(InvoiceLine $line): string
+    {
+        [$class, $cat] = $this->resolveLineClass($line);
+
+        return (filled($class) && filled($cat)) ? $class : '—';
+    }
+
+    private function incomeClassTooltip(InvoiceLine $line): string
+    {
+        [$class, $cat] = $this->resolveLineClass($line);
+        if (! filled($class) || ! filled($cat)) {
+            return 'Χωρίς ταξινόμηση εσόδων (π.χ. δελτίο/εσωτερικό — δεν φέρει έσοδο).';
+        }
+
+        $typeLabel = Codes::e3TypeLabel($class);
+        $catLabel = Codes::e3CategoryLabel($cat);
+
+        return $class.($typeLabel ? ' — '.$typeLabel : '')
+            .' · '.$cat.($catLabel ? ' — '.$catLabel : '');
     }
 }
