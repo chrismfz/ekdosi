@@ -56,6 +56,7 @@ class CreateFirebirdImportRun extends CreateRecord
             'items' => $data['items_json'] ?? null,
             'services' => $data['services_json'] ?? null,
             'sales' => $data['sales_json'] ?? null,
+            'payments' => $data['payments_json'] ?? null,
         ], static fn ($path): bool => filled($path));
 
         if ($epsilonFiles !== []) {

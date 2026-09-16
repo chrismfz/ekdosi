@@ -196,6 +196,11 @@ class FirebirdImportRunForm
                                             ->disk('local')->directory('epsilon-imports')->visibility('private')
                                             ->helperText('Ιστορικά παραστατικά (με ΜΑΡΚ) → invoices (active, VALID, εξοφλημένα). Match πελάτη με ΑΦΜ· κρατά το νούμερο Epsilon. Καλό είναι να εισαχθούν πρώτα Πελάτες + Είδη. (Χωρίς AADE QR στο PDF — το Epsilon δεν εξάγει το URL.)')
                                             ->columnSpanFull(),
+                                        FileUpload::make('payments_json')
+                                            ->label('Πληρωμές/Υπόλοιπα — DataExport-Payments-Balances.json')
+                                            ->disk('local')->directory('epsilon-imports')->visibility('private')
+                                            ->helperText('Εμβάσματα + Εισπράξεις πελατών → πληρωμές «έναντι» (on-account, match ΑΦΜ) που μειώνουν το υπόλοιπο· idempotent με το UID. Στο τέλος βγαίνει αναφορά συμφωνίας ekdosi vs Epsilon ανά πελάτη. Τρέξε το ΑΦΟΥ έχουν μπει Πελάτες + Πωλήσεις — και ΜΗΝ ξανα-τρέξεις τις Πωλήσεις μετά (θα διπλο-εξοφλούσε).')
+                                            ->columnSpanFull(),
                                     ]),
                             ]),
 
@@ -330,7 +335,8 @@ class FirebirdImportRunForm
     public static function hasEpsilon(Get $get): bool
     {
         return filled($get('customers_json')) || filled($get('items_json'))
-            || filled($get('services_json')) || filled($get('sales_json'));
+            || filled($get('services_json')) || filled($get('sales_json'))
+            || filled($get('payments_json'));
     }
 
     /**

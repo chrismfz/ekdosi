@@ -87,6 +87,21 @@ class EpsilonImporter
     /** Marker note on the synthetic settlement payment (idempotent re-runs). */
     private const IMPORT_PAYMENT_NOTE = 'Εισαγωγή ιστορικού Epsilon — εξοφλημένο κατά την έκδοση';
 
+    /** Marker note bases on the imported on-account payments (εμβάσματα / εισπράξεις). */
+    private const REMITTANCE_NOTE = 'Εισαγωγή Epsilon — έμβασμα πελάτη (έναντι)';
+
+    private const RECEIPT_NOTE = 'Εισαγωγή Epsilon — είσπραξη πελάτη (έναντι)';
+
+    /**
+     * Prefix that scopes an imported payment's idempotency key on
+     * `payments.transaction_id` (= PREFIX + Epsilon UID), so a re-run upserts
+     * and never collides with a gateway/WHMCS transaction id.
+     */
+    private const PAYMENT_TXN_PREFIX = 'EPS:';
+
+    /** @var array<string,?int> payment-side ΑΦΜ → id (resolve-only, never creates) */
+    private array $paymentCustomerCache = [];
+
     /** @var array<string,true> de-duped human-readable warnings surfaced to the operator */
     private array $warnings = [];
 
@@ -126,6 +141,11 @@ class EpsilonImporter
         }
         if (isset($payload['sales'])) {
             $out['sales'] = $this->importSales($payload['sales']);
+        }
+        // The payments export is a single file with three sections
+        // (CustomerRemittances / CustomerReceipts / CustomerBalances).
+        if (isset($payload['payments'])) {
+            $out['payments'] = $this->importPayments($payload['payments']);
         }
 
         return $out;
@@ -328,6 +348,170 @@ class EpsilonImporter
         $invoice = Invoice::withoutGlobalScopes()->find($invoiceId);
         if ($invoice !== null) {
             app(InvoiceBalance::class)->recompute($invoice);
+        }
+    }
+
+    /**
+     * Customer remittances (εμβάσματα) + receipts (εισπράξεις) → ON-ACCOUNT
+     * payments. Epsilon does NOT link these to specific invoices — they are
+     * customer-account movements — so each lands as ONE Payment with
+     * invoice_id = null (kind = 'payment'). Customer::scopeWithOutstandingBalance
+     * subtracts EVERY customer payment regardless of allocation, so the έναντι
+     * credit reduces the displayed balance directly (the operator can later apply
+     * it onto a specific invoice from the Καρτέλα via «εφαρμογή πίστωσης»).
+     *
+     * The single payments JSON carries three sections. Re-runnable: keyed by the
+     * Epsilon UID (on transaction_id, prefixed) — a re-run refreshes amount/date
+     * and never double-counts. Cancelled/cancelling receipts (DocStatus ≠
+     * «Έγκυρο») are skipped (they net to nothing in Epsilon). After the write,
+     * CustomerBalances drives a READ-ONLY reconciliation that WARNS on any
+     * customer whose live ekdosi balance diverges from Epsilon's — surfacing the
+     * historical sales-import edge cases (transformed ΔΑ, cash/bank credit notes)
+     * as explicit, per-customer follow-ups rather than silent drift.
+     *
+     * @param  array<string,mixed>  $data  the decoded payments export
+     * @return array{created:int, updated:int, skipped:int}
+     */
+    public function importPayments(array $data): array
+    {
+        $created = $updated = $skipped = 0;
+
+        DB::transaction(function () use ($data, &$created, &$updated, &$skipped) {
+            foreach (($data['CustomerRemittances'] ?? []) as $row) {
+                $this->importOnAccountPayment($row, self::REMITTANCE_NOTE, $created, $updated, $skipped);
+            }
+            foreach (($data['CustomerReceipts'] ?? []) as $row) {
+                // Only a valid receipt settles a balance — a cancelled («Ακυρωμένο»)
+                // or cancelling («Ακυρωτικό») one nets to nothing in Epsilon.
+                if ($this->clean($row['DocStatus'] ?? null) !== 'Έγκυρο') {
+                    $skipped++;
+
+                    continue;
+                }
+                $this->importOnAccountPayment($row, self::RECEIPT_NOTE, $created, $updated, $skipped);
+            }
+        });
+
+        // Read-only cross-check against Epsilon's own per-customer figures. Runs
+        // AFTER the transaction commits so the balance query sees the new rows.
+        $this->reconcileBalances($data['CustomerBalances'] ?? []);
+
+        return ['created' => $created, 'updated' => $updated, 'skipped' => $skipped];
+    }
+
+    /**
+     * Upsert ONE on-account payment from a remittance/receipt row, keyed by its
+     * Epsilon UID. An unmatched ΑΦΜ (no such customer, or a retail placeholder)
+     * and a non-positive amount are warned/skipped rather than fabricating a
+     * party or a negative-magnitude payment (MON-8).
+     *
+     * @param  array<string,mixed>  $row
+     */
+    private function importOnAccountPayment(array $row, string $noteBase, int &$created, int &$updated, int &$skipped): void
+    {
+        $afm = $this->clean($row['TraderTIN'] ?? null);
+        $customerId = $this->resolvePaymentCustomer($afm);
+        if ($customerId === null) {
+            $this->warn("Πληρωμή Epsilon για ΑΦΜ «{$afm}» χωρίς αντίστοιχο πελάτη — παραλείφθηκε. Εισήγαγε πρώτα τους Πελάτες.");
+            $skipped++;
+
+            return;
+        }
+
+        $amount = round((float) ($row['TotalVal'] ?? 0), 2);
+        if ($amount <= 0) {
+            $skipped++;
+
+            return;
+        }
+
+        $uid = $this->clean($row['UID'] ?? null);
+        $docCode = $this->clean($row['DocCode'] ?? null);
+        // Idempotency key: prefer the stable Epsilon UID; fall back to DocCode.
+        $key = self::PAYMENT_TXN_PREFIX.($uid ?? $docCode ?? bin2hex(random_bytes(8)));
+
+        $bank = $this->clean($row['BankAccount'] ?? null);
+        $notes = $noteBase
+            .($docCode !== null ? " · {$docCode}" : '')
+            .($bank !== null ? " · {$bank}" : '');
+
+        $values = [
+            'customer_id' => $customerId,
+            'invoice_id' => null,          // on-account credit / έναντι
+            'kind' => 'payment',
+            'pay_date' => $this->parseDateTime(null, $row['Date'] ?? null)->toDateString(),
+            'amount' => $amount,
+            'reference' => $docCode,
+            'notes' => $notes,
+        ];
+
+        $existing = Payment::query()->withoutGlobalScopes()
+            ->where('company_id', $this->companyId)
+            ->where('transaction_id', $key)
+            ->first();
+
+        if ($existing !== null) {
+            $existing->forceFill($values)->save();
+            $updated++;
+
+            return;
+        }
+
+        Payment::create($values + [
+            'company_id' => $this->companyId,
+            'transaction_id' => $key,
+        ]);
+        $created++;
+    }
+
+    /** Resolve a payment's customer by ΑΦΜ — EXISTING only (never creates one). */
+    private function resolvePaymentCustomer(?string $afm): ?int
+    {
+        if ($afm === null || Afm::uniqueKey($afm) === null) {
+            return null;
+        }
+        if (array_key_exists($afm, $this->paymentCustomerCache)) {
+            return $this->paymentCustomerCache[$afm];
+        }
+        $id = Customer::query()->withoutGlobalScopes()
+            ->where('company_id', $this->companyId)
+            ->whereAfmKeyOf($afm)
+            ->value('id');
+
+        return $this->paymentCustomerCache[$afm] = $id !== null ? (int) $id : null;
+    }
+
+    /**
+     * READ-ONLY reconciliation: compare each customer's LIVE ekdosi outstanding
+     * balance with Epsilon's own figure (EpsilonBalance) and WARN on any gap >
+     * 1 cent. Writes nothing — it just tells the operator exactly which customers
+     * still diverge (and by how much) after the payment import, so the remaining
+     * historical sales-import edge cases can be fixed one by one.
+     *
+     * @param  array<int, array<string,mixed>>  $balances
+     */
+    private function reconcileBalances(array $balances): void
+    {
+        foreach ($balances as $b) {
+            $afm = $this->clean($b['TraderTIN'] ?? null);
+            $customerId = $this->resolvePaymentCustomer($afm);
+            if ($customerId === null) {
+                continue; // no matching customer — its payment (if any) already warned
+            }
+
+            $target = round((float) ($b['EpsilonBalance'] ?? 0), 2);
+            $live = round((float) Customer::query()->withoutGlobalScopes()
+                ->withOutstandingBalance($this->companyId)
+                ->whereKey($customerId)
+                ->value('outstanding_balance'), 2);
+
+            if (abs($live - $target) > 0.01) {
+                $name = $this->clean($b['TraderName'] ?? null) ?? $afm;
+                $this->warn(sprintf(
+                    'Συμφωνία «%s»: ekdosi %.2f € vs Epsilon %.2f € (διαφορά %+.2f €) — έλεγξε μετασχηματισμένα ΔΑ / πιστωτικά μετρητοίς-τράπεζας.',
+                    $name, $live, $target, $live - $target,
+                ));
+            }
         }
     }
 

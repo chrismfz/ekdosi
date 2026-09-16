@@ -577,6 +577,12 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Ζωντανή σύνδεση Firebird** — tab «Ζωντανή σύνδεση» στη φόρμα εισαγωγής: απευθείας στη ζωντανή legacy
   βάση (IP + διαπιστευτήρια + διαδρομή `.fdb`), χωρίς gbak/upload, με κουμπί **«Έλεγχος σύνδεσης»**
   (μετρά CUSTOMER/INVTYPE/INVOICE/PRODUCT πριν το import· read-only· κωδικός μόνο στη μνήμη).
+- **Εισαγωγή Epsilon Smart (JSON)** — tab «Epsilon Smart» στη φόρμα εισαγωγής (`EpsilonImporter`,
+  επαναλήψιμο upsert με φυσικό κλειδί): Πελάτες (ΑΦΜ) / Είδη·Υπηρεσίες (→ προϊόντα) / Πωλήσεις (ιστορικά
+  παραστατικά με ΜΑΡΚ) και **Πληρωμές/Υπόλοιπα** — εμβάσματα & εισπράξεις πελατών → πληρωμές **«έναντι»
+  (on-account)** που μειώνουν το υπόλοιπο, idempotent με το Epsilon UID· ακυρωμένες/ακυρωτικές εισπράξεις
+  παραλείπονται· στο τέλος **αναφορά συμφωνίας** ekdosi vs `EpsilonBalance` ανά πελάτη (καρφώνει τα
+  μετασχηματισμένα ΔΑ / cash-bank πιστωτικά που θέλουν χειροκίνητη τακτοποίηση).
 
 ## 14. Backups / Portability / DR
 - **Per-company backups** (`spatie/laravel-backup`) — πρόγραμμα/διατήρηση/προορισμοί
