@@ -260,6 +260,92 @@ class MailTemplateRendererTest extends TestCase
         $mailable->assertDontSeeInText('\\');
     }
 
+    public function test_autolink_wraps_bare_url_in_clickable_anchor(): void
+    {
+        $html = MailTemplateRenderer::autolink(e('Δείτε: https://verify.aade.gr/?mark=123'));
+
+        $this->assertStringContainsString(
+            '<a href="https://verify.aade.gr/?mark=123" target="_blank" rel="noopener noreferrer">https://verify.aade.gr/?mark=123</a>',
+            $html,
+        );
+    }
+
+    public function test_autolink_keeps_ampersand_entity_inside_the_link(): void
+    {
+        // e() turns & into &amp;; a real query `&` is part of the URL and must
+        // stay inside the link (and inside href="", where the entity is valid).
+        $html = MailTemplateRenderer::autolink(e('https://www1.aade.gr/q?mark=1&sig=abc'));
+
+        $this->assertStringContainsString(
+            '<a href="https://www1.aade.gr/q?mark=1&amp;sig=abc" target="_blank" rel="noopener noreferrer">https://www1.aade.gr/q?mark=1&amp;sig=abc</a>',
+            $html,
+        );
+    }
+
+    public function test_autolink_stops_at_a_quote_entity_it_does_not_over_consume(): void
+    {
+        // A stray `"` after a URL becomes &quot;; the link must END at the URL,
+        // not swallow the entity (the DOC-8 escaped-body over-consumption guard).
+        $html = MailTemplateRenderer::autolink(e('https://aade.gr/v"tail'));
+
+        $this->assertStringContainsString(
+            '<a href="https://aade.gr/v" target="_blank" rel="noopener noreferrer">https://aade.gr/v</a>&quot;tail',
+            $html,
+        );
+    }
+
+    public function test_autolink_leaves_trailing_sentence_punctuation_outside_the_link(): void
+    {
+        $html = MailTemplateRenderer::autolink(e('Επαλήθευση: https://aade.gr/x.'));
+
+        $this->assertStringContainsString('">https://aade.gr/x</a>.', $html);
+        $this->assertStringNotContainsString('x.</a>', $html);
+    }
+
+    public function test_autolink_only_links_http_and_https_never_other_schemes(): void
+    {
+        $html = MailTemplateRenderer::autolink(e('javascript:alert(1) mailto:x@y.gr data:text/html,x'));
+
+        $this->assertStringNotContainsString('<a ', $html);
+    }
+
+    public function test_autolink_keeps_operator_markup_escaped_no_live_tag(): void
+    {
+        // The DOC-8 boundary: operator angle-brackets are escaped BEFORE autolink,
+        // so a typed <script>/<a> never becomes a live tag; only the genuine URL
+        // run is linked.
+        $html = MailTemplateRenderer::autolink(nl2br(e('<script>alert(1)</script> https://ok.gr/v')));
+
+        $this->assertStringNotContainsString('<script>', $html);
+        $this->assertStringContainsString('&lt;script&gt;', $html);
+        $this->assertStringContainsString('<a href="https://ok.gr/v" target="_blank" rel="noopener noreferrer">https://ok.gr/v</a>', $html);
+    }
+
+    public function test_invoice_mail_html_part_has_a_clickable_verification_link(): void
+    {
+        // End-to-end: the AADE verify URL from {mark_section} must render as a
+        // clickable <a href> in the real mailable's HTML part (not dead text).
+        $invoice = $this->makeInvoice();
+        $invoice->forceFill([
+            'mydata_mark' => '400099999999999',
+            'mydata_url' => 'https://www1.aade.gr/q?mark=400099999999999&fim=1',
+            'mydata_state' => 'VALID',
+        ])->save();
+
+        $fresh = Invoice::query()->whereKey($invoice->getKey())
+            ->with(['company', 'customer', 'invoiceType'])
+            ->first();
+
+        $mailable = new InvoiceIssuedMail($fresh, 'fake-pdf-bytes');
+
+        // $escape=false: assert the raw anchor markup, not an escaped literal.
+        // No trailing `>` — Laravel's CSS inliner injects a style="" attribute
+        // into the anchor before the close, so match up to rel="…" only.
+        $mailable->assertSeeInHtml('<a href="https://www1.aade.gr/q?mark=400099999999999&amp;fim=1" target="_blank" rel="noopener noreferrer"', false);
+        // The plain-text part keeps the URL as-is (mail clients linkify it there).
+        $mailable->assertSeeInText('https://www1.aade.gr/q?mark=400099999999999&fim=1');
+    }
+
     private function makeInvoice(): Invoice
     {
         return Invoice::create([

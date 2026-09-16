@@ -1267,6 +1267,18 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **`delivery:fetch-inbound`: καμία ειδοποίηση σε ΕΠΙΜΟΝΗ αποτυχία (P2, review 2026-09-16 — inbound-poll resilience).**
+  Ο command πλέον επιστρέφει πάντα SUCCESS σε per-tenant fetch αποτυχία (transient AADE hiccup → `Log::warning`, όχι
+  exit-1/alert — έκλεισε τα midnight error emails). Συνέπεια: μια **επίμονη** βλάβη (λάθος/ληγμένα creds → firebed
+  `MyDataAuthenticationException`, ή πολυήμερο AADE outage) δεν καταγράφει πλέον `failed` scheduled run και **δεν** κάνει
+  page — μόνο ένα `Log::warning` κάθε 6ωρο + το on-demand «Λήψη νέων» στο panel. Συνειδητό tradeoff για read-only staging
+  poll, αλλά τα inbound ΔΑ (νομικά σχετικά «goods received») μπορούν να σταματήσουν σιωπηλά να στέηζονται για μέρες σε
+  επίμονο config error. Optional hardening αν χρειαστεί: μέτρημα consecutive-failures και page σε N-στη-σειρά (ο guard για
+  mode-off/missing-creds μένει ξεχωριστός — `RuntimeException`, δεν είναι σφάλμα).
+- **`MailTemplateRenderer::autolink()`: το trailing `)` δεν βγαίνει από το link (P2, ίδιο review — declined).** Ο strip
+  αφαιρεί μόνο `.,!?`, όχι `)`, οπότε operator free-text σαν `(δείτε https://…/x)` παράγει link με `)` μέσα. **Declined:** το
+  `)` μπορεί να είναι νόμιμο μέρος ενός URL (θα έσπαγε σωστά URLs), και το πραγματικό `{verify_url}` κάθεται μόνο του στη
+  γραμμή «Επαλήθευση: {url}» → δεν επηρεάζεται στην πράξη. Κοσμετικό, όχι fix.
 - **Schema baseline (v2.0.2 squash) — τα P2 που έμειναν συνειδητά ανοιχτά.** Μετά το squash
   (`database/schema/{sqlite,mariadb}-schema.sql`) ισχύουν τρία πράγματα που ΔΕΝ έχουν guard:
   **(α) `migrate:rollback` είναι πλέον μόνιμο no-op** για τα 220 baseline migrations σε κάθε υπάρχουσα βάση —

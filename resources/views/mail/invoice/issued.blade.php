@@ -7,8 +7,11 @@
      {!! ... !!} would let HTML escape; we use {!! nl2br(e($body)) !!} so
      newlines render as <br> in HTML but operator-supplied tags are
      escaped to plain text. This is the security boundary between
-     operator-edited template strings and rendered HTML. --}}
-{!! nl2br(e($body)) !!}
+     operator-edited template strings and rendered HTML.
+     autolink() then wraps bare http(s) URLs (the AADE {verify_url}) in a
+     clickable <a href> — it runs on the ALREADY-escaped string, so the DOC-8
+     boundary above is preserved (see MailTemplateRenderer::autolink). --}}
+{!! \App\Services\MailTemplateRenderer::autolink(nl2br(e($body))) !!}
 
 @if($tenant?->phone || $tenant?->email || $tenant?->afm || $tenant?->gemi)
 @component('mail::subcopy')

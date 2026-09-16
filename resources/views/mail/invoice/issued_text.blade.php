@@ -1,10 +1,15 @@
 {{-- DOC-8 Finding A: the plain-text MIME part. Rendered as a normal Blade
      view (NOT markdown), so $bodyText is the UN-escaped body — no CommonMark
-     backslash-escaping leaks into text-only clients. --}}
-@if($tenant?->name){{ $tenant->name }}
+     backslash-escaping leaks into text-only clients.
+     {!! … !!}, not {{ … }}: this is the text/plain part — a mail client renders
+     it as literal text and NEVER parses it as HTML, so there is no injection
+     vector to escape against, while {{ }} would corrupt content (a URL's `&`
+     → `&amp;`, breaking the verification link when copied). Raw is correct here
+     and matches this view's "UN-escaped body" intent. --}}
+@if($tenant?->name){!! $tenant->name !!}
 
 @endif
-{{ $bodyText }}
+{!! $bodyText !!}
 @if($tenant?->phone || $tenant?->email || $tenant?->afm || $tenant?->gemi)
 
 @php
@@ -14,5 +19,5 @@
     if ($tenant?->afm)   { $contact[] = 'ΑΦΜ: '.$tenant->afm; }
     if ($tenant?->gemi)  { $contact[] = 'ΓΕΜΗ: '.$tenant->gemi; }
 @endphp
-{{ implode(' · ', $contact) }}
+{!! implode(' · ', $contact) !!}
 @endif

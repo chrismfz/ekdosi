@@ -65,6 +65,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
   ακριβώς αυτό που ΥΠΟΒΑΛΛΕΤΑΙ (η προτεραιότητα per-line snapshot → κατηγορία προϊόντος → τύπος +
   MYD-006 πολιτική δεν αλλάζει — behavior-preserving refactor).
 
+### Fixed
+- **Email παραστατικού: το link επαλήθευσης myDATA γίνεται πλέον clickable `<a href>`.** Το HTML μέρος
+  έβγαζε το AADE URL (`{verify_url}`/`{mark_section}`) ως απλό κείμενο· νέα `MailTemplateRenderer::autolink()`
+  το τυλίγει σε ασφαλή anchor — τρέχει ΠΑΝΩ στο ήδη escaped σώμα (το DOC-8 όριο μένει ανέπαφο), μόνο
+  http/https, με `target="_blank" rel="noopener noreferrer"`. Το text/plain μέρος σταμάτησε επίσης να
+  HTML-escape-άρει το σώμα (`{!! !!}` αντί `{{ }}` — ασφαλές, δεν parse-άρεται ποτέ ως HTML), ώστε το
+  `&` στο URL να μη γίνεται `&amp;` (χαλασμένος copy-paste σύνδεσμος).
+- **`delivery:fetch-inbound`: μια παροδική αποτυχία AADE ανά tenant δεν ρίχνει πλέον όλο το scheduled
+  task.** Ο read-only 6ωρος poll αυτο-θεραπεύεται στην επόμενη εκτέλεση, οπότε μια αποτυχία fetch (firebed
+  `MyDataConnection`/`Timeout`/`InvalidResponse` → όλες `\Exception`, άρα έπεφταν στο exit-1 branch) πλέον
+  **καταγράφεται** (`Log::warning` με το πραγματικό exception — πριν το stdout-only `$this->error()` άφηνε
+  το `laravel.log` άδειο) αλλά ΔΕΝ βγάζει exit-1/alert. Διόρθωσε τα midnight error emails και στους 2 prod
+  hosts. (Ο guard για mode-off/missing-creds — `RuntimeException` — μένει ως έχει.)
+
 ## [2.3.0] - 2026-09-16
 
 ### Changed
