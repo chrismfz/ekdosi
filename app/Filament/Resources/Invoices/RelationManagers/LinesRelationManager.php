@@ -65,7 +65,7 @@ class LinesRelationManager extends RelationManager
                 // Toggleable so it never gets in the way.
                 TextColumn::make('income_class')
                     ->label('E3 (ΑΑΔΕ)')
-                    ->state(fn (InvoiceLine $record): string => $this->resolveLineClass($record)[0] ?? '—')
+                    ->state(fn (InvoiceLine $record): string => $this->incomeClassLabel($record))
                     ->tooltip(fn (InvoiceLine $record): string => $this->incomeClassTooltip($record))
                     ->toggleable(),
 
@@ -142,10 +142,22 @@ class LinesRelationManager extends RelationManager
         return $this->incomeBaseCache;
     }
 
+    /**
+     * The visible cell: the E3 class code, but ONLY when the pair actually files
+     * (both parts truthy — mirrors AadeInvoiceDocument's `$lineClass && $lineCat`),
+     * so an empty/half pair reads «—» exactly as the filed document omits it.
+     */
+    private function incomeClassLabel(InvoiceLine $line): string
+    {
+        [$class, $cat] = $this->resolveLineClass($line);
+
+        return (filled($class) && filled($cat)) ? $class : '—';
+    }
+
     private function incomeClassTooltip(InvoiceLine $line): string
     {
         [$class, $cat] = $this->resolveLineClass($line);
-        if ($class === null || $cat === null) {
+        if (! filled($class) || ! filled($cat)) {
             return 'Χωρίς ταξινόμηση εσόδων (π.χ. δελτίο/εσωτερικό — δεν φέρει έσοδο).';
         }
 

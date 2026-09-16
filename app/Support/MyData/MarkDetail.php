@@ -4,6 +4,7 @@ namespace App\Support\MyData;
 
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
+use Carbon\Carbon;
 use Firebed\AadeMyData\Models\Invoice as AadeInvoice;
 use Firebed\AadeMyData\Models\Issuer;
 
@@ -56,7 +57,10 @@ final class MarkDetail
             $gross = (float) $line->gross_price;
 
             [$class, $cat] = $resolver->forLine($line, $baseClass, $baseCat, $businessType);
-            $classifications = ($class !== null && $cat !== null)
+            // Mirror the filing gate (AadeInvoiceDocument: `if ($lineClass && $lineCat)`)
+            // exactly — an empty-string class/cat files NOTHING, so it must show
+            // nothing too, or "what you see" would diverge from "what is filed".
+            $classifications = (filled($class) && filled($cat))
                 ? [[
                     'type' => $class,
                     'typeLabel' => Codes::e3TypeLabel($class),
@@ -294,7 +298,7 @@ final class MarkDetail
         }
 
         try {
-            return \Carbon\Carbon::parse($iso)->format('d/m/Y');
+            return Carbon::parse($iso)->format('d/m/Y');
         } catch (\Throwable) {
             return $iso;
         }

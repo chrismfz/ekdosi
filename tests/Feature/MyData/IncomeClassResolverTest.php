@@ -15,6 +15,7 @@ use App\Support\MyData\ClassificationGuidance;
 use App\Support\MyData\IncomeClassResolver;
 use App\Support\MyData\MarkDetail;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -205,6 +206,27 @@ class IncomeClassResolverTest extends TestCase
         $this->assertSame(100.0, $cls[0]['amount']);
         // The product description is kept — classification is ADDED, not instead.
         $this->assertNotEmpty($doc['lines'][0]['itemDescr'] ?? null);
+    }
+
+    public function test_empty_string_classification_shows_nothing_like_filing(): void
+    {
+        // Guarantee «ό,τι βλέπεις = ό,τι υποβάλλεις»: the filing gate is truthy
+        // (`$lineClass && $lineCat`), so an EMPTY-STRING class/cat files NOTHING.
+        // The display must mirror that, not render a phantom E3. Force '' straight
+        // into the columns (bypassing any mutator) to pin the not-null-but-empty state.
+        $type = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'EMPTY', 'name' => 'Κενό',
+            'invcount' => 1, 'mydata_type' => '2.1',
+            'mydata_income_class' => 'E3_561_001', 'mydata_income_class_category' => 'category1_3',
+        ]);
+        DB::table('invoice_types')->where('id', $type->id)
+            ->update(['mydata_income_class' => '', 'mydata_income_class_category' => '']);
+
+        $invoice = $this->invoiceOf($type->fresh());
+        $invoice->update(['mydata_mark' => '400000000000777']);
+
+        $doc = MarkDetail::fromInvoice($invoice->fresh(['lines.product.productCategory', 'invoiceType', 'company']));
+        $this->assertSame([], $doc['lines'][0]['classifications']);
     }
 
     public function test_type_without_income_class_yields_no_classification(): void
