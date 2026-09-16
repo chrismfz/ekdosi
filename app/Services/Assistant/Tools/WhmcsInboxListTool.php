@@ -55,7 +55,7 @@ class WhmcsInboxListTool implements AssistantTool
     public function description(): string
     {
         return 'Τα «Εισερχόμενα» WHMCS ΑΝΑΛΥΤΙΚΑ (όχι σκέτος μετρητής): ανά προτιμολόγιο — πελάτης/ΑΦΜ, ποσό, '
-            .'ημ/νία πληρωμής, κατάσταση, γραμμές WHMCS — μαζί με ΕΛΕΓΧΟ ΔΙΠΛΟΤΥΠΟΥ (υπάρχον ekdosi παραστατικό '
+            .'ημ/νία πληρωμής, κατάσταση, γραμμές WHMCS, πληρωμές (transaction id/gateway/ημ/νία) — μαζί με ΕΛΕΓΧΟ ΔΙΠΛΟΤΥΠΟΥ (υπάρχον ekdosi παραστατικό '
             .'με ίδιο whmcs id / εγγραφή στο legacy log / παραστατικό ίδιου πελάτη+ποσού) και πρόταση file/archive/'
             .'check. `status`: open (προεπιλογή), pending_review, held, archived (αρχειοθετημένα), filed, drafted, '
             .'resolved, split, all. `status="archived"` δείχνει και «mis_archived» = αρχειοθετημένα που μάλλον '
@@ -164,11 +164,11 @@ class WhmcsInboxListTool implements AssistantTool
         foreach ($rows as $i => $row) {
             $payload = is_array($row->payload) ? $row->payload : [];
             $amount = round((float) ($payload['total'] ?? 0), 2);
-            $datepaid = (string) ($payload['datepaid'] ?? '');
-            // WHMCS writes '0000-00-00 00:00:00' for a not-yet-paid invoice
-            // (whmcs:fetch-unpaid rows) — treat that as «no payment date», not a
-            // real pre-cut-over date, or every unpaid row reads as probable-legacy.
-            $paidDate = ($datepaid !== '' && ! str_starts_with($datepaid, '0000')) ? substr($datepaid, 0, 10) : '';
+            // whmcsDatePaid() is the canonical guard: null when unset/'0000-00-00'
+            // (whmcs:fetch-unpaid or admin-marked-paid), so those don't read as a
+            // real pre-cut-over date and mis-suggest check_legacy.
+            $datepaid = $row->whmcsDatePaid();
+            $paidDate = $datepaid !== null ? substr($datepaid, 0, 10) : '';
 
             $existing = $existingLinks[$row->whmcs_invoice_id] ?? [];
             $log = $legacyLog[$row->whmcs_invoice_id] ?? null;
@@ -195,8 +195,9 @@ class WhmcsInboxListTool implements AssistantTool
                 'afm' => $row->customer?->afm,
                 'amount' => $amount,
                 'currency' => 'EUR',
-                'datepaid' => $datepaid ?: null,
+                'datepaid' => $datepaid,
                 'lines' => $this->lines($payload),
+                'transactions' => $this->transactions($payload),
                 'duplicate' => [
                     'existing_ekdosi_invoices' => $existing ?: null,
                     'legacy_log_hits' => (int) ($log?->hits ?? 0),
@@ -244,6 +245,39 @@ class WhmcsInboxListTool implements AssistantTool
         }
 
         return $paidDate >= $cutover ? 'file' : 'check_legacy';
+    }
+
+    /**
+     * Payment transactions off the payload (gateway txn id + gateway + date +
+     * amount) — present on rows synced by plugin ≥ 0.48.0, [] for older ones. Lets
+     * the caller answer «πότε/πώς πληρώθηκε» and «με ποιο transaction id».
+     *
+     * @return list<array{transid: string, gateway: string, date: string, amount: float}>
+     */
+    private function transactions(array $payload): array
+    {
+        $txns = $payload['transactions'] ?? [];
+        if (! is_array($txns) || $txns === []) {
+            return [];
+        }
+        if (! array_is_list($txns)) {
+            $txns = [$txns];
+        }
+
+        $out = [];
+        foreach ($txns as $t) {
+            if (! is_array($t)) {
+                continue;
+            }
+            $out[] = [
+                'transid' => (string) ($t['transid'] ?? ''),
+                'gateway' => (string) ($t['gateway'] ?? ''),
+                'date' => (string) ($t['date'] ?? ''),
+                'amount' => round((float) ($t['amount'] ?? 0), 2),
+            ];
+        }
+
+        return $out;
     }
 
     /** Normalise the WHMCS payload line items to [{description, amount}]. */

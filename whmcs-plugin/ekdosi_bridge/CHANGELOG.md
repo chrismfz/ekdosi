@@ -10,6 +10,19 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.48.0] — 2026-09-16
+### Changed
+- **Το inbox feed (`op=invoices`, `paid_unfiled`) φιλτράρει πλέον κατά ΗΜΕΡΟΜΗΝΙΑ ΠΛΗΡΩΜΗΣ
+  (`datepaid`), όχι έκδοσης (`date`).** Το per-tenant cut-over (`whmcs_invoice_min_date`) σημαίνει
+  τώρα «ό,τι **πληρώθηκε** από την ημερομηνία κι έπειτα». Έτσι ένα renewal που εκδόθηκε πριν το
+  cut-over αλλά πληρώθηκε μετά (αργός πελάτης, 2 μήνες αργότερα) **εμφανίζεται τη μέρα που πληρώνεται**,
+  ενώ το ιστορικό (πληρωμένο πριν το cut-over) **δεν πλημμυρίζει** το inbox. Τα άλλα status modes
+  (Paid/Unpaid/…) κρατούν το creation-date bound.
+### Added
+- **Το feed φέρνει τις πληρωμές (`tblaccounts`) ανά τιμολόγιο** — `transactions[]` με `transid`
+  (gateway txn id), `gateway`, `date`, `amount`. Το ekdosi τα δείχνει στο modal («Ημ. πληρωμής» +
+  «Transaction ID») και τα εκθέτει στο `whmcs_inbox_list` MCP tool (insights). Ένα batched query/σελίδα.
+
 ## [0.47.1] — 2026-09-15
 ### Changed
 - **Το status «Απορρίφθηκε» εμφανίζεται πλέον ως «Αρχειοθετήθηκε»** στο WHMCS admin (badge στη λίστα

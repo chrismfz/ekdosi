@@ -317,6 +317,27 @@ class InvoiceInboxToolsTest extends TestCase
         $this->assertSame([], $row['duplicate']['same_amount_invoices']);
     }
 
+    public function test_inbox_list_exposes_payment_transactions(): void
+    {
+        $cust = $this->customer('Txn');
+        PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'source' => PendingWhmcsInvoice::SOURCE_WHMCS,
+            'whmcs_invoice_id' => 93000, 'whmcs_userid' => 1, 'customer_id' => $cust->id,
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW, 'match_reason' => 'test',
+            'payload' => [
+                'total' => '100', 'datepaid' => '2026-09-15 10:00:00', 'status' => 'Paid',
+                'items' => ['item' => [['description' => 'X', 'amount' => '100']]],
+                'transactions' => [['transid' => 'TXN123', 'gateway' => 'eurobank', 'date' => '2026-09-15 10:00:00', 'amount' => '100']],
+            ],
+        ]);
+
+        $res = (new WhmcsInboxListTool)->run($this->tenant, ['status' => 'open']);
+        $row = collect($res['rows'])->firstWhere('whmcs_invoice_id', 93000);
+        $this->assertSame('TXN123', $row['transactions'][0]['transid']);
+        $this->assertSame('eurobank', $row['transactions'][0]['gateway']);
+        $this->assertSame('2026-09-15 10:00:00', $row['datepaid']);
+    }
+
     public function test_inbox_list_duplicates_only_filters(): void
     {
         $this->tenant->update(['whmcs_invoice_min_date' => '2026-09-14']);

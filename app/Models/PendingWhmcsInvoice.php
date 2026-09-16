@@ -382,6 +382,22 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
+     * The WHMCS payment date (`datepaid`) as a real value, or null when unset —
+     * WHMCS writes '0000-00-00 00:00:00' (or leaves it empty) for a not-yet-paid
+     * invoice, or one flipped to Paid via the admin dropdown with no transaction.
+     * Read from the stored payload; guarded so a partial/absent payload is safe.
+     */
+    public function whmcsDatePaid(): ?string
+    {
+        $dp = is_array($this->payload) ? ($this->payload['datepaid'] ?? null) : null;
+        if (! is_string($dp) || $dp === '' || strncmp($dp, '0000', 4) === 0) {
+            return null;
+        }
+
+        return $dp;
+    }
+
+    /**
      * Is the source WHMCS invoice UNPAID? True only for the explicit 'Unpaid'
      * status (the «θέλει πρώτα τιμολόγιο, μετά πληρώνει» public-sector / Α.Ε.
      * case). Paid/Cancelled/Refunded/unknown → false (those are either settled

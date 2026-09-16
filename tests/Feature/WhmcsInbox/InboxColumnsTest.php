@@ -65,6 +65,48 @@ class InboxColumnsTest extends TestCase
             ->assertSee('<span class="text-warning-600', false);
     }
 
+    public function test_paid_row_shows_payment_date_next_to_the_amount(): void
+    {
+        $company = $this->boot();
+        PendingWhmcsInvoice::create([
+            'company_id' => $company->id,
+            'whmcs_invoice_id' => 32144,
+            // Issued 23/08 but PAID 15/09 (a slow-paying renewal) — the payment date
+            // folds into the Ποσό subtitle so it's visible without opening the row.
+            'payload' => ['date' => '2026-08-23', 'datepaid' => '2026-09-15 21:49:16', 'total' => 360.84, 'currencycode' => 'EUR', 'status' => 'Paid'],
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'match_reason' => PendingWhmcsInvoice::REASON_UNMATCHED,
+        ]);
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->assertSuccessful()
+            ->assertSee('Πληρωμένο · 15/09')
+            ->assertSee('<span class="text-success-600', false);
+    }
+
+    public function test_invoice_view_modal_shows_payment_date_and_transaction_id(): void
+    {
+        $company = $this->boot();
+        $r = PendingWhmcsInvoice::create([
+            'company_id' => $company->id,
+            'whmcs_invoice_id' => 32144,
+            'payload' => [
+                'date' => '2026-08-23', 'datepaid' => '2026-09-15 21:49:16', 'total' => 360.84,
+                'currencycode' => 'EUR', 'status' => 'Paid',
+                'items' => ['item' => [['description' => 'Business20', 'amount' => 291.0]]],
+                'transactions' => [['transid' => '320274444857', 'gateway' => 'eurobank', 'date' => '2026-09-15 21:49:16', 'amount' => '360.84']],
+            ],
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'match_reason' => PendingWhmcsInvoice::REASON_UNMATCHED,
+        ]);
+
+        $html = view('filament.whmcs-inbox.invoice-view', ['r' => $r])->render();
+        $this->assertStringContainsString('Ημ. πληρωμής', $html);
+        $this->assertStringContainsString('2026-09-15 21:49:16', $html);
+        $this->assertStringContainsString('Transaction ID', $html);
+        $this->assertStringContainsString('320274444857', $html);
+    }
+
     public function test_filed_row_links_to_the_ekdosi_invoice_by_code(): void
     {
         $company = $this->boot();

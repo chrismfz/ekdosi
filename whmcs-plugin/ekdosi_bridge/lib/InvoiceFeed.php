@@ -63,7 +63,32 @@ class InvoiceFeed
         }
         // 'All' → no status filter.
         if ($since !== null && $since !== '') {
-            $q->where('date', '>=', $since);
+            if ($status === 'paid_unfiled' || $status === '') {
+                // The inbox is bounded by the PAYMENT date, not the invoice creation
+                // date: a renewal issued before the cut-over but PAID after it must
+                // surface the day it's paid (a slow client paying a 2-month-old
+                // invoice); the historical backlog (paid before cut-over) stays out,
+                // so the window can't flood.
+                //
+                // When datepaid is unset ('0000-00-00 …'/NULL — an invoice flipped to
+                // Paid via the WHMCS admin dropdown with no transaction), WHMCS records
+                // NO payment date, so we approximate with the issue date: a recently-
+                // issued admin-paid invoice still surfaces; an old-issued one can't be
+                // dated to after the cut-over and stays out (rare — push it manually).
+                //
+                // Two sargable predicates (index-usable on datepaid/date) rather than a
+                // COALESCE wrapper that no index can serve.
+                $q->where(function ($w) use ($since) {
+                    $w->where('datepaid', '>=', $since)
+                        ->orWhere(function ($w2) use ($since) {
+                            $w2->where(function ($w3) {
+                                $w3->whereNull('datepaid')->orWhere('datepaid', '0000-00-00 00:00:00');
+                            })->where('date', '>=', $since);
+                        });
+                });
+            } else {
+                $q->where('date', '>=', $since);
+            }
         }
 
         $invoices = $q->offset($offset)->limit($limit)->get([
@@ -120,6 +145,7 @@ class InvoiceFeed
         $userIds = $invoices->pluck('userid')->map(fn ($v) => (int) $v)->filter()->unique()->values()->all();
 
         $itemsByInvoice = self::itemsByInvoice($invoiceIds);
+        $txnsByInvoice = self::transactionsByInvoice($invoiceIds);
         $clients = $userIds === []
             ? collect()
             : Capsule::table('tblclients')->whereIn('id', $userIds)->get([
@@ -171,6 +197,10 @@ class InvoiceFeed
                 'customfields' => $customFieldsByClient[$userId] ?? [],
                 // Line items in the GetInvoice nested shape.
                 'items' => ['item' => $itemsByInvoice[$id] ?? []],
+                // Payment transactions (tblaccounts) — gateway txn id + gateway +
+                // date + amount, so ekdosi can show WHEN and HOW it was paid
+                // (the modal «Ημ. πληρωμής» / «Transaction ID» + inbox insights).
+                'transactions' => $txnsByInvoice[$id] ?? [],
             ];
 
             // Slice 2: embed the third-party routing (same shape as resolve.php
@@ -270,6 +300,39 @@ class InvoiceFeed
             $pid = (int) ($packageByHosting[$relid] ?? 0);
             $gid = $pid > 0 && isset($products[$pid]) ? (int) $products[$pid]->gid : 0;
             $out[$itemId] = ['pid' => $pid, 'gid' => $gid];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Payment transactions per invoice (tblaccounts) — the gateway txn id, the
+     * gateway system name, the payment date and the amount, oldest first. Empty
+     * for an unpaid invoice. One batched query for the whole page.
+     *
+     * @param  list<int>  $invoiceIds
+     * @return array<int, list<array{transid: string, gateway: string, date: string, amount: string}>>
+     */
+    private static function transactionsByInvoice(array $invoiceIds): array
+    {
+        if ($invoiceIds === []) {
+            return [];
+        }
+        $out = [];
+        $rows = Capsule::table('tblaccounts')
+            ->whereIn('invoiceid', $invoiceIds)
+            // Inbound PAYMENTS only — a refund row (amountout>0, amountin=0) would
+            // otherwise surface as a spurious €0.00 «transaction».
+            ->where('amountin', '>', 0)
+            ->orderBy('date')
+            ->get(['invoiceid', 'transid', 'gateway', 'date', 'amountin']);
+        foreach ($rows as $r) {
+            $out[(int) $r->invoiceid][] = [
+                'transid' => (string) ($r->transid ?? ''),
+                'gateway' => (string) ($r->gateway ?? ''),
+                'date' => (string) ($r->date ?? ''),
+                'amount' => (string) ($r->amountin ?? '0'),
+            ];
         }
 
         return $out;

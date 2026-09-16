@@ -698,10 +698,10 @@ class CompanyForm
                                         // you stopped doing test invoices). Null = no cutoff =
                                         // pull all history (correct for fresh WHMCS installs).
                                         DatePicker::make('whmcs_invoice_min_date')
-                                            ->label('Skip WHMCS invoices dated before')
+                                            ->label('Cut-over: skip invoices PAID before')
                                             ->native(false)
                                             ->displayFormat('Y-m-d')
-                                            ->helperText('IMPORTANT for long-running tenants with historical test data. Set to your ekdosi-cutover date (e.g. when you started filing via this app). Invoices dated before this are silently skipped by Fetch + Preview. Leave blank only if your WHMCS is fresh / has no historical noise.'),
+                                            ->helperText('Your ekdosi cut-over date. With the ekdosi_bridge plugin ≥ 0.48.0 the inbox (Fetch) brings every WHMCS invoice PAID on/after this date — regardless of when it was issued — so a renewal issued earlier but paid now still shows the day it is paid; the historical backlog (paid before it) stays out. Without that plugin (native API path) it falls back to the invoice ISSUE date. IMPORTANT for long-running tenants with historical data; leave blank only if your WHMCS is fresh.'),
                                         Toggle::make('whmcs_amount_includes_tax')
                                             ->label('WHMCS line amounts include VAT')
                                             ->default(true)

@@ -119,12 +119,7 @@ class WhmcsInboxTable
                     // colour class. The classes are hand-defined in panel.css (no-build
                     // CSS: text-{success,warning}-600 + their .dark variants). The raw
                     // WHMCS status fallback is e()-escaped because it's now HTML.
-                    ->description(fn (PendingWhmcsInvoice $r): ?HtmlString => match (true) {
-                        $r->whmcsIsUnpaid() => new HtmlString('<span class="text-warning-600 dark:text-warning-400">Απλήρωτο</span>'),
-                        strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 => new HtmlString('<span class="text-success-600 dark:text-success-400">Πληρωμένο</span>'),
-                        $r->whmcsStatus() !== null => new HtmlString(e((string) $r->whmcsStatus())),   // Cancelled/Refunded raw
-                        default => null,
-                    }),
+                    ->description(fn (PendingWhmcsInvoice $r): ?HtmlString => self::amountStatusHtml($r)),
 
                 // Who the invoice is from on the WHMCS side — always shown,
                 // even for unmatched rows, so the operator has the full picture
@@ -441,6 +436,39 @@ class WhmcsInboxTable
             ->orderBy('code')
             ->pluck('code', 'id')
             ->all();
+    }
+
+    /**
+     * The «Ποσό» cell subtitle: the paid/unpaid word, coloured — and for a paid
+     * row, WHEN it was paid («Πληρωμένο · 15/09») so the payment date lives next
+     * to the amount without a standalone column (space is tight). The datepaid is
+     * in the payload; '0000-00-00 …' (not-yet-paid) shows just «Πληρωμένο». Returns
+     * an HtmlString so Filament renders the colour class unescaped (the raw WHMCS
+     * status fallback is e()-escaped). Colour classes are hand-defined in panel.css.
+     */
+    private static function amountStatusHtml(PendingWhmcsInvoice $r): ?HtmlString
+    {
+        if ($r->whmcsIsUnpaid()) {
+            return new HtmlString('<span class="text-warning-600 dark:text-warning-400">Απλήρωτο</span>');
+        }
+        if (strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0) {
+            $label = 'Πληρωμένο';
+            if ($dp = $r->whmcsDatePaid()) {
+                [$y, $m, $d] = array_pad(explode('-', substr($dp, 0, 10)), 3, '');
+                if ($d !== '' && $m !== '') {
+                    // Compact «DD/MM» for the current year; append «/YY» for older
+                    // rows so a cross-year backlog isn't ambiguous.
+                    $label .= ' · '.$d.'/'.$m.($y !== '' && $y !== date('Y') ? '/'.substr($y, 2) : '');
+                }
+            }
+
+            return new HtmlString('<span class="text-success-600 dark:text-success-400">'.e($label).'</span>');
+        }
+        if ($r->whmcsStatus() !== null) {
+            return new HtmlString(e((string) $r->whmcsStatus()));   // Cancelled/Refunded raw
+        }
+
+        return null;
     }
 
     private static function isDeletable(PendingWhmcsInvoice $r): bool

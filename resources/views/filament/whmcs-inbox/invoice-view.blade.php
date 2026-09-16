@@ -17,11 +17,22 @@
     if ($items && ! array_is_list($items)) {
         $items = [$items];
     }
+
+    // Payment date via the canonical accessor: null when unset ('0000-00-00 …' /
+    // not-yet-paid), the real timestamp otherwise.
+    $paidAt = $r->whmcsDatePaid();
+
+    // Transactions (tblaccounts) — present only on rows synced by plugin ≥ 0.48.0;
+    // older staged rows simply don't show the section.
+    $txns = $p['transactions'] ?? [];
+    if ($txns && ! array_is_list($txns)) {
+        $txns = [$txns];
+    }
 @endphp
 
 <div class="space-y-4 text-sm">
     {{-- Header --}}
-    <div class="grid grid-cols-2 gap-3 md:grid-cols-4">
+    <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
         <div>
             <div class="text-gray-500 dark:text-gray-400">WHMCS #</div>
             <div class="font-semibold">{{ ($p['invoicenum'] ?? '') ?: ('#'.$r->whmcs_invoice_id) }}</div>
@@ -37,6 +48,10 @@
         <div>
             <div class="text-gray-500 dark:text-gray-400">Σύνολο</div>
             <div class="font-semibold">{{ $money($p['total'] ?? 0) }}</div>
+        </div>
+        <div>
+            <div class="text-gray-500 dark:text-gray-400">Ημ. πληρωμής</div>
+            <div class="font-semibold">{{ $paidAt ?? '—' }}</div>
         </div>
     </div>
 
@@ -98,6 +113,37 @@
             </table>
         </div>
     </div>
+
+    {{-- Payment transactions (WHMCS tblaccounts) — the gateway txn id + how/when
+         it was paid. Only present on rows synced by plugin ≥ 0.48.0. --}}
+    @if (! empty($txns))
+        <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+            <div class="mb-1 font-medium">Πληρωμή / Συναλλαγές</div>
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="text-left text-gray-500 dark:text-gray-400">
+                        <tr class="border-b border-gray-200 dark:border-white/10">
+                            <th class="py-1 pr-4">Transaction ID</th>
+                            <th class="py-1 pr-4">Gateway</th>
+                            <th class="py-1 pr-4">Ημ/νία</th>
+                            <th class="py-1 text-right">Ποσό</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach ($txns as $t)
+                            @continue(! is_array($t))
+                            <tr class="border-b border-gray-100 dark:border-white/5">
+                                <td class="py-1 pr-4 font-mono text-xs">{{ ($t['transid'] ?? '') ?: '—' }}</td>
+                                <td class="py-1 pr-4">{{ ($t['gateway'] ?? '') ?: '—' }}</td>
+                                <td class="py-1 pr-4 whitespace-nowrap">{{ ($t['date'] ?? '') ?: '—' }}</td>
+                                <td class="py-1 text-right whitespace-nowrap">{{ $money($t['amount'] ?? 0) }}</td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    @endif
 
     {{-- ekdosi mapping --}}
     <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
