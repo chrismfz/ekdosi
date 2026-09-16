@@ -18,6 +18,10 @@ class CustomerLedgerBalanceChart extends ChartWidget
 
     protected int | string | array $columnSpan = 'full';
 
+    // Compact (dashboard-style miniature): capped height, laid out beside the
+    // revenue chart below the ledger table instead of towering above it.
+    protected ?string $maxHeight = '240px';
+
     protected function getType(): string
     {
         return 'line';

@@ -382,6 +382,32 @@ class CustomerLedger extends Page implements HasTable
                     ->weight('bold')
                     ->color(fn ($state): string => $state > 0 ? 'danger' : 'gray')
                     ->formatStateUsing(fn ($state): string => $this->fmtMoney($state)),
+                // «Κατάσταση»: for an invoice row, whether it's cash- or credit-term
+                // AND whether a real payment is recorded — so the operator SEES why
+                // the «Υπόλοιπο» moved or not (τοις μετρητοίς = εξοφλημένο στην έκδοση,
+                // δεν προσμετράται). Blank on payment/refund rows. Display-only.
+                TextColumn::make('payment_term')
+                    ->label('Κατάσταση')
+                    ->badge()
+                    ->placeholder('')
+                    ->formatStateUsing(fn ($state): string => match ($state) {
+                        'cash' => 'Μετρητά',
+                        'credit' => 'Επί πιστώσει',
+                        default => '',
+                    })
+                    ->color(fn ($state): string => $state === 'credit' ? 'info' : 'gray')
+                    ->description(function (array $record): ?string {
+                        if (($record['payment_term'] ?? null) === null) {
+                            return null; // payment / refund row — no term
+                        }
+                        if (! empty($record['has_payment'])) {
+                            return '✓ με πληρωμή';
+                        }
+
+                        return $record['payment_term'] === 'cash'
+                            ? 'εξοφλήθηκε στην έκδοση'
+                            : 'χωρίς πληρωμή';
+                    }),
                 TextColumn::make('mydata_state')
                     ->label('myDATA')
                     ->badge()
@@ -434,7 +460,10 @@ class CustomerLedger extends Page implements HasTable
                     ])),
             ])
             ->recordUrl(fn (array $record): ?string => $this->ledgerRowUrl($record))
-            ->defaultSort('date', 'desc')
+            // Χρονολογικά (παλιά→νέα) εξ ορισμού — διαβάζεται σαν λογιστική καρτέλα:
+            // από πάνω προς τα κάτω χτίζεται το «Υπόλοιπο», με τα σύνολα στο τέλος.
+            // (Ο operator κλικάρει την «Ημερομηνία» για ανάποδα όποτε θέλει.)
+            ->defaultSort('date', 'asc')
             ->paginated([25, 50, 100, 'all'])
             ->defaultPaginationPageOption(25)
             ->emptyStateHeading('Δεν βρέθηκαν κινήσεις')
@@ -491,11 +520,15 @@ class CustomerLedger extends Page implements HasTable
             }));
         }
 
-        // buildLedgerOnly already returns newest-first (date + creation-order
-        // tiebreak). Flipping to ascending just reverses it — array_reverse keeps
-        // the same-day creation-order tiebreak intact (strcmp on the date string
-        // would collapse same-day rows into an arbitrary order again).
-        if ($sortColumn === 'date' && $sortDirection === 'asc') {
+        // buildLedgerOnly returns newest-first (date + creation-order tiebreak). The
+        // Καρτέλα shows oldest-first by DEFAULT (χρονολογικά — λογιστική ανάγνωση):
+        // reverse it UNLESS the operator explicitly picked a descending sort.
+        // A records()-backed table does NOT seed defaultSort() into the sort state,
+        // so the no-click default arrives here as (null, null) — that must count as
+        // the ascending default, not fall through to newest-first. array_reverse
+        // keeps the same-day creation-order tiebreak intact (strcmp on the date
+        // string would collapse same-day rows into an arbitrary order again).
+        if ($sortDirection !== 'desc') {
             $rows = array_reverse($rows);
         }
 

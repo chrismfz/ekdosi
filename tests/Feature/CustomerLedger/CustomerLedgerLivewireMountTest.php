@@ -5,9 +5,13 @@ namespace Tests\Feature\CustomerLedger;
 use App\Filament\Resources\Customers\Pages\CustomerLedger;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\User;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -50,7 +54,7 @@ class CustomerLedgerLivewireMountTest extends TestCase
         // CustomerPolicy. In production an operator with view
         // permission satisfies the policy; the test user doesn't
         // have Shield-generated permissions.
-        \Illuminate\Support\Facades\Gate::before(fn () => true);
+        Gate::before(fn () => true);
 
         $this->actingAs($user);
 
@@ -66,5 +70,40 @@ class CustomerLedgerLivewireMountTest extends TestCase
         // If we reached here without aborting, the page mounted OK.
         $response->assertStatus(200);
         $this->assertSame($customer->id, $response->get('record')->id);
+    }
+
+    public function test_ledger_defaults_to_chronological_oldest_first_on_first_load(): void
+    {
+        // Regression guard: on a records()-backed table, defaultSort() does NOT
+        // seed the sort state, so the no-click default arrives as (null,null). The
+        // page must still show OLDEST-first (χρονολογικά) without a header click —
+        // proving the reverse triggers on the default state, not only on 'asc'.
+        Gate::before(fn () => true);
+
+        $tenant = Company::create([
+            'name' => 'Test', 'slug' => 'order-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        $pm = PaymentMethod::create(['company_id' => $tenant->id, 'name' => 'Credit', 'due_days' => 30, 'is_active' => true]);
+        $type = InvoiceType::create(['company_id' => $tenant->id, 'name' => 'T', 'code' => 'TST', 'invcount' => 0, 'payment_method_id' => $pm->id]);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'K']);
+
+        foreach ([['2019-03-07', 'OLD1', 1], ['2025-11-19', 'NEW1', 2]] as [$date, $code, $seq]) {
+            Invoice::create([
+                'company_id' => $tenant->id, 'customer_id' => $customer->id,
+                'invoice_type_id' => $type->id, 'payment_method_id' => $pm->id,
+                'invcode' => $code, 'code' => $seq, 'issued_at' => $date,
+                'gross_total' => 124.0, 'net_total' => 100.0, 'local_status' => 'active',
+            ]);
+        }
+
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@example.test', 'password' => bcrypt('x')]);
+        $this->actingAs($user);
+        Filament::setTenant($tenant);
+
+        Livewire::test(CustomerLedger::class, ['record' => $customer->id])
+            ->assertOk()
+            // Oldest date appears BEFORE the newest — chronological, no click needed.
+            ->assertSeeInOrder(['07/03/2019', '19/11/2025']);
     }
 }

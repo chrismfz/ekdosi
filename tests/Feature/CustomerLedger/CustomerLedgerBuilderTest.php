@@ -117,6 +117,40 @@ class CustomerLedgerBuilderTest extends TestCase
         $this->assertSame(124.0, app(CustomerLedgerBuilder::class)->build($c)->stats['balance']);
     }
 
+    public function test_ledger_rows_carry_cash_credit_term_and_payment_presence(): void
+    {
+        // Display-only «Κατάσταση» hints — so the operator SEES why the balance
+        // moved or not. No effect on the money math (asserted elsewhere).
+        $c = $this->makeCustomer();
+        $credit = $this->makeInvoice($c, '2026-01-01', 124.0, $this->credit);   // credit-term, no payment
+        $cash = $this->makeInvoice($c, '2026-01-02', 62.0, $this->cash);        // cash-term, settled at issue
+        $cashPaid = $this->makeInvoice($c, '2026-01-03', 50.0, $this->cash);    // cash-term WITH a real payment
+        Payment::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $c->id,
+            'invoice_id' => $cashPaid->id,
+            'pay_date' => '2026-01-03',
+            'amount' => 50.0,
+        ]);
+
+        $ledger = collect(app(CustomerLedgerBuilder::class)->build($c)->ledger)->keyBy('reference');
+
+        $this->assertSame('credit', $ledger[$credit->invcode]['payment_term']);
+        $this->assertFalse($ledger[$credit->invcode]['has_payment']);
+
+        $this->assertSame('cash', $ledger[$cash->invcode]['payment_term']);
+        $this->assertFalse($ledger[$cash->invcode]['has_payment']);
+
+        $this->assertSame('cash', $ledger[$cashPaid->invcode]['payment_term']);
+        $this->assertTrue($ledger[$cashPaid->invcode]['has_payment']);
+
+        // A payment/refund row carries no term (invoice-only hint).
+        $paymentRow = collect(app(CustomerLedgerBuilder::class)->build($c)->ledger)
+            ->firstWhere('type', 'payment');
+        $this->assertNull($paymentRow['payment_term']);
+        $this->assertFalse($paymentRow['has_payment']);
+    }
+
     public function test_same_day_payment_and_refund_order_by_creation_and_carry_link_ids(): void
     {
         // Two money rows on the SAME date (a payment, then a refund entered later).

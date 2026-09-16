@@ -163,20 +163,8 @@
             key('ledger-aging-' . $cust->id)
         )
 
-        {{-- ============= Year comparison + balance trend (≥2 years) ============= --}}
-        @if ($this->hasBalanceTrend())
-            @livewire(
-                \App\Filament\Resources\Customers\Widgets\CustomerLedgerRevenueChart::class,
-                ['ledgerYearly' => $yearly],
-                key('ledger-revenue-' . $cust->id)
-            )
-
-            @livewire(
-                \App\Filament\Resources\Customers\Widgets\CustomerLedgerBalanceChart::class,
-                ['ledgerYearly' => $yearly],
-                key('ledger-chart-' . $cust->id)
-            )
-        @endif
+        {{-- Year comparison + balance trend charts moved BELOW the ledger table
+             (compact, side-by-side) so they don't push the actual κινήσεις down. --}}
 
         {{-- ============= Πρόχειρα (unissued drafts) =============
              Deliberately its OWN section, above the ledger and outside every money
@@ -267,7 +255,52 @@
             @endif
 
             {{ $this->table }}
+
+            {{-- ============= Σύνολα (κλείνει λογιστικά) =============
+                 Reconciles from the already-correct stats: Χρεώσεις − Πιστωτικά −
+                 Πληρωμές = Υπόλοιπο. Τα τοις μετρητοίς (εξοφλημένα στην έκδοση) ΔΕΝ
+                 προσμετρώνται στο υπόλοιπο — γι' αυτό η «Χρέωση» στήλη μπορεί να δείχνει
+                 ποσά που δεν κινούν το υπόλοιπο (βλ. στήλη «Κατάσταση»). --}}
+            @php($b = (float) ($stats['balance'] ?? 0))
+            <div class="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                    <div class="text-xs fi-color-gray">Σύνολο χρεώσεων (στο υπόλοιπο)</div>
+                    <div class="text-lg font-bold">{{ \App\Support\Money::eur((float) ($stats['charges'] ?? 0)) }}</div>
+                </div>
+                <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                    <div class="text-xs fi-color-gray">Πιστωτικά</div>
+                    <div class="text-lg font-bold">{{ \App\Support\Money::eur((float) ($stats['credit_notes'] ?? 0)) }}</div>
+                </div>
+                <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                    <div class="text-xs fi-color-gray">Σύνολο πληρωμών</div>
+                    <div class="text-lg font-bold text-success-600 dark:text-success-400">{{ \App\Support\Money::eur((float) ($stats['payments'] ?? 0)) }}</div>
+                </div>
+                <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
+                    <div class="text-xs fi-color-gray">Υπόλοιπο</div>
+                    <div class="text-lg font-bold {{ $b > 0.005 ? 'text-danger-600 dark:text-danger-400' : '' }}">{{ \App\Support\Money::eur($b) }}</div>
+                </div>
+            </div>
+            <div class="mt-2 text-xs fi-color-gray">
+                Τα τοις μετρητοίς εξοφλούνται στην έκδοση και δεν προσμετρώνται στο υπόλοιπο.
+            </div>
         </x-filament::section>
+
+        {{-- ============= Γραφήματα (compact, κάτω από την καρτέλα) ============= --}}
+        @if ($this->hasBalanceTrend())
+            <div class="grid grid-cols-1 gap-4 md:grid-cols-2">
+                @livewire(
+                    \App\Filament\Resources\Customers\Widgets\CustomerLedgerRevenueChart::class,
+                    ['ledgerYearly' => $yearly],
+                    key('ledger-revenue-' . $cust->id)
+                )
+
+                @livewire(
+                    \App\Filament\Resources\Customers\Widgets\CustomerLedgerBalanceChart::class,
+                    ['ledgerYearly' => $yearly],
+                    key('ledger-chart-' . $cust->id)
+                )
+            </div>
+        @endif
 
         {{-- ============= Συχνά προϊόντα/υπηρεσίες ============= --}}
         @if (count($this->topProducts) > 0)
