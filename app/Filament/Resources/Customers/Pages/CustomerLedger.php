@@ -289,10 +289,25 @@ class CustomerLedger extends Page implements HasTable
 
         $year = (int) $value;
 
+        // «Υπόλοιπο από μεταφορά» = the closing balance of the most recent PRIOR
+        // year (i.e. the opening balance of the picked period). 0 when the picked
+        // year is the earliest with activity. computeYearly already carries the
+        // per-year year_end_balance, so this needs no extra query.
+        $openingBalance = 0.0;
+        $priorYear = null;
+        foreach ($this->cachedStatsBlock['yearly'] ?? [] as $r) {
+            $ry = (int) ($r['year'] ?? 0);
+            if ($ry < $year && ($priorYear === null || $ry > $priorYear)) {
+                $priorYear = $ry;
+                $openingBalance = (float) ($r['year_end_balance'] ?? 0);
+            }
+        }
+
         foreach ($this->cachedStatsBlock['yearly'] ?? [] as $row) {
             if ((int) ($row['year'] ?? 0) === $year) {
                 return [
                     'year' => $year,
+                    'opening_balance' => $openingBalance,
                     'invoice_count' => (int) ($row['invoice_count'] ?? 0),
                     'net' => (float) ($row['net'] ?? 0),
                     'gross' => (float) ($row['gross'] ?? 0),
@@ -306,6 +321,7 @@ class CustomerLedger extends Page implements HasTable
         // year always has a computeYearly row — but never trust that blindly.
         return [
             'year' => $year,
+            'opening_balance' => $openingBalance,
             'invoice_count' => 0,
             'net' => 0.0,
             'gross' => 0.0,

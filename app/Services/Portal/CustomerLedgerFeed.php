@@ -58,7 +58,9 @@ class CustomerLedgerFeed
                 'owed' => max($balance, 0.0),
                 'credit' => max(-$balance, 0.0),
                 'oldest_unpaid_days' => $result->stats['oldest_unpaid_days'],
-                'rows' => $this->projectRows($result->ledger),
+                // Chronological (old→new) — «Η καρτέλα μου» reads like a statement,
+                // consistent with the operator table + the CSV/PDF export.
+                'rows' => $this->projectRows($result->chronologicalLedger()),
             ];
         }
 

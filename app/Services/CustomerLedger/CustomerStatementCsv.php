@@ -33,7 +33,8 @@ class CustomerStatementCsv
         $rows = [];
         $rows[] = ['Ημερομηνία', 'Τύπος', 'Αναφορά', 'Χρέωση', 'Πίστωση', 'Υπόλοιπο', 'myDATA'];
 
-        foreach ($result->ledger as $row) {
+        // Chronological (old→new) — a statement reads top→bottom as the balance builds.
+        foreach ($result->chronologicalLedger() as $row) {
             // Φ3 — a grouped «έμβασμα/είσπραξη» renders as ONE credit line; its
             // allocation breakdown is appended to the reference cell so the
             // statement still shows what was settled (never exploded into sub-rows).

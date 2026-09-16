@@ -106,4 +106,39 @@ class CustomerLedgerLivewireMountTest extends TestCase
             // Oldest date appears BEFORE the newest — chronological, no click needed.
             ->assertSeeInOrder(['07/03/2019', '19/11/2025']);
     }
+
+    public function test_carry_over_balance_line_shows_only_when_a_period_is_filtered(): void
+    {
+        Gate::before(fn () => true);
+
+        $tenant = Company::create([
+            'name' => 'Test', 'slug' => 'carry-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        $pm = PaymentMethod::create(['company_id' => $tenant->id, 'name' => 'Credit', 'due_days' => 30, 'is_active' => true]);
+        $type = InvoiceType::create(['company_id' => $tenant->id, 'name' => 'T', 'code' => 'TST', 'invcount' => 0, 'payment_method_id' => $pm->id]);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'K']);
+
+        // 2024 unpaid credit invoice → year-end balance carried into 2025.
+        foreach ([['2024-05-01', 1], ['2025-05-01', 2]] as [$date, $seq]) {
+            Invoice::create([
+                'company_id' => $tenant->id, 'customer_id' => $customer->id,
+                'invoice_type_id' => $type->id, 'payment_method_id' => $pm->id,
+                'invcode' => 'I'.$seq, 'code' => $seq, 'issued_at' => $date,
+                'gross_total' => 100.0, 'net_total' => 80.0, 'local_status' => 'active',
+            ]);
+        }
+
+        $user = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@example.test', 'password' => bcrypt('x')]);
+        $this->actingAs($user);
+        Filament::setTenant($tenant);
+
+        // No period filter → no carry-over line.
+        Livewire::test(CustomerLedger::class, ['record' => $customer->id])
+            ->assertOk()
+            ->assertDontSee('Υπόλοιπο από μεταφορά')
+            // Pick 2025 → the carry-over line appears (opening = 2024 closing).
+            ->filterTable('year', 2025)
+            ->assertSee('Υπόλοιπο από μεταφορά');
+    }
 }
