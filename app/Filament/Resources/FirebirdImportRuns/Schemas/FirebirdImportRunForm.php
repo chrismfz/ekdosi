@@ -199,7 +199,7 @@ class FirebirdImportRunForm
                                         FileUpload::make('payments_json')
                                             ->label('Πληρωμές/Υπόλοιπα — DataExport-Payments-Balances.json')
                                             ->disk('local')->directory('epsilon-imports')->visibility('private')
-                                            ->helperText('Εμβάσματα + Εισπράξεις πελατών → πληρωμές «έναντι» (on-account, match ΑΦΜ) που μειώνουν το υπόλοιπο· idempotent με το UID. Στο τέλος βγαίνει αναφορά συμφωνίας ekdosi vs Epsilon ανά πελάτη. Τρέξε το ΑΦΟΥ έχουν μπει Πελάτες + Πωλήσεις — και ΜΗΝ ξανα-τρέξεις τις Πωλήσεις μετά (θα διπλο-εξοφλούσε).')
+                                            ->helperText('Εμβάσματα + Εισπράξεις πελατών → πληρωμές «έναντι» (on-account, match ΑΦΜ) που μειώνουν το υπόλοιπο· idempotent με το DocCode. Στο τέλος βγαίνει αναφορά συμφωνίας ekdosi vs Epsilon ανά πελάτη. Τρέξε το ΑΦΟΥ έχουν μπει Πελάτες + Πωλήσεις — και ΜΗΝ ξανα-τρέξεις τις Πωλήσεις μετά (θα διπλο-εξοφλούσε).')
                                             ->columnSpanFull(),
                                     ]),
                             ]),

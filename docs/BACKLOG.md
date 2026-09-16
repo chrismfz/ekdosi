@@ -1058,6 +1058,23 @@ data model + phase gates: **`PLAN.md`**.
   πάντα array). Στον γκρινιάρη-mirror το καταπίνει το best-effort `\Throwable` catch· στο create-seed
   (`WhmcsCustomerCreator`) όχι. Fix = ένας κοινός guard `is_array($customfields)` στην κορυφή του reader.
 
+### Epsilon πληρωμές (on-account) — surviving P2s (από το adversarial review, 2026-09-16)
+Το `EpsilonImporter::importPayments` (εμβάσματα/εισπράξεις → on-account, idempotent με DocCode,
+supersede των synthetic settlements, reconciliation vs `EpsilonBalance`) πέρασε **χωρίς reachable
+P0/P1** για την πραγματική εξαγωγή (242 εμβάσματα + 7 εισπράξεις· όλα DocCode+UID, dates `dd/MM/yyyy`).
+Ό,τι απέμεινε είναι **εγγενή tradeoffs του on-account** που **τα καρφώνει η αναφορά συμφωνίας**:
+- **Cash-term πώληση + Epsilon είσπραξη → αρνητικό υπόλοιπο (P2):** αν πελάτης με μόνο cash-term
+  πωλήσεις (εξοφλημένες στην έκδοση, εκτός owed base) έχει και είσπραξη στο αρχείο, η on-account
+  πίστωση οδηγεί το υπόλοιπο αρνητικό (owed 0 − paid). Το ίδιο θα έκανε και το FIFO (park on-account).
+  **Δεν συμβαίνει στα δεδομένα** (οι εισπράξεις είναι credit-account κινήσεις)· η reconciliation το
+  δείχνει (live αρνητικό vs `EpsilonBalance` 0 → warning). Fix αν χρειαστεί: skip on-account όταν ο
+  πελάτης δεν έχει owed base, ή στοχευμένη allocation.
+- **Re-run δεν προπαγανδίζει διορθωμένο ποσό (P2, συνειδητό):** υπάρχουσα πληρωμή (ίδιο DocCode) →
+  no-op, ώστε να **μη χαλάει** τυχόν χειροκίνητο allocation (invoice_id) που έβαλε ο χειριστής από την
+  Καρτέλα. Αν το Epsilon διορθώσει ποσό και ξανα-εξάγει, το ekdosi κρατά το παλιό (το summary δείχνει
+  «~N ενημ.»). Τα ιστορικά ποσά δεν αλλάζουν· διόρθωση = σβήσε τη γραμμή και ξανα-import. Preserve
+  operator work > auto-propagate.
+
 ### Mass-pay consolidation — surviving P2s (από το adversarial review, 2026-09-15)
 Το feature (CONSOLIDATE/EXPLODE ενός WHMCS συγκεντρωτικού) πέρασε **χωρίς reachable P0/P1** για τη σημερινή
 διαμόρφωση (όλοι mainland-GR, net-per-line WHMCS, single 24%). Εφαρμόστηκαν οι φθηνές θωρακίσεις (child-rate,
