@@ -42,9 +42,29 @@ final class MarkDetail
     {
         $type = $invoice->mydata_type;
 
-        $lines = $invoice->lines->values()->map(function (InvoiceLine $line, int $i): array {
+        // MYD-5: the (E3 class, category) EACH line files — resolved through the
+        // same IncomeClassResolver the filing path uses, so the «Έλεγχος ΜΑΡΚ»
+        // detail shows exactly what was sent. Base pair once (a credit note's is a
+        // query), then per line; local lines keep their product description AND
+        // gain the classification as a discreet sub-line (not instead of it).
+        $resolver = app(IncomeClassResolver::class);
+        [$baseClass, $baseCat] = $resolver->baseFor($invoice);
+        $businessType = $invoice->company?->business_activity_type;
+
+        $lines = $invoice->lines->values()->map(function (InvoiceLine $line, int $i) use ($resolver, $baseClass, $baseCat, $businessType): array {
             $net = (float) $line->net_price;
             $gross = (float) $line->gross_price;
+
+            [$class, $cat] = $resolver->forLine($line, $baseClass, $baseCat, $businessType);
+            $classifications = ($class !== null && $cat !== null)
+                ? [[
+                    'type' => $class,
+                    'typeLabel' => Codes::e3TypeLabel($class),
+                    'category' => $cat,
+                    'categoryLabel' => Codes::e3CategoryLabel($cat),
+                    'amount' => round($net, 2),
+                ]]
+                : [];
 
             return [
                 'lineNumber' => $i + 1,
@@ -58,9 +78,7 @@ final class MarkDetail
                 'vatCategory' => null,
                 'vatExemptionCategory' => null,
                 'vatAmount' => round($gross - $net, 2),
-                // Local lines carry a real product description, so no need for
-                // the E3-classification fallback the AADE side uses.
-                'classifications' => [],
+                'classifications' => $classifications,
             ];
         })->all();
 

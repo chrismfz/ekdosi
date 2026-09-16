@@ -274,7 +274,8 @@ class MyDataMarkDetail extends Page
             ->with([
                 // Stable, insertion-ordered lines so the displayed numbering
                 // matches the filed document (no stored line_number column).
-                'lines' => fn ($q) => $q->orderBy('id')->with('product'),
+                // product.productCategory feeds the per-line E3 income class (MYD-5).
+                'lines' => fn ($q) => $q->orderBy('id')->with('product.productCategory'),
                 'invoiceType',
                 'company',
             ])

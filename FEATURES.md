@@ -148,7 +148,10 @@
   tenant + κάθε τύπος παραστατικού/κατηγορία ΦΠΑ με badge ✓/⚠/✗ και **link «Διόρθωση →»** στη
   ρύθμιση. Ίδιο audit τροφοδοτεί το `mydata:preflight` ΚΑΙ το badge «Ετοιμότητα myDATA» στη
   λίστα Invoice Types.
-- **Σελίδα ΜΑΡΚ** (direction-aware) + per-line E3 classification.
+- **Σελίδα ΜΑΡΚ** (direction-aware) + per-line E3 classification — τώρα και στα **δικά μας**
+  παραστατικά (διακριτική υπο-γραμμή κάτω από την περιγραφή, όχι μόνο στα «αδέσποτα»), και ως
+  **compact στήλη «E3 (ΑΑΔΕ)» με tooltip** στις γραμμές του παραστατικού (view). Κοινός
+  `IncomeClassResolver` → ό,τι βλέπεις = ό,τι υποβάλλεται.
 - **Enrich/έλεγχος από ΑΑΔΕ** (`EnrichInvoiceFromAade`) — από τη Σελίδα ΜΑΡΚ: live-pull
   του MARK, stamp **QR**, συμπλήρωση κενών header πεδίων + **per-field σύγκριση**
   (cross-check τοπικού ↔ ΑΑΔΕ).
