@@ -18,6 +18,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Changed
+- **Dashboard charts — empty state (#7 polish).** Τα τρία νέα γραφήματα (`TopProductsChart`,
+  `RevenueByCategoryChart`, `TopSuppliersChart`) δείχνουν τώρα το **built-in empty state** του Filament
+  (κρυμμένο το κενό canvas + κεντραρισμένο μήνυμα «καμία πώληση/έσοδο/έξοδο προς εμφάνιση φέτος») όταν δεν
+  υπάρχουν δεδομένα να σχεδιαστούν — αντί για κενό canvas σε νέο/ήσυχο tenant. Μέσω κοινού trait
+  `HasChartEmptyNote` (override του `isEmpty()`, που default ελέγχει όλο το `getData()` array και έμενε πάντα
+  false) + `$emptyStateHeading` ανά widget. Dark/mobile-safe by construction. Custom skeleton loaders +
+  sparse-<3→πίνακας: declined ως over-engineering· δες `docs/EKDOSI-BACKLOG.md`.
+
 ### Added
 - **Dashboard widgets: top προμηθευτές + αξία pipeline (#8 PR-2).** Νέο γράφημα **«Κορυφαίοι προμηθευτές
   — έξοδα»** (`TopSuppliersChart`, top-N ανά καθαρή αξία εξόδων του έτους· **ίδιο reportable-expense treatment

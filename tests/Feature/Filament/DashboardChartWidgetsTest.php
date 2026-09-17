@@ -133,4 +133,24 @@ class DashboardChartWidgetsTest extends TestCase
         $this->assertSame(['datasets' => [], 'labels' => []], (new TopProductsChart)->getData());
         $this->assertSame(['datasets' => [], 'labels' => []], (new RevenueByCategoryChart)->getData());
     }
+
+    public function test_empty_charts_report_empty_state(): void
+    {
+        Filament::setTenant($this->tenant); // tenant with no invoices yet
+
+        // isEmpty() drives the built-in empty state (blank canvas hidden + heading).
+        $this->assertTrue((new TopProductsChart)->isEmpty());
+        $this->assertSame('Καμία πώληση προς εμφάνιση φέτος.', (new TopProductsChart)->getEmptyStateHeading());
+        $this->assertTrue((new RevenueByCategoryChart)->isEmpty());
+        $this->assertSame('Κανένα έσοδο προς εμφάνιση φέτος.', (new RevenueByCategoryChart)->getEmptyStateHeading());
+    }
+
+    public function test_charts_are_not_empty_once_there_is_data(): void
+    {
+        $this->lineInvoice('Alpha', 100);
+
+        Filament::setTenant($this->tenant);
+        $this->assertFalse((new TopProductsChart)->isEmpty());
+        $this->assertFalse((new RevenueByCategoryChart)->isEmpty());
+    }
 }
