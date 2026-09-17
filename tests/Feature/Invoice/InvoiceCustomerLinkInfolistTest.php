@@ -92,6 +92,7 @@ class InvoiceCustomerLinkInfolistTest extends TestCase
         $customer->delete(); // soft delete
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
-            ->assertDontSee('Άνοιγμα εγγραφής');
+            ->assertDontSee('Άνοιγμα εγγραφής')                        // no label
+            ->assertDontSee('/customers/'.$customer->id.'/edit', false); // and no dead-end URL
     }
 }

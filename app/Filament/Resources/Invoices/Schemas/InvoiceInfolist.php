@@ -88,9 +88,9 @@ class InvoiceInfolist
                             // model binding 404s a trashed record. So gate on
                             // `! trashed()`: a trashed/missing customer degrades to «—»,
                             // no dead-end link (the legal name still shows in the snapshot).
-                            ->getStateUsing(fn ($record) => ($record->customer && ! $record->customer->trashed())
-                                ? 'Άνοιγμα εγγραφής'
-                                : null)
+                            // ONE guard for both state and url so they can never disagree
+                            // (a url without a visible label, or vice-versa).
+                            ->getStateUsing(fn ($record) => self::customerIsLinkable($record) ? 'Άνοιγμα εγγραφής' : null)
                             ->icon('heroicon-m-arrow-top-right-on-square')
                             // Pass the Company model (Laravel uses its
                             // route key = slug, per Company::getRouteKeyName).
@@ -98,7 +98,7 @@ class InvoiceInfolist
                             // a URL with an integer in the {tenant} slug
                             // segment, which Filament's tenant-binding
                             // middleware then 404s.
-                            ->url(fn ($record) => ($record->customer && ! $record->customer->trashed())
+                            ->url(fn ($record) => self::customerIsLinkable($record)
                                 ? route('filament.admin.resources.customers.edit', [
                                     'tenant' => $record->company,
                                     'record' => $record->customer_id,
@@ -412,5 +412,17 @@ class InvoiceInfolist
                     ->columns(3)
                     ->collapsible(),
             ]);
+    }
+
+    /**
+     * Whether the «Live customer record» link should render: a customer that is
+     * present AND not soft-deleted. InvoiceResource eager-loads `customer` with
+     * withTrashed(), so `$record->customer` is non-null for a deleted customer —
+     * and customers.edit route-model binding 404s a trashed record. Single source
+     * for both the link label (getStateUsing) and its url so they can't diverge.
+     */
+    private static function customerIsLinkable(mixed $record): bool
+    {
+        return $record->customer !== null && ! $record->customer->trashed();
     }
 }
