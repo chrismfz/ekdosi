@@ -5,9 +5,15 @@ namespace App\Filament\Resources\Invoices\Schemas;
 use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Models\Invoice;
+use App\Models\InvoiceLine;
+use App\Support\MyData\Codes;
+use App\Support\MyData\IncomeClassResolver;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
+use Filament\Infolists\Components\RepeatableEntry;
+use Filament\Infolists\Components\RepeatableEntry\TableColumn;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
@@ -142,6 +148,61 @@ class InvoiceInfolist
                     ])
                     ->columns(3)
                     ->compact(),
+
+                // Lines in the page BODY (between the header cards and the totals), so the
+                // view reads like the printed παραστατικό — moved here from the bottom
+                // «Lines» tab (that relation manager is dropped from getRelations(), which
+                // also promotes «Πληρωμές» to the first tab). Read-only, snapshot columns.
+                Section::make('Γραμμές')
+                    ->columnSpanFull()
+                    // Never render an empty «Γραμμές» card (e.g. a fresh draft with no
+                    // lines yet) above the totals.
+                    ->visible(fn (Invoice $record): bool => $record->lines->isNotEmpty())
+                    ->schema([
+                        RepeatableEntry::make('lines')
+                            ->hiddenLabel()
+                            ->table([
+                                TableColumn::make('Περιγραφή'),
+                                TableColumn::make('Μ.Μ.'),
+                                TableColumn::make('Ποσότ.')->alignEnd(),
+                                TableColumn::make('Τιμή μον.')->alignEnd(),
+                                TableColumn::make('Έκπτ.%')->alignEnd(),
+                                TableColumn::make('ΦΠΑ%')->alignEnd(),
+                                TableColumn::make('Καθαρή')->alignEnd(),
+                                TableColumn::make('Μεικτή')->alignEnd(),
+                                TableColumn::make('E3 (ΑΑΔΕ)')->alignEnd(),
+                            ])
+                            ->schema([
+                                TextEntry::make('product_descr')->placeholder('—'),
+                                TextEntry::make('metric_unit')->placeholder('—'),
+                                TextEntry::make('qty')->numeric(decimalPlaces: 3)->alignEnd(),
+                                TextEntry::make('price_per_item')->money('EUR')->alignEnd(),
+                                TextEntry::make('discount')->numeric(decimalPlaces: 4)->placeholder('—')->alignEnd(),
+                                TextEntry::make('vat_percent')->suffix('%')->alignEnd(),
+                                TextEntry::make('net_price')->money('EUR')->alignEnd(),
+                                TextEntry::make('gross_price')->money('EUR')->alignEnd(),
+                                // The E3 income class this line FILES at myDATA (same resolver
+                                // as the filing path), «—» when the pair doesn't actually file.
+                                TextEntry::make('income_class')
+                                    ->alignEnd()
+                                    ->getStateUsing(function (InvoiceLine $record, $livewire): string {
+                                        [$class, $cat] = self::lineIncomeClass($livewire->getRecord(), $record);
+
+                                        return (filled($class) && filled($cat)) ? $class : '—';
+                                    })
+                                    ->tooltip(function (InvoiceLine $record, $livewire): string {
+                                        [$class, $cat] = self::lineIncomeClass($livewire->getRecord(), $record);
+                                        if (! filled($class) || ! filled($cat)) {
+                                            return 'Χωρίς ταξινόμηση εσόδων (π.χ. δελτίο/εσωτερικό — δεν φέρει έσοδο).';
+                                        }
+                                        $typeLabel = Codes::e3TypeLabel($class);
+                                        $catLabel = Codes::e3CategoryLabel($cat);
+
+                                        return $class.($typeLabel ? ' — '.$typeLabel : '')
+                                            .' · '.$cat.($catLabel ? ' — '.$catLabel : '');
+                                    }),
+                            ]),
+                    ]),
 
                 Section::make('Totals')
                     ->schema([
@@ -417,5 +478,44 @@ class InvoiceInfolist
     private static function customerIsLinkable(mixed $record): bool
     {
         return $record->customer !== null && ! $record->customer->trashed();
+    }
+
+    /**
+     * The (E3 class, §8.6 category) a line files, via the SAME IncomeClassResolver
+     * the filing path uses (so the column reads exactly what gets sent).
+     *
+     * Memoised in WeakMaps keyed by the invoice / line OBJECTS — not a process-global
+     * array keyed by id: a WeakMap is freed with the request's models (no cross-request
+     * staleness or unbounded growth under Octane), the base pair (a DB query for a
+     * credit note) is computed once per invoice, and each line resolves once (shared by
+     * the cell value and its tooltip). The nested product.productCategory the resolver
+     * reads is eager-loaded in one go so N lines don't fire N+1 queries.
+     *
+     * @return array{0: ?string, 1: ?string}
+     */
+    private static function lineIncomeClass(Invoice $invoice, InvoiceLine $line): array
+    {
+        /** @var \WeakMap<InvoiceLine, array{0: ?string, 1: ?string}> $lineCache */
+        static $lineCache = null;
+        /** @var \WeakMap<Invoice, array{0: ?string, 1: ?string, 2: ?string}> $baseCache */
+        static $baseCache = null;
+        $lineCache ??= new \WeakMap;
+        $baseCache ??= new \WeakMap;
+
+        if (isset($lineCache[$line])) {
+            return $lineCache[$line];
+        }
+
+        if (! isset($baseCache[$invoice])) {
+            // Everything the resolver reads, loaded once: product.productCategory per
+            // line (the N+1 the old relation manager guarded against) + the invoice's
+            // own invoiceType/company (once-per-invoice, for baseFor + business type).
+            $invoice->loadMissing(['lines.product.productCategory', 'invoiceType', 'company']);
+            [$class, $cat] = app(IncomeClassResolver::class)->baseFor($invoice);
+            $baseCache[$invoice] = [$class, $cat, $invoice->company?->business_activity_type];
+        }
+        [$baseClass, $baseCat, $businessType] = $baseCache[$invoice];
+
+        return $lineCache[$line] = app(IncomeClassResolver::class)->forLine($line, $baseClass, $baseCat, $businessType);
     }
 }
