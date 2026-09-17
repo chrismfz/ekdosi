@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Dashboard widgets: κορυφαία είδη + έσοδα ανά κατηγορία (#8).** Δύο νέα γραφήματα στο κεντρικό
+  dashboard: **«Κορυφαία είδη/υπηρεσίες — έσοδα»** (top-N κατά καθαρή αξία, reuse του
+  `CustomerTopProducts::forCompany`, cached 30' ανά tenant+έτος γιατί υλοποιεί τις γραμμές σε PHP) και
+  **«Έσοδα ανά κατηγορία»** (top-N καθαρά ανά ekdosi ProductCategory, μόνο θετικά, reuse του
+  `RevenueByCategory` — ίδια πηγή με την αναφορά #2· κι αυτό υλοποιεί γραμμές σε PHP → cached 30').
+  Vertical bar, € στους άξονες/tooltips (`FormatsReportChart`), κοινή παλέτα (`ReportPalette`),
+  tenant-scoped, read-only.
 - **Στατιστικά χρέωσης ανά συμβόλαιο + retro-link (#11).** Η προβολή μιας **Υπηρεσίας** δείχνει τώρα:
   πόσες φορές τιμολογήθηκε, **συνολικό έσοδο** (καθαρό, live παραστατικά, μείον πιστωτικά — μέσω
   `App\Services\ServiceContractBilling`, tenant-scoped/reusable), μικτό, πρώτη/τελευταία χρέωση, εκκρεμή
