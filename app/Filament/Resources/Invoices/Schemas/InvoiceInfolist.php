@@ -64,7 +64,10 @@ class InvoiceInfolist
                             ->date('d/m/Y')
                             ->placeholder('—'),
                     ])
-                    ->columns(3),
+                    ->columns(3)
+                    // Tighter header + body padding so the top pair of cards claims
+                    // less vertical space (reclaims room below for the phase-2 block).
+                    ->compact(),
 
                 Section::make('Customer')
                     ->description('Snapshot at issue time — these values are legally frozen and do NOT reflect later customer edits.')
@@ -127,7 +130,8 @@ class InvoiceInfolist
                             ->label('Εγκατάσταση πελάτη (myDATA)')
                             ->visible(fn ($record) => $record->filedCounterpartBranch() > 0),
                     ])
-                    ->columns(3),
+                    ->columns(3)
+                    ->compact(),
 
                 Section::make('Totals')
                     ->schema([
