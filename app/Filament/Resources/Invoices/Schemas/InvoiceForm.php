@@ -439,20 +439,23 @@ class InvoiceForm
                         ->hiddenLabel()
                         // Table layout renders ONE cell per column, mapping schema children
                         // to columns IN ORDER and DROPPING any child beyond the last column
-                        // (Repeater.php: `count($tableColumns) > $counter`). So «Σημείωση»
-                        // needs its own column AND `notes` must sit within the first N
-                        // children (it is placed right before vat_exemption_category below) —
-                        // otherwise the per-line note is silently un-enterable, as it was.
+                        // (Repeater.php: `count($tableColumns) > $counter`). So EVERY child an
+                        // operator must reach needs a column within the count: «Σημείωση» (→
+                        // `notes`) AND «Αιτία 0%» (→ `vat_exemption_category`). The exemption
+                        // cell is empty for a normal line and shows the §8.3 Select only when
+                        // the line is 0% (the child's own `->hidden()`), so a 0% line on a type
+                        // the auto-suggest can't fill (1.1/2.1/2.3) is still enterable by hand.
                         ->table([
-                            TableColumn::make('Προϊόν')->width('18%'),
-                            TableColumn::make('Περιγραφή')->width('24%'),
-                            TableColumn::make('Ποσότ.')->width('7%'),
+                            TableColumn::make('Προϊόν')->width('16%'),
+                            TableColumn::make('Περιγραφή')->width('20%'),
+                            TableColumn::make('Ποσότ.')->width('6%'),
                             TableColumn::make('Μ.Μ.')->width('6%'),
-                            TableColumn::make('Τιμή (καθ.)')->width('10%'),
-                            TableColumn::make('Τιμή (με ΦΠΑ)')->width('10%'),
-                            TableColumn::make('Έκπτ.%')->width('7%'),
-                            TableColumn::make('ΦΠΑ%')->width('8%'),
-                            TableColumn::make('Σημείωση')->width('10%'),
+                            TableColumn::make('Τιμή (καθ.)')->width('9%'),
+                            TableColumn::make('Τιμή (με ΦΠΑ)')->width('9%'),
+                            TableColumn::make('Έκπτ.%')->width('6%'),
+                            TableColumn::make('ΦΠΑ%')->width('7%'),
+                            TableColumn::make('Σημείωση')->width('8%'),
+                            TableColumn::make('Αιτία 0%')->width('13%'),
                         ])
                         ->schema([
                             Select::make('product_id')
@@ -642,15 +645,26 @@ class InvoiceForm
                             // the line is 0%, required then (AADE [217]). The value is suggested
                             // from the invoice type by the rate handler above; always dehydrated
                             // but nulled for non-0% lines so a rate change clears a stale reason.
-                            // Kept LAST (a non-column child) so it stays auto-suggested exactly
-                            // as before — never a stray empty column in the line table.
+                            // Maps to the «Αιτία 0%» column (10th child ↔ 10th column): the cell
+                            // is empty for a normal line and shows this Select on a 0% line, so
+                            // the operator can pick the reason by hand when the auto-suggest
+                            // can't (type 1.1/2.1/2.3 → recommendForType() returns null). Before
+                            // there was no column for it, so a `required` reason on such a type
+                            // was un-enterable and the line couldn't be saved.
                             Select::make('vat_exemption_category')
                                 ->label('Αιτία απαλλαγής ΦΠΑ (§8.3)')
                                 ->options(Codes::vatExemptionOptions())
                                 ->searchable()
                                 ->hidden(fn (Get $get) => (float) ($get('vat_percent') ?? 0) !== 0.0)
                                 ->required(fn (Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0)
-                                ->helperText('Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).')
+                                // Guidance as a hover tooltip (hint icon), NOT helperText — in the
+                                // narrow table cell a long helperText wraps and inflates the whole
+                                // 0% row; the icon keeps the «ποια αιτία, πότε» hint one hover away
+                                // and the dropdown's own §8.3 legal labels guide regardless.
+                                ->hintIcon(
+                                    'heroicon-m-question-mark-circle',
+                                    tooltip: 'Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).',
+                                )
                                 ->dehydrated()
                                 ->dehydrateStateUsing(fn ($state, Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0 ? $state : null),
                         ])
