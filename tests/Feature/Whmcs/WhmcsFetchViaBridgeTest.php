@@ -45,7 +45,7 @@ class WhmcsFetchViaBridgeTest extends TestCase
         ];
     }
 
-    /** Fake resolve.php: op=invoices paginated, op=invoiced_flags empty. */
+    /** Fake resolve.php: op=invoices paginated. */
     private function fakeFeed(array $page0): void
     {
         Http::fake([self::RESOLVE_URL => function (Request $request) use ($page0) {
@@ -56,9 +56,6 @@ class WhmcsFetchViaBridgeTest extends TestCase
                 $invoices = $offset === 0 ? $page0 : [];
 
                 return Http::response(['status' => 'ok', 'invoices' => $invoices, 'offset' => $offset, 'count' => count($invoices)], 200);
-            }
-            if ($op === 'invoiced_flags') {
-                return Http::response(['status' => 'ok', 'flags' => []], 200);
             }
 
             return Http::response(['status' => 'ok'], 200);

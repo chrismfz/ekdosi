@@ -113,6 +113,22 @@ from `[Unreleased]`; `--major` explicit for milestones).
   έκδοση παραστατικού, αν και η αποθηκευμένη/εκτυπωμένη τιμή ήταν πάντα σωστή. Πλέον όλοι οι date/
   datetime pickers του panel χρησιμοποιούν τον JS picker του Filament με ρητό format `d/m/Y` (και
   `d/m/Y H:i`), εβδομάδα από Δευτέρα, ανεξάρτητα από τον browser (per-field overrides διατηρούνται).
+- **Εισερχόμενα WHMCS: το header action «Συγχρονισμός τώρα» έριχνε 500 σε κάθε φόρτωση της λίστας.**
+  Το action έκανε `->authorize('update')`, αλλά ένα **header action δεν έχει record** — το Laravel
+  Gate έκοβε το model class-string και καλούσε `PendingWhmcsInvoicePolicy::update($user)` με **ένα**
+  όρισμα («Too few arguments … 1 passed … exactly 2 expected»), σκάζοντας ολόκληρο το render της
+  σελίδας για κάθε μη-super-admin χρήστη. Πλέον ελέγχει το shield permission απευθείας
+  (`can('Update:PendingWhmcsInvoice')`, no-record), όπως κάνει ήδη το bulk «Αρχειοθέτηση επιλεγμένων».
+  Regression test που τρέχει με πραγματικό gate (τα υπόλοιπα inbox tests έκαναν `Gate::before(true)`
+  και μασκάριζαν το policy path).
+- **Βιβλίο Εξόδων: λιγότερα «αταξινόμητο» (#3).** Όταν το εισερχόμενο παραστατικό εξόδου έφερε
+  **χαρακτηρισμό ανά γραμμή** (E3) και η εισαγωγή τον κράτησε στα `expense_lines`, αλλά κανένας
+  κανόνας «προμηθευτής → χαρακτηρισμός» δεν ταίριαξε (η κεφαλίδα έμεινε αχαρακτήριστη), το Βιβλίο
+  το έδειχνε «αταξινόμητο». Πλέον, όταν λείπει η κεφαλίδα, η κατηγορία του Βιβλίου προκύπτει από τις
+  γραμμές (η κυρίαρχη κατά καθαρή αξία). Read-only παραγωγή — δεν γράφει την κεφαλίδα, οπότε το
+  παραστατικό μένει στη λίστα «προς χαρακτηρισμό» και ο χαρακτηρισμός προς ΑΑΔΕ δεν επηρεάζεται· η
+  δική μας κεφαλίδα, όταν υπάρχει, υπερισχύει πάντα. (Αφορά και το `income_vs_expense` MCP εργαλείο +
+  την εξαγωγή Βιβλίου, που περνούν από το ίδιο read-model.)
 - **Καρτέλα: το «Υπόλοιπο τέλους έτους» δεν φουσκώνει πια από τοις-μετρητοίς πωλήσεις.** Το
   `computeYearly` άθροιζε το year-end balance για ΟΛΑ τα παραστατικά χωρίς τον credit-term gate,
   οπότε κάθε μετρητοίς πώληση χωρίς πληρωμή (εξοφλημένη στην έκδοση) το ανέβαζε — ασυνέπεια με το
@@ -135,6 +151,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   **καταγράφεται** (`Log::warning` με το πραγματικό exception — πριν το stdout-only `$this->error()` άφηνε
   το `laravel.log` άδειο) αλλά ΔΕΝ βγάζει exit-1/alert. Διόρθωσε τα midnight error emails και στους 2 prod
   hosts. (Ο guard για mode-off/missing-creds — `RuntimeException` — μένει ως έχει.)
+
+### Removed
+- **«Έλεγχος legacy» στα Εισερχόμενα WHMCS (cutover-phase εργαλείο).** Το header action «Έλεγχος
+  legacy», η στήλη «Legacy» και το ομώνυμο φίλτρο αφαιρέθηκαν — μαζί με το `LegacyInvoicedRefresher`
+  service και τις κλήσεις του στο `whmcs:fetch-pending`. Χρησίμευαν μόνο όσο έτρεχε παράλληλα η παλιά
+  εφαρμογή ekdosi (dual-run), για να μη διπλο-τιμολογηθεί ένα WHMCS invoice· μετά το cutover δεν
+  υπάρχει legacy να ρωτηθεί. **Η δικλείδα διπλής υποβολής παραμένει** ως αδρανές backstop: η στήλη
+  `legacy_invoiced`, το `PendingWhmcsInvoice::invoicedInLegacy()`, ο guard στο
+  `WhmcsInvoiceFiler::assertCanBeFiled()` και το candidate exclusion του `whmcs:auto-issue` μένουν (πάντα
+  false τώρα — καμία αλλαγή στη ροή έκδοσης, κανένα schema change).
 
 ## [2.3.0] - 2026-09-16
 
