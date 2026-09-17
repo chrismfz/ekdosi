@@ -98,10 +98,22 @@ class ToolRegistry
             if (! $this->userMay($user, $tool)) {
                 continue;
             }
+            $schema = $tool->inputSchema();
+            // A no-argument tool whose top-level `properties` is an empty PHP `[]`
+            // would re-encode as a JSON array `[]`, and Anthropic 400s the whole
+            // call «input_schema.properties: Input should be an object». Coerce it
+            // to an object `{}` so a tool that forgot the cast can't break every
+            // request — the no-arg shape all our tools use. (Mirror of
+            // AssistantRunner::normalizeToolInputs. Our schemas are flat, so a
+            // top-level check suffices; add recursion only if a tool ever nests
+            // an empty-`properties` object.)
+            if (($schema['properties'] ?? null) === []) {
+                $schema['properties'] = (object) [];
+            }
             $out[] = [
                 'name' => $tool->name(),
                 'description' => $tool->description(),
-                'input_schema' => $tool->inputSchema(),
+                'input_schema' => $schema,
             ];
         }
 

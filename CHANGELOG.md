@@ -158,6 +158,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   μέρος (στυλ legacy Impact). Καμία αλλαγή σε ποσά/περιεχόμενο — μόνο διάταξη.
 
 ### Fixed
+- **AI «Βοηθός»: το `app_version` έσπαγε ΟΛΗ την κλήση με 400 «input_schema.properties: Input
+  should be an object».** Το εργαλείο χωρίς παραμέτρους επέστρεφε `'properties' => []` (κενό PHP array),
+  που σειριοποιείται ως JSON array `[]` αντί για object `{}`, και το Anthropic API απέρριπτε το σύνολο
+  του payload (`tools.N.custom.input_schema.properties`). Διορθώθηκε στη ρίζα (`AppVersionTool` →
+  `(object) []`, σύμβαση όπως `WhmcsInboxTool`/`OutstandingReceivablesTool`) **και** στο boundary
+  (`ToolRegistry::definitionsFor` εξαναγκάζει κενό `properties` σε object — καθρέφτης του
+  `AssistantRunner::normalizeToolInputs`), ώστε κανένα μελλοντικό εργαλείο να μην το ξανασπάσει.
 - **«Σημείωση γραμμής» εισάγεται ξανά — και εμφανίζεται στην προβολή.** Ο πίνακας γραμμών στη φόρμα
   έκδοσης είναι table-repeater που renderάρει ένα κελί ανά **στήλη** και «κόβει» όσα πεδία περισσεύουν·
   με 8 στήλες αλλά το `notes` ως 10ο πεδίο, το «Σημείωση γραμμής» **δεν εμφανιζόταν πουθενά** — ο
