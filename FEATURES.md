@@ -593,6 +593,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **ΦΠΑ ανά περίοδο** (`VatPeriodReport`, μήνας/τρίμηνο) — εκροών − εισροών (πόσο ΦΠΑ θα χρωστάμε).
 - **Ηλικίωση οφειλών** (`AgedReceivables`) — ανοιχτό υπόλοιπο ανά πελάτη σε buckets 0-30/31-60/61-90/90+
   (ίδιο FIFO aging με την Καρτέλα), σύνολα, drill στην Καρτέλα, εξαγωγή CSV.
+- **Ισοζύγιο Πελατών** (`CustomerTrialBalance`, perm `View:CustomerTrialBalance`) — ανά πελάτη
+  `Υπόλοιπο μεταφοράς | Χρέωση | Πίστωση | Τελικό` για ελεύθερη περίοδο (Από/Έως), σύνολα, drill στην
+  Καρτέλα, εξαγωγή CSV. Ίδια βάση με την Καρτέλα (`CustomerLedgerBuilder::periodBalances`) → το «Τελικό»
+  ισοσκελίζει με το υπόλοιπο Καρτέλας και τα ανεξόφλητα (`App\Services\Accounting\CustomerTrialBalanceReport`).
 
 ## 13. Migration / ETL
 - **`migrate:firebird`** — επαναλήψιμο ETL, μία εταιρία/run, upsert σε
