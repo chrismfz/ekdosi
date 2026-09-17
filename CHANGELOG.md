@@ -28,6 +28,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   sparse-<3→πίνακας: declined ως over-engineering· δες `docs/EKDOSI-BACKLOG.md`.
 
 ### Added
+- **Ταμειακό ημερολόγιο (Εισπράξεων–Πληρωμών) (#10).** Νέα αναφορά «Λογιστικά» (`CashJournalReport`, perm
+  `View:CashJournalReport`): ταμειακές κινήσεις πελατών για μια περίοδο, ομαδοποιημένες **ανά λογαριασμό
+  (τραπεζικό/ταμείο) → τρόπο πληρωμής** — εισπράξεις (money in, kind=payment) vs πληρωμές/επιστροφές
+  (money out, kind=refund), subtotals ανά λογαριασμό + **καθαρή ταμειακή ροή** + πλήθος κινήσεων + export CSV.
+  Καλύπτει μόνο τον πίνακα `payments` (εισπράξεις/επιστροφές πελατών) — τα έξοδα/πληρωμές προμηθευτών μένουν
+  στο Βιβλίο Εσόδων-Εξόδων. Ημ/νία κίνησης = `COALESCE(pay_date, DATE(created_at))` ώστε καμία πληρωμή να μη
+  χάνεται· soft-deleted εξαιρούνται· `amount` θετικό, το πρόσημο το φέρει το `kind`. Default περίοδος = τρέχων
+  μήνας. **Μετά το deploy: `shield:generate` + re-provision** (νέο permission). Backlog #10.
 - **Ισοζύγιο Ειδών/Υπηρεσιών (#4).** Νέα αναφορά «Λογιστικά» (`RevenueByItemReport`, perm
   `View:RevenueByItemReport`): τζίρος ανά **είδος/υπηρεσία** για ένα έτος — καθαρά/ΦΠΑ/μεικτά + **ποσότητα**,
   δεσπόζουσα κατηγορία, **% τζίρου**, **YoY**, σύνολα, export CSV. Η υπολογιστική βάση (`RevenueByItem`) είναι
