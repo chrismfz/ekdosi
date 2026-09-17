@@ -168,4 +168,37 @@ final class WhmcsFilingGuard
             }
         }
     }
+
+    /**
+     * UNATTENDED-ONLY: refuse to auto-issue a WHMCS invoice whose mapping carries
+     * ANY 0%-VAT line. Such a line means WHMCS sent the product untaxed (Apply Tax
+     * off) — which is EITHER a legacy/grandfathered product that legally still
+     * owes 24% (the common case: an old package priced gross) OR a genuine
+     * exempt / ενδοκοινοτικό reverse-charge sale. The unattended path CANNOT tell
+     * the two apart from the payload, so it HOLDS the row for a human — who either
+     * sets 24% (gross-edit keeps the customer total) or confirms the exemption in
+     * the editable draft. Deliberately NOT called on the manual createDraft path:
+     * draft-first exists precisely so an operator can fix exactly this. WHOLE-
+     * invoice; runs BEFORE the exemption-aware refuseProblematicZeroVatLines so a
+     * tenant with a single configured 0%-exemption still can't auto-file 0% here.
+     *
+     * @param  array<string, mixed>  $mapped  WhmcsInvoiceMapper::map() output
+     */
+    public static function assertNoUntaxedForUnattendedIssue(array $mapped, PendingWhmcsInvoice $pending): void
+    {
+        $zero = $mapped['totals']['zero_vat_lines'] ?? [];
+        if ($zero === []) {
+            return;
+        }
+
+        $sample = implode('», «', array_slice($zero, 0, 3));
+        $more = count($zero) > 3 ? ' (+'.(count($zero) - 3).' ακόμα)' : '';
+        throw new LogicException(
+            'Το WHMCS #'.$pending->whmcs_invoice_id.' έχει '.count($zero).' γραμμή/ές ΧΩΡΙΣ ΦΠΑ '
+            .'(«'.$sample.'»'.$more.') — ήρθαν έτσι από το WHMCS (Apply Tax off στο προϊόν). Η άμεση '
+            .'τιμολόγηση ΔΕΝ εκδίδει αυτόματα 0% παραστατικό: μπορεί να χρειάζεται 24% (εγχώριο) ή '
+            .'να είναι απαλλαγή/ενδοκοινοτικό. Η γραμμή κρατείται — δημιούργησε προσχέδιο, όρισε τον '
+            .'σωστό συντελεστή (gross-edit για να μείνει ίδιο το τελικό) και έκδωσέ το χειροκίνητα.'
+        );
+    }
 }

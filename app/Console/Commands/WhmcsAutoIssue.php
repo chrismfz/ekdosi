@@ -41,10 +41,12 @@ use Throwable;
  *     models here deliberately do NOT use Filament's BelongsToTenant — this
  *     runs in CLI with no panel tenant context), and the customer/type are
  *     re-loaded scoped + asserted to belong to the tenant before filing.
- *   - Reuses WhmcsInvoiceFiler::file() unchanged, so every existing guard
+ *   - Calls WhmcsInvoiceFiler::file(unattended: true), so every existing guard
  *     (0%-exempt refusal, lockForUpdate, assertCanBeFiled, the outside-tx
- *     AADE submit) still applies. A guard that throws is caught per-row,
- *     logged loudly, and the row is left for the operator.
+ *     AADE submit) still applies PLUS the unattended-only hold: any 0%-VAT line
+ *     (WHMCS Apply-Tax-off — may owe 24% or be a genuine exemption) is NEVER
+ *     auto-filed; the row is held for a human. A guard that throws is caught
+ *     per-row, logged loudly, and the row is left for the operator.
  *   - Every auto-filed row is logged (Log::info) and tagged in its notes
  *     ('Αυτόματη έκδοση (άμεση τιμολόγηση)') for the audit trail.
  *
@@ -237,6 +239,7 @@ class WhmcsAutoIssue extends Command
                     invoiceType: $chosenType,
                     filedByUserId: null,            // system-issued (no operator)
                     auditNote: self::AUDIT_NOTE,
+                    unattended: true,               // → holds 0%-VAT rows for a human
                 );
                 $filed++;
                 $this->line("  ✓ {$label} → {$result->invoice->invcode}".

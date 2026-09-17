@@ -83,6 +83,7 @@ class WhmcsInvoiceFiler
         InvoiceType $invoiceType,
         ?int $filedByUserId = null,
         ?string $auditNote = null,
+        bool $unattended = false,
     ): FileResult {
         // Defense: refuse to run inside an outer transaction. The
         // AADE HTTP call below MUST happen with no row locks held
@@ -106,6 +107,14 @@ class WhmcsInvoiceFiler
         // (consuming ΑΑ) by the time the submit threw. Off-mode
         // tenants (NullSubmitter) tolerate 0%-VAT lines fine.
         $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
+        // Unattended (άμεση τιμολόγηση) must NEVER auto-file a 0%-VAT invoice —
+        // a WHMCS-untaxed line (Apply Tax off) is either a grandfathered product
+        // owing 24% or a genuine exemption, and only a human can decide. HOLD it
+        // (this runs BEFORE refuseProblematicZeroVatLines so a configured
+        // exemption can't let it slip through the unattended path).
+        if ($unattended) {
+            WhmcsFilingGuard::assertNoUntaxedForUnattendedIssue($mapped, $pending);
+        }
         $this->refuseProblematicZeroVatLines($tenant, $mapped, $pending);
         // WH-1/WH-4: non-EUR or negative (promo/credit) lines → HOLD.
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);

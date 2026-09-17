@@ -1279,6 +1279,27 @@ class WhmcsInboxTable
                     return;
                 }
 
+                // Soft warning (non-blocking): the draft carries 0%-VAT line(s)
+                // because WHMCS sent them untaxed (Apply Tax off on the product).
+                // Draft-first exists exactly for this — surface it so the operator
+                // sets the correct rate (24% via gross-edit keeps the total) or
+                // confirms a genuine exemption/ενδοκοινοτικό before issuing, rather
+                // than filing 0% to AADE by reflex.
+                $zeroVatCount = $invoice->load('lines')->lines
+                    ->filter(fn ($line) => (float) $line->vat_percent === 0.0)
+                    ->count();
+                if ($zeroVatCount > 0) {
+                    Notification::make()
+                        ->title('Προσοχή: '.$zeroVatCount.' γραμμή/ές ΧΩΡΙΣ ΦΠΑ (ήρθε έτσι από WHMCS)')
+                        ->body('Το προϊόν έχει «Apply Tax» OFF στο WHMCS. Πριν την έκδοση: όρισε τον '
+                            .'σωστό συντελεστή — 24% αν εγχώριο (με gross-edit κράτα το ίδιο τελικό ποσό) '
+                            .'— ή επιβεβαίωσε απαλλαγή/ενδοκοινοτικό (reverse-charge). Δεν εκδίδεται '
+                            .'αυτόματα.')
+                        ->warning()
+                        ->persistent()
+                        ->send();
+                }
+
                 // «Δημιουργία & έλεγχος» → land straight on the new παραστατικό.
                 if ($arguments['redirect'] ?? false) {
                     Notification::make()
