@@ -117,6 +117,24 @@ class AgedReceivablesCollectionTest extends TestCase
         $this->assertSame('10/06/2026', $row->collectionLastContactAt);
     }
 
+    public function test_foreign_tenant_assignee_id_is_rejected(): void
+    {
+        // A user NOT in this tenant (no company_user pivot row). Assigning the debt
+        // to them must be blocked so their display name can't leak into the
+        // «Ανάθεση» column. Two layers: the Select validates against its tenant-only
+        // options (this error) AND the action re-checks membership at the write.
+        $outsider = User::create(['name' => 'Ξένος Χρήστης', 'email' => 'x-'.uniqid().'@t.local', 'password' => bcrypt('x')]);
+
+        Livewire::test(AgedReceivables::class)
+            ->callAction('collection', data: [
+                'collection_assigned_to' => $outsider->id,
+            ], arguments: ['customer' => $this->debtor->id])
+            ->assertHasActionErrors(['collection_assigned_to']);
+
+        $this->debtor->refresh();
+        $this->assertNull($this->debtor->collection_assigned_to, 'a non-tenant user must not be assignable');
+    }
+
     public function test_action_cannot_write_another_tenants_customer(): void
     {
         $other = Company::create([

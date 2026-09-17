@@ -78,7 +78,7 @@
                                             <div class="text-xs text-gray-400 dark:text-gray-500">👤 {{ $row->collectionAssignee }}</div>
                                         @endif
                                     @else
-                                        <span class="text-gray-300 dark:text-gray-600">—</span>
+                                        <span class="text-gray-400 dark:text-gray-500">—</span>
                                     @endif
                                 </td>
                                 <td class="py-2 pr-4 whitespace-nowrap">{{ $row->collectionLastContactAt ?? '—' }}</td>

@@ -147,6 +147,11 @@
   clutter στη φαρδιά γραμμή)· καμία ειδοποίηση/κλιμάκωση (Φάση Γ), κανένα per-event ιστορικό (Φάση B).
 - [ ] **Φάση B (M):** ενέργεια → task με ημερομηνία/υπεύθυνο στο ημερολόγιο + ιστορικό επαφών στην Καρτέλα
 - [ ] **Φάση Γ (S):** κλιμάκωση +7/+15/+30 με το υπάρχον `send_customer_statement`
+- [ ] **(P2 review, accepted για Φάση A):** η ενέργεια γράφει `customers.collection_*` κάτω από το gate
+  `View:AgedReceivables` (χωρίς ξεχωριστό `Update`-ability). Μόνο collection metadata (ποτέ money/ταυτότητα/
+  myDATA)· ok για Φάση A, αλλά ίσως δικό του ability αργότερα. Επίσης: ο assignee ελέγχεται και write-time
+  (πέρα από το Select-options validation του Filament) — το ίδιο latent pattern (options-only) υπάρχει στο
+  `LeadForm::assigned_user_id`· καλυμμένο από το ίδιο Filament Select validation, explicit guard αν χρειαστεί.
 
 ### 6. Ενοποίηση ρυθμίσεων + Wizard νέας εταιρείας
 

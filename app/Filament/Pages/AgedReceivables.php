@@ -120,7 +120,17 @@ class AgedReceivables extends Page
                     return;
                 }
 
-                $c->collection_assigned_to = $data['collection_assigned_to'] ?: null;
+                // Validate the assignee at the WRITE, not just the dropdown: the
+                // Select's options() restricts the UI, but a crafted request can
+                // POST any id and `users` is a GLOBAL table — so re-check membership
+                // in the tenant's operator set (null out anything foreign/missing).
+                // This blocks assigning a debt to another tenant's user (whose name
+                // would then leak into the «Ανάθεση» column) AND avoids an FK-
+                // violation 500 on a non-existent id.
+                $assignee = (int) ($data['collection_assigned_to'] ?? 0);
+                $c->collection_assigned_to = ($assignee > 0 && array_key_exists($assignee, $this->operatorOptions()))
+                    ? $assignee
+                    : null;
                 $c->collection_next_step_at = $data['collection_next_step_at'] ?: null;
                 $c->collection_next_step_note = $data['collection_next_step_note'] ?: null;
                 $c->collection_note = $data['collection_note'] ?: null;
