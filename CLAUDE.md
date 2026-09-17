@@ -103,6 +103,12 @@ cutover.
   UTF8 superset → no errors). Fallback: `charset=NONE` + `iconv('Windows-1253','UTF-8//IGNORE',…)`.
 - Reserved words renamed; INVDATE+INVTIME → `invoices.issued_at`; Firebird domains → concrete
   decimals.
+- **Services = ONE model, evolved additively — never cloned.** `ServiceContract` covers every
+  recurring thing (support, licenses, VM, and — όταν έρθει η MyIP off-WHMCS — shared hosting/VPS/
+  reseller): same renewal/dunning/money/myDATA core. Grow it via `service_type`/categories +
+  `ProvisioningModule` drivers + addons as child rows + progressive disclosure — NOT a second
+  "Hosting Services" module (that would duplicate the money-critical core). Full rationale:
+  `docs/services-module-evolution.md`.
 
 ## Conventions
 - Deliver **complete, ready-to-drop files**, not diffs.
