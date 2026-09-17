@@ -723,28 +723,21 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   `index.csv` (ΜΑΡΚ, ημερομηνία, πελάτης, σύνολο) και README. Συμπληρωματικό του `company:export`
   (bundle επαναφοράς, μόνο για άλλο ekdosi) — αυτό διαβάζεται από άνθρωπο και λογιστή χωρίς την
   εφαρμογή. Η **διαγραφή εταιρείας** δείχνει τι υποβεβλημένο χάνεται και δείχνει και τα δύο.
-- **In-app ενημέρωση από GitHub — ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΗ by default** (`EKDOSI_UPDATE_IN_APP_APPLY=false`,
-  triage 2026-09-02). Ο **έλεγχος** ενημερώσεων μένει ενεργός· η αναβάθμιση γίνεται από τον server με
-  **`deploy/update.sh <tag>`** (και `deploy/rollback.sh` για επαναφορά) — η «Υγεία συστήματος» δείχνει
-  τη νέα έκδοση **και την ακριβή εντολή**. Λόγος: το ίδιο το updater audit είχε βγάλει «μη βασίζεσαι
-  στο UI apply μέχρι να κλείσουν τα UPD-001…004» (δεν αδειάζει τον queue worker που κάνει restart,
-  fails open μετά από μερική εφαρμογή, στοχεύει mutable tag αντί για verified SHA). Ο μηχανισμός
-  παρακάτω **υπάρχει ολόκληρος** και ξανα-ενεργοποιείται με ένα env var — αφού κλείσουν αυτά.
-  Το `ekdosi:self-update` αρνείται κάθε queued run (update ή rollback) όσο είναι disarmed.
-- **In-app ενημέρωση από GitHub** (Phase 2 / Φάση A) — super_admin action «Εγκατάσταση ενημέρωσης»
-  στη «Υγεία συστήματος»: εφαρμόζει νέα έκδοση από το panel (snapshot → maintenance → `git checkout` →
+- **In-app ενημέρωση από GitHub** (Phase A/B) — **ΑΠΕΝΕΡΓΟΠΟΙΗΜΕΝΗ by default**
+  (`EKDOSI_UPDATE_IN_APP_APPLY=false`, triage 2026-09-02): ο **έλεγχος** ενημερώσεων μένει ενεργός, η
+  αναβάθμιση γίνεται από τον server με **`deploy/update.sh <tag>`** (+ `deploy/rollback.sh`) — η «Υγεία
+  συστήματος» δείχνει τη νέα έκδοση **και την ακριβή εντολή**· το `ekdosi:self-update` αρνείται κάθε queued
+  run όσο είναι disarmed. Λόγος (updater audit): «μη βασίζεσαι στο UI apply μέχρι να κλείσουν τα
+  UPD-001…004» (queue-drain, fails-open μετά μερική εφαρμογή, mutable tag αντί verified SHA). Ο μηχανισμός
+  **υπάρχει ολόκληρος** και ξανα-ενεργοποιείται με το env var. **Όταν αρματωθεί:** super_admin action
+  «Εγκατάσταση ενημέρωσης» στη «Υγεία συστήματος» (snapshot → maintenance → `git checkout` →
   `composer install` *από το lock, ΠΟΤΕ `composer update`* → `migrate` → `optimize` → shield →
-  `queue:restart` → opcache → `ops:health`). **Shared-hosting-first — χωρίς sudo/systemd/root**: τρέχει
-  ως ο ίδιος account user, εκτελείται out-of-band από τον cron scheduler (`ekdosi:self-update`), ώστε η
-  εφαρμογή να κάνει restart τον εαυτό της με ασφάλεια. `UpdateRun` model + resource «Ενημερώσεις»
-  (ζωντανή πρόοδος + στάδιο + έξοδος + ιστορικό)· signed `/internal/opcache-flush`· token-authenticated
-  `git fetch` (ένα PAT για check + pull). **Arming flag** `EKDOSI_UPDATE_IN_APP_APPLY` (default **OFF**, βλ. παραπάνω)·
-  όταν είναι ON το κουμπί εμφανίζεται εφόσον υπάρχει διαθέσιμη έκδοση (σε private repo προϋποθέτει
-  έγκυρο token)· super_admin-only + confirmation.
-  **Φάση Β: «Επαναφορά»** — αναιρεί μια ολοκληρωμένη (ή αποτυχημένη) ενημέρωση με checkout του
-  προηγούμενου commit + `db-restore` του pre-update snapshot (destructive· λαμβάνει safety snapshot
-  πρώτα). `EKDOSI_UPDATE_STRATEGY` = `php` (φορητό) ή `script` (wrap `deploy/update.sh` σε VPS). Το
-  manual `deploy/update.sh <tag>` παραμένει το VPS path. `docs/versioning-and-updates.md`.
+  `queue:restart` → opcache → `ops:health`), **shared-hosting-first** (χωρίς sudo/systemd/root, ως ο ίδιος
+  account user, out-of-band μέσω του `ekdosi:self-update` cron)· `UpdateRun` model + resource «Ενημερώσεις»
+  (ζωντανή πρόοδος/στάδιο/έξοδος/ιστορικό)· signed `/internal/opcache-flush`· token-auth `git fetch`.
+  **Φάση Β «Επαναφορά»**: checkout προηγ. commit + `db-restore` του pre-update snapshot (destructive, με
+  safety snapshot πρώτα). `EKDOSI_UPDATE_STRATEGY` = `php` (φορητό) ή `script` (wrap `deploy/update.sh` σε
+  VPS)· το manual `deploy/update.sh <tag>` παραμένει το VPS path. `docs/versioning-and-updates.md`.
 - **Deploy worker-drain** — `deploy/update.sh`/`rollback.sh` σταματούν τον queue worker πριν το
   `migrate`/restore (κανένα in-flight job σε μισο-migrated schema)· `db-snapshot` clean-slate
   (`--add-drop-database`) + snapshot μετά το `artisan down`.
