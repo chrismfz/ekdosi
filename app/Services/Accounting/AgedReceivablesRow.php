@@ -19,5 +19,10 @@ final readonly class AgedReceivablesRow
         public float $b90plus,
         public float $total,
         public ?int $oldestDays,
+        // #5 dunning Φάση A: per-customer collection state (nullable).
+        public ?string $collectionAssignee = null,
+        public ?string $collectionNextStepAt = null,
+        public ?string $collectionNextStepNote = null,
+        public ?string $collectionLastContactAt = null,
     ) {}
 }

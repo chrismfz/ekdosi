@@ -138,12 +138,20 @@
 
 ### 5. Εργασίες Είσπραξης (dunning) — 3 φάσεις
 
-**Verdict: ✅ όντως λείπει για εισπρακτέα (M).** Η ηλικίωση είναι read-only. Υπάρχουν leads follow-ups
-(`Lead.php`) + service-contract suspension (`ServiceContract.php:73-81`) αλλά **άλλο domain**.
+**Verdict: ✅ όντως λείπει για εισπρακτέα (M). — ✅ Φάση A DONE 2026-09-17.** Η ηλικίωση ήταν read-only.
+Υπάρχουν leads follow-ups (`Lead.php`) + service-contract suspension (`ServiceContract.php:73-81`) αλλά **άλλο domain**.
 
-- **Φάση A (S):** κουμπιά πάνω στην ηλικίωση — υπενθύμιση/ανάθεση/αναβολή/σημείωση + στήλες «τελ. επαφή»/«επόμενο βήμα»
-- **Φάση B (M):** ενέργεια → task με ημερομηνία/υπεύθυνο στο ημερολόγιο + ιστορικό επαφών στην Καρτέλα
-- **Φάση Γ (S):** κλιμάκωση +7/+15/+30 με το υπάρχον `send_customer_statement`
+- [x] **Φάση A:** κουμπί «Εργασία είσπραξης» πάνω στην ηλικίωση (ανάθεση/επόμενο βήμα+ημ/νία/σημείωση/καταγραφή
+  επαφής, ένα modal) + στήλες «Επόμενο βήμα»/«Τελ. επαφή». Κατάσταση σε `customers.collection_*` (record-keeping,
+  tenant-scoped, ίδιο gate `View:AgedReceivables`). Οι 4 «κουμπιά» ενοποιήθηκαν σε ένα modal-editor (λιγότερο
+  clutter στη φαρδιά γραμμή)· καμία ειδοποίηση/κλιμάκωση (Φάση Γ), κανένα per-event ιστορικό (Φάση B).
+- [ ] **Φάση B (M):** ενέργεια → task με ημερομηνία/υπεύθυνο στο ημερολόγιο + ιστορικό επαφών στην Καρτέλα
+- [ ] **Φάση Γ (S):** κλιμάκωση +7/+15/+30 με το υπάρχον `send_customer_statement`
+- [ ] **(P2 review, accepted για Φάση A):** η ενέργεια γράφει `customers.collection_*` κάτω από το gate
+  `View:AgedReceivables` (χωρίς ξεχωριστό `Update`-ability). Μόνο collection metadata (ποτέ money/ταυτότητα/
+  myDATA)· ok για Φάση A, αλλά ίσως δικό του ability αργότερα. Επίσης: ο assignee ελέγχεται και write-time
+  (πέρα από το Select-options validation του Filament) — το ίδιο latent pattern (options-only) υπάρχει στο
+  `LeadForm::assigned_user_id`· καλυμμένο από το ίδιο Filament Select validation, explicit guard αν χρειαστεί.
 
 ### 6. Ενοποίηση ρυθμίσεων + Wizard νέας εταιρείας
 
