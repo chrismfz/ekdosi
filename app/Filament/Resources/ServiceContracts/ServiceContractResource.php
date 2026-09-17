@@ -8,6 +8,7 @@ use App\Filament\Resources\ServiceContracts\Pages\CreateServiceContract;
 use App\Filament\Resources\ServiceContracts\Pages\EditServiceContract;
 use App\Filament\Resources\ServiceContracts\Pages\ListServiceContracts;
 use App\Filament\Resources\ServiceContracts\Pages\ViewServiceContract;
+use App\Filament\Resources\ServiceContracts\RelationManagers\RenewalsRelationManager;
 use App\Filament\Resources\ServiceContracts\Schemas\ServiceContractForm;
 use App\Filament\Resources\ServiceContracts\Tables\ServiceContractsTable;
 use App\Models\ServiceContract;
@@ -95,6 +96,9 @@ class ServiceContractResource extends Resource
     public static function getRelations(): array
     {
         return [
+            // «Ανανεώσεις» — the invoices billed from this contract (staged
+            // renewals + retro-linked); read-only, the tangible billing history.
+            RenewalsRelationManager::class,
             // «Ιστορικό» — the contract's audit trail (manual + automated dunning
             // suspends/terminates), via the shared read-only relation manager.
             ActivityLogRelationManager::class,

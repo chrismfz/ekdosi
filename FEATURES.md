@@ -439,6 +439,13 @@ WHMCS-style, προσαρμοσμένο στο per-invoice myDATA: κατάλο�
 matrix** + per-customer `service_contracts`· **ανανέωση = staged DRAFT** (ποτέ
 auto-AADE)· **dunning** (auto suspend/terminate, opt-in ανά προϊόν)· **provisioning
 seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcoming.
+- **Στατιστικά χρέωσης ανά συμβόλαιο** (`ServiceContractBilling`, tenant-scoped/reusable): φορές
+  τιμολογήθηκε · **συνολικό έσοδο** (καθαρό, live, μείον πιστωτικά) · μικτό · πρώτη/τελευταία χρέωση ·
+  εκκρεμή πρόχειρα · **ιστορικό τιμής καταλόγου** (audit log). Tab **«Ανανεώσεις»** = read-only λίστα
+  παραστατικών του συμβολαίου.
+- **«Σύνδεση υπάρχοντος παραστατικού»** (retro-link): «κουμπώνει» ένα ήδη-εκδομένο παραστατικό του πελάτη
+  σε σύμβαση (θέτει μόνο `service_contract_id`· tenant+customer scoped, re-checked στο write) — για
+  χειροκίνητες πωλήσεις που έγιναν πριν φτιαχτεί το συμβόλαιο.
 
 ## 11. Γέφυρες τιμολόγησης (WHMCS + seam για πολλαπλές)
 - **Source-neutral «Εισερχόμενα»** + per-row **source badge** (από `BillingSourceRegistry`)·
