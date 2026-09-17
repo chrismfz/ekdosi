@@ -193,6 +193,10 @@ class IssueCreditNote
                     'invoice_id' => $credit->id,
                     'original_line_id' => $line->id,
                     'product_id' => $line->product_id,
+                    // #2 revenue-by-category: carry the original line's ekdosi category
+                    // stamp (WHMCS lines have no product_id, so without this the credit
+                    // would net into «Αταξινόμητα» instead of reducing the right category).
+                    'product_category_id' => $line->product_category_id,
                     'qty' => $qty,
                     'price_per_item' => $line->price_per_item,
                     'discount' => $line->discount,

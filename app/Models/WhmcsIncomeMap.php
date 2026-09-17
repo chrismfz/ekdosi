@@ -27,6 +27,10 @@ class WhmcsIncomeMap extends Model
         'whmcs_key',
         'income_class_category',
         'income_class',
+        // Revenue-by-category (#2): the ekdosi business ProductCategory this WHMCS
+        // group/product's lines belong to — the reporting axis, independent of the
+        // §8.6 income class above.
+        'product_category_id',
         'label',
     ];
 
@@ -34,6 +38,7 @@ class WhmcsIncomeMap extends Model
     {
         return [
             'whmcs_key' => 'integer',
+            'product_category_id' => 'integer',
         ];
     }
 

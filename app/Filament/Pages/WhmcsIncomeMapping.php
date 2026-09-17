@@ -6,6 +6,7 @@ use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Filament\Clusters\SettingsCluster;
 use App\Models\Company;
+use App\Models\ProductCategory;
 use App\Models\WhmcsIncomeMap;
 use App\Services\Whmcs\WhmcsClientFactory;
 use App\Support\MyData\ClassificationGuidance;
@@ -46,17 +47,26 @@ class WhmcsIncomeMapping extends Page
     /** @var array<string, string> gid => §8.6 category ('' = μη αντιστοιχισμένο) */
     public array $choice = [];
 
+    /** @var array<string, string> gid => ekdosi ProductCategory id ('' = καμία) */
+    public array $categoryChoice = [];
+
     public bool $fetched = false;
 
     public function mount(): void
     {
         // Pre-load the saved group choices so a fetch shows them selected and an
-        // unfetched visit still remembers what was mapped.
-        $this->choice = WhmcsIncomeMap::query()
+        // unfetched visit still remembers what was mapped (both the §8.6 class and
+        // the ekdosi revenue-report category).
+        $rows = WhmcsIncomeMap::query()
             ->where('company_id', $this->tenant()->getKey())
             ->where('scope', WhmcsIncomeMap::SCOPE_GROUP)
-            ->get(['whmcs_key', 'income_class_category'])
+            ->get(['whmcs_key', 'income_class_category', 'product_category_id']);
+
+        $this->choice = $rows
             ->mapWithKeys(fn (WhmcsIncomeMap $m) => [(string) $m->whmcs_key => (string) $m->income_class_category])
+            ->all();
+        $this->categoryChoice = $rows
+            ->mapWithKeys(fn (WhmcsIncomeMap $m) => [(string) $m->whmcs_key => (string) ($m->product_category_id ?? '')])
             ->all();
     }
 
@@ -64,6 +74,26 @@ class WhmcsIncomeMapping extends Page
     public function bucketOptions(): array
     {
         return ['' => '— δεν έχει οριστεί (κληρονομεί τύπο) —'] + ClassificationGuidance::bucketOptions();
+    }
+
+    /**
+     * The tenant's ekdosi ProductCategory list for the «Κατηγορία ekdosi» column —
+     * the reporting axis for «Έσοδα ανά κατηγορία». id => label.
+     *
+     * @return array<string, string>
+     */
+    public function categoryOptions(): array
+    {
+        $cats = ProductCategory::query()
+            ->where('company_id', $this->tenant()->getKey())
+            ->orderBy('description_short')
+            ->get(['id', 'description_short', 'description'])
+            ->mapWithKeys(fn (ProductCategory $c): array => [
+                (string) $c->id => (string) ($c->description_short ?: $c->description ?: ('#'.$c->id)),
+            ])
+            ->all();
+
+        return ['' => '— καμία —'] + $cats;
     }
 
     protected function getHeaderActions(): array
@@ -141,9 +171,18 @@ class WhmcsIncomeMapping extends Page
             }
 
             if (in_array($category, $valid, true)) {
+                // The ekdosi report category rides on the same row (which needs a
+                // §8.6 class — income_class_category is NOT NULL). '' → null (καμία).
+                $rawCat = $this->categoryChoice[(string) $gid] ?? '';
+                $productCategoryId = ctype_digit((string) $rawCat) ? (int) $rawCat : null;
+
                 WhmcsIncomeMap::updateOrCreate(
                     ['company_id' => $companyId, 'scope' => WhmcsIncomeMap::SCOPE_GROUP, 'whmcs_key' => $gid],
-                    ['income_class_category' => $category, 'label' => $labelByGid[$gid] ?? null],
+                    [
+                        'income_class_category' => $category,
+                        'product_category_id' => $productCategoryId,
+                        'label' => $labelByGid[$gid] ?? null,
+                    ],
                 );
                 $set++;
             } else {

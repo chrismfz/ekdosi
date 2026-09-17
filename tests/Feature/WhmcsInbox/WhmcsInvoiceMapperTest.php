@@ -7,7 +7,9 @@ use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
+use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Models\WhmcsIncomeMap;
 use App\Models\WhmcsPaymentMap;
 use App\Services\WhmcsInbox\WhmcsInvoiceMapper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -95,6 +97,40 @@ class WhmcsInvoiceMapperTest extends TestCase
             'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
             'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
         ]);
+    }
+
+    public function test_stamps_ekdosi_product_category_from_the_group_income_map(): void
+    {
+        $cat = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'Web Hosting']);
+        WhmcsIncomeMap::create([
+            'company_id' => $this->tenant->id,
+            'scope' => WhmcsIncomeMap::SCOPE_GROUP,
+            'whmcs_key' => 40,
+            'income_class_category' => 'category1_3',
+            'product_category_id' => $cat->id,
+        ]);
+
+        $pending = $this->makePending([
+            'invoiceid' => 1002,
+            'date' => '2026-05-20',
+            'total' => '124.00',
+            'items' => ['item' => [
+                ['description' => 'Reseller 70 - j3t.gr', 'amount' => '124.00', 'taxed' => '1', 'whmcs_group_id' => 40],
+            ]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame($cat->id, $line['product_category_id']);
+        // An unmapped group leaves it null (→ «Αταξινόμητα» in the report).
+        $pending2 = $this->makePending([
+            'invoiceid' => 1003, 'date' => '2026-05-20', 'total' => '124.00',
+            'items' => ['item' => [['description' => 'x', 'amount' => '124.00', 'taxed' => '1', 'whmcs_group_id' => 99]]],
+        ]);
+        $line2 = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending2, $this->customer, $this->invoiceType)['lines'][0];
+        $this->assertNull($line2['product_category_id']);
     }
 
     public function test_maps_single_gross_price_to_net_using_default_vat(): void

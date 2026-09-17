@@ -69,17 +69,25 @@
 
 ### 2. Έσοδα ανά κατηγορία / ετικέτα προϊόντος — **best value/effort**
 
-**Verdict: ✅ core ισχύει (M· φθηνότερο από το προσχέδιο — το data model υπάρχει).**
+**Verdict: ✅ core ισχύει (M). — ⏳ Phase 1 DONE 2026-09-16 (forward-only).**
 
 Το Βιβλίο Εσόδων-Εξόδων ομαδοποιεί έσοδα **μόνο** κατά myDATA class του τύπου παραστατικού
 (`LedgerBook.php:92`) — γι' αυτό όλα πέφτουν σε ένα «category1_3». Tags + business `ProductCategory` **υπάρχουν ήδη**·
 λείπει μόνο η αναφορά/άξονας.
 
 **Tasks**
-- [ ] Αναφορά + dashboard widget «Έσοδα ανά tag/κατηγορία» (περίοδος, YoY, % τζίρου)
-- [ ] Bulk-assign tags/κατηγορία στη λίστα ειδών + φίλτρο
-- [ ] Backfill από περιγραφή («Web Hosting», «Domain Names», «Data Hosting» ήδη διακριτά)
-- [ ] Ίδιο για έξοδα · Bonus: MRR/churn ανά κατηγορία
+- [x] **Αναφορά «Έσοδα ανά κατηγορία»** (`RevenueByCategoryReport` + `App\Services\Accounting\RevenueByCategory`):
+  ανά ekdosi ProductCategory, έτος, % τζίρου, YoY, export CSV. Οι WHMCS γραμμές παίρνουν κατηγορία μέσω
+  νέας στήλης «Κατηγορία ekdosi» στη σελίδα «Αντιστοίχιση WHMCS» (`whmcs_income_maps.product_category_id`),
+  σφραγισμένη στη γραμμή στην εισαγωγή (`invoice_lines.product_category_id`). **Forward-only.**
+- [ ] **Backfill ιστορικών** WHMCS γραμμών (description→package→group→category) — τα προ-mapping παραστατικά
+  δείχνουν «Αταξινόμητα» μέχρι τότε.
+- [ ] Dashboard widget «Έσοδα ανά κατηγορία» · Bulk-assign κατηγορίας/tags στη λίστα ειδών + φίλτρο
+- [ ] Ίδιο για έξοδα · Bonus: MRR/churn ανά κατηγορία · (tags ως εναλλακτικός άξονας)
+- [ ] **P2 (review):** στη σελίδα «Αντιστοίχιση WHMCS», αν ο operator βάλει «Κατηγορία ekdosi» αλλά αφήσει
+  τη §8.6 κενή, η γραμμή διαγράφεται και η κατηγορία χάνεται (coupling — income_class_category NOT NULL)·
+  disclosed στο help text, αλλά θέλει per-row validation notice. Επίσης `RevenueByCategory` `whereYear`
+  είναι non-sargable (συνεπές με τις άλλες αναφορές· range θα κρατούσε το index).
 
 ### 3. Bug: έξοδα «αταξινόμητο» — προαγωγή inbound classification
 

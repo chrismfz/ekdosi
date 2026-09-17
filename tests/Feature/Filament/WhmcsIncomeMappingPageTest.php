@@ -4,6 +4,7 @@ namespace Tests\Feature\Filament;
 
 use App\Filament\Pages\WhmcsIncomeMapping;
 use App\Models\Company;
+use App\Models\ProductCategory;
 use App\Models\User;
 use App\Models\WhmcsIncomeMap;
 use App\Services\TenantRoleProvisioner;
@@ -95,6 +96,38 @@ class WhmcsIncomeMappingPageTest extends TestCase
         $this->assertDatabaseMissing('whmcs_income_maps', [
             'company_id' => $company->id, 'scope' => 'group', 'whmcs_key' => 3,
         ]);
+    }
+
+    #[Test]
+    public function save_persists_the_ekdosi_product_category_alongside_the_income_class(): void
+    {
+        $company = $this->tenant();
+        $this->actingSuperAdmin($company);
+        $cat = ProductCategory::create(['company_id' => $company->id, 'description_short' => 'Web Hosting']);
+
+        Http::fake([
+            'example.gr/*' => Http::response([
+                'result' => 'success',
+                'products' => ['product' => [
+                    ['pid' => 42, 'gid' => 3, 'name' => 'Personal2', 'groupname' => 'Web Hosting'],
+                ]],
+            ], 200),
+        ]);
+
+        Livewire::test(WhmcsIncomeMapping::class)
+            ->call('fetch')
+            ->set('choice.3', 'category1_3')
+            ->set('categoryChoice.3', (string) $cat->id)
+            ->call('save');
+
+        $this->assertDatabaseHas('whmcs_income_maps', [
+            'company_id' => $company->id, 'scope' => 'group', 'whmcs_key' => 3,
+            'income_class_category' => 'category1_3', 'product_category_id' => $cat->id,
+        ]);
+
+        // Prehydrates on next mount.
+        Livewire::test(WhmcsIncomeMapping::class)
+            ->assertSet('categoryChoice.3', (string) $cat->id);
     }
 
     #[Test]
