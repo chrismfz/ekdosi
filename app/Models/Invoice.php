@@ -777,7 +777,10 @@ class Invoice extends Model implements MovableDocument
 
     public function lines(): HasMany
     {
-        return $this->hasMany(InvoiceLine::class);
+        // Deterministic insertion order everywhere the lines are read (PDF, the
+        // invoice view «Γραμμές» section, breakdowns) — a bare hasMany has no ORDER
+        // BY, so row order would be storage-engine dependent.
+        return $this->hasMany(InvoiceLine::class)->orderBy('id');
     }
 
     /**

@@ -10,7 +10,6 @@ use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Pages\ListInvoices;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Filament\Resources\Invoices\RelationManagers\InvoicePaymentsRelationManager;
-use App\Filament\Resources\Invoices\RelationManagers\LinesRelationManager;
 use App\Filament\Resources\Invoices\RelationManagers\MailLogRelationManager;
 use App\Filament\Resources\Invoices\RelationManagers\MyDataMarksRelationManager;
 use App\Filament\Resources\Invoices\Schemas\InvoiceForm;
@@ -122,7 +121,8 @@ class InvoiceResource extends Resource
     public static function getRelations(): array
     {
         return [
-            LinesRelationManager::class,
+            // «Πληρωμές» first — the invoice LINES now render in the page body
+            // (InvoiceInfolist «Γραμμές» section), not as the leading tab.
             InvoicePaymentsRelationManager::class,
             MyDataMarksRelationManager::class,
             InternalNotesRelationManager::class,
