@@ -262,6 +262,40 @@ class LedgerBookTest extends TestCase
         $this->assertSame(100.0, $row->net);
     }
 
+    public function test_credit_note_expense_takes_the_line_category_and_still_nets_negative(): void
+    {
+        // The doc-level sign (πιστωτικό) is independent of category selection:
+        // the category comes from the positive line net, the amount nets negative.
+        $exp = $this->expense('2026-01-15', 10, 2, 12, [
+            'invoice_type' => '14.31',            // credit type → doc signs −
+            'classification_category' => null,
+        ]);
+        $this->withLines($exp, [['net' => 10, 'cat' => 'category2_3']]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertTrue($row->isCredit);
+        $this->assertSame('category2_3', $row->categoryCode);
+        $this->assertSame(-10.0, $row->net);
+    }
+
+    public function test_dominant_tiebreak_is_exact_and_picks_the_smaller_code(): void
+    {
+        // Two categories tie at €30.30 — one split across lines (float-fragile:
+        // 10.10 + 20.20 ≠ 30.30 in binary), one single line. Integer-cent
+        // accumulation makes the tie exact, so the smaller code wins deterministically.
+        $exp = $this->expense('2026-01-12', 60.60, 0, 60.60, ['classification_category' => null]);
+        $this->withLines($exp, [
+            ['net' => 10.10, 'cat' => 'category2_5'],
+            ['net' => 20.20, 'cat' => 'category2_5'],  // 2_5 total 30.30
+            ['net' => 30.30, 'cat' => 'category2_3'],  // 2_3 total 30.30 → tie → smaller code
+        ]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertSame('category2_3', $row->categoryCode);
+    }
+
     public function test_expense_with_no_classification_anywhere_stays_uncategorised(): void
     {
         $exp = $this->expense('2026-01-12', 50, 12, 62, ['classification_category' => null]);

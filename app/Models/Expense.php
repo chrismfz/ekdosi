@@ -146,6 +146,10 @@ class Expense extends Model
      * READ-ONLY: it derives, it never writes the header — so the «προς
      * χαρακτηρισμό» worklist (driven by `classification_state`) and the
      * operator's own χαρακτηρισμός are left exactly as they were.
+     *
+     * Callers that resolve this over MANY expenses (the Βιβλίο) should eager-load
+     * `lines` — the fallback reads them, so an un-eager-loaded caller pays one
+     * query per document.
      */
     public function effectiveClassificationCategory(): ?string
     {
@@ -162,30 +166,35 @@ class Expense extends Model
      * is unclassified. Lines without a classification are ignored (they don't
      * dilute a doc that IS partly classified); ties break on the smaller code so
      * the book is deterministic. Null when no line carries one.
+     *
+     * Net is accumulated in integer cents (net_value is decimal:2) so the
+     * dominance AND the tie-break are exact — summing euros as floats would make
+     * two categories that decimally tie compare unequal (10.10+20.20 ≠ 30.30 in
+     * binary) and silently skip the smaller-code rule.
      */
     private function dominantLineClassificationCategory(): ?string
     {
         $this->loadMissing('lines');
 
-        $netByCategory = [];
+        $centsByCategory = [];
         foreach ($this->lines as $line) {
             $code = $line->classification_category;
             if (blank($code)) {
                 continue;
             }
-            $netByCategory[$code] = ($netByCategory[$code] ?? 0.0) + (float) $line->net_value;
+            $centsByCategory[$code] = ($centsByCategory[$code] ?? 0) + (int) round((float) $line->net_value * 100);
         }
 
-        if ($netByCategory === []) {
+        if ($centsByCategory === []) {
             return null;
         }
 
         $winner = null;
-        $winningNet = -INF;
-        foreach ($netByCategory as $code => $net) {
-            if ($net > $winningNet || ($net === $winningNet && (string) $code < (string) $winner)) {
+        $winningCents = PHP_INT_MIN;
+        foreach ($centsByCategory as $code => $cents) {
+            if ($cents > $winningCents || ($cents === $winningCents && (string) $code < (string) $winner)) {
                 $winner = (string) $code;
-                $winningNet = $net;
+                $winningCents = $cents;
             }
         }
 
