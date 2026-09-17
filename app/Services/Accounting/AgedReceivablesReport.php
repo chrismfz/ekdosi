@@ -28,6 +28,8 @@ class AgedReceivablesReport
             ->where('company_id', $tenant->getKey())
             ->withOutstandingBalance($tenant->getKey())
             ->onlyDebtors()
+            // #5 dunning Φάση A: the assignee for the «Ανάθεση» column (one query, not N).
+            ->with('collectionAssignee:id,name')
             ->get();
 
         if ($customers->isEmpty()) {
@@ -61,6 +63,10 @@ class AgedReceivablesReport
                 b90plus: $aging['bucket_90_plus'],
                 total: $total,
                 oldestDays: $block['stats']['oldest_unpaid_days'] ?? null,
+                collectionAssignee: $customer->collectionAssignee?->name,
+                collectionNextStepAt: $customer->collection_next_step_at?->format('d/m/Y'),
+                collectionNextStepNote: $customer->collection_next_step_note,
+                collectionLastContactAt: $customer->collection_last_contact_at?->format('d/m/Y'),
             );
         }
 

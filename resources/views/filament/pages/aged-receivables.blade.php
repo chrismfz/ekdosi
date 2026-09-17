@@ -46,7 +46,10 @@
                             <th class="py-2 pr-4 text-right">61-90</th>
                             <th class="py-2 pr-4 text-right">90+</th>
                             <th class="py-2 pr-4 text-right">Σύνολο</th>
-                            <th class="py-2 text-right">Παλαιότερο</th>
+                            <th class="py-2 pr-4 text-right">Παλαιότερο</th>
+                            <th class="py-2 pr-4">Επόμενο βήμα</th>
+                            <th class="py-2 pr-4">Τελ. επαφή</th>
+                            <th class="py-2"></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -64,7 +67,30 @@
                                 <td class="py-2 pr-4 text-right whitespace-nowrap text-warning-700 dark:text-warning-400">{{ $row->b61_90 ? $money($row->b61_90) : '' }}</td>
                                 <td class="py-2 pr-4 text-right whitespace-nowrap text-danger-700 dark:text-danger-400">{{ $row->b90plus ? $money($row->b90plus) : '' }}</td>
                                 <td class="py-2 pr-4 text-right whitespace-nowrap font-semibold">{{ $money($row->total) }}</td>
-                                <td class="py-2 text-right whitespace-nowrap">{{ $row->oldestDays !== null ? $row->oldestDays.' ημ.' : '—' }}</td>
+                                <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $row->oldestDays !== null ? $row->oldestDays.' ημ.' : '—' }}</td>
+                                <td class="py-2 pr-4 whitespace-nowrap">
+                                    @if ($row->collectionNextStepAt || $row->collectionNextStepNote || $row->collectionAssignee)
+                                        <div class="font-medium">{{ $row->collectionNextStepAt ?? '—' }}</div>
+                                        @if ($row->collectionNextStepNote)
+                                            <div class="text-xs text-gray-500 dark:text-gray-400">{{ $row->collectionNextStepNote }}</div>
+                                        @endif
+                                        @if ($row->collectionAssignee)
+                                            <div class="text-xs text-gray-400 dark:text-gray-500">👤 {{ $row->collectionAssignee }}</div>
+                                        @endif
+                                    @else
+                                        <span class="text-gray-300 dark:text-gray-600">—</span>
+                                    @endif
+                                </td>
+                                <td class="py-2 pr-4 whitespace-nowrap">{{ $row->collectionLastContactAt ?? '—' }}</td>
+                                <td class="py-2 text-right">
+                                    <x-filament::icon-button
+                                        icon="heroicon-m-phone-arrow-up-right"
+                                        color="gray"
+                                        size="sm"
+                                        label="Εργασία είσπραξης"
+                                        wire:click="mountAction('collection', { customer: {{ $row->customerId }} })"
+                                    />
+                                </td>
                             </tr>
                         @endforeach
                     </tbody>
@@ -76,6 +102,9 @@
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($result->total61_90()) }}</td>
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($result->total90plus()) }}</td>
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($result->grandTotal()) }}</td>
+                            <td></td>
+                            <td></td>
+                            <td></td>
                             <td></td>
                         </tr>
                     </tfoot>

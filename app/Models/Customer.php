@@ -107,12 +107,21 @@ class Customer extends Model
         // T-1b: count of WHMCS third-party routing rows this customer owns
         // (0 = not a reseller). Maintained by whmcs:sync-resellers.
         'whmcs_reseller_routes',
+        // #5 dunning Φάση A: per-customer collection state (set from the
+        // «Ηλικίωση οφειλών» row action, not the customer form).
+        'collection_assigned_to',
+        'collection_next_step_at',
+        'collection_next_step_note',
+        'collection_last_contact_at',
+        'collection_note',
     ];
 
     protected function casts(): array
     {
         return [
             'discount' => 'decimal:2',
+            'collection_next_step_at' => 'date',
+            'collection_last_contact_at' => 'date',
             'needs_immediate_invoice' => 'boolean',
             'needs_invoice_before_payment' => 'boolean',
             'auto_email_invoices' => 'boolean',
@@ -242,6 +251,15 @@ class Customer extends Model
     public function referredBy(): BelongsTo
     {
         return $this->belongsTo(self::class, 'referred_by_customer_id');
+    }
+
+    /**
+     * #5 dunning Φάση A: the operator chasing this customer's overdue balance
+     * (nullable). Set from the «Ηλικίωση οφειλών» row action.
+     */
+    public function collectionAssignee(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'collection_assigned_to');
     }
 
     /**
