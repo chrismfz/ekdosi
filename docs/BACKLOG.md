@@ -1297,6 +1297,12 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **WHMCS plugin: `Controller::logActivity()` περνά το admin id ως WHMCS *client* id (P2, review 2026-09-17).**
+  Το `logActivity($msg, $user->id)` (όπου `$user` = CurrentUser) βάζει το staff id στη θέση του client-userid
+  παραμέτρου του WHMCS `logActivity`. Σε admin addon context το `CurrentUser::user()` συνήθως είναι null → περνά 0
+  (σωστό), οπότε πρακτικά σπάνια χτυπά· αλλά αν επιστρέψει user, το audit entry (π.χ. του «Καθαρισμός ορφανών»)
+  συσχετίζεται με λάθος client. Προϋπάρχον + κοινός helper (route/sync/reset/push το χρησιμοποιούν) — fix = πέρνα 0
+  για admin-initiated actions· αφημένο εκτός scope του UI-polish PR για να μην αλλάξει shared audit συμπεριφορά.
 - **WHMCS auto-issue: permanent guard-holds μετρώνται ως `failed`, όχι `held` (P2, review 2026-09-16 — 0%-VAT unattended hold).**
   Ο νέος `assertNoUntaxedForUnattendedIssue` (και ΟΛΟΙ οι throwing WH-* guards: non-EUR, negative, blank-desc,
   totals/rate) πετάει `LogicException` που το `whmcs:auto-issue` loop το πιάνει ως **`$failed` + `Log::error`
