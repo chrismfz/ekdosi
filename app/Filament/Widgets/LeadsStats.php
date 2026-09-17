@@ -3,11 +3,14 @@
 namespace App\Filament\Widgets;
 
 use App\Enums\LeadActivityType;
+use App\Enums\QuoteStatus;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Filament\Resources\Leads\Pages\ListLeads;
 use App\Models\Company;
 use App\Models\Lead;
 use App\Models\LeadActivity;
+use App\Models\Quote;
+use App\Support\Money;
 use Filament\Facades\Filament;
 use Filament\Widgets\StatsOverviewWidget;
 use Filament\Widgets\StatsOverviewWidget\Stat;
@@ -50,6 +53,22 @@ class LeadsStats extends StatsOverviewWidget
             ->whereBetween('happened_at', [now()->startOfMonth(), now()->endOfMonth()])
             ->count();
 
+        // #8: αξία pipeline = Σ μικτής αξίας της ΤΕΛΕΥΤΑΙΑΣ ζωντανής προσφοράς
+        // (draft/sent/accepted — όχι rejected/expired) ΑΝΑ ανοιχτό lead. Τα leads
+        // δεν έχουν δικό τους πεδίο αξίας — η προσφορά είναι η ποσοτικοποίηση.
+        // Μία-ανά-lead (η τρέχουσα προσφορά): έτσι μια αναθεωρημένη προσφορά που
+        // δεν απορρίφθηκε δεν διπλομετράει το ίδιο deal· lead χωρίς ζωντανή
+        // προσφορά δεν προσμετράται.
+        $pipeline = Quote::query()
+            ->where('company_id', $tenant->id)
+            ->whereNotIn('status', [QuoteStatus::Rejected->value, QuoteStatus::Expired->value])
+            ->whereHas('lead', fn ($q) => $q->open())
+            ->get(['lead_id', 'gross_total', 'created_at', 'id'])
+            ->groupBy('lead_id')
+            ->sum(fn ($quotes): float => (float) $quotes
+                ->sortByDesc(fn ($q): array => [$q->created_at?->getTimestamp() ?? 0, $q->id])
+                ->first()->gross_total);
+
         // ListRecords binds its active tab to `?tab=` (#[Url(as: 'tab')]).
         $url = fn (string $tab): string => LeadResource::getUrl('index', ['tab' => $tab]);
 
@@ -71,6 +90,12 @@ class LeadsStats extends StatsOverviewWidget
                 ->descriptionIcon('heroicon-m-check-badge')
                 ->color('success')
                 ->url($url('won')),
+
+            Stat::make('Αξία pipeline', Money::eur($pipeline))
+                ->description('Μικτή αξία προσφορών ανοιχτών leads')
+                ->descriptionIcon('heroicon-m-banknotes')
+                ->color('primary')
+                ->url($url('open')),
         ];
     }
 }

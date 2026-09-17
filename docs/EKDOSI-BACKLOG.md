@@ -180,16 +180,20 @@
 
 ### 8. Dashboard — widgets που λείπουν
 
-**Verdict: ✅ ισχύει (S ανά widget). — ⏳ PR-1 DONE 2026-09-17 (top είδη + έσοδα ανά κατηγορία).**
+**Verdict: ✅ ισχύει (S ανά widget). — ✅ PR-1+PR-2 DONE 2026-09-17.**
 Υπάρχουν: receivables € (`OutstandingCustomersTable`/`OverdueInvoicesTable`),
 Top **Πελάτες** (`TopCustomersTable`), renewals, myDATA/WHMCS stats. Λείπουν:
 
 - [x] Top **είδη/υπηρεσίες** — `TopProductsChart` (top-N κατά καθαρή αξία, reuse `CustomerTopProducts::forCompany`,
   cached 30' — υλοποιεί γραμμές σε PHP).
 - [x] **Έσοδα ανά κατηγορία** — `RevenueByCategoryChart` (reuse `RevenueByCategory`, ίδια πηγή με την αναφορά #2).
+- [x] **Top προμηθευτές** — `TopSuppliersChart` (top-N ανά καθαρή αξία εξόδων, SQL groupBy, gated `ViewAny:Expense`).
+- [x] Αξία **pipeline** leads σε € — stat στο `LeadsStats` (μικτή αξία προσφορών ανοιχτών leads· quote-derived,
+  μηδέν schema change).
+- [x] Ημερολόγιο επόμενων 7 ημερών — **δεν χτίστηκε (redundant):** καλύπτεται από `UpcomingRenewalsTable`
+  (ανανεώσεις 30μ) + `LeadsCalendar` (επόμενα βήματα leads) + `OverdueInvoicesTable`. Μόνο τα collection
+  next-steps (#5) δεν είναι σε dashboard widget (ζουν στην AgedReceivables) — μικρό follow-up αν χρειαστεί.
 - [ ] **Έξοδα** ανά κατηγορία widget (κουμπώνει με το «ίδιο για έξοδα» του #2).
-- [ ] Αξία **pipeline** leads σε € — τα leads ΔΕΝ έχουν πεδίο αξίας· θέλει πηγή (quote-derived ή νέο πεδίο) → PR-2.
-- [ ] Top προμηθευτές (aggregation εξόδων ανά `supplier_*`) · Ημερολόγιο επόμενων 7 ημερών (ποια events) → PR-2.
 - [ ] (deferred, #7 polish PR) skeleton/sparse states + dark/mobile pass στα νέα γραφήματα.
 - [ ] (P2 review, accepted) τα δύο νέα γραφήματα cache-άρονται per tenant+year (TTL 30', PHP materialisation)
   χωρίς invalidation σε invoice write → έως 30' staleness. Overview surfaces (όχι money-consistency invariant),
@@ -199,11 +203,21 @@ Top **Πελάτες** (`TopCustomersTable`), renewals, myDATA/WHMCS stats. Λε
     header discount), όπως ήδη κάνει το `CustomerTopProducts::forCompany` (Καρτέλα + MCP top_products), ενώ το
     `RevenueByCategoryChart` εφαρμόζει τον header-discount factor. Διαφέρουν ΜΟΝΟ όταν υπάρχει header discount
     (σπάνιο). Root-fix = αλλαγή του shared service (επηρεάζει 3 surfaces) → χωριστό PR.
-  - **Perf:** `RevenueByCategory::build` υπολογίζει ΚΑΙ το prior year (για YoY) που το γράφημα πετά· και το
-    `forCompany(PHP_INT_MAX)` υλοποιεί όλες τις γραμμές του έτους σε PHP. Cached 30', αλλά ένα current-year-only
-    + SQL-aggregated variant θα το έκοβε → με το ίδιο caching follow-up.
+  - **Perf:** `RevenueByCategory::build` υπολογίζει ΚΑΙ το prior year (για YoY) που το γράφημα πετά· το
+    `forCompany(PHP_INT_MAX)` υλοποιεί όλες τις γραμμές του έτους σε PHP· και το `TopSuppliersChart` υλοποιεί
+    τα έξοδα του έτους σε PHP (χρειάζεται per-row credit-note sign, άρα όχι σκέτο SQL `SUM`). Όλα cached 30',
+    αλλά current-year-only / SQL-aggregated (CASE sign + `GROUP BY COALESCE(supplier_id, name)`) variants θα τα
+    έκοβαν → με το ίδιο caching follow-up.
   - **Label collisions (#7 polish):** `Str::limit` μπορεί να κάνει δύο μακριά ονόματα ίδια στο γράφημα → μαζί με
     το sparse/dark/mobile pass.
+  - **Pipeline heuristic (PR-2):** το «Αξία pipeline» παίρνει την ΤΕΛΕΥΤΑΙΑ ζωντανή προσφορά ανά ανοιχτό lead
+    (created_at, tiebreak id)· ένα φρέσκο Draft revision μπορεί να υπερκεράσει ένα ζωντανό Accepted. Το quote-derived
+    pipeline είναι εξ ορισμού προσεγγιστικό (τα leads δεν έχουν πεδίο αξίας)· status-priority (Accepted>Sent>Draft)
+    = μελλοντική βελτίωση. Επίσης uncached (τρέχει στο 60s poll όπως τα COUNTs του `LeadsStats`) και δείχνει
+    quote-value πίσω μόνο από `ViewAny:Lead` (χωρίς Quote-gate) — συνεπές με το leads-card, dashboard-wide αν αλλάξει.
+  - **Shared base (PR-2):** `TopSuppliersChart`/`TopProductsChart`/`RevenueByCategoryChart` μοιράζονται σχεδόν όλο
+    το scaffold (cache-30', sort-by-net, TOP_N, Str::limit, FormatsReportChart, empty-guard) → abstract `TopNMoneyChart`
+    base σε cleanup PR (μαζί με το #7 polish), όχι τώρα (θα άγγιζε 3 widgets).
   - **Dashboard revenue visibility:** τα widgets (όπως τα αδελφά `IncomeStatsOverview`/`TopCustomersTable`) δεν
     έχουν `canView()` → όποιος βλέπει το panel βλέπει company-wide έσοδα. Συνεπές με το υπάρχον dashboard· αν
     θέλουμε role-gate, είναι dashboard-wide απόφαση (όχι μόνο αυτών των δύο).
