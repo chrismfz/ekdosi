@@ -16,18 +16,30 @@
 
 ## 🔴 P0
 
-### 1. Ηλεκτρονική τιμολόγηση B2B (UBL / EN 16931 / PEPPOL BIS 3.0)
-✅ **Phase 1 (παραγωγή UBL + κουμπί «Λήψη UBL» + MCP preview) — shipped.** Ο `PeppolInvoiceDocument` χτίζει
-έγκυρο EN16931/PEPPOL BIS 3.0, country-agnostic (GR σήμερα, myip/nexon). myDATA filing = ήδη ΟΚ (InvoSign).
-**Μένει — Phase 2 (L), η αποστολή**, που είναι **ΤΟ ΙΔΙΟ πράγμα με το `ee-peppol` (Nixpal/Estonia)**: ο UBL
-builder είναι κοινός· το Phase 2 τον ανάβει για GR-send ΚΑΙ EE (σήμερα `ee-peppol` → NullSubmitter stub).
-- [ ] Διερεύνηση: τι υποστηρίζει ο InvoSign σε EN16931-UBL send/receive (μπορεί να καλυπτόμαστε downstream)
-- [ ] Access-Point transport + delivered/rejected ανά παραστατικό + λήψη εισερχομένων + πεδία endpoint/GLN πελάτη
-- [ ] Επιβεβαίωση legal deadline (τρίτων πηγών: 1/10/2026 «λοιποί») με λογιστή/πάροχο πριν χρονοπρογραμματιστεί
+_(Κενό. Το πρώην #1 «Ηλεκτρονική τιμολόγηση» αναδιαρθρώθηκε μετά το **spike #1 (2026-09)**:
+το transport ΔΕΝ επείγει (ViDA 2030 · Estonia 2027 proposed · InvoSign καλύπτει GR) → parked·
+το κοντινό need είναι το **i18n** που ξεκλειδώνει το **Nixpal ως testbed**. Δες #1 στο P1 + **PLAN.md §6.5–6.6**.)_
 
 ---
 
 ## 🟠 P1
+
+### 1. Ηλεκτρονική τιμολόγηση + i18n / Nixpal testbed — spike #1 (→ **PLAN.md §6.5–6.6**)
+✅ Phase 1 UBL (`PeppolInvoiceDocument`, country-agnostic) + `PdfLabels` dictionary + latent γλωσσικές
+στήλες (`invoices/quotes.language` live· `customer_users.locale`, `country_code`) = **ήδη υπάρχουν**.
+
+**#1a — i18n (bilingual customer-facing) — το κοντινό unlock:**
+- [ ] **Slice 0 (S):** `CustomerLanguage::for()` resolver + `app()->setLocale()` (portal middleware + `SendInvoiceEmail`) — prereq
+- [ ] **Portal i18n (M):** `lang/{el,en}` (from scratch) + 12 blades `portal/*` + layout → `__()` (η επιφάνεια του testbed)
+- [ ] **Email i18n (M):** EL/EN Mailables (5) + `MailTemplateRenderer::DEFAULT_BODY_TEMPLATE` per-recipient
+- [ ] **PDF completion (S-M):** `PdfLabels` → delivery-note (heavy)/statement/receipt + invoice movement block (~10 slugs)
+
+**#1c — Multi-domain (per-tenant portal host) — ζευγαρώνει με το portal i18n:**
+- [ ] `companies.portal_host` + host→company resolver (`Route::domain()`/middleware)· portal 1η επιφάνεια (`cs.nixpal.com` vs `invoicer.myip.gr`)
+
+**#1b — PEPPOL transport (send / ee-peppol) — parked, review 2027:**
+- [ ] Access-Point (Telema/Billberry/Finbite/Unifiedpost)· ΕΝΑ PEPPOL AP = GR-send **και** EE-send· **check αν ο InvoSign κάνει ήδη PEPPOL send** (φθηνότερο)
+- [ ] Επιβεβαίωση legal deadline με λογιστή/πάροχο πριν χρονοπρογραμματιστεί (ViDA 2030 · Estonia 2027)
 
 ### 2. Έσοδα/έξοδα ανά κατηγορία — follow-ups
 - [ ] Backfill ιστορικών WHMCS γραμμών (description→package→group→category)· πριν = «Αταξινόμητα»

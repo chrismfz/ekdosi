@@ -308,6 +308,52 @@ gateways — τα services έχουν ήδη το billing+dunning loop.
 
 ---
 
+## 6.5 i18n (bilingual) + Multi-domain — το Nixpal ως testbed
+
+**ΝΕΟ (2026-09, spike #1).** Το «κοντινό» βήμα προς τον απογαλακτισμό από το WHMCS ΔΕΝ
+είναι το e-invoicing transport (βλ. §6.6) — είναι να γίνει το **Nixpal OÜ** (~20-30
+πελάτες, vs ~700 της MyIP) **canary/testbed** για τους frontend πυλώνες (portal/cart/
+Services/domains/tickets/hosting): μικρό blast radius, δοκιμάζεις κάθε πυλώνα εκεί πριν
+τον ρίξεις στη MyIP. Δύο enablers λείπουν, ανεξάρτητοι από A/B/C:
+
+**Enabler 1 — i18n (bilingual customer-facing).** *Όχι greenfield.* Ήδη υπάρχει:
+`App\Support\Pdf\PdfLabels` (dictionary EL/EN/both, ~80 slugs — invoice PDF ~90%, quote
+PDF 100%, CMR ήδη EN-capable μέσω `name_en/address_en/city_en`) + latent γλωσσικές
+στήλες (`invoices.language`/`quotes.language` **live**· `customer_users.locale`
+**dormant**· `customers/companies.country_code`, οδηγεί ήδη auto-PDF-language). Λείπει η
+**καλωδίωση επιλογής γλώσσας** + οι customer-facing επιφάνειες εκτός PDF. Slices:
+- **Slice 0 (S, foundation):** `CustomerLanguage::for($customer)` resolver (πηγή:
+  per-customer default / `customer_users.locale` / `country_code`) + `app()->setLocale()`
+  στο portal middleware ΚΑΙ στο `SendInvoiceEmail`. *Ξεκλειδώνει τα υπόλοιπα.*
+- **Slice — portal (M):** Laravel `lang/{el,en}` (χτίζεται from scratch· η εφαρμογή
+  σήμερα είναι hardcoded-Greek) + μετατροπή 12 blades `resources/views/portal/*` +
+  `portal-layout` σε `__()`. **Στρατηγικά κεντρικό** — είναι η επιφάνεια του testbed.
+- **Slice — email (M):** EL/EN variants (5 Mailables + ~8 views + το single-Greek
+  `MailTemplateRenderer::DEFAULT_BODY_TEMPLATE`) με per-recipient επιλογή.
+- **Slice — PDF completion (S-M):** extend `PdfLabels` στα delivery-note (heavy),
+  statement, receipt + invoice movement-block (~10 slugs).
+
+**Enabler 2 — Multi-domain (per-tenant portal host).** `invoicer.myip.gr` (MyIP) vs
+`cs.nixpal.com` (Nixpal). Σήμερα: admin = path-based tenant (`/admin/{tenant}`), portal
+= `/user` (guard `portal`, ήδη tenant-aware). Σχέδιο: `companies.portal_host` +
+**host→company resolver** (`Route::domain()`/middleware θέτει το tenant context από το
+Host). Το **portal είναι η 1η επιφάνεια** (customer-facing, εκεί μετράει το branding)·
+ο admin μένει path-based ή παίρνει domain αργότερα. M-L, δικό του workstream — ζευγαρώνει
+φυσικά με το portal i18n slice («Nixpal testbed frontend» milestone).
+
+**Σειρά:** i18n Slice 0 (prereq) → portal i18n + multi-domain (= testbed frontend) →
+email/PDF completion. Μετά, οι πυλώνες A/B/C/E δοκιμάζονται στο Nixpal ως canary.
+
+## 6.6 E-invoicing transport (PEPPOL send / ee-peppol) — parked, review 2027
+
+**Spike #1 (2026-09):** το transport ΔΕΝ επείγει. GR domestic B2B καλύπτεται ήδη από
+**InvoSign/myDATA**· cross-border ενδοκοινοτικά = **EU ViDA 1/7/2030**· Estonia domestic =
+**2027 (proposed)**· B2C = εκτός DRR. PEPPOL είναι δίκτυο → **ένα** Access Point καλύπτει
+GR-send ΚΑΙ EE-send (`ee-peppol` σήμερα = NullSubmitter stub). Providers EE: Telema/
+Billberry/Finbite/Unifiedpost· **check αν ο InvoSign κάνει ήδη PEPPOL send** (φθηνότερο).
+→ parked, review 2027· εκτελέσιμα: `docs/EKDOSI-BACKLOG.md #1b`. Ο UBL builder
+(`PeppolInvoiceDocument`, Phase 1) είναι ήδη έτοιμος + country-agnostic.
+
 ## 7. Σειρά & γιατί
 
 `Domains → Gateways → Provisioning → Portal`
