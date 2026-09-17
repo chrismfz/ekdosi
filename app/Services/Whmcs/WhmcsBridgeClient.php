@@ -189,43 +189,6 @@ class WhmcsBridgeClient
     }
 
     /**
-     * Dual-run visibility: the legacy `tblinvoices.invoiced` flag for a batch of
-     * WHMCS invoice ids (the WHMCS API can't expose this custom column, so the
-     * bridge reads it directly — READ-ONLY). ekdosi shows "already invoiced in
-     * the legacy app" on its inbox so the operator doesn't double-issue.
-     *
-     * Returns a map { whmcsInvoiceId => invoiced } for the ids the bridge knew;
-     * ids absent from the response are simply omitted (caller treats missing as
-     * unknown). Throws WhmcsUnreachable / WhmcsApiException like resolveThirdParty.
-     *
-     * @param  array<int>  $ids
-     * @return array<int, int>
-     */
-    public function getInvoicedFlags(array $ids): array
-    {
-        $ids = array_values(array_filter(array_map('intval', $ids), static fn (int $id): bool => $id > 0));
-        if ($ids === []) {
-            return [];
-        }
-
-        $data = $this->postResolve(['op' => 'invoiced_flags', 'ids' => $ids]);
-        $flags = $data['flags'] ?? [];
-        if (! is_array($flags)) {
-            return [];
-        }
-
-        $out = [];
-        foreach ($flags as $id => $value) {
-            $id = (int) $id;
-            if ($id > 0) {
-                $out[$id] = (int) $value;
-            }
-        }
-
-        return $out;
-    }
-
-    /**
      * Slice 1 of "the bridge is the inbox feed": one page of full invoice
      * payloads (invoice + client identity + customfields + line items), built
      * by the plugin's InvoiceFeed — shape-compatible with the native

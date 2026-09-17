@@ -9,7 +9,6 @@ use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Billing\BillingSourceRegistry;
-use App\Services\Whmcs\LegacyInvoicedRefresher;
 use App\Services\Whmcs\WhmcsCustomerCreateResult;
 use App\Services\Whmcs\WhmcsCustomerCreator;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
@@ -262,33 +261,6 @@ class WhmcsInboxTable
                         : null)
                     ->toggleable(isToggledHiddenByDefault: true),
 
-                // Dual-run heads-up: this WHMCS invoice has ALSO been invoiced
-                // in the LEGACY ekdosi app (tblinvoices.invoiced != 0). Three
-                // visible states so the operator can tell a CHECK ran:
-                //   >0 (red)  «Στην παλιά» — already invoiced in the old app
-                //   0  (gray) «Όχι»        — checked, not invoiced in legacy
-                //   null      «—»          — not checked yet (run «Έλεγχος legacy»)
-                // Populated by whmcs:fetch-pending + the «Έλεγχος legacy» action.
-                TextColumn::make('legacy_invoiced')
-                    ->label('Legacy')
-                    ->badge()
-                    ->placeholder('—')
-                    ->state(fn (PendingWhmcsInvoice $r): ?string => match (true) {
-                        $r->invoicedInLegacy() => 'Στην παλιά',
-                        $r->legacy_invoiced === 0 => 'Όχι',
-                        default => null,
-                    })
-                    ->color(fn (PendingWhmcsInvoice $r): string => $r->invoicedInLegacy() ? 'danger' : 'gray')
-                    ->icon(fn (PendingWhmcsInvoice $r): ?string => $r->invoicedInLegacy()
-                        ? 'heroicon-o-exclamation-triangle'
-                        : null)
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match (true) {
-                        $r->invoicedInLegacy() => 'Έχει ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi. Μην το ξαναεκδώσεις εδώ — θα γίνει διπλή υποβολή στην ΑΑΔΕ.',
-                        $r->legacy_invoiced === 0 => 'Ελέγχθηκε — δεν έχει τιμολογηθεί στην παλιά εφαρμογή.',
-                        default => 'Δεν έχει ελεγχθεί ακόμη. Πάτα «Έλεγχος legacy» για να ρωτήσει τη γέφυρα.',
-                    })
-                    ->toggleable(isToggledHiddenByDefault: true),
-
                 TextColumn::make('created_at')
                     ->label('Συγχρ.')
                     ->since()
@@ -311,23 +283,6 @@ class WhmcsInboxTable
                 // getTabs) — CFM-style, each with a live count, default «Ανοιχτά» =
                 // προς-έλεγχο + σε-αναμονή together. The old defaulted SelectFilter
                 // hid held rows on load (one got lost), so it was removed here.
-
-                // Filter on the legacy-invoiced flag (the dual-run «τιμολογήθηκε
-                // στην παλιά εφαρμογή» signal). >0 = invoiced in legacy, 0 =
-                // not, null = not checked yet.
-                SelectFilter::make('legacy_invoiced')
-                    ->label('Legacy (παλιά εφαρμογή)')
-                    ->options([
-                        'yes' => 'Τιμολογήθηκε στη legacy',
-                        'no' => 'Όχι στη legacy',
-                        'unknown' => 'Άγνωστο (δεν ελέγχθηκε)',
-                    ])
-                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
-                        'yes' => $query->where('legacy_invoiced', '>', 0),
-                        'no' => $query->where('legacy_invoiced', 0),
-                        'unknown' => $query->whereNull('legacy_invoiced'),
-                        default => $query,
-                    }),
 
                 // Isolate the rows the operator scans for most.
                 SelectFilter::make('immediate')
@@ -373,7 +328,6 @@ class WhmcsInboxTable
             ])
             ->headerActions([
                 self::syncNowAction(),
-                self::refreshLegacyInvoicedAction(),
             ])
             ->recordActions([
                 // Only the one action you do most stays inline — «Δημιουργία
@@ -730,17 +684,10 @@ class WhmcsInboxTable
     }
 
     /**
-     * Dual-run: ask the bridge whether any of the still-actionable inbox rows
-     * (προς έλεγχο / σε αναμονή) have meanwhile been invoiced in the LEGACY
-     * ekdosi app, and refresh the «Legacy» column. Lets the operator spot —
-     * before issuing — an invoice the partner already filed from the old app.
-     * No-op (and a friendly notice) when the bridge isn't configured/reachable.
-     */
-    /**
      * «Συγχρονισμός τώρα» — pull paid+unfiled WHMCS invoices into the inbox on
      * demand (the manual twin of the scheduled whmcs:fetch-pending). Handy for
      * testing without SSH/cron. Delegates to the SAME command, so source
-     * selection (bridge vs native) + legacy refresh are identical.
+     * selection (bridge vs native) is identical.
      */
     private static function syncNowAction(): Action
     {
@@ -748,7 +695,13 @@ class WhmcsInboxTable
             ->label('Συγχρονισμός τώρα')
             ->icon('heroicon-o-arrow-down-tray')
             ->color('primary')
-            ->authorize('update')
+            // HEADER action = no record, so it must NOT authorize against the
+            // record-scoped `update` policy ability: Filament would then call
+            // PendingWhmcsInvoicePolicy::update($user) with no model → «Too few
+            // arguments … 1 passed … exactly 2 expected» on every list render.
+            // Check the raw shield permission directly instead, exactly like the
+            // no-record archiveSelectedAction bulk action does.
+            ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
             ->requiresConfirmation()
             ->modalHeading('Συγχρονισμός τώρα από το WHMCS;')
             ->modalDescription('Τραβά τα πληρωμένα/μη-εκδομένα τιμολόγια από το WHMCS και τα στάζει στο inbox (ίδιο με το προγραμματισμένο whmcs:fetch-pending). Idempotent — ασφαλές να ξανατρέξει. Μεγάλος tenant μπορεί να αργήσει λίγο.')
@@ -821,36 +774,6 @@ class WhmcsInboxTable
                         ->title('Δεν έγινε επανάληψη')
                         ->body($e->getMessage())
                         ->warning()
-                        ->send();
-                }
-            });
-    }
-
-    private static function refreshLegacyInvoicedAction(): Action
-    {
-        return Action::make('refresh_legacy_invoiced')
-            ->label('Έλεγχος legacy')
-            ->icon('heroicon-o-arrow-path')
-            ->color('gray')
-            ->requiresConfirmation()
-            ->modalHeading('Έλεγχος: τιμολογήθηκαν στην παλιά εφαρμογή;')
-            ->modalDescription('Ρωτά τη γέφυρα WHMCS αν κάποια από τα τιμολόγια «προς έλεγχο» ή «σε αναμονή» έχουν ήδη τιμολογηθεί στην παλιά εφαρμογή ekdosi, και ενημερώνει τη στήλη «Legacy». Χρήσιμο στη φάση που εκδίδεις ακόμη από την παλιά εφαρμογή, για να μην κάνεις διπλό τιμολόγιο.')
-            ->modalSubmitActionLabel('Έλεγχος τώρα')
-            ->action(function () {
-                $tenant = Filament::getTenant();
-                try {
-                    $changed = app(LegacyInvoicedRefresher::class)->refresh($tenant);
-                    Notification::make()
-                        ->title($changed > 0
-                            ? $changed.' τιμολόγιο(α) σημάνθηκαν ως «τιμολογημένα στη legacy»'
-                            : 'Καμία αλλαγή — τίποτα νέο δεν τιμολογήθηκε στη legacy')
-                        ->success()
-                        ->send();
-                } catch (Throwable $e) {
-                    Notification::make()
-                        ->title('Ο έλεγχος legacy απέτυχε')
-                        ->body($e->getMessage())
-                        ->danger()
                         ->send();
                 }
             });

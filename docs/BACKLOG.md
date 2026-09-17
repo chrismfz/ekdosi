@@ -1080,6 +1080,21 @@ data model + phase gates: **`PLAN.md`**.
   πάντα array). Στον γκρινιάρη-mirror το καταπίνει το best-effort `\Throwable` catch· στο create-seed
   (`WhmcsCustomerCreator`) όχι. Fix = ένας κοινός guard `is_array($customfields)` στην κορυφή του reader.
 
+### «Έλεγχος legacy» removal — surviving P2s (από το review, 2026-09-17)
+Το dual-run legacy-invoiced check αφαιρέθηκε post-cutover (κουμπί «Έλεγχος legacy» + στήλη «Legacy» +
+φίλτρο + `LegacyInvoicedRefresher` + οι κλήσεις του στο `whmcs:fetch-pending`· καθαρίστηκε και το
+orphaned `WhmcsBridgeClient::getInvoicedFlags()` + το test του). Επιβίωσαν 2 P2:
+- **Plugin-side `invoiced_flags` op πλέον αχρησιμοποίητο (P2).** Το `resolve.php` op `invoiced_flags`
+  (+ αναφορές σε `ekdosi_bridge.php`/`README.md`) δεν το καλεί κανείς πια στο ekdosi. Αβλαβές (read-only,
+  HMAC-gated), αλλά αφαιρέσιμο σε μελλοντικό plugin release — θέλει **version bump + redeploy** στο WHMCS
+  κάθε tenant, γι' αυτό δεν μπήκε στο ίδιο PR (καμία αλλαγή στο deployed plugin εδώ).
+- **Αδρανής `legacy_invoiced` δικλείδα (P2, συνειδητό deferral).** Κρατήθηκαν σκόπιμα ως backstop η στήλη
+  `legacy_invoiced`, το `PendingWhmcsInvoice::invoicedInLegacy()`, ο guard `WhmcsInvoiceFiler::assertCanBeFiled()`
+  και το `whmcs:auto-issue` candidate exclusion. Αφού τίποτα δεν γράφει πλέον μη-null τιμή, τα branches είναι
+  μη-προσβάσιμα στην παραγωγή (τα εξασκούν μόνο τα manual-set-column tests). Πλήρης αφαίρεση (μαζί με drop
+  της στήλης — destructive migration + baseline schema) όποτε επιβεβαιωθεί ότι κανένα prod row δεν φέρει
+  `legacy_invoiced > 0`.
+
 ### Epsilon πληρωμές (on-account) — surviving P2s (από το adversarial review, 2026-09-16)
 Το `EpsilonImporter::importPayments` (εμβάσματα/εισπράξεις → on-account, idempotent με DocCode,
 supersede των synthetic settlements, reconciliation vs `EpsilonBalance`) πέρασε **χωρίς reachable

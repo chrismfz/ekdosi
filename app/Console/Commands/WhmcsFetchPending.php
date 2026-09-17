@@ -7,7 +7,6 @@ use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
-use App\Services\Whmcs\LegacyInvoicedRefresher;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClient;
 use App\Services\Whmcs\WhmcsClientFactory;
@@ -250,19 +249,6 @@ class WhmcsFetchPending extends Command
             }
         }
 
-        // Dual-run: refresh the "already invoiced in the legacy app" flag for
-        // still-actionable rows (catches invoices the partner filed from the old
-        // app AFTER they were staged here). Non-fatal — a bridge hiccup must not
-        // fail the fetch.
-        try {
-            $legacyChanged = app(LegacyInvoicedRefresher::class)->refresh($tenant);
-            if ($legacyChanged > 0) {
-                $this->warn(sprintf('Legacy check: %d row(s) are now flagged "already invoiced in the legacy app".', $legacyChanged));
-            }
-        } catch (\Throwable $e) {
-            $this->warn('Legacy-invoiced refresh skipped: '.$e->getMessage());
-        }
-
         $this->line('');
         $this->info(sprintf(
             'Summary: %d created, %d refreshed, %d audit-frozen, %d failed.',
@@ -352,15 +338,6 @@ class WhmcsFetchPending extends Command
                 $this->warn('Stopped after 10000 pages (safety guard).');
                 break;
             }
-        }
-
-        try {
-            $legacyChanged = app(LegacyInvoicedRefresher::class)->refresh($tenant);
-            if ($legacyChanged > 0) {
-                $this->warn(sprintf('Legacy check: %d row(s) are now flagged "already invoiced in the legacy app".', $legacyChanged));
-            }
-        } catch (\Throwable $e) {
-            $this->warn('Legacy-invoiced refresh skipped: '.$e->getMessage());
         }
 
         $this->line('');
