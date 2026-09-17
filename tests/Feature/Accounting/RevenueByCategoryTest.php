@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Accounting;
 
+use App\Actions\IssueCreditNote;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -111,5 +112,38 @@ class RevenueByCategoryTest extends TestCase
 
         // «Αταξινόμητα» always sinks to the bottom of the rows.
         $this->assertSame('Αταξινόμητα', end($r['rows'])['name']);
+    }
+
+    public function test_credit_note_via_action_reduces_the_original_category_not_uncategorised(): void
+    {
+        // The primary WHMCS case: a line with NO product but a stamped category.
+        // IssueCreditNote must carry the stamp so the reduction nets the RIGHT
+        // category (else it lands in «Αταξινόμητα» and makes it negative).
+        $hosting = $this->category('Web Hosting');
+        $inv = $this->invoice('2026-03-01', [['cat_id' => $hosting->id, 'price' => 100]]);
+        $line = $inv->lines()->first();
+
+        app(IssueCreditNote::class)($inv->fresh('lines'), $this->type(credit: true), [
+            ['line_id' => $line->id, 'qty' => 1],
+        ]);
+
+        $byName = collect(app(RevenueByCategory::class)->build($this->tenant, 2026)['rows'])->keyBy('name');
+
+        $this->assertEqualsWithDelta(0.0, $byName['Web Hosting']['net'], 0.01); // 100 − 100
+        $this->assertFalse($byName->has('Αταξινόμητα'), 'the credit must not land in «Αταξινόμητα»');
+    }
+
+    public function test_category_with_only_prior_year_revenue_still_appears(): void
+    {
+        $legacy = $this->category('Legacy');
+        $this->invoice('2025-01-01', [['cat_id' => $legacy->id, 'price' => 80]]); // prior year only
+        $this->invoice('2026-01-01', [['cat_id' => $this->category('Now')->id, 'price' => 10]]);
+
+        $byName = collect(app(RevenueByCategory::class)->build($this->tenant, 2026)['rows'])->keyBy('name');
+
+        $this->assertTrue($byName->has('Legacy'), 'a prior-only category must still show a row (YoY reconciliation)');
+        $this->assertEqualsWithDelta(0.0, $byName['Legacy']['net'], 0.01);
+        $this->assertEqualsWithDelta(80.0, $byName['Legacy']['prior_net'], 0.01);
+        $this->assertEqualsWithDelta(-80.0, $byName['Legacy']['delta'], 0.01);
     }
 }

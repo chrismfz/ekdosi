@@ -1,11 +1,11 @@
 <x-filament-panels::page>
     @php($r = $this->getResult())
 
-    <div class="flex items-end gap-3 mb-4">
+    <div class="flex gap-3 mb-4">
         <label class="text-sm">
             <span class="block text-xs fi-color-gray mb-1">Έτος</span>
             <select wire:model.live="year"
-                class="rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 px-3 py-1.5 text-sm">
+                class="rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm">
                 @foreach ($this->availableYears() as $y)
                     <option value="{{ $y }}">{{ $y }}</option>
                 @endforeach
@@ -54,7 +54,7 @@
                             <th class="py-2 pl-3 text-right">Μεταβολή</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-gray-100 dark:divide-white/5">
+                    <tbody class="divide-y divide-gray-200 dark:divide-white/10">
                         @foreach ($r['rows'] as $row)
                             <tr @class(['bg-warning-50 dark:bg-warning-950/40' => $row['category_id'] === null])>
                                 <td class="py-2 pr-4 font-medium">
@@ -82,7 +82,7 @@
                             <td class="py-2 px-3 text-right font-mono whitespace-nowrap">{{ $this->fmt($r['total_vat']) }}</td>
                             <td class="py-2 px-3 text-right font-mono whitespace-nowrap">{{ $this->fmt($r['total_gross']) }}</td>
                             <td class="py-2 px-3"></td>
-                            <td class="py-2 px-3 text-right font-mono">100%</td>
+                            <td class="py-2 px-3 text-right font-mono">{{ $r['total_net'] != 0.0 ? '100%' : '—' }}</td>
                             <td class="py-2 px-3 text-right font-mono whitespace-nowrap">{{ $this->fmt($r['prior_total_net']) }}</td>
                             <td class="py-2 pl-3 text-right font-mono whitespace-nowrap">{{ $deltaTotal >= 0 ? '+' : '' }}{{ $this->fmt($deltaTotal) }}</td>
                         </tr>

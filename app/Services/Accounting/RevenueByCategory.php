@@ -51,8 +51,14 @@ class RevenueByCategory
             ->pluck('description_short', 'id')
             ->all();
 
+        // Union of buckets present in EITHER year, so a category discontinued this
+        // year (revenue only last year) still shows a row — otherwise the «Πέρσι»
+        // column and the deltas wouldn't reconcile to the footer totals.
+        $catIds = array_values(array_unique(array_merge(array_keys($current), array_keys($prior))));
+
         $rows = [];
-        foreach ($current as $catId => $agg) {
+        foreach ($catIds as $catId) {
+            $agg = $current[$catId] ?? ['net' => 0.0, 'vat' => 0.0, 'gross' => 0.0, 'lines' => 0];
             $priorNet = (float) ($prior[$catId]['net'] ?? 0.0);
             $rows[] = [
                 'category_id' => $catId > 0 ? $catId : null,

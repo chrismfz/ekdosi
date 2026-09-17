@@ -84,6 +84,10 @@
   δείχνουν «Αταξινόμητα» μέχρι τότε.
 - [ ] Dashboard widget «Έσοδα ανά κατηγορία» · Bulk-assign κατηγορίας/tags στη λίστα ειδών + φίλτρο
 - [ ] Ίδιο για έξοδα · Bonus: MRR/churn ανά κατηγορία · (tags ως εναλλακτικός άξονας)
+- [ ] **P2 (review):** στη σελίδα «Αντιστοίχιση WHMCS», αν ο operator βάλει «Κατηγορία ekdosi» αλλά αφήσει
+  τη §8.6 κενή, η γραμμή διαγράφεται και η κατηγορία χάνεται (coupling — income_class_category NOT NULL)·
+  disclosed στο help text, αλλά θέλει per-row validation notice. Επίσης `RevenueByCategory` `whereYear`
+  είναι non-sargable (συνεπές με τις άλλες αναφορές· range θα κρατούσε το index).
 
 ### 3. Bug: έξοδα «αταξινόμητο» — προαγωγή inbound classification
 
