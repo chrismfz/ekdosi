@@ -28,6 +28,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   sparse-<3→πίνακας: declined ως over-engineering· δες `docs/EKDOSI-BACKLOG.md`.
 
 ### Added
+- **Ισοζύγιο Ειδών/Υπηρεσιών (#4).** Νέα αναφορά «Λογιστικά» (`RevenueByItemReport`, perm
+  `View:RevenueByItemReport`): τζίρος ανά **είδος/υπηρεσία** για ένα έτος — καθαρά/ΦΠΑ/μεικτά + **ποσότητα**,
+  δεσπόζουσα κατηγορία, **% τζίρου**, **YoY**, σύνολα, export CSV. Η υπολογιστική βάση (`RevenueByItem`) είναι
+  ο **item-grain αδελφός του `RevenueByCategory`** (#2): ίδιο scope (ζωντανά/εκδοθέντα), ίδια header-discount
+  math, πιστωτικά αρνητικά (**αξία & ποσότητα**) → **Σ(είδη) ισοσκελίζει με Σ(κατηγορίες)**. Ταυτότητα γραμμής:
+  `product_id` → προϊόν· αλλιώς η περιγραφή **κανονικοποιημένη** (`ItemLabelNormalizer` κόβει την τελική
+  παρένθεση περιόδου π.χ. «(1/9/2026-31/8/2027)» ώστε οι ανανεώσεις του ίδιου πακέτου να συγκεντρώνονται —
+  απαραίτητο για WHMCS γραμμές που δεν έχουν `product_id` και βάζουν την περίοδο στο κείμενο· display-only,
+  δεν αγγίζει ποτέ το παραστατικό). Η οθόνη δείχνει top-200 + μία γραμμή «Λοιπά είδη» (foots σωστά)· το CSV όλα.
+  **Μετά το deploy: `shield:generate` + re-provision** (νέο permission). Backlog #4.
 - **Dashboard widgets: top προμηθευτές + αξία pipeline (#8 PR-2).** Νέο γράφημα **«Κορυφαίοι προμηθευτές
   — έξοδα»** (`TopSuppliersChart`, top-N ανά καθαρή αξία εξόδων του έτους· **ίδιο reportable-expense treatment
   με το `LedgerBook`** — εξαιρεί AADE-ακυρωμένα, αντιστρέφει πρόσημο πιστωτικών, id-aware supplier — cached 30',
