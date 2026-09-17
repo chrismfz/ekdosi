@@ -437,15 +437,22 @@ class InvoiceForm
                     Repeater::make('lines')
                         ->relationship('lines')
                         ->hiddenLabel()
+                        // Table layout renders ONE cell per column, mapping schema children
+                        // to columns IN ORDER and DROPPING any child beyond the last column
+                        // (Repeater.php: `count($tableColumns) > $counter`). So «Σημείωση»
+                        // needs its own column AND `notes` must sit within the first N
+                        // children (it is placed right before vat_exemption_category below) —
+                        // otherwise the per-line note is silently un-enterable, as it was.
                         ->table([
-                            TableColumn::make('Προϊόν')->width('20%'),
-                            TableColumn::make('Περιγραφή')->width('26%'),
-                            TableColumn::make('Ποσότ.')->width('8%'),
-                            TableColumn::make('Μ.Μ.')->width('8%'),
-                            TableColumn::make('Τιμή (καθ.)')->width('11%'),
-                            TableColumn::make('Τιμή (με ΦΠΑ)')->width('11%'),
-                            TableColumn::make('Έκπτ.%')->width('8%'),
+                            TableColumn::make('Προϊόν')->width('18%'),
+                            TableColumn::make('Περιγραφή')->width('24%'),
+                            TableColumn::make('Ποσότ.')->width('7%'),
+                            TableColumn::make('Μ.Μ.')->width('6%'),
+                            TableColumn::make('Τιμή (καθ.)')->width('10%'),
+                            TableColumn::make('Τιμή (με ΦΠΑ)')->width('10%'),
+                            TableColumn::make('Έκπτ.%')->width('7%'),
                             TableColumn::make('ΦΠΑ%')->width('8%'),
+                            TableColumn::make('Σημείωση')->width('10%'),
                         ])
                         ->schema([
                             Select::make('product_id')
@@ -623,10 +630,20 @@ class InvoiceForm
                                     }
                                 }),
 
+                            // «Σημείωση γραμμής» → the «Σημείωση» column. MUST sit within the
+                            // first N children (before vat_exemption_category) so the table
+                            // layout gives it a cell; it prints on the PDF under the line
+                            // description and now shows on the invoice view too.
+                            TextInput::make('notes')
+                                ->label('Σημείωση γραμμής')
+                                ->placeholder('προαιρετικό'),
+
                             // MYD-007: the §8.3 exemption reason for a 0% line — shown ONLY when
                             // the line is 0%, required then (AADE [217]). The value is suggested
                             // from the invoice type by the rate handler above; always dehydrated
                             // but nulled for non-0% lines so a rate change clears a stale reason.
+                            // Kept LAST (a non-column child) so it stays auto-suggested exactly
+                            // as before — never a stray empty column in the line table.
                             Select::make('vat_exemption_category')
                                 ->label('Αιτία απαλλαγής ΦΠΑ (§8.3)')
                                 ->options(Codes::vatExemptionOptions())
@@ -636,9 +653,6 @@ class InvoiceForm
                                 ->helperText('Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).')
                                 ->dehydrated()
                                 ->dehydrateStateUsing(fn ($state, Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0 ? $state : null),
-
-                            TextInput::make('notes')
-                                ->label('Σημείωση γραμμής'),
                         ])
                         ->addActionLabel('+ Προσθήκη γραμμής')
                         ->reorderable(false)
