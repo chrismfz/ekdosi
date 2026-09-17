@@ -416,9 +416,17 @@ class WhmcsInvoiceMapper
                 (int) ($item['whmcs_product_id'] ?? 0),
                 (int) ($item['whmcs_group_id'] ?? 0),
             );
+            // Revenue-by-category (#2): stamp the ekdosi ProductCategory from the same
+            // WHMCS map, so the free-text WHMCS line (product_id null) can still be
+            // grouped in «Έσοδα ανά κατηγορία». null (unmapped) → «Αταξινόμητο».
+            $productCategoryId = $classifier->resolveCategoryId(
+                (int) ($item['whmcs_product_id'] ?? 0),
+                (int) ($item['whmcs_group_id'] ?? 0),
+            );
 
             $out[] = [
                 'product_id' => null,
+                'product_category_id' => $productCategoryId,
                 // MYD-006 bridge: the §8.6 classification snapshot from the WHMCS
                 // group/product map. null (unmapped / old plugin) leaves the
                 // submitter's product/type/policy resolution untouched. The AMOUNT

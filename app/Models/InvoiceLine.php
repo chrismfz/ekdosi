@@ -110,6 +110,10 @@ class InvoiceLine extends Model
         'invoice_id',
         'original_line_id',
         'product_id',
+        // Revenue-by-category (#2): the resolved ekdosi ProductCategory, stamped at
+        // WHMCS ingestion from the income-map (WHMCS lines have no product_id). Null
+        // on product-linked lines → the report falls back to product→category.
+        'product_category_id',
         'qty',
         'price_per_item',
         'discount',
@@ -140,6 +144,7 @@ class InvoiceLine extends Model
             'discount' => 'decimal:4',
             'vat_percent' => 'decimal:2',
             'vat_exemption_category' => 'integer',
+            'product_category_id' => 'integer',
             'net_price' => 'decimal:2',
             'gross_price' => 'decimal:2',
         ];
@@ -158,6 +163,11 @@ class InvoiceLine extends Model
     public function product(): BelongsTo
     {
         return $this->belongsTo(Product::class);
+    }
+
+    public function productCategory(): BelongsTo
+    {
+        return $this->belongsTo(ProductCategory::class);
     }
 
     /**
