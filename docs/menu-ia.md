@@ -13,7 +13,7 @@
 2. **Ops vs Config split (the real scaling move).** Each domain's **daily** screens live in its
    domain Cluster; each domain's **configuration** goes to the **Settings** Cluster, sub-grouped by
    domain. Config is the *bulk* (WHMCS's whole «Configuration» sidebar) — it must not pollute daily
-   nav. WHMCS confirms this split (see `docs/ticket-system-eval.md` «WHMCS parity»).
+   nav. WHMCS confirms this split (see `docs/ticket-system.md` «WHMCS parity»).
 3. **Per-tenant gating is what makes it "fit".** Every pillar sits behind a `companies.enable_*`
    flag (already the plan for Domains → `enable_domain_management`). **No tenant ever sees all of
    it** — a mainland invoicing-only tenant sees ~5 clusters; a full-reseller tenant sees them all.

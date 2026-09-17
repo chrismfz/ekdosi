@@ -351,7 +351,7 @@ email/PDF completion. Μετά, οι πυλώνες A/B/C/E δοκιμάζοντ
 **2027 (proposed)**· B2C = εκτός DRR. PEPPOL είναι δίκτυο → **ένα** Access Point καλύπτει
 GR-send ΚΑΙ EE-send (`ee-peppol` σήμερα = NullSubmitter stub). Providers EE: Telema/
 Billberry/Finbite/Unifiedpost· **check αν ο InvoSign κάνει ήδη PEPPOL send** (φθηνότερο).
-→ parked, review 2027· εκτελέσιμα: `docs/EKDOSI-BACKLOG.md #1b`. Ο UBL builder
+→ parked, review 2027· εκτελέσιμα: `docs/BACKLOG.md #1b`. Ο UBL builder
 (`PeppolInvoiceDocument`, Phase 1) είναι ήδη έτοιμος + country-agnostic.
 
 ## 7. Σειρά & γιατί

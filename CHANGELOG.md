@@ -18,15 +18,6 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
-### Changed
-- **Dashboard charts — empty state (#7 polish).** Τα τρία νέα γραφήματα (`TopProductsChart`,
-  `RevenueByCategoryChart`, `TopSuppliersChart`) δείχνουν τώρα το **built-in empty state** του Filament
-  (κρυμμένο το κενό canvas + κεντραρισμένο μήνυμα «καμία πώληση/έσοδο/έξοδο προς εμφάνιση φέτος») όταν δεν
-  υπάρχουν δεδομένα να σχεδιαστούν — αντί για κενό canvas σε νέο/ήσυχο tenant. Μέσω κοινού trait
-  `HasChartEmptyNote` (override του `isEmpty()`, που default ελέγχει όλο το `getData()` array και έμενε πάντα
-  false) + `$emptyStateHeading` ανά widget. Dark/mobile-safe by construction. Custom skeleton loaders +
-  sparse-<3→πίνακας: declined ως over-engineering· δες `docs/EKDOSI-BACKLOG.md`.
-
 ### Added
 - **Ταμειακό ημερολόγιο (Εισπράξεων–Πληρωμών) (#10).** Νέα αναφορά «Λογιστικά» (`CashJournalReport`, perm
   `View:CashJournalReport`): ταμειακές κινήσεις πελατών για μια περίοδο, ομαδοποιημένες **ανά λογαριασμό
@@ -100,7 +91,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   re-provision μετά το deploy). **WHMCS mapping:** νέα στήλη «Κατηγορία ekdosi» στη σελίδα
   «Αντιστοίχιση WHMCS» (δίπλα στη §8.6) — ανά ομάδα προϊόντων· σφραγίζεται στις γραμμές νέων
   παραστατικών (forward-only· τα ιστορικά σε επόμενο backfill). Μετρά για όλες τις εταιρίες.
-- **UBL / PEPPOL BIS Billing 3.0 (EN 16931) — Phase 1 (προβολή + λήψη).** Νέα κουμπιά «Προβολή UBL»
+- **UBL / PEPPOL BIS Billing 3.0 (EN 16931) — Phase 1b (UI + MCP· προβολή + λήψη).** Νέα κουμπιά «Προβολή UBL»
   (modal με το XML + αποτέλεσμα ελέγχου) και «Λήψη UBL» (.xml) σε κάθε παραστατικό — **ανεξάρτητα**
   από τον `einvoice_provider`, ώστε ΟΛΕΣ οι εταιρίες (και οι ελληνικές mainland) να έχουν έτοιμο το
   τυποποιημένο e-invoice· η αποστολή μέσω Access Point είναι Phase 2. Νέο read-only MCP/«Βοηθός»
@@ -141,6 +132,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   χαλάει τη στοίχιση. Ώστε ο χειριστής να βλέπει «τι στέλνω / αν έχω λάθος» με μια ματιά.
 
 ### Changed
+- **Dashboard charts — empty state (#7 polish).** Τα τρία νέα γραφήματα (`TopProductsChart`,
+  `RevenueByCategoryChart`, `TopSuppliersChart`) δείχνουν τώρα το **built-in empty state** του Filament
+  (κρυμμένο το κενό canvas + κεντραρισμένο μήνυμα «καμία πώληση/έσοδο/έξοδο προς εμφάνιση φέτος») όταν δεν
+  υπάρχουν δεδομένα να σχεδιαστούν — αντί για κενό canvas σε νέο/ήσυχο tenant. Μέσω κοινού trait
+  `HasChartEmptyNote` (override του `isEmpty()`, που default ελέγχει όλο το `getData()` array και έμενε πάντα
+  false) + `$emptyStateHeading` ανά widget. Dark/mobile-safe by construction. Custom skeleton loaders +
+  sparse-<3→πίνακας: declined ως over-engineering· δες `docs/BACKLOG.md`.
 - **Σελίδα προβολής παραστατικού: οι γραμμές στο σώμα (φάση 3).** Οι γραμμές του παραστατικού μπήκαν
   σε ενότητα «Γραμμές» **ανάμεσα στα πάνω cards και τα σύνολα** (αντί για το κάτω tab «Lines»), ώστε η
   προβολή να διαβάζεται σαν το εκτυπωμένο παραστατικό (κεφαλίδα → γραμμές → σύνολα). Read-only πίνακας
@@ -1246,7 +1244,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (μέσω `CustomerDocumentFeed::grantedTargets`, `withoutGlobalScope` + ρητό company_id/customer_id· άγνωστο
   ticket id → 404) και **μόνο δημόσια μηνύματα** (`Ticket::publicMessages` — εσωτερική σημείωση δεν διαρρέει
   ΠΟΤΕ στην πύλη). Γράψιμο μέσω των `OpenTicket`/`PostTicketMessage` (ίδιο state machine· η απάντηση πελάτη
-  πάει στην ουρά χειριστή, ξανα-ανοίγει κλειστό). Νέα `Customer::tickets()` σχέση. `docs/ticket-system-design.md`.
+  πάει στην ουρά χειριστή, ξανα-ανοίγει κλειστό). Νέα `Customer::tickets()` σχέση. `docs/ticket-system.md`.
 - **Σύστημα υποστήριξης (tickets) — polish: έτοιμες απαντήσεις + context panel (Πυλώνας E).** (α) **Έτοιμες
   απαντήσεις** (`CannedReplyResource` σε κατηγορίες, Settings Cluster → «Υποστήριξη») με `{{tokens}}`
   ({{customer.name}}, {{ticket.reference}}, {{company.ibans}}, {{operator.name}}…) — picker στη φόρμα
@@ -1262,7 +1260,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   + ενέργειες **Απάντηση / Εσωτερική σημείωση / Ανάθεση / Σε αναμονή / Κλείσιμο-Επαναφορά**. Ρυθμίσεις
   **Τμημάτων** (`TicketDepartmentResource`, με IMAP πεδία για Phase 3) στο Settings Cluster → «Υποστήριξη».
   Toggle ενεργοποίησης στη φόρμα Εταιρείας (super-admin). Απομένουν (follow-up): canned-reply picker +
-  context panel με τιμολόγια/καρτέλα του πελάτη. `docs/ticket-system-design.md`.
+  context panel με τιμολόγια/καρτέλα του πελάτη. `docs/ticket-system.md`.
 - **Σύστημα υποστήριξης (tickets) — θεμέλιο domain (Πυλώνας E, Phase 1a).** Νέο tenant-scoped domain:
   `tickets` / `ticket_messages` (public reply ή **εσωτερική σημείωση**) / `ticket_departments`
   (+ IMAP config πεδία, encrypted — για Phase 3) / `canned_replies` (κατηγορίες). State machine
@@ -1271,7 +1269,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `TK-YYYY-MM-DD-xxxxxx` (ημ/νία ανοίγματος + αμάντευτη ουρά = email token). Reuse των έτοιμων
   `HasAttachments`/`HasTags`/`TracksActivity`. Όλο το pillar πίσω από `companies.support_enabled`
   (**default off, τελείως κρυμμένο**) + `Company::hasSupport()`. Χωρίς UI/mail ακόμα — σχέδιο:
-  `docs/ticket-system-design.md`.
+  `docs/ticket-system.md`.
   παραστατικό: άτυπο αποδεικτικό είσπραξης για όλο το reference-group (κανάλι «Πύλη · Eurobank», κωδ. συναλλαγής,
   ποια τιμολόγια εξόφλησε, σύνολο). Δεν είναι φορολογικό παραστατικό — αποδεικτικό «λάβαμε €X».
 - **Στοιχεία πληρωμής πάνω στο παραστατικό.** Το tab «Πληρωμές» του τιμολογίου δείχνει στήλη «Κανάλι» («Πύλη ·
@@ -3976,7 +3974,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   (Closes the gap left after PR #179, where `refreshStatus` discarded the
   history.) Run `php artisan migrate`.
 - **Digital Delivery-Note lifecycle spec committed** at repo root
-  (`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md`) + CLAUDE.md
+  (`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.2_preofficial.md`) + CLAUDE.md
   Delivery-notes section: records that the full ΔΑ lifecycle (submit + register
   + confirm + status + cancel) is ALREADY built (PR #179), code-complete and
   pending only a live AADE-sandbox round-trip; the one genuine remaining gap is

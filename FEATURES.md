@@ -1010,7 +1010,7 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 ## 20. Σύστημα υποστήριξης / Tickets (Πυλώνας E) — foundation
 - **Per-tenant kill-switch (SHIPPED):** όλος ο πυλώνας πίσω από `companies.support_enabled`
   (**default OFF, τελείως κρυμμένο** — μενού/ρυθμίσεις/portal), toggle στη φόρμα Εταιρείας (super-admin).
-  Design: `docs/ticket-system-design.md`· build-our-own thin domain (multi-tenant native), δανεικό μόνο
+  Design: `docs/ticket-system.md`· build-our-own thin domain (multi-tenant native), δανεικό μόνο
   το mail layer (Phase 3).
 - **Domain (Phase 1a, SHIPPED):** `tickets` / `ticket_messages` (public reply **ή** εσωτερική σημείωση) /
   `ticket_departments` (+ IMAP config encrypted, Phase 3) / `canned_replies`. State machine «ποιος έγραψε →

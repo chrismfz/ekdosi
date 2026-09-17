@@ -79,4 +79,4 @@ semantics**. Δεν αποκλίνουν (το WHMCS το αποδεικνύει
 `ServiceContract` (κατάλογος + per-cycle price matrix + per-customer contracts) · renewal = staged
 DRAFT (ποτέ auto-AADE) · dunning (opt-in ανά προϊόν) · provisioning seam · dashboard MRR/upcoming ·
 **#11** billing analytics (`ServiceContractBilling`) + tab «Ανανεώσεις» + retro-link «Σύνδεση
-υπάρχοντος παραστατικού». Roadmap: `docs/EKDOSI-BACKLOG.md` §10–11.
+υπάρχοντος παραστατικού». Roadmap: `docs/BACKLOG.md` §10–11.
