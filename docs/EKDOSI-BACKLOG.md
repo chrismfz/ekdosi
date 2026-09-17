@@ -227,6 +227,11 @@ Top **Πελάτες** (`TopCustomersTable`), renewals, myDATA/WHMCS stats. Λε
   inline — τα σύνολα όμως τα αφαιρούν (disclosed με helper στα tiles + description στο tab). Inline εμφάνιση πιστωτικών
   θέλει custom query εκτός της `invoices()` relation (fragile OR/soft-delete precedence) → ξεχωριστό enhancement.
 
+> **🔒 Locked architectural decision — Services module για MyIP/hosting:** κρατάμε **ΕΝΑ** «Υπηρεσίες»
+> και το εξελίσσουμε προσθετικά (service_type/κατηγορίες + ProvisioningModule drivers + addons ως child
+> rows + progressive disclosure), **ΟΧΙ** clone σε ξεχωριστό «Hosting Services». Πλήρες σκεπτικό +
+> evolution path → **`docs/services-module-evolution.md`**.
+
 ### 12. Έργα (projects) — **χαμηλή προτεραιότητα**
 
 **Verdict: ✅ absent (L).** Νόημα μόνο αν ένα έργο μαζεύει έσοδα+έξοδα από πολλά παραστατικά (μικτό περιθώριο).
