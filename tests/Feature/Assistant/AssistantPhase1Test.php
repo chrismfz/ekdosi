@@ -123,6 +123,24 @@ class AssistantPhase1Test extends TestCase
         $this->assertContains('outstanding_receivables', $names);
     }
 
+    public function test_every_tool_definition_encodes_properties_as_a_json_object(): void
+    {
+        // The bug: a no-arg tool whose `properties` is an empty PHP `[]` re-encodes
+        // as a JSON array `[]`, and Anthropic 400s the WHOLE call
+        // «tools.N.custom.input_schema.properties: Input should be an object».
+        // Every tool (super_admin → all offered) must serialise `properties` as {}.
+        Gate::before(fn () => true);
+
+        foreach ((new ToolRegistry)->definitionsFor($this->user) as $def) {
+            $json = (string) json_encode($def['input_schema'], JSON_UNESCAPED_UNICODE);
+            $this->assertStringNotContainsString(
+                '"properties":[]',
+                $json,
+                "Tool «{$def['name']}» sends properties as a JSON array — Anthropic rejects it."
+            );
+        }
+    }
+
     public function test_pricing_estimate_from_the_config_map(): void
     {
         $p = app(AiPricing::class);

@@ -98,10 +98,19 @@ class ToolRegistry
             if (! $this->userMay($user, $tool)) {
                 continue;
             }
+            $schema = $tool->inputSchema();
+            // A no-argument tool whose `properties` is an empty PHP `[]` would
+            // re-encode as a JSON array `[]`, and Anthropic 400s the whole call
+            // «input_schema.properties: Input should be an object». Force it to
+            // an object `{}` here so ANY tool is safe, not just the ones that
+            // remembered to cast. (Mirror of AssistantRunner::normalizeToolInputs.)
+            if (($schema['properties'] ?? null) === []) {
+                $schema['properties'] = (object) [];
+            }
             $out[] = [
                 'name' => $tool->name(),
                 'description' => $tool->description(),
-                'input_schema' => $tool->inputSchema(),
+                'input_schema' => $schema,
             ];
         }
 

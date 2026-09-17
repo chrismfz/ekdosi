@@ -30,7 +30,9 @@ class AppVersionTool implements AssistantTool
 
     public function inputSchema(): array
     {
-        return ['type' => 'object', 'properties' => []];
+        // `(object) []` — an EMPTY PHP `[]` re-encodes as a JSON array `[]` and
+        // Anthropic 400s «input_schema.properties: Input should be an object».
+        return ['type' => 'object', 'properties' => (object) []];
     }
 
     public function permission(): ?string
