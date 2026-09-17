@@ -2,10 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\ExpenseSource;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
-
-use App\Enums\ExpenseSource;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -26,7 +25,6 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 class Expense extends Model
 {
     use BelongsToCompany;
-
     use HasFactory;
     use HasTags;
     use SoftDeletes;
@@ -131,6 +129,67 @@ class Expense extends Model
             .'|'.($line->classification_category ?: $this->classification_category))->unique();
 
         return $combos->count() > 1;
+    }
+
+    /**
+     * The E3 category the Βιβλίο Εξόδων / reports should attribute this expense
+     * to: our OWN document classification (the header) when we've set one, else
+     * the issuer's per-line E3 classification the import captured (the line
+     * carrying the largest share of net value), else null → «αταξινόμητο».
+     *
+     * This is the REVERSE priority from ExpenseClassificationSubmitter — there a
+     * per-line χαρακτηρισμός wins over the header for AADE submission; here our
+     * own decided classification wins and the issuer's per-line codes are only a
+     * fallback, so a document the operator hasn't classified yet still lands in
+     * the right category instead of «αταξινόμητο».
+     *
+     * READ-ONLY: it derives, it never writes the header — so the «προς
+     * χαρακτηρισμό» worklist (driven by `classification_state`) and the
+     * operator's own χαρακτηρισμός are left exactly as they were.
+     */
+    public function effectiveClassificationCategory(): ?string
+    {
+        if (filled($this->classification_category)) {
+            return $this->classification_category;
+        }
+
+        return $this->dominantLineClassificationCategory();
+    }
+
+    /**
+     * The `classification_category` carrying the largest share of net value
+     * across this expense's lines — the doc's dominant category when the header
+     * is unclassified. Lines without a classification are ignored (they don't
+     * dilute a doc that IS partly classified); ties break on the smaller code so
+     * the book is deterministic. Null when no line carries one.
+     */
+    private function dominantLineClassificationCategory(): ?string
+    {
+        $this->loadMissing('lines');
+
+        $netByCategory = [];
+        foreach ($this->lines as $line) {
+            $code = $line->classification_category;
+            if (blank($code)) {
+                continue;
+            }
+            $netByCategory[$code] = ($netByCategory[$code] ?? 0.0) + (float) $line->net_value;
+        }
+
+        if ($netByCategory === []) {
+            return null;
+        }
+
+        $winner = null;
+        $winningNet = -INF;
+        foreach ($netByCategory as $code => $net) {
+            if ($net > $winningNet || ($net === $winningNet && (string) $code < (string) $winner)) {
+                $winner = (string) $code;
+                $winningNet = $net;
+            }
+        }
+
+        return $winner;
     }
 
     /**
