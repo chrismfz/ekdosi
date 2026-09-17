@@ -128,12 +128,19 @@ class LedgerBook
             ->where(fn ($q) => $q
                 ->whereNull('mydata_state')
                 ->orWhere('mydata_state', '!=', 'CANCELLED'))
-            ->with('supplier:id,name,afm');
+            ->with([
+                'supplier:id,name,afm',
+                // For the header→line classification fallback (#3): a doc the
+                // operator hasn't classified yet still lands in the right
+                // category from the issuer's per-line E3 codes the import kept,
+                // instead of «αταξινόμητο». Eager-loaded so it's one query, not N.
+                'lines:id,expense_id,net_value,classification_category',
+            ]);
 
         return $query->get()->map(function (Expense $exp) use ($creditTypes): LedgerRow {
             $isCredit = in_array($exp->invoice_type, $creditTypes, true);
             $sign = $isCredit ? -1 : 1;
-            $code = $exp->classification_category;
+            $code = $exp->effectiveClassificationCategory();
             $account = ChartOfAccounts::accountFor($code);
 
             $doc = trim(($exp->series ?? '').' '.($exp->aa ?? ''));

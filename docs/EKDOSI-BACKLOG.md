@@ -91,16 +91,23 @@
 
 ### 3. Bug: έξοδα «αταξινόμητο» — προαγωγή inbound classification
 
-**Verdict: ✅ ισχύει (S–M, στοχευμένο).**
+**Verdict: ✅ ισχύει (S–M, στοχευμένο). — ✅ core DONE 2026-09-17 (Βιβλίο fallback).**
 
 Το auto-classify εξόδων είναι **βάσει ΑΦΜ προμηθευτή** (`ExpenseClassifier.php`), όχι από την κατηγορία του
 εισερχόμενου. Το import **πιάνει** την per-line classification του εκδότη σε `expense_lines`
-(`ExpenseImporter.php:405-406`) αλλά **δεν την ανεβάζει** στο header που διαβάζει το Βιβλίο
+(`ExpenseImporter.php:405-406`) αλλά **δεν την ανέβαζε** στο header που διαβάζει το Βιβλίο
 (`LedgerBook.php:136`) → «αταξινόμητο».
 
 **Tasks**
-- [ ] Προαγωγή inbound per-line classification στο header (ή fallback του Βιβλίου στο line-level) όταν δεν υπάρχει rule
+- [x] **Fallback του Βιβλίου στο line-level** όταν λείπει ο χαρακτηρισμός κεφαλίδας:
+  `Expense::effectiveClassificationCategory()` (κεφαλίδα → αλλιώς κυρίαρχη γραμμή κατά καθαρή αξία →
+  αλλιώς null). Read-only — δεν γράφει την κεφαλίδα, δεν πειράζει το `classification_state`/worklist
+  ούτε τον χαρακτηρισμό προς ΑΑΔΕ. Το `LedgerBook` (και ό,τι περνά από αυτό: `income_vs_expense`,
+  εξαγωγή) το χρησιμοποιεί.
 - [ ] (προαιρετικό) auto-rule πρόταση από επαναλαμβανόμενο προμηθευτή
+- [ ] (P2) Το Βιβλίο δίνει **μία** γραμμή/κατηγορία ανά έξοδο (κυρίαρχη) — για doc με μικτές γραμμές
+  δεν σπάει τα ποσά ανά κατηγορία (συνεπές με το header path που κι αυτό χαρακτηρίζει όλο το doc σε μία).
+  Split ανά κατηγορία = χωριστό, μεγαλύτερο enhancement και για τα δύο paths.
 
 ### 4. Ισοζύγιο Πελατών (και Ειδών)
 

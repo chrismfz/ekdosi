@@ -199,6 +199,131 @@ class LedgerBookTest extends TestCase
         $this->assertSame('category2_3', $byCategory->rows[0]->categoryCode);
     }
 
+    /** @param list<array{net:float,cat:?string}> $lines */
+    private function withLines(Expense $expense, array $lines): Expense
+    {
+        foreach ($lines as $i => $l) {
+            $expense->lines()->create([
+                'company_id' => $this->tenant->id,
+                'line_number' => $i + 1,
+                'net_value' => $l['net'],
+                'vat_amount' => 0,
+                // A realistic E3 type code alongside the category2_x; only the
+                // category feeds the book, but keep the pair coherent.
+                'classification_type' => $l['cat'] !== null ? 'E3_102_001' : null,
+                'classification_category' => $l['cat'],
+            ]);
+        }
+
+        return $expense;
+    }
+
+    public function test_expense_falls_back_to_line_classification_when_header_is_unclassified(): void
+    {
+        // #3: the issuer sent a per-line E3 classification the import captured,
+        // but no supplier rule matched so the header stayed null. The book must
+        // show the line's category, not «αταξινόμητο».
+        $exp = $this->expense('2026-01-12', 50, 12, 62, ['classification_category' => null]);
+        $this->withLines($exp, [['net' => 50, 'cat' => 'category2_3']]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertSame('category2_3', $row->categoryCode);
+        $this->assertNotNull($row->categoryLabel);
+        $this->assertSame('61', $row->accountCode, 'category2_3 → ΕΓΛΣ 61');
+    }
+
+    public function test_header_classification_wins_over_the_line_fallback(): void
+    {
+        // The operator/rule classified the whole doc — that decision wins over
+        // whatever the issuer put on the lines.
+        $exp = $this->expense('2026-01-12', 50, 12, 62, ['classification_category' => 'category2_5']);
+        $this->withLines($exp, [['net' => 50, 'cat' => 'category2_3']]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertSame('category2_5', $row->categoryCode);
+    }
+
+    public function test_mixed_line_classifications_pick_the_dominant_by_net(): void
+    {
+        $exp = $this->expense('2026-01-12', 100, 24, 124, ['classification_category' => null]);
+        $this->withLines($exp, [
+            ['net' => 30, 'cat' => 'category2_3'],
+            ['net' => 70, 'cat' => 'category2_5'],  // larger share → wins
+            ['net' => 5, 'cat' => null],            // unclassified line: ignored
+        ]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertSame('category2_5', $row->categoryCode);
+        // The doc's own totals are attributed to that one category (one row per
+        // doc, as with a header classification) — the line split isn't itemised.
+        $this->assertSame(100.0, $row->net);
+    }
+
+    public function test_credit_note_expense_takes_the_line_category_and_still_nets_negative(): void
+    {
+        // The doc-level sign (πιστωτικό) is independent of category selection:
+        // the category comes from the positive line net, the amount nets negative.
+        $exp = $this->expense('2026-01-15', 10, 2, 12, [
+            'invoice_type' => '14.31',            // credit type → doc signs −
+            'classification_category' => null,
+        ]);
+        $this->withLines($exp, [['net' => 10, 'cat' => 'category2_3']]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertTrue($row->isCredit);
+        $this->assertSame('category2_3', $row->categoryCode);
+        $this->assertSame(-10.0, $row->net);
+    }
+
+    public function test_dominant_tiebreak_is_exact_and_picks_the_smaller_code(): void
+    {
+        // Two categories tie at €30.30 — one split across lines (float-fragile:
+        // 10.10 + 20.20 ≠ 30.30 in binary), one single line. Integer-cent
+        // accumulation makes the tie exact, so the smaller code wins deterministically.
+        $exp = $this->expense('2026-01-12', 60.60, 0, 60.60, ['classification_category' => null]);
+        $this->withLines($exp, [
+            ['net' => 10.10, 'cat' => 'category2_5'],
+            ['net' => 20.20, 'cat' => 'category2_5'],  // 2_5 total 30.30
+            ['net' => 30.30, 'cat' => 'category2_3'],  // 2_3 total 30.30 → tie → smaller code
+        ]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertSame('category2_3', $row->categoryCode);
+    }
+
+    public function test_expense_with_no_classification_anywhere_stays_uncategorised(): void
+    {
+        $exp = $this->expense('2026-01-12', 50, 12, 62, ['classification_category' => null]);
+        $this->withLines($exp, [['net' => 50, 'cat' => null]]);
+
+        $row = $this->book(bk: 'expense')->expenseRows()[0];
+
+        $this->assertNull($row->categoryCode);
+        $this->assertNull($row->categoryLabel);
+    }
+
+    public function test_line_fallback_never_writes_the_header_or_classification_state(): void
+    {
+        // The book is a read-model: deriving the category must not classify the
+        // doc (it stays in the «προς χαρακτηρισμό» worklist for the operator).
+        $exp = $this->expense('2026-01-12', 50, 12, 62, [
+            'classification_category' => null,
+            'classification_state' => null,
+        ]);
+        $this->withLines($exp, [['net' => 50, 'cat' => 'category2_3']]);
+
+        $this->book(bk: 'expense');
+        $exp->refresh();
+
+        $this->assertNull($exp->classification_category, 'the book must not write the derived category back');
+        $this->assertNull($exp->classification_state, 'the doc stays «προς χαρακτηρισμό»');
+    }
+
     public function test_counterparty_and_category_label_are_resolved(): void
     {
         $customer = Customer::create([
