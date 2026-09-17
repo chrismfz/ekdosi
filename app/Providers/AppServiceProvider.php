@@ -11,6 +11,7 @@ use App\Support\ErrorAlerts\ExceptionNotifier;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
 use Filament\Events\TenantSet;
+use Filament\Forms\Components\DateTimePicker;
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
 use Illuminate\Console\Events\CommandStarting;
@@ -177,6 +178,33 @@ class AppServiceProvider extends ServiceProvider
         FilamentAsset::register([
             Css::make('ekdosi-panel', resource_path('css/panel.css')),
         ]);
+
+        /*
+         * Greek date/time pickers panel-wide. Filament's date pickers default to a
+         * NATIVE browser control (<input type="date">/<input type="datetime-local">),
+         * whose DISPLAYED format follows the VIEWER'S BROWSER locale — so an operator
+         * on an en-US browser saw the invoice «Ημερομηνία έκδοσης» as M/D/Y even though
+         * APP_LOCALE=el (the value stored/printed was always correct — only the input
+         * display was reversed). Force Filament's own JS picker (native:false) with an
+         * el-GR display format so every date reads d/m/Y regardless of browser, weeks
+         * starting Monday.
+         *
+         * Registered ONCE on the base DateTimePicker: BOTH DatePicker and TimePicker
+         * extend it, and ComponentManager::configure() runs every ancestor's
+         * configureUsing callback (parent→child), so this one registration reaches all
+         * three. We set the DEFAULT-format slots — NOT an explicit ->displayFormat() —
+         * so getDisplayFormat() still picks the RIGHT shape per field: d/m/Y for a
+         * DatePicker, d/m/Y H:i for a DateTimePicker, and the untouched H:i for a
+         * time-only TimePicker (an explicit displayFormat would wrongly force date
+         * tokens onto a time field). A per-field ->displayFormat() still overrides it
+         * (e.g. CompanyForm's ISO Y-m-d min-date pickers stay as they are).
+         */
+        DateTimePicker::configureUsing(fn (DateTimePicker $picker) => $picker
+            ->native(false)
+            ->firstDayOfWeek(1)
+            ->defaultDateDisplayFormat('d/m/Y')
+            ->defaultDateTimeDisplayFormat('d/m/Y H:i')
+            ->defaultDateTimeWithSecondsDisplayFormat('d/m/Y H:i:s'));
 
         /*
          * @gup('Κείμενο') — Greek ALL-CAPS without τόνος, for PDF/print labels.

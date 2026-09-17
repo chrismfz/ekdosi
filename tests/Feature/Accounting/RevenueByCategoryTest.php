@@ -12,6 +12,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Accounting\RevenueByCategory;
+use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
@@ -131,6 +132,42 @@ class RevenueByCategoryTest extends TestCase
 
         $this->assertEqualsWithDelta(0.0, $byName['Web Hosting']['net'], 0.01); // 100 − 100
         $this->assertFalse($byName->has('Αταξινόμητα'), 'the credit must not land in «Αταξινόμητα»');
+    }
+
+    public function test_header_discount_reduces_category_revenue_to_the_document_value(): void
+    {
+        // The invoice-level «Έκπτωση παραστατικού» is applied to the invoice TOTALS,
+        // not to the stored line net_price. The report must apply it too, or a
+        // discounted invoice overstates its category revenue and stops matching the
+        // document value (net_total) / turnover stats.
+        $hosting = $this->category('Web Hosting');
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'HD']);
+        $inv = Invoice::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $customer->id,
+            'invoice_type_id' => $this->type()->id,
+            'code' => ++self::$seq, 'invcode' => 'HD'.self::$seq, 'issued_at' => '2026-03-01',
+            'local_status' => 'active', 'header_discount_percent' => 10,
+        ]);
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id,
+            'product_category_id' => $hosting->id, 'qty' => 1, 'price_per_item' => 100,
+            'vat_percent' => 24, 'product_descr' => 'x',
+        ]);
+
+        // The canonical document value after the 10% header discount.
+        app(RecomputeInvoiceTotals::class)($inv);
+        $this->assertSame('90.00', (string) $inv->fresh()->net_total);
+
+        $r = app(RevenueByCategory::class)->build($this->tenant, 2026);
+        $byName = collect($r['rows'])->keyBy('name');
+
+        // 100 net − 10% = 90 (document value), NOT the raw 100; VAT/gross discounted too.
+        $this->assertEqualsWithDelta(90.0, $byName['Web Hosting']['net'], 0.01);
+        $this->assertEqualsWithDelta(21.60, $byName['Web Hosting']['vat'], 0.01);   // 90 × 24%
+        $this->assertEqualsWithDelta(111.60, $byName['Web Hosting']['gross'], 0.01);
+        // Footer reconciles with the document value.
+        $this->assertEqualsWithDelta(90.0, $r['total_net'], 0.01);
+        $this->assertEqualsWithDelta((float) $inv->fresh()->net_total, $r['total_net'], 0.01);
     }
 
     public function test_category_with_only_prior_year_revenue_still_appears(): void

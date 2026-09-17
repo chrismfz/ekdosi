@@ -125,6 +125,9 @@ class RevenueByCategory
                 'invoice_lines.net_price',
                 'invoice_lines.gross_price',
                 'invoices.credited_invoice_id',
+                // The invoice-level discount is applied to the invoice TOTALS, not to
+                // the stored line net/gross — carry it so we can apply it per line.
+                'invoices.header_discount_percent',
             )
             // A standalone legacy credit-type document (is_credit) also nets negative.
             ->selectRaw('EXISTS (SELECT 1 FROM invoice_types it WHERE it.id = invoices.invoice_type_id AND it.is_credit = 1) as is_credit_type')
@@ -136,8 +139,16 @@ class RevenueByCategory
             $sign = $isCreditNote ? -1.0 : 1.0;
             $catId = (int) ($l->line_cat ?? $l->product_cat ?? 0);
 
-            $net = (float) $l->net_price;
-            $gross = (float) $l->gross_price;
+            // Apply the invoice-level header discount, which lives on the invoice
+            // TOTALS (RecomputeInvoiceTotals: net_total = round(Σ net_price × factor)),
+            // NOT on the stored line net_price/gross_price. The factor is uniform per
+            // invoice, so Σ(line × factor) == invoice net_total pre-rounding — this
+            // keeps the report's «document value» promise instead of overstating
+            // revenue for every invoice that carries a header discount. See CLAUDE.md
+            // «The VAT / discount / rounding math».
+            $factor = 1 - ((float) $l->header_discount_percent) / 100;
+            $net = (float) $l->net_price * $factor;
+            $gross = (float) $l->gross_price * $factor;
             $agg[$catId] ??= ['net' => 0.0, 'vat' => 0.0, 'gross' => 0.0, 'lines' => 0];
             $agg[$catId]['net'] += $sign * $net;
             $agg[$catId]['vat'] += $sign * ($gross - $net);

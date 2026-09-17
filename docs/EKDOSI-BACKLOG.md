@@ -88,6 +88,16 @@
   τη §8.6 κενή, η γραμμή διαγράφεται και η κατηγορία χάνεται (coupling — income_class_category NOT NULL)·
   disclosed στο help text, αλλά θέλει per-row validation notice. Επίσης `RevenueByCategory` `whereYear`
   είναι non-sargable (συνεπές με τις άλλες αναφορές· range θα κρατούσε το index).
+- [ ] **P2 (review, surviving):** `RevenueByCategory` — (α) το `total_net` του footer στρογγυλοποιεί το
+  άθροισμα των ΜΗ-στρογγυλεμένων per-category nets, ενώ κάθε γραμμή δείχνει `round(per-category net)` → το
+  άθροισμα των εμφανιζόμενων γραμμών μπορεί να διαφέρει ±1 λεπτό από το ΣΥΝΟΛΟ (και το % να μην αθροίζει
+  ακριβώς 100)· (β) το όνομα κατηγορίας πέφτει σε `#<id>` όταν `description_short` κενό, ενώ το dropdown
+  «Αντιστοίχιση WHMCS» δείχνει `description` → δύο ονόματα για την ίδια κατηγορία (ευθυγράμμιση σε
+  `description_short ?: description ?: '#id'`)· (γ) το CSV total row τυπώνει σκληρά «100,00» για το % τζίρου
+  ακόμη κι όταν `total_net<=0`, ενώ η οθόνη δείχνει «—»· (δ) `header_discount_percent ≥ 100` (anomalous
+  data — η φόρμα το κόβει στο 99,99) δίνει factor ≤ 0 → σιωπηλά αρνητικά/μηδενικά έσοδα, ενώ το
+  `InvoiceVatBreakdown` πετάει exception στην ίδια τιμή (ασυνεπής χειρισμός· η αναφορά δεν έχει guard).
+  **Το header-discount overstatement (P1) διορθώθηκε.**
 
 ### 3. Bug: έξοδα «αταξινόμητο» — προαγωγή inbound classification
 
