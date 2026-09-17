@@ -3,6 +3,7 @@
 namespace App\Filament\Reports\Widgets;
 
 use App\Models\Company;
+use App\Services\Dashboard\DashboardMetrics;
 use App\Support\Dashboard\DashboardMetricsCache;
 use App\Support\Dashboard\ReportFilters;
 use App\Support\Money;
@@ -39,6 +40,14 @@ class ReportKpis extends StatsOverviewWidget
 
         $year = ReportFilters::year($this->pageFilters);
         $k = DashboardMetricsCache::for($tenant)->kpiSummary($year);
+
+        // «Ανεξόφλητα» + DSO are "now" snapshots, not year-scoped: recompute them
+        // LIVE so the scorecard always matches the (uncached) main-dashboard
+        // receivables, instead of the value cached when the metrics were last
+        // warmed (cross-surface money consistency — MON-13).
+        $live = (new DashboardMetrics($tenant))->receivablesAndDso();
+        $k['receivables'] = $live['receivables'];
+        $k['dsoDays'] = $live['dsoDays'];
 
         $yoy = $k['yoyPct'];
         $yoyText = $yoy === null
