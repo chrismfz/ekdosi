@@ -146,4 +146,30 @@ class RevenueByCategoryTest extends TestCase
         $this->assertEqualsWithDelta(80.0, $byName['Legacy']['prior_net'], 0.01);
         $this->assertEqualsWithDelta(-80.0, $byName['Legacy']['delta'], 0.01);
     }
+
+    public function test_all_zero_prior_only_bucket_is_dropped_but_a_same_year_wash_still_shows(): void
+    {
+        // Prior-year category that washed to exactly zero (an invoice + an equal
+        // credit last year) with nothing since → carries no information, so the
+        // union-of-keys logic must NOT emit an all-zero row for it.
+        $washedLastYear = $this->category('Washed 2025');
+        $this->invoice('2025-02-01', [['cat_id' => $washedLastYear->id, 'price' => 50]]);
+        $this->invoice('2025-03-01', [['cat_id' => $washedLastYear->id, 'price' => 50]], credit: true);
+
+        // Current-year category washed by a same-year credit: net 0 but it HAS
+        // lines → it MUST still show (the operator issued documents against it).
+        $washedThisYear = $this->category('Washed 2026');
+        $this->invoice('2026-02-01', [['cat_id' => $washedThisYear->id, 'price' => 30]]);
+        $this->invoice('2026-03-01', [['cat_id' => $washedThisYear->id, 'price' => 30]], credit: true);
+
+        // A plain current-year category so the report isn't on the empty path.
+        $this->invoice('2026-04-01', [['cat_id' => $this->category('Live')->id, 'price' => 10]]);
+
+        $byName = collect(app(RevenueByCategory::class)->build($this->tenant, 2026)['rows'])->keyBy('name');
+
+        $this->assertFalse($byName->has('Washed 2025'), 'a prior-only bucket that nets to zero must not emit an all-zero row');
+        $this->assertTrue($byName->has('Washed 2026'), 'a same-year washed category still has lines → still shows');
+        $this->assertEqualsWithDelta(0.0, $byName['Washed 2026']['net'], 0.01);
+        $this->assertSame(2, $byName['Washed 2026']['lines']);
+    }
 }

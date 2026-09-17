@@ -60,6 +60,17 @@ class RevenueByCategory
         foreach ($catIds as $catId) {
             $agg = $current[$catId] ?? ['net' => 0.0, 'vat' => 0.0, 'gross' => 0.0, 'lines' => 0];
             $priorNet = (float) ($prior[$catId]['net'] ?? 0.0);
+
+            // No current-year activity AND a zero prior-year net = a bucket that
+            // carries no information (e.g. a prior-year invoice fully credited in
+            // the same category, nothing since): skip it rather than emit a
+            // confusing all-zero row. A current-year net of 0 that HAS lines (an
+            // invoice washed by a same-year credit) still shows, as does any
+            // non-zero prior — those are meaningful.
+            if ($agg['lines'] === 0 && round($priorNet, 2) === 0.0) {
+                continue;
+            }
+
             $rows[] = [
                 'category_id' => $catId > 0 ? $catId : null,
                 'name' => $catId > 0 ? (string) ($names[$catId] ?: ('#'.$catId)) : 'Αταξινόμητα',
