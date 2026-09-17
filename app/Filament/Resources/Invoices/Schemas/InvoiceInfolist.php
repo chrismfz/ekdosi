@@ -75,6 +75,14 @@ class InvoiceInfolist
                         TextEntry::make('customer.name')
                             ->label('Live customer record')
                             ->placeholder('—')
+                            // Compact link instead of the full live company name: that
+                            // name wrapped to 5–7 lines and, next to the «Name on invoice»
+                            // snapshot (the legal value), was pure height. Here we only
+                            // need the JUMP to the live record, so render a short link and
+                            // keep the Customer card tight. State is null (→ «—», no link)
+                            // when the invoice has no linked customer.
+                            ->getStateUsing(fn ($record) => $record->customer_id ? 'Άνοιγμα εγγραφής →' : null)
+                            ->icon('heroicon-m-arrow-top-right-on-square')
                             // Pass the Company model (Laravel uses its
                             // route key = slug, per Company::getRouteKeyName).
                             // Passing $record->company_id directly produces
