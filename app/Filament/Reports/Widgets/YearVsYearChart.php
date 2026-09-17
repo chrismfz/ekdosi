@@ -2,9 +2,11 @@
 
 namespace App\Filament\Reports\Widgets;
 
+use App\Filament\Reports\Widgets\Concerns\FormatsReportChart;
 use App\Models\Company;
-use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
 use App\Support\Dashboard\ReportFilters;
+use App\Support\Dashboard\ReportPalette;
 use Filament\Facades\Filament;
 use Filament\Widgets\ChartWidget;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
@@ -17,6 +19,7 @@ use Filament\Widgets\Concerns\InteractsWithPageFilters;
  */
 class YearVsYearChart extends ChartWidget
 {
+    use FormatsReportChart;
     use InteractsWithPageFilters;
 
     protected static ?int $sort = 4;
@@ -36,7 +39,7 @@ class YearVsYearChart extends ChartWidget
             return ['datasets' => [], 'labels' => []];
         }
 
-        $metrics = new DashboardMetrics($tenant);
+        $metrics = DashboardMetricsCache::for($tenant);
         $year = ReportFilters::year($this->pageFilters);
         $compare = ReportFilters::compareYear($this->pageFilters);
 
@@ -45,13 +48,13 @@ class YearVsYearChart extends ChartWidget
                 [
                     'label' => (string) $year,
                     'data' => $metrics->cumulativeNetByMonth($year),
-                    'borderColor' => '#3b82f6',
+                    'borderColor' => ReportPalette::PRIMARY,
                     'fill' => false,
                 ],
                 [
                     'label' => (string) $compare,
                     'data' => $metrics->cumulativeNetByMonth($compare),
-                    'borderColor' => '#9ca3af',
+                    'borderColor' => ReportPalette::MUTED,
                     'fill' => false,
                 ],
             ],

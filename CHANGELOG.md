@@ -19,6 +19,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **«Αναφορές»: cache των μετρήσεων + € στα γραφήματα + «Ανανέωση» (#7).** Τα 9 report widgets ήταν
+  ξεχωριστά (lazy) requests που το καθένα ξανα-έτρεχε τα δικά του aggregates σε κάθε άνοιγμα (~25s).
+  Πλέον διαβάζουν **cache ανά κομμάτι** (`App\Support\Dashboard\DashboardMetricsCache`, version-keyed
+  ανά tenant)· η νέα εντολή **`dashboard:warm-metrics`** (scheduler, `EKDOSI_SCHEDULE_DASHBOARD_METRICS`,
+  default ON, cadence `EKDOSI_DASHBOARD_METRICS_CRON` = `0 */2 * * *`) προθερμαίνει το cache ανά tenant
+  για τρέχον + προηγούμενο έτος, ώστε η σελίδα να διαβάζει σχεδόν πάντα warm cache — ίδιο μοτίβο με το
+  «Εικόνα από myDATA». TTL `EKDOSI_DASHBOARD_CACHE_TTL` (default 3h). Κουμπί **«Ανανέωση»** στη σελίδα
+  για άμεσο μηδενισμό του cache ανά tenant μετά από έκδοση. Τα ποσά στους άξονες/tooltips όλων των
+  γραφημάτων εμφανίζονται τώρα σε **€** (el-GR) και οι χρωματισμοί ενοποιήθηκαν (`ReportPalette`).
+  Read-only· δεν αλλάζει καμία μέτρηση (ο `DashboardMetrics` έμεινε ως έχει).
 - **Αναφορά «Έσοδα ανά κατηγορία» (#2, Phase 1).** Νέα σελίδα στα «Λογιστικά»: καθαρά/ΦΠΑ/μεικτά
   έσοδα ανά ekdosi **ProductCategory** για ένα έτος, με **% τζίρου**, **YoY** vs πέρσι, σύνολα και
   **εξαγωγή CSV**. Η κατηγορία κάθε γραμμής προκύπτει: `invoice_lines.product_category_id` (σφραγίδα

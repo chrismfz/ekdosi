@@ -569,14 +569,11 @@ class DashboardMetrics
             ? round(((float) $top->gross_ytd) / $cur->gross * 100, 1)
             : null;
 
-        // DSO snapshot: receivables / (trailing-365-day sales per day).
-        $receivables = $this->outstandingReceivables();
-        $trailing = $this->income($now->copy()->subYearNoOverflow(), $now);
-        $perDay = $trailing->gross / 365.0;
-        // DSO measures how long receivables take to collect — a settled OR CREDIT
-        // (negative) balance has zero days outstanding, never a negative DSO. Clamp
-        // at 0 (MON-13: crediting a cash-term invoice can push receivables negative).
-        $dso = $perDay > 0.005 ? (int) round(max(0.0, $receivables) / $perDay) : null;
+        // DSO snapshot: receivables / (trailing-365-day sales per day). Extracted to
+        // receivablesAndDso() so the Reports scorecard can recompute these "now"
+        // figures LIVE instead of serving them from the year-keyed metrics cache
+        // (they must agree with the uncached main-dashboard receivables — MON-13).
+        ['receivables' => $receivables, 'dsoDays' => $dso] = $this->receivablesAndDso();
 
         return [
             'year' => $year,
@@ -595,6 +592,30 @@ class DashboardMetrics
             'receivables' => $receivables,
             'dsoDays' => $dso,
         ];
+    }
+
+    /**
+     * The "now" receivables snapshot behind the KPI scorecard: total outstanding
+     * receivables + DSO (days sales outstanding, trailing-365 basis). Split out of
+     * kpiSummary() so the Reports scorecard can recompute it LIVE — these are
+     * point-in-time figures, not year-scoped, so they must match the (uncached)
+     * main-dashboard receivables rather than lag the year-keyed metrics cache.
+     *
+     * DSO clamps a settled/credit (negative) balance to 0 days (MON-13: crediting
+     * a cash-term invoice can push receivables negative — that is never a negative
+     * collection period).
+     *
+     * @return array{receivables: float, dsoDays: int|null}
+     */
+    public function receivablesAndDso(): array
+    {
+        $now = Carbon::now();
+        $receivables = $this->outstandingReceivables();
+        $trailing = $this->income($now->copy()->subYearNoOverflow(), $now);
+        $perDay = $trailing->gross / 365.0;
+        $dso = $perDay > 0.005 ? (int) round(max(0.0, $receivables) / $perDay) : null;
+
+        return ['receivables' => $receivables, 'dsoDays' => $dso];
     }
 
     /**

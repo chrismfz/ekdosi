@@ -3,7 +3,7 @@
 namespace App\Filament\Reports\Widgets;
 
 use App\Models\Company;
-use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
 use App\Support\Dashboard\ReportFilters;
 use Filament\Facades\Filament;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
@@ -38,7 +38,7 @@ class SeasonalityHeatmap extends Widget
         }
 
         $year = ReportFilters::year($this->pageFilters);
-        $data = (new DashboardMetrics($tenant))->netByMonthMatrix(4, $year);
+        $data = DashboardMetricsCache::for($tenant)->netByMonthMatrix(4, $year);
         $data['months'] = self::MONTHS;
 
         return $data;

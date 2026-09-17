@@ -32,6 +32,23 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | «Αναφορές» dashboard metrics cache
+    |--------------------------------------------------------------------------
+    |
+    | The 9 report widgets each ran their own DashboardMetrics aggregates on
+    | every open (~25s). They now read a per-slice cache (DashboardMetricsCache);
+    | `dashboard:warm-metrics` pre-builds it on the scheduler and the Reports
+    | «Ανανέωση» action busts it per tenant. TTL bounds staleness if the warm
+    | task is off — keep it comfortably ABOVE the warm cron cadence so a warmed
+    | slice never expires between runs (else a page open would rebuild on the web).
+    |
+    */
+    'dashboard' => [
+        'cache_ttl' => (int) env('EKDOSI_DASHBOARD_CACHE_TTL', 10800), // 3h
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Demo seed (SET-1)
     |--------------------------------------------------------------------------
     |
@@ -204,6 +221,14 @@ return [
         // run every few hours so the widget reads a fresh-enough cache.
         'mydata_vat_picture_enabled' => env('EKDOSI_SCHEDULE_MYDATA_VAT_PICTURE', true),
         'mydata_vat_picture_cron' => env('EKDOSI_MYDATA_VAT_PICTURE_CRON', '0 */4 * * *'),
+
+        // dashboard:warm-metrics — pre-builds the cached «Αναφορές» metric slices
+        // (per tenant, current + previous year) so the report widgets read a warm
+        // cache instead of each re-running its aggregates (~25s cold). Pure DB,
+        // READ-ONLY. Cadence must stay ≤ the cache TTL (see 'dashboard.cache_ttl')
+        // so a warmed slice never expires onto a web page open.
+        'dashboard_metrics_enabled' => env('EKDOSI_SCHEDULE_DASHBOARD_METRICS', true),
+        'dashboard_metrics_cron' => env('EKDOSI_DASHBOARD_METRICS_CRON', '0 */2 * * *'),
 
         // mydata:refresh-expenses — READ-ONLY refresh of the expenses
         // reconciliation snapshot (current quarter) per myDATA-readable tenant, so

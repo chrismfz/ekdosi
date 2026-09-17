@@ -268,6 +268,20 @@ $trackSchedule(
     'mydata_vat_picture'
 );
 
+// dashboard:warm-metrics — pre-builds the cached «Αναφορές» metric slices per
+// tenant (current + previous year), so the report widgets read a warm cache
+// instead of each re-running its aggregates on open (~25s cold). Pure DB,
+// READ-ONLY. Cadence stays ≤ the cache TTL (config 'dashboard.cache_ttl') so a
+// warmed slice never expires onto a web page open.
+$trackSchedule(
+    Schedule::command('dashboard:warm-metrics')
+        ->cron($scheduleCron('dashboard_metrics_cron', '0 */2 * * *'))
+        ->name('dashboard-warm-metrics-all')
+        ->when(fn () => $scheduleEnabled('dashboard_metrics_enabled'))
+        ->withoutOverlapping(30),
+    'dashboard_metrics'
+);
+
 // mydata:refresh-expenses — READ-ONLY refresh of the expenses reconciliation
 // snapshot (keeps the Έξοδα worklist + «Άντληση» badge fresh). Creates no rows.
 // Two-key: this deploy-wide flag enables the task (default OFF), and --auto-only

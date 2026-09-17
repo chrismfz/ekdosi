@@ -92,6 +92,8 @@ class ScheduleSettings extends Page implements HasForms
         // Υποστήριξη & domains
         'tickets_poll_imap_enabled' => ['Υποστήριξη — polling email (IMAP)', 'Διαβάζει τα mailboxes των τμημάτων υποστήριξης (IMAP) και δρομολογεί εισερχόμενα email σε tickets.', false],
         'domain_sync_enabled' => ['Συγχρονισμός domains', 'Συγχρονίζει καταστάσεις/λήξεις domains (νυχτερινό).', false],
+        // Αναφορές
+        'dashboard_metrics_enabled' => ['Αναφορές — προθέρμανση cache', 'Προϋπολογίζει τα δεδομένα των γραφημάτων «Αναφορές» ανά εταιρεία (τρέχον + προηγούμενο έτος) ώστε η σελίδα να ανοίγει από warm cache αντί να ξανα-υπολογίζει (~25s). Read-only — δεν δημιουργεί εγγραφές.', false],
     ];
 
     /**
@@ -108,6 +110,7 @@ class ScheduleSettings extends Page implements HasForms
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled', 'intent_expiry_enabled', 'ai_reminders_enabled'],
         'Υποστήριξη & domains' => ['tickets_poll_imap_enabled', 'domain_sync_enabled'],
+        'Αναφορές' => ['dashboard_metrics_enabled'],
     ];
 
     /**
@@ -143,6 +146,7 @@ class ScheduleSettings extends Page implements HasForms
         'company_backups_cron' => ['Backup ανά εταιρία', 'cron'],
         'tickets_poll_imap_cron' => ['Υποστήριξη — polling email', 'cron'],
         'domain_sync_cron' => ['Συγχρονισμός domains', 'cron'],
+        'dashboard_metrics_cron' => ['Αναφορές — προθέρμανση cache', 'cron'],
     ];
 
     public function mount(): void

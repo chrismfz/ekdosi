@@ -2,9 +2,11 @@
 
 namespace App\Filament\Reports\Widgets;
 
+use App\Filament\Reports\Widgets\Concerns\FormatsReportChart;
 use App\Models\Company;
-use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
 use App\Support\Dashboard\ReportFilters;
+use App\Support\Dashboard\ReportPalette;
 use Filament\Facades\Filament;
 use Filament\Widgets\ChartWidget;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
@@ -16,6 +18,7 @@ use Filament\Widgets\Concerns\InteractsWithPageFilters;
  */
 class RevenueByYearChart extends ChartWidget
 {
+    use FormatsReportChart;
     use InteractsWithPageFilters;
 
     protected static ?int $sort = 5;
@@ -30,11 +33,11 @@ class RevenueByYearChart extends ChartWidget
         }
 
         $year = ReportFilters::year($this->pageFilters);
-        $rows = (new DashboardMetrics($tenant))->yearlyTotals(5, $year);
+        $rows = DashboardMetricsCache::for($tenant)->yearlyTotals(5, $year);
 
         // Highlight the focus year (amber) vs the rest (blue).
         $colors = array_map(
-            fn (array $r): string => $r['year'] === $year ? '#f59e0b' : '#3b82f6',
+            fn (array $r): string => $r['year'] === $year ? ReportPalette::WARNING : ReportPalette::PRIMARY,
             $rows,
         );
 
