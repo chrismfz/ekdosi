@@ -62,7 +62,7 @@
         .qr-block .qr-mark  { font-size: 6.5pt; color: #374151; word-break: break-all; max-width: 26mm; }
 
         /* Provider (ΥΠΑΗΕΣ) evidence block — PROV-003 / A.1112/2025 */
-        .provider-box { clear: both; border: 1pt solid #d1d5db; border-radius: 1.5mm; background: #f9fafb; padding: 1.5mm 2.5mm; margin: 0 0 2mm 0; font-size: 7pt; color: #374151; }
+        .provider-box { clear: both; border: 1pt solid #d1d5db; border-radius: 1.5mm; background: #f9fafb; padding: 1.5mm 2.5mm; margin: 3mm 0 2mm 0; font-size: 7pt; color: #374151; page-break-inside: avoid; }
         .provider-box .provider-title { font-weight: 700; color: #111827; margin: 0 0 0.8mm 0; font-size: 7.5pt; }
         .provider-box .provider-row { margin: 0 0 0.4mm 0; }
         .provider-box .provider-label { color: #6b7280; }
@@ -90,10 +90,21 @@
         .line-desc { font-weight: normal; line-height: 1.15; }
         .line-notes { font-size: 7.5pt; color: #6b7280; margin-top: 0.4mm; font-style: italic; }
 
-        /* Totals — right-aligned summary box */
-        .totals-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 2.5mm; page-break-inside: avoid; }
-        .totals-spacer { display: table-cell; width: 45%; }
-        .totals-box { display: table-cell; width: 55%; vertical-align: top; }
+        /* Summary band — «Υπόλοιπο πελάτη» (left) + totals (right) on ONE row, so a
+           many-line invoice keeps both blocks in a single horizontal band instead of
+           stacking them (legacy Impact-style layout → saves vertical space). With no
+           balance snapshot the totals stay right-aligned exactly as before (empty
+           left spacer). display:table-cell only — DomPDF has no flex/grid. */
+        .summary-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 2.5mm; page-break-inside: avoid; }
+        .summary-cell { display: table-cell; vertical-align: top; }
+        /* Widths sum to exactly 100% under table-layout:fixed; the balance/totals gap
+           is a margin on the INNER .balance-box (never affects column widths), so no
+           padding is added on top of the percentages (DomPDF-safe). */
+        .summary-left  { width: 47%; }                         /* balance box */
+        .summary-right { width: 53%; }                         /* totals (paired) */
+        .summary-spacer { width: 45%; }                        /* no-balance: push totals right */
+        .summary-solo  { width: 55%; }                         /* totals (alone, as before) */
+
         table.totals { width: 100%; border-collapse: collapse; }
         table.totals td { padding: 1mm 3mm; font-size: 9pt; }
         table.totals .vat-row td { color: #4b5563; font-size: 8pt; }
@@ -105,10 +116,9 @@
         table.totals .withhold td { color: #9a3412; font-style: italic; }
         table.totals .discount-note td { color: #6b7280; font-size: 7.5pt; font-style: italic; padding-top: 0; }
 
-        /* Customer running-balance block (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») */
-        .balance-wrap { display: table; width: 100%; table-layout: fixed; margin-top: 2.5mm; page-break-inside: avoid; }
-        .balance-spacer { display: table-cell; width: 45%; }
-        .balance-box { display: table-cell; width: 55%; vertical-align: top; border: 0.5pt solid #d1d5db; border-radius: 1mm; }
+        /* Customer running-balance box (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») — fills its summary
+           cell; margin-right is the gap to the totals column (kept off the cell width). */
+        .balance-box { border: 0.5pt solid #d1d5db; border-radius: 1mm; margin-right: 4mm; }
         .balance-box h3 { margin: 0; padding: 1mm 3mm; font-size: 7.5pt; text-transform: uppercase; letter-spacing: 0.3pt; color: #6b7280; background: #f3f4f6; border-bottom: 0.5pt solid #d1d5db; }
         table.balance { width: 100%; border-collapse: collapse; }
         table.balance td { padding: 1mm 3mm; font-size: 9pt; }
@@ -280,30 +290,11 @@
     </div>
 @endif
 
-{{-- ============ Provider (ΥΠΑΗΕΣ) evidence — PROV-003 / A.1112/2025 ============ --}}
-{{-- Printed only for a document actually filed through a provider (a PROVIDER_INSERT
-     MARK that IS the current filing) and still VALID/not-cancelled with a configured
-     provider licence. That whole decision lives in InvoicePdfRenderer::providerEvidenceView
-     (single source) — here we only render what it computed. --}}
-@if(! empty($providerEvidence))
-    <div class="provider-box">
-        <div class="provider-title">{{ $L('provider_issued') }}</div>
-        <div class="provider-row">
-            <span class="provider-label">{{ $L('provider_name') }}:</span>
-            {{ $providerEvidence['commercial_name'] }}@if($providerEvidence['legal_name']) — {{ $providerEvidence['legal_name'] }}@endif@if($providerEvidence['aade_code']) · ΑΑΔΕ {{ $providerEvidence['aade_code'] }}@endif@if($providerEvidence['site']) · {{ $providerEvidence['site'] }}@endif
-        </div>
-        @if($providerEvidence['licence_no'])
-            <div class="provider-row"><span class="provider-label">{{ $L('provider_licence') }}:</span> {{ $providerEvidence['licence_no'] }}</div>
-        @endif
-        <div class="provider-row"><span class="provider-label">{{ $L('mark_label') }}:</span> {{ $providerEvidence['mark'] }}</div>
-        @if($providerEvidence['uid'])
-            <div class="provider-row"><span class="provider-label">{{ $L('provider_uid') }}:</span> {{ $providerEvidence['uid'] }}</div>
-        @endif
-        @if($providerEvidence['auth_code'])
-            <div class="provider-row"><span class="provider-label">{{ $L('provider_auth') }}:</span> <span class="provider-auth">{{ $providerEvidence['auth_code'] }}</span></div>
-        @endif
-    </div>
-@endif
+{{-- The Provider (ΥΠΑΗΕΣ) evidence block moved to the END of the document (just
+     above the footer), so everything «περί υπογραφών» — provider identity, ΜΑΡΚ,
+     UID, auth code — sits with the myDATA verification notice/URL at the bottom
+     (mirrors the legacy Impact layout). The QR + ΜΑΡΚ stay top-right in the header
+     (a scan must be reachable at a glance). See the .provider-box render before .footer. --}}
 
 {{-- ============ Στοιχεία διακίνησης — ΤΔΑ only (is_delivery_note) ============ --}}
 @if($invoice->is_delivery_note)
@@ -419,11 +410,41 @@
     <div class="qty-total">{{ $L('total_quantity') }}: <strong>{{ number_format((float) ($totals['totalQty'] ?? 0), 3, ',', '.') }}</strong></div>
 @endif
 
-{{-- ====================== Totals (skipped for delivery notes) ====================== --}}
+{{-- ============ Summary band: Υπόλοιπο πελάτη (left) + Totals (right) ============
+     Both on ONE horizontal row to save vertical space for many-line invoices. The
+     «Υπόλοιπο πελάτη» box shows only when a snapshot was captured AND the tenant/
+     customer opted in (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ», stable on reprint); with no balance the
+     totals sit right-aligned exactly as before via an empty left spacer. Skipped
+     whole for delivery notes (no monetary totals). --}}
 @if(! $isDelivery)
-    <div class="totals-wrap">
-        <div class="totals-spacer"></div>
-        <div class="totals-box">
+    @php($hasBalance = ($customerBalance ?? null) !== null)
+    <div class="summary-wrap">
+        @if($hasBalance)
+            <div class="summary-cell summary-left">
+                <div class="balance-box">
+                    <h3>@gup($L('customer_balance'))</h3>
+                    <table class="balance">
+                        {{-- A negative balance = customer in credit; use the U+2212 minus
+                             to match the rest of the document (deductions/withholding rows). --}}
+                        <tr>
+                            <td class="label">{{ $L('previous_balance') }}</td>
+                            <td class="value">{{ str_replace('-', '−', number_format($customerBalance['previous'], 2, ',', '.')) }} €</td>
+                        </tr>
+                        <tr>
+                            <td class="label">{{ $L('this_document') }}</td>
+                            <td class="value">{{ ($customerBalance['current'] >= 0 ? '+' : '−') }}{{ number_format(abs($customerBalance['current']), 2, ',', '.') }} €</td>
+                        </tr>
+                        <tr class="new">
+                            <td class="label">{{ $L('new_balance') }}</td>
+                            <td class="value">{{ str_replace('-', '−', number_format($customerBalance['new'], 2, ',', '.')) }} €</td>
+                        </tr>
+                    </table>
+                </div>
+            </div>
+        @else
+            <div class="summary-cell summary-spacer"></div>
+        @endif
+        <div class="summary-cell {{ $hasBalance ? 'summary-right' : 'summary-solo' }}">
             <table class="totals">
                 @foreach($totals['rows'] as $row)
                     <tr class="vat-row">
@@ -481,35 +502,6 @@
                         <td class="value">{{ number_format($totals['payable'], 2, ',', '.') }} €</td>
                     </tr>
                 @endif
-            </table>
-        </div>
-    </div>
-@endif
-
-{{-- ============== Υπόλοιπο πελάτη (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») ==============
-     Snapshot-at-issue running balance: Προηγούμενο + αυτό το παραστατικό = Νέο.
-     Printed only when the tenant/customer opted in AND a snapshot was captured
-     (credit-term/credit-note invoice). Stable on reprint. --}}
-@if(($customerBalance ?? null) !== null)
-    <div class="balance-wrap">
-        <div class="balance-spacer"></div>
-        <div class="balance-box">
-            <h3>@gup($L('customer_balance'))</h3>
-            <table class="balance">
-                {{-- A negative balance = customer in credit; use the U+2212 minus
-                     to match the rest of the document (deductions/withholding rows). --}}
-                <tr>
-                    <td class="label">{{ $L('previous_balance') }}</td>
-                    <td class="value">{{ str_replace('-', '−', number_format($customerBalance['previous'], 2, ',', '.')) }} €</td>
-                </tr>
-                <tr>
-                    <td class="label">{{ $L('this_document') }}</td>
-                    <td class="value">{{ ($customerBalance['current'] >= 0 ? '+' : '−') }}{{ number_format(abs($customerBalance['current']), 2, ',', '.') }} €</td>
-                </tr>
-                <tr class="new">
-                    <td class="label">{{ $L('new_balance') }}</td>
-                    <td class="value">{{ str_replace('-', '−', number_format($customerBalance['new'], 2, ',', '.')) }} €</td>
-                </tr>
             </table>
         </div>
     </div>
@@ -575,6 +567,35 @@
                 <span class="rel-label">{{ $L('delivery_notes') }}:</span>
                 <strong>{{ $relDeliveries->pluck('invcode')->implode(', ') }}</strong>
             </div>
+        @endif
+    </div>
+@endif
+
+{{-- ============ Provider (ΥΠΑΗΕΣ) evidence — PROV-003 / A.1112/2025 ============
+     Moved to the END of the document (was above the lines): provider identity + ΜΑΡΚ
+     + UID + auth code now sit with the myDATA verification notice/URL in the footer,
+     so everything «περί υπογραφών» is grouped at the bottom (legacy Impact layout).
+     The QR + ΜΑΡΚ remain top-right in the header. Printed only for a document actually
+     filed through a provider (a
+     PROVIDER_INSERT MARK that IS the current filing) and still VALID/not-cancelled
+     with a configured provider licence. That whole decision lives in
+     InvoicePdfRenderer::providerEvidenceView (single source) — here we only render. --}}
+@if(! empty($providerEvidence))
+    <div class="provider-box">
+        <div class="provider-title">{{ $L('provider_issued') }}</div>
+        <div class="provider-row">
+            <span class="provider-label">{{ $L('provider_name') }}:</span>
+            {{ $providerEvidence['commercial_name'] }}@if($providerEvidence['legal_name']) — {{ $providerEvidence['legal_name'] }}@endif@if($providerEvidence['aade_code']) · ΑΑΔΕ {{ $providerEvidence['aade_code'] }}@endif@if($providerEvidence['site']) · {{ $providerEvidence['site'] }}@endif
+        </div>
+        @if($providerEvidence['licence_no'])
+            <div class="provider-row"><span class="provider-label">{{ $L('provider_licence') }}:</span> {{ $providerEvidence['licence_no'] }}</div>
+        @endif
+        <div class="provider-row"><span class="provider-label">{{ $L('mark_label') }}:</span> {{ $providerEvidence['mark'] }}</div>
+        @if($providerEvidence['uid'])
+            <div class="provider-row"><span class="provider-label">{{ $L('provider_uid') }}:</span> {{ $providerEvidence['uid'] }}</div>
+        @endif
+        @if($providerEvidence['auth_code'])
+            <div class="provider-row"><span class="provider-label">{{ $L('provider_auth') }}:</span> <span class="provider-auth">{{ $providerEvidence['auth_code'] }}</span></div>
         @endif
     </div>
 @endif
