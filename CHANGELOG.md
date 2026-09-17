@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Dashboard widgets: top προμηθευτές + αξία pipeline (#8 PR-2).** Νέο γράφημα **«Κορυφαίοι προμηθευτές
+  — έξοδα»** (`TopSuppliersChart`, top-N ανά καθαρή αξία εξόδων του έτους· **ίδιο reportable-expense treatment
+  με το `LedgerBook`** — εξαιρεί AADE-ακυρωμένα, αντιστρέφει πρόσημο πιστωτικών, id-aware supplier — cached 30',
+  gated `ViewAny:Expense`) και νέο stat **«Αξία pipeline»** στο `LeadsStats` (μικτή αξία **ζωντανών** προσφορών
+  —όχι rejected/expired— ανοιχτών leads· τα leads δεν έχουν δικό τους πεδίο αξίας). Το «ημερολόγιο επόμενων 7
+  ημερών» του #8 δεν χτίστηκε: καλύπτεται ήδη από `UpcomingRenewalsTable` (ανανεώσεις) + `LeadsCalendar`
+  (επόμενα βήματα leads) + `OverdueInvoicesTable`.
 - **Dashboard widgets: κορυφαία είδη + έσοδα ανά κατηγορία (#8).** Δύο νέα γραφήματα στο κεντρικό
   dashboard: **«Κορυφαία είδη/υπηρεσίες — έσοδα»** (top-N κατά καθαρή αξία, reuse του
   `CustomerTopProducts::forCompany`, cached 30' ανά tenant+έτος γιατί υλοποιεί τις γραμμές σε PHP) και
