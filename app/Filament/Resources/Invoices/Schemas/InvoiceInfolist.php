@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Invoices\Schemas;
 use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\DeliveryNotes\DeliveryNoteResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Infolists\Components\IconEntry;
 use Filament\Infolists\Components\TextEntry;
@@ -37,13 +38,11 @@ class InvoiceInfolist
                             ->label('Type')
                             ->placeholder('—'),
 
-                        TextEntry::make('invoiceType.code')
-                            ->label('Series')
-                            ->placeholder('—'),
-
-                        TextEntry::make('code')
-                            ->label('ΑΑ')
-                            ->numeric(),
+                        // «Series» (invoiceType.code, e.g. ΤΠΥ) and «ΑΑ» (code, e.g. 6664)
+                        // are dropped here: they are exactly the two halves of «Code»
+                        // (invcode = ΤΠΥ6664, per GET_INV_CODE = code || invcount), so
+                        // showing them again was pure duplication and height. Code keeps
+                        // both; Type keeps the human-readable document name.
 
                         // The two dates, kept distinct: issued_at = «Ημερομηνία έκδοσης»
                         // (the public/legal date, stamped to today at «Αποστολή»),
@@ -70,7 +69,28 @@ class InvoiceInfolist
                     ->compact(),
 
                 Section::make('Customer')
+                    ->key('customer')
                     ->description('Snapshot at issue time — these values are legally frozen and do NOT reflect later customer edits.')
+                    // «Πλήρη στοιχεία» → modal with the full frozen snapshot (address,
+                    // VIES, city/postcode/country, establishment) so the card itself stays
+                    // compact (only name + ΑΦΜ + the live-record link inline). Mirrors the
+                    // WHMCS-inbox detail modal (Action + Blade modalContent).
+                    ->headerActions([
+                        Action::make('customer_details')
+                            ->label('Πλήρη στοιχεία')
+                            ->icon('heroicon-m-identification')
+                            ->color('gray')
+                            ->modalHeading('Στοιχεία πελάτη (στιγμιότυπο έκδοσης)')
+                            // $livewire->getRecord() (the ViewRecord's invoice) rather than
+                            // a $record closure arg — guaranteed on a ViewRecord page, no
+                            // reliance on schema-action arg injection.
+                            ->modalContent(fn ($livewire) => view('filament.invoices.customer-details', [
+                                'invoice' => $livewire->getRecord(),
+                            ]))
+                            ->modalSubmitAction(false)
+                            ->modalCancelActionLabel('Κλείσιμο')
+                            ->modalWidth('2xl'),
+                    ])
                     ->schema([
                         TextEntry::make('customer.name')
                             ->label('Live customer record')
@@ -115,37 +135,10 @@ class InvoiceInfolist
                             ->placeholder('—')
                             ->copyable(),
 
-                        TextEntry::make('vies_vat')
-                            ->label('VIES VAT')
-                            ->placeholder('—'),
-
-                        TextEntry::make('occupation')
-                            ->label('Δραστηριότητα')
-                            ->placeholder('—'),
-
-                        TextEntry::make('address1')
-                            ->label('Address')
-                            ->placeholder('—'),
-
-                        TextEntry::make('city')
-                            ->label('City')
-                            ->placeholder('—'),
-
-                        TextEntry::make('postcode')
-                            ->label('Postcode')
-                            ->placeholder('—'),
-
-                        TextEntry::make('country')
-                            ->label('Country')
-                            ->placeholder('—'),
-
-                        // Show the branch that ACTUALLY files (filedCounterpartBranch) —
-                        // 0/hidden for retail (11.x, no counterpart) AND for a foreign
-                        // party (branch forced to 0), so a legal view never shows an
-                        // establishment number that AADE never received.
-                        TextEntry::make('counterpart_branch')
-                            ->label('Εγκατάσταση πελάτη (myDATA)')
-                            ->visible(fn ($record) => $record->filedCounterpartBranch() > 0),
+                        // VIES, Δραστηριότητα, address, city/postcode/country and the
+                        // counterpart establishment moved into the «Πλήρη στοιχεία» modal
+                        // (headerActions above) to keep this card compact — only name +
+                        // ΑΦΜ + the live-record link stay inline.
                     ])
                     ->columns(3)
                     ->compact(),
