@@ -580,6 +580,10 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   `pay_date`, καθαρά από επιστροφές — δείχνει τους αδύναμους/εποχικούς μήνες)· **ΦΠΑ εκροών ανά
   συντελεστή × τρίμηνο** (βοηθητικός πίνακας για την περιοδική δήλωση: φορολογητέα βάση + ΦΠΑ ανά
   24/13/6/0%, καθαρά από πιστωτικά). Οδηγούνται από τους επιλογείς Έτος + Σύγκριση με.
+  Τα widgets διαβάζουν **cache ανά κομμάτι** (`DashboardMetricsCache`) αντί να ξανα-τρέχει το καθένα
+  τα aggregates του σε κάθε άνοιγμα· η `dashboard:warm-metrics` (scheduler, `EKDOSI_SCHEDULE_DASHBOARD_METRICS`)
+  προθερμαίνει το cache ανά tenant (τρέχον + προηγούμενο έτος), το κουμπί **«Ανανέωση»** το μηδενίζει άμεσα
+  ανά tenant, και τα ποσά στους άξονες/tooltips των γραφημάτων εμφανίζονται σε **€** (Backlog #7).
 - **Έσοδα ανά κατηγορία** (`RevenueByCategoryReport`, perm `View:RevenueByCategoryReport`) — καθαρά/ΦΠΑ/
   μεικτά ανά ekdosi `ProductCategory` για ένα έτος, με **% τζίρου**, **YoY** vs πέρσι, σύνολα, export CSV.
   Η κατηγορία γραμμής: `invoice_lines.product_category_id` (σφραγίδα WHMCS) → κατηγορία προϊόντος →

@@ -3,7 +3,7 @@
 namespace App\Filament\Reports\Widgets;
 
 use App\Models\Company;
-use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
 use App\Support\Dashboard\ReportFilters;
 use App\Support\Money;
 use Filament\Facades\Filament;
@@ -38,7 +38,7 @@ class ReportKpis extends StatsOverviewWidget
         }
 
         $year = ReportFilters::year($this->pageFilters);
-        $k = (new DashboardMetrics($tenant))->kpiSummary($year);
+        $k = DashboardMetricsCache::for($tenant)->kpiSummary($year);
 
         $yoy = $k['yoyPct'];
         $yoyText = $yoy === null

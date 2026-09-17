@@ -16,6 +16,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\User;
+use App\Support\Dashboard\DashboardMetricsCache;
 use Carbon\Carbon;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -93,6 +94,15 @@ class ReportsRenderTest extends TestCase
         foreach ($widgets as $widget) {
             Livewire::test($widget)->assertOk();
         }
+    }
+
+    public function test_refresh_action_busts_the_metrics_cache(): void
+    {
+        $before = DashboardMetricsCache::for($this->tenant)->version();
+
+        Livewire::test(Reports::class)->callAction('refreshMetrics');
+
+        $this->assertSame($before + 1, DashboardMetricsCache::for($this->tenant)->version());
     }
 
     public function test_heatmap_renders_the_value_table(): void

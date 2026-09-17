@@ -3,7 +3,7 @@
 namespace App\Filament\Reports\Widgets;
 
 use App\Models\Company;
-use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
 use App\Support\Dashboard\ReportFilters;
 use Filament\Facades\Filament;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
@@ -41,7 +41,7 @@ class VatByRateQuarterTable extends Widget
         $year = ReportFilters::year($this->pageFilters);
 
         $data = $tenant instanceof Company
-            ? (new DashboardMetrics($tenant))->vatByRateByQuarter($year)
+            ? DashboardMetricsCache::for($tenant)->vatByRateByQuarter($year)
             : ['year' => $year, 'rates' => [], 'quarters' => [], 'totals' => ['rates' => [], 'net' => 0.0, 'vat' => 0.0]];
 
         // Same 2dp key the metric buckets rates by, so the view can look up cells.

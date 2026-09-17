@@ -138,13 +138,19 @@
 
 ### 7. Γραφήματα / Αναφορές — πέρασμα ποιότητας
 
-**Verdict: ⚠️ επιβεβαιωμένο στον κώδικα (S–M).** 9 widgets (`Reports.php:82-97`), lazy per-widget **αλλά χωρίς cache**
-(κάθε ένα `new DashboardMetrics` ξεχωριστά, καμία memoization) → αξιόπιστο το «~25s»· **κανένα skeleton**·
-sparse-guard μόνο στο `ProjectionChart.php:43`.
+**Verdict: ⚠️ επιβεβαιωμένο στον κώδικα (S–M). — ✅ core DONE 2026-09-17 (cache + € + Ανανέωση).**
+9 widgets (`Reports.php`), lazy per-widget **χωρίς cache** (κάθε ένα `new DashboardMetrics` ξεχωριστά) → «~25s».
 
 **Tasks**
-- [ ] Shared/cached metrics για τα report widgets (να μη ξανα-τρέχει το ίδιο aggregate 9 φορές)
-- [ ] Skeleton loaders · empty/sparse states (<3 σημεία → πίνακας/sparkline) · κοινή παλέτα · μορφοποίηση € · dark/mobile
+- [x] **Cache ανά κομμάτι** (`DashboardMetricsCache`, version-keyed ανά tenant) — τα widgets διαβάζουν
+  warm cache αντί να ξανα-τρέχουν τα aggregates. `dashboard:warm-metrics` (scheduler, default ON)
+  προθερμαίνει ανά tenant (τρέχον + προηγούμενο έτος)· κουμπί «Ανανέωση» = άμεσος version bump. TTL
+  config-driven. `DashboardMetrics` έμεινε άθικτος (μηδέν αλλαγή στις μετρήσεις).
+- [x] **Μορφοποίηση €** στους άξονες/tooltips όλων των γραφημάτων (`FormatsReportChart`) + **κοινή παλέτα**
+  (`ReportPalette`, ίδια χρώματα, μία πηγή).
+- [ ] **(deferred UI polish)** custom skeleton loaders (τώρα: το built-in lazy indicator του Filament)·
+  sparse/empty states στα γραφήματα (<3 σημεία → πίνακας/sparkline — οι δύο table-widgets έχουν ήδη empty
+  state)· έλεγχος dark/mobile ανά widget. Μικρότερης αξίας από το perf· χωριστό PR όποτε προκύψει.
 
 ### 8. Dashboard — widgets που λείπουν
 

@@ -2,8 +2,10 @@
 
 namespace App\Filament\Reports\Widgets;
 
+use App\Filament\Reports\Widgets\Concerns\FormatsReportChart;
 use App\Models\Company;
-use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
+use App\Support\Dashboard\ReportPalette;
 use App\Support\Money;
 use Filament\Facades\Filament;
 use Filament\Widgets\ChartWidget;
@@ -17,6 +19,8 @@ use Filament\Widgets\ChartWidget;
  */
 class ProjectionChart extends ChartWidget
 {
+    use FormatsReportChart;
+
     protected static ?int $sort = 8;
 
     private const MONTHS = ['Ιαν', 'Φεβ', 'Μάρ', 'Απρ', 'Μάι', 'Ιούν', 'Ιούλ', 'Αύγ', 'Σεπ', 'Οκτ', 'Νοέ', 'Δεκ'];
@@ -25,7 +29,7 @@ class ProjectionChart extends ChartWidget
     {
         $tenant = Filament::getTenant();
         $next = $tenant instanceof Company
-            ? (new DashboardMetrics($tenant))->projectNextYear()['nextYear']
+            ? DashboardMetricsCache::for($tenant)->projectNextYear()['nextYear']
             : (int) now()->year + 1;
 
         return "Πρόβλεψη {$next} (εκτίμηση)";
@@ -38,7 +42,7 @@ class ProjectionChart extends ChartWidget
             return null;
         }
 
-        $p = (new DashboardMetrics($tenant))->projectNextYear();
+        $p = DashboardMetricsCache::for($tenant)->projectNextYear();
         if (! $p['hasHistory']) {
             return 'Δεν υπάρχει αρκετό ιστορικό για πρόβλεψη.';
         }
@@ -60,7 +64,7 @@ class ProjectionChart extends ChartWidget
             return ['datasets' => [], 'labels' => []];
         }
 
-        $metrics = new DashboardMetrics($tenant);
+        $metrics = DashboardMetricsCache::for($tenant);
         $p = $metrics->projectNextYear();
         $lastYear = array_column($metrics->monthlyForYear($p['baseYear']), 'net');
 
@@ -69,14 +73,14 @@ class ProjectionChart extends ChartWidget
                 [
                     'label' => 'Πρόβλεψη '.$p['nextYear'],
                     'data' => $p['monthly'],
-                    'borderColor' => '#16a34a',
+                    'borderColor' => ReportPalette::FORECAST,
                     'borderDash' => [6, 4],
                     'fill' => false,
                 ],
                 [
                     'label' => (string) $p['baseYear'],
                     'data' => $lastYear,
-                    'borderColor' => '#9ca3af',
+                    'borderColor' => ReportPalette::MUTED,
                     'fill' => false,
                 ],
             ],

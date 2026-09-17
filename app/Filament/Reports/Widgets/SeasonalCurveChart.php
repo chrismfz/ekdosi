@@ -2,9 +2,11 @@
 
 namespace App\Filament\Reports\Widgets;
 
+use App\Filament\Reports\Widgets\Concerns\FormatsReportChart;
 use App\Models\Company;
-use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
 use App\Support\Dashboard\ReportFilters;
+use App\Support\Dashboard\ReportPalette;
 use Filament\Facades\Filament;
 use Filament\Widgets\ChartWidget;
 use Filament\Widgets\Concerns\InteractsWithPageFilters;
@@ -16,6 +18,7 @@ use Filament\Widgets\Concerns\InteractsWithPageFilters;
  */
 class SeasonalCurveChart extends ChartWidget
 {
+    use FormatsReportChart;
     use InteractsWithPageFilters;
 
     protected static ?int $sort = 7;
@@ -36,7 +39,7 @@ class SeasonalCurveChart extends ChartWidget
             return ['datasets' => [], 'labels' => []];
         }
 
-        $metrics = new DashboardMetrics($tenant);
+        $metrics = DashboardMetricsCache::for($tenant);
         $year = ReportFilters::year($this->pageFilters);
 
         // Average shape from the 3 completed years before the focus year.
@@ -50,14 +53,14 @@ class SeasonalCurveChart extends ChartWidget
                 [
                     'label' => 'Μέση εποχική (καθαρά)',
                     'data' => $avg,
-                    'borderColor' => '#9ca3af',
+                    'borderColor' => ReportPalette::MUTED,
                     'borderDash' => [6, 4],
                     'fill' => false,
                 ],
                 [
                     'label' => (string) $year,
                     'data' => $current,
-                    'borderColor' => '#3b82f6',
+                    'borderColor' => ReportPalette::PRIMARY,
                     'fill' => false,
                 ],
             ],

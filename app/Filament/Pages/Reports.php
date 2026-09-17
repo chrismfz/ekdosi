@@ -13,9 +13,12 @@ use App\Filament\Reports\Widgets\VatByRateQuarterTable;
 use App\Filament\Reports\Widgets\YearVsYearChart;
 use App\Models\Company;
 use App\Services\Dashboard\DashboardMetrics;
+use App\Support\Dashboard\DashboardMetricsCache;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
+use Filament\Notifications\Notification;
 use Filament\Pages\Dashboard as BaseDashboard;
 use Filament\Pages\Dashboard\Concerns\HasFiltersForm;
 use Filament\Schemas\Schema;
@@ -74,6 +77,38 @@ class Reports extends BaseDashboard
     public function getColumns(): int|array
     {
         return 2;
+    }
+
+    /**
+     * «Ανανέωση» — bust this tenant's cached metric slices (version bump) and
+     * reload, so the figures reflect just-issued documents immediately instead
+     * of waiting for the TTL / the scheduled warm. The reload preserves the URL
+     * (and its year filters); the widgets then rebuild fresh on their next lazy
+     * load. The escape hatch for the «TTL + scheduled warm» freshness model.
+     *
+     * @return array<Action>
+     */
+    protected function getHeaderActions(): array
+    {
+        return [
+            Action::make('refreshMetrics')
+                ->label('Ανανέωση')
+                ->icon('heroicon-o-arrow-path')
+                ->color('gray')
+                ->action(function () {
+                    $tenant = Filament::getTenant();
+                    if ($tenant instanceof Company) {
+                        DashboardMetricsCache::bump($tenant);
+                    }
+
+                    Notification::make()
+                        ->title('Τα δεδομένα των αναφορών ανανεώθηκαν.')
+                        ->success()
+                        ->send();
+
+                    return redirect(url()->full());
+                }),
+        ];
     }
 
     /**
