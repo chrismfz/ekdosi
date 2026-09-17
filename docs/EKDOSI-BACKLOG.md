@@ -9,7 +9,8 @@
 ## ✅ Shipped (λεπτομέρειες στο CHANGELOG/FEATURES)
 #2 Έσοδα ανά κατηγορία (report + widget) · #3 Έξοδα «αταξινόμητο» (Βιβλίο fallback) · #4 Ισοζύγιο Πελατών + Ειδών/Υπηρεσιών ·
 #5 Dunning Φάση A · #7 Αναφορές (cache + € + Ανανέωση + empty states) · #8 Dashboard widgets (top είδη/έσοδα ανά
-κατηγορία/top προμηθευτές/αξία pipeline) · #9 Καρτέλα polish v2 · #11 Analytics ανά συμβόλαιο + retro-link.
+κατηγορία/top προμηθευτές/αξία pipeline) · #9 Καρτέλα polish v2 · #10 Ταμειακό ημερολόγιο ·
+#11 Analytics ανά συμβόλαιο + retro-link.
 
 ---
 
@@ -52,11 +53,15 @@ builder είναι κοινός· το Phase 2 τον ανάβει για GR-sen
 - [ ] **Φάση Γ (S):** κλιμάκωση +7/+15/+30 με το `send_customer_statement`
 - [ ] P2: δικό του `Update`-ability για το collection metadata (τώρα κάτω από `View:AgedReceivables`)
 
-### 6. Ενοποίηση ρυθμίσεων + Wizard νέας εταιρείας (M) — δεν ξεκίνησε
-Υπάρχει `SettingsCluster` αλλά όχι ενιαία tabbed σελίδα ούτε onboarding wizard (`CreateCompany` = απλό CreateRecord).
-- [ ] Ενιαίο `/settings` με tabs (Εταιρεία·Παραστατικά·ΦΠΑ/myDATA·Πάροχος·Email·Γέφυρες·Πύλη·AI) — **σεβασμός του
-  company_admin vs super_admin διαχωρισμού** (`CompanySettings` whitelist vs `CompanyResource` creds), progressive disclosure
-- [ ] Wizard νέου tenant + δείκτης πληρότητας στο dashboard
+### 6. Ενοποίηση ρυθμίσεων + Wizard νέας εταιρείας — ΟΥΣΙΑΣΤΙΚΑ ΙΚΑΝΟΠΟΙΗΜΕΝΟ (P2 polish μόνο)
+Το «ενιαίο settings με tabs» **υπάρχει ήδη σε δύο επίπεδα** (sweep 2026-09-17): (α) nav-level ο `SettingsCluster`
+(`/settings`, 17 members σε 4 collapsible υπο-ενότητες Τιμολόγηση&πληρωμές/Είδη&αποστολή/Εταιρεία/Λειτουργία) —
+βήματα 1+1.5 του `docs/menu-ia.md` = ✅ DONE· (β) form-level ο `CompanyResource` έχει ήδη `Tabs::make()`
+(Identity·myDATA·Πάροχος·GSIS·PDF&Email·WHMCS·AI·…) με progressive disclosure + secret-flagging. Ο company_admin
+vs super_admin διαχωρισμός είναι ήδη σωστός (`CompanySettings` whitelist vs super-admin `CompanyResource`/creds).
+- [ ] P2 (κοσμετικό, deferred): «Ρυθμίσεις» landing page αντί να πηγαίνει στο πρώτο member (το μόνο ρητά deferred item του IA plan)
+- [ ] P2 (χαμηλή αξία): onboarding wizard νέου tenant (`CreateCompany` = απλό CreateRecord)· σπάνιο (προσθέτεις tenant σπάνια),
+  το readiness το καλύπτουν ήδη `Preflight` + `ekdosi:go-live-check`
 
 ### 7–8. Γραφήματα/Dashboard — υπόλοιπα
 - [ ] **Έξοδα ανά κατηγορία widget** (βλ. #2)
@@ -75,9 +80,10 @@ builder είναι κοινός· το Phase 2 τον ανάβει για GR-sen
 
 ## 🟡 P2
 
-### 10. Ταμειακό ημερολόγιο (Εισπράξεων–Πληρωμών) (S) — δεν ξεκίνησε
-Πληρωμές/περίοδο ομαδοποιημένες **ανά τρόπο πληρωμής + λογαριασμό** με σύνολα (η `Πληρωμές` είναι flat —
-`PaymentsTable.php`, χωρίς groups/summarize). Το Βιβλίο Εσόδων-Εξόδων καλύπτει ήδη Πωλήσεις/Αγορές.
+### 10. Ταμειακό ημερολόγιο (Εισπράξεων–Πληρωμών) — ✅ shipped
+Νέα αναφορά «Λογιστικά» (`CashJournalReport`): ταμειακές κινήσεις πελατών/περίοδο ομαδοποιημένες **ανά λογαριασμό →
+τρόπο πληρωμής**, εισπράξεις vs πληρωμές/επιστροφές + καθαρή ροή + CSV. Λεπτομέρειες στο CHANGELOG/FEATURES.
+- [ ] P2 (μελλοντικό): προαιρετική συμπερίληψη εξόδων/πληρωμών προμηθευτών (τώρα μόνο `payments` — τα έξοδα στο Βιβλίο)
 
 ### 11. Χρεώσεις ανά συμβόλαιο — follow-ups
 - [ ] **(config, όχι κώδικας)** «προσχέδιο N μέρες πριν τη λήξη»: υπάρχει ήδη — `services:stage-renewals

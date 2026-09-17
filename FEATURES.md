@@ -614,6 +614,11 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
   `Υπόλοιπο μεταφοράς | Χρέωση | Πίστωση | Τελικό` για ελεύθερη περίοδο (Από/Έως), σύνολα, drill στην
   Καρτέλα, εξαγωγή CSV. Ίδια βάση με την Καρτέλα (`CustomerLedgerBuilder::periodBalances`) → το «Τελικό»
   ισοσκελίζει με το υπόλοιπο Καρτέλας και τα ανεξόφλητα (`App\Services\Accounting\CustomerTrialBalanceReport`).
+- **Ταμειακό ημερολόγιο** (`CashJournalReport`, perm `View:CashJournalReport`) — ταμειακές κινήσεις πελατών για
+  ελεύθερη περίοδο (Από/Έως, default τρέχων μήνας), ομαδοποιημένες **ανά λογαριασμό (τραπεζικό/ταμείο) → τρόπο
+  πληρωμής**: εισπράξεις (money in) vs πληρωμές/επιστροφές (money out), subtotals ανά λογαριασμό + καθαρή
+  ταμειακή ροή + πλήθος + εξαγωγή CSV. Μόνο ο πίνακας `payments` (τα έξοδα προμηθευτών μένουν στο Βιβλίο
+  Εσόδων-Εξόδων)· ημ/νία = `COALESCE(pay_date, created_at)` (`App\Services\Accounting\CashJournalReport`).
 
 ## 13. Migration / ETL
 - **`migrate:firebird`** — επαναλήψιμο ETL, μία εταιρία/run, upsert σε
