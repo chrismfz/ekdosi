@@ -8,14 +8,21 @@ use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Resources\ServiceContracts\ServiceContractResource;
 use App\Models\Invoice;
 use App\Models\ServiceContract;
+use App\Services\ServiceContractBilling;
+use App\Support\InvoiceScope;
+use App\Support\Money;
 use Filament\Actions\Action;
 use Filament\Actions\EditAction;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\Toggle;
 use Filament\Infolists\Components\TextEntry;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
@@ -30,6 +37,9 @@ use Throwable;
 class ViewServiceContract extends ViewRecord
 {
     protected static string $resource = ServiceContractResource::class;
+
+    /** Memoised per request so the infolist entries share one query pass. */
+    private ?ServiceContractBilling $billing = null;
 
     public function infolist(Schema $schema): Schema
     {
@@ -58,13 +68,135 @@ class ViewServiceContract extends ViewRecord
                     TextEntry::make('server.name')->label('Server')->placeholder('—'),
                     TextEntry::make('domain')->label('Domain')->placeholder('—'),
                 ]),
+
+            // #11 per-contract billing analytics — how many times billed, the net
+            // revenue it produced (live, minus credits), the billing window, and
+            // its list-price timeline. All figures via ServiceContractBilling.
+            Section::make('Στατιστικά χρέωσης')
+                ->columns(3)
+                ->schema([
+                    TextEntry::make('billed_count')
+                        ->label('Φορές τιμολογήθηκε')
+                        ->state(fn (): string => (string) $this->billing()->billedCount()),
+                    TextEntry::make('net_revenue')
+                        ->label('Συνολικό έσοδο (καθαρό)')
+                        ->state(fn (): string => Money::eur($this->billing()->netRevenue()))
+                        ->helperText('Live παραστατικά, μείον πιστωτικά'),
+                    TextEntry::make('gross_billed')
+                        ->label('Μικτό σύνολο')
+                        ->state(fn (): string => Money::eur($this->billing()->grossBilled()))
+                        ->helperText('Live παραστατικά, μείον πιστωτικά'),
+                    TextEntry::make('first_billed')
+                        ->label('Πρώτη χρέωση')
+                        ->state(fn (): ?string => $this->billing()->firstBilledAt()?->format('d/m/Y'))
+                        ->placeholder('—'),
+                    TextEntry::make('last_billed')
+                        ->label('Τελευταία χρέωση')
+                        ->state(fn (): ?string => $this->billing()->lastBilledAt()?->format('d/m/Y'))
+                        ->placeholder('—'),
+                    TextEntry::make('pending_drafts')
+                        ->label('Εκκρεμή πρόχειρα')
+                        ->state(fn (): string => (string) $this->billing()->pendingDraftCount()),
+                    TextEntry::make('price_history')
+                        ->label('Ιστορικό τιμής καταλόγου')
+                        ->state(fn (): array => $this->billing()->priceHistory())
+                        ->listWithLineBreaks()
+                        ->bulleted()
+                        ->placeholder('Καμία καταγεγραμμένη αλλαγή τιμής')
+                        ->columnSpanFull(),
+                ]),
         ]);
+    }
+
+    /** The per-contract billing analytics for the viewed record (memoised). */
+    private function billing(): ServiceContractBilling
+    {
+        /** @var ServiceContract $record */
+        $record = $this->getRecord();
+
+        return $this->billing ??= new ServiceContractBilling($record);
     }
 
     protected function getHeaderActions(): array
     {
         return [
             EditAction::make()->label('Επεξεργασία'),
+
+            // #11 retro-link: attach an ALREADY-ISSUED invoice of the same customer
+            // to this contract (the «I sold it manually and forgot to make it a
+            // subscription» case). Sets only invoices.service_contract_id — never
+            // money/lifecycle — so the invoice then counts in the billing history.
+            Action::make('link_invoice')
+                ->label('Σύνδεση υπάρχοντος παραστατικού')
+                ->icon('heroicon-o-link')
+                ->color('gray')
+                ->modalHeading('Σύνδεση υπάρχοντος παραστατικού')
+                ->modalDescription('Συνδέει ένα ήδη εκδομένο παραστατικό του ίδιου πελάτη σε αυτή τη σύμβαση, ώστε να μετρά στο ιστορικό/έσοδο. Δεν αλλάζει ποσά ούτε την υποβολή στο myDATA.')
+                ->modalSubmitActionLabel('Σύνδεση')
+                ->schema([
+                    Select::make('invoice_id')
+                        ->label('Παραστατικό')
+                        ->required()
+                        ->searchable()
+                        // Server-side search over the eligible set (no cap): a
+                        // customer with hundreds of invoices can still find an old
+                        // one by code. The write re-checks the same predicate.
+                        ->getSearchResultsUsing(fn (string $search, ServiceContract $record): array => static::linkableInvoiceQuery($record)
+                            ->where(fn (Builder $q) => $q->where('invcode', 'like', "%{$search}%")
+                                ->orWhere('code', 'like', "%{$search}%"))
+                            ->orderByDesc('issued_at')
+                            ->limit(50)
+                            ->get()
+                            ->mapWithKeys(fn (Invoice $i): array => [$i->id => static::invoiceOptionLabel($i)])
+                            ->all())
+                        ->getOptionLabelUsing(fn ($value, ServiceContract $record): ?string => ($invoice = static::linkableInvoiceQuery($record)->whereKey($value)->first())
+                            ? static::invoiceOptionLabel($invoice)
+                            : null)
+                        ->helperText('Μόνο live εκδομένα παραστατικά του πελάτη, μη δεμένα σε σύμβαση. Πληκτρολόγησε κωδικό.'),
+                    Toggle::make('stamp_last_invoiced')
+                        ->label('Θεώρησέ το ως την τελευταία χρέωση')
+                        ->helperText('Ενημερώνει το «Τελευταία χρέωση» ώστε η επόμενη ανανέωση να μην ξαναβάλει τέλος εγκατάστασης.')
+                        ->default(true),
+                ])
+                ->action(function (ServiceContract $record, array $data): void {
+                    // Re-resolve UNDER the same tenant+customer+unlinked predicate
+                    // as the options list (a crafted request can POST any id), so a
+                    // foreign or already-linked invoice can never be attached.
+                    $invoice = static::linkableInvoiceQuery($record)
+                        ->whereKey((int) ($data['invoice_id'] ?? 0))
+                        ->first();
+                    if ($invoice === null) {
+                        Notification::make()
+                            ->title('Το παραστατικό δεν είναι διαθέσιμο για σύνδεση')
+                            ->body('Ανήκει σε άλλον πελάτη/εταιρεία ή είναι ήδη δεμένο σε σύμβαση.')
+                            ->warning()->send();
+
+                        return;
+                    }
+
+                    // Both writes in one transaction: the link + the «last invoiced»
+                    // stamp commit together. Once linked the invoice is no longer
+                    // «linkable», so a half-applied state (linked but unstamped)
+                    // could never be finished by re-running the action.
+                    DB::transaction(function () use ($record, $invoice, $data): void {
+                        $invoice->service_contract_id = $record->id;
+                        $invoice->save();
+
+                        // Optionally advance the contract's «τελευταία χρέωση» cursor
+                        // so the next staged renewal knows a bill already happened
+                        // (no repeated setup fee). Only ever move it FORWARD.
+                        if (! empty($data['stamp_last_invoiced']) && $invoice->issued_at !== null
+                            && ($record->last_invoiced_at === null || $invoice->issued_at->gt($record->last_invoiced_at))) {
+                            $record->last_invoiced_at = $invoice->issued_at;
+                            $record->save();
+                        }
+                    });
+
+                    Notification::make()
+                        ->title('Το παραστατικό συνδέθηκε — '.$invoice->invcode)
+                        ->success()->send();
+                    $this->redirectToView($record);
+                }),
 
             // Ενεργοποίηση (Pending → Active). If no next_due_date set, seed
             // it from start_date or today so the contract starts billing.
@@ -222,6 +354,36 @@ class ViewServiceContract extends ViewRecord
                     }
                 }),
         ];
+    }
+
+    /**
+     * The invoices eligible to be retro-linked to $record: same tenant + same
+     * customer, LIVE + ISSUED (not a draft, not cancelled/AADE-cancelled), NOT a
+     * credit note, and NOT already linked to any contract. One predicate shared
+     * by the picker AND the write, so a crafted id can never attach a foreign/
+     * ineligible invoice. Excluding cancelled matters: stamping «last invoiced»
+     * from a cancelled document would wrongly suppress the first renewal's setup
+     * fee (StageServiceRenewal gates that on last_invoiced_at === null).
+     */
+    private static function linkableInvoiceQuery(ServiceContract $record): Builder
+    {
+        $query = Invoice::query()
+            ->where('company_id', $record->company_id)
+            ->where('customer_id', $record->customer_id)
+            ->whereNull('service_contract_id')
+            ->where('local_status', '!=', 'draft');
+        InvoiceScope::live($query);
+        InvoiceScope::excludeCreditNotes($query);
+
+        return $query;
+    }
+
+    /** «ΤΠΥ5 — 17/09/2026 — 5.952,00 €» — one label for both the picker and the selected value. */
+    private static function invoiceOptionLabel(Invoice $invoice): string
+    {
+        return ($invoice->invcode ?? ('#'.$invoice->id))
+            .' — '.($invoice->issued_at?->format('d/m/Y') ?? '—')
+            .' — '.Money::eur($invoice->gross_total);
     }
 
     /**

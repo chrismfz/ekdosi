@@ -210,8 +210,27 @@ Top **Πελάτες** (`TopCustomersTable`), renewals, myDATA/WHMCS stats. Λε
 
 ### 11. Χρεώσεις — analytics ανά συμβόλαιο
 
-**Verdict: 🤔 η οντότητα υπάρχει (`ServiceContract`)· λείπουν analytics (M).**
-- [ ] Στην προβολή συμβολαίου: «πόσες φορές τιμολογήθηκε / συνολικό έσοδο» (derivable από `invoices()`) + price history
+**Verdict: 🤔 η οντότητα υπάρχει (`ServiceContract`)· λείπουν analytics (M). — ✅ DONE 2026-09-17.**
+- [x] **Στατιστικά χρέωσης στην προβολή** (`ServiceContractBilling`, tenant-scoped/reusable για μελλοντικό
+  `/user` portal): φορές τιμολογήθηκε · **συνολικό έσοδο** (καθαρό, live, μείον πιστωτικά — μέσω `InvoiceScope`,
+  ισοσκελίζει με τζίρο) · μικτό · πρώτη/τελευταία χρέωση · εκκρεμή πρόχειρα · **ιστορικό τιμής καταλόγου** (audit
+  log). Tab **«Ανανεώσεις»** (`RenewalsRelationManager`) = read-only λίστα των invoices του συμβολαίου.
+- [x] **«Σύνδεση υπάρχοντος παραστατικού» (retro-link)** — «κουμπώνει» ένα ήδη-εκδομένο παραστατικό του πελάτη
+  σε σύμβαση (θέτει μόνο `service_contract_id`· tenant+customer scoped, re-checked στο write· mirror του
+  `ConvertQuoteToServiceContract`). Για χειροκίνητες πωλήσεις πριν φτιαχτεί το συμβόλαιο (π.χ. ΤΠΥ VM στο nexon).
+- [ ] **(config, όχι κώδικας)** «βγάλε προσχέδιο N μέρες πριν τη λήξη» = υπάρχει ήδη: `services:stage-renewals
+  --lead-days=N` (`EKDOSI_SERVICE_RENEWALS_LEAD_DAYS`, scheduler `EKDOSI_SCHEDULE_SERVICE_RENEWALS`). Set στο deploy.
+- [ ] **(ιδέα, επόμενο PR)** proactive «κουδούνι»/email για συμβόλαια που λήγουν σε N μέρες (τώρα: nav badge 7μ +
+  dashboard widget 30μ + το auto-staged προσχέδιο).
+- [ ] **(P2 review, deferred)** το tab «Ανανεώσεις» δείχνει μόνο τα invoices του συμβολαίου (`service_contract_id`)·
+  τα **πιστωτικά δεν φέρουν `service_contract_id`** (τα βρίσκουμε μέσω `credited_invoice_id`), οπότε δεν εμφανίζονται
+  inline — τα σύνολα όμως τα αφαιρούν (disclosed με helper στα tiles + description στο tab). Inline εμφάνιση πιστωτικών
+  θέλει custom query εκτός της `invoices()` relation (fragile OR/soft-delete precedence) → ξεχωριστό enhancement.
+
+> **🔒 Locked architectural decision — Services module για MyIP/hosting:** κρατάμε **ΕΝΑ** «Υπηρεσίες»
+> και το εξελίσσουμε προσθετικά (service_type/κατηγορίες + ProvisioningModule drivers + addons ως child
+> rows + progressive disclosure), **ΟΧΙ** clone σε ξεχωριστό «Hosting Services». Πλήρες σκεπτικό +
+> evolution path → **`docs/services-module-evolution.md`**.
 
 ### 12. Έργα (projects) — **χαμηλή προτεραιότητα**
 
