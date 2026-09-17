@@ -1282,6 +1282,23 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **WHMCS auto-issue: permanent guard-holds μετρώνται ως `failed`, όχι `held` (P2, review 2026-09-16 — 0%-VAT unattended hold).**
+  Ο νέος `assertNoUntaxedForUnattendedIssue` (και ΟΛΟΙ οι throwing WH-* guards: non-EUR, negative, blank-desc,
+  totals/rate) πετάει `LogicException` που το `whmcs:auto-issue` loop το πιάνει ως **`$failed` + `Log::error`
+  σε ΚΑΘΕ 6ωρη εκτέλεση**, μέχρι ο χειριστής να το τακτοποιήσει. Για έναν tenant που πουλά τακτικά
+  ενδοκοινοτικά (γνήσιο 0% reverse-charge), αυτό είναι μόνιμος structural hold → επαναλαμβανόμενο error-log +
+  διογκωμένο failed count (όχι λάθος αποτέλεσμα — η γραμμή σωστά κρατείται). Συνειδητά αφημένο **consistent**
+  με τους υπόλοιπους guards· το σωστό fix είναι cross-guard: δρομολόγηση των known-permanent holds
+  (0%-untaxed, non-EUR, negative) στο `$held`/`Log::info` bucket (όπως ο `chooseType` hold), όχι μόνο αυτού
+  του ενός (θα έσπαγε το consistency). Επίσης (P2-cosmetic): όταν μια unattended γραμμή έχει ΚΑΙ 0% ΚΑΙ
+  non-EUR/negative, το μήνυμα «ΧΩΡΙΣ ΦΠΑ» προηγείται του currency/negative (ίδιο outcome, λιγότερο specific).
+- **Test gap: το soft-warning της «Δημιουργία προσχεδίου» (0%-VAT) δεν καλύπτεται (P2, ίδιο review).**
+  Ο guard/hold στο filer + auto-issue command είναι tested· η UI ειδοποίηση (`WhmcsInboxTable` createDraftAction,
+  `vat_percent==0` → warning Notification, non-blocking) δεν έχει test — το Filament panel-tenancy harness είναι
+  φλύαρο για μια cosmetic ειδοποίηση, η λογική (predicate `(float)$line->vat_percent===0.0`) επιβεβαιώθηκε
+  χειροκίνητα + είναι ίδια με τον mapper. Επίσης doc-nuance (harmless): ένας tenant με **default** VatCategory
+  rate 0% θα κρατούσε και taxed γραμμές (map σε `vat_percent=0`) — άσχετο για GR-mainland (default 24%), errs
+  toward hold (safe).
 - **`delivery:fetch-inbound`: καμία ειδοποίηση σε ΕΠΙΜΟΝΗ αποτυχία (P2, review 2026-09-16 — inbound-poll resilience).**
   Ο command πλέον επιστρέφει πάντα SUCCESS σε per-tenant fetch αποτυχία (transient AADE hiccup → `Log::warning`, όχι
   exit-1/alert — έκλεισε τα midnight error emails). Συνέπεια: μια **επίμονη** βλάβη (λάθος/ληγμένα creds → firebed

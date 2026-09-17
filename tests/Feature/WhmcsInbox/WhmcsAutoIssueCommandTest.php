@@ -126,6 +126,34 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertSame(0, Invoice::count());
     }
 
+    public function test_does_not_auto_issue_a_zero_vat_row_holds_it_for_a_human(): void
+    {
+        // A WHMCS-untaxed line (product with Apply Tax off) may owe 24% (a
+        // grandfathered package priced gross) OR be a genuine exemption /
+        // ενδοκοινοτικό — the unattended path can't tell, so it must HOLD the row
+        // rather than auto-file 0% to AADE. The manual «Δημιουργία» draft path is
+        // unaffected; that's where the operator sets the correct rate.
+        $tenant = $this->tenant();
+        $customer = $this->customer($tenant, grumpy: true);
+        $pending = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 9500,
+                'userid' => 1,
+                'date' => '2026-05-20',
+                'total' => '66.00',
+                'items' => ['item' => [
+                    ['description' => 'Starter (Apply Tax off)', 'amount' => '66.00', 'taxed' => '0'],
+                ]],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
+        $this->assertNull($pending->fresh()->invoice_id);
+        $this->assertSame(0, Invoice::count());
+    }
+
     public function test_does_not_file_non_grumpy_customer(): void
     {
         $tenant = $this->tenant();

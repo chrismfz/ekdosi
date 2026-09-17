@@ -387,6 +387,32 @@ class WhmcsInvoiceFilerTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $result->pending->status);
     }
 
+    public function test_unattended_file_holds_a_zero_vat_invoice_even_in_off_mode(): void
+    {
+        // The unattended (άμεση τιμολόγηση) path must NEVER auto-file a WHMCS-untaxed
+        // line — a 0% line may owe 24% (grandfathered product priced gross) or be a
+        // genuine exemption/ενδοκοινοτικό; only a human can decide. Held regardless of
+        // mode or exemption config (the attended path above still files it in off-mode).
+        $pending = $this->makePending([
+            ['description' => 'Starter (Apply Tax off)', 'amount' => '66.00', 'taxed' => '0'],
+        ], total: '66.00');
+
+        try {
+            app(WhmcsInvoiceFiler::class)->file(
+                $this->tenant, $pending, $this->customer, $this->invoiceType,
+                unattended: true,
+            );
+            $this->fail('the unattended path must HOLD a 0%-VAT WHMCS invoice');
+        } catch (LogicException $e) {
+            $this->assertStringContainsString('ΧΩΡΙΣ ΦΠΑ', $e->getMessage());
+        }
+
+        // Held before any ΑΑ/persist: nothing created, pending left for a human.
+        $this->assertSame(0, Invoice::query()->count());
+        $this->assertNull($pending->fresh()->invoice_id);
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
+    }
+
     public function _unused_test_file_logs_would_be_whmcs_writeback_for_stage_b3(): void
     {
         Log::spy();
