@@ -96,6 +96,14 @@ from `[Unreleased]`; `--major` explicit for milestones).
   ή να επιβεβαιώσει την απαλλαγή πριν την οριστικοποίηση. Η χειροκίνητη ροή δεν μπλοκάρεται.
 
 ### Fixed
+- **Εισερχόμενα WHMCS: το header action «Συγχρονισμός τώρα» έριχνε 500 σε κάθε φόρτωση της λίστας.**
+  Το action έκανε `->authorize('update')`, αλλά ένα **header action δεν έχει record** — το Laravel
+  Gate έκοβε το model class-string και καλούσε `PendingWhmcsInvoicePolicy::update($user)` με **ένα**
+  όρισμα («Too few arguments … 1 passed … exactly 2 expected»), σκάζοντας ολόκληρο το render της
+  σελίδας για κάθε μη-super-admin χρήστη. Πλέον ελέγχει το shield permission απευθείας
+  (`can('Update:PendingWhmcsInvoice')`, no-record), όπως κάνει ήδη το bulk «Αρχειοθέτηση επιλεγμένων».
+  Regression test που τρέχει με πραγματικό gate (τα υπόλοιπα inbox tests έκαναν `Gate::before(true)`
+  και μασκάριζαν το policy path).
 - **Βιβλίο Εξόδων: λιγότερα «αταξινόμητο» (#3).** Όταν το εισερχόμενο παραστατικό εξόδου έφερε
   **χαρακτηρισμό ανά γραμμή** (E3) και η εισαγωγή τον κράτησε στα `expense_lines`, αλλά κανένας
   κανόνας «προμηθευτής → χαρακτηρισμός» δεν ταίριαξε (η κεφαλίδα έμεινε αχαρακτήριστη), το Βιβλίο

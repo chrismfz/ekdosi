@@ -748,7 +748,13 @@ class WhmcsInboxTable
             ->label('Συγχρονισμός τώρα')
             ->icon('heroicon-o-arrow-down-tray')
             ->color('primary')
-            ->authorize('update')
+            // HEADER action = no record, so it must NOT authorize against the
+            // record-scoped `update` policy ability: Filament would then call
+            // PendingWhmcsInvoicePolicy::update($user) with no model → «Too few
+            // arguments … 1 passed … exactly 2 expected» on every list render.
+            // Check the raw shield permission directly instead, exactly like the
+            // no-record archiveSelectedAction bulk action does.
+            ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
             ->requiresConfirmation()
             ->modalHeading('Συγχρονισμός τώρα από το WHMCS;')
             ->modalDescription('Τραβά τα πληρωμένα/μη-εκδομένα τιμολόγια από το WHMCS και τα στάζει στο inbox (ίδιο με το προγραμματισμένο whmcs:fetch-pending). Idempotent — ασφαλές να ξανατρέξει. Μεγάλος tenant μπορεί να αργήσει λίγο.')
