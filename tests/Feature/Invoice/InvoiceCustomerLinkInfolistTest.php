@@ -78,4 +78,20 @@ class InvoiceCustomerLinkInfolistTest extends TestCase
         Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
             ->assertDontSee('Άνοιγμα εγγραφής');
     }
+
+    public function test_soft_deleted_customer_shows_no_broken_link(): void
+    {
+        // The FK (customer_id) survives a SoftDeletes on the Customer, but the
+        // `customer` relation resolves null (soft-delete scope) and route-model
+        // binding 404s a trashed record. The entry must gate on the relation and
+        // degrade to «—», not render a link that dead-ends.
+        $tenant = $this->tenant();
+        $this->boot($tenant);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'Πρώην Πελάτης ΑΕ']);
+        $invoice = $this->invoice($tenant, $customer->id);
+        $customer->delete(); // soft delete
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
+            ->assertDontSee('Άνοιγμα εγγραφής');
+    }
 }

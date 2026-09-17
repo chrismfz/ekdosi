@@ -78,10 +78,19 @@ class InvoiceInfolist
                             // Compact link instead of the full live company name: that
                             // name wrapped to 5–7 lines and, next to the «Name on invoice»
                             // snapshot (the legal value), was pure height. Here we only
-                            // need the JUMP to the live record, so render a short link and
-                            // keep the Customer card tight. State is null (→ «—», no link)
-                            // when the invoice has no linked customer.
-                            ->getStateUsing(fn ($record) => $record->customer_id ? 'Άνοιγμα εγγραφής →' : null)
+                            // need the JUMP to the live record, so render a short link
+                            // (icon carries the arrow) and keep the Customer card tight.
+                            //
+                            // Link ONLY for a live (non-trashed) customer. InvoiceResource
+                            // eager-loads `customer` with withTrashed() so the invoice can
+                            // still reference a deleted customer, so `$record->customer` is
+                            // non-null even when soft-deleted — and customers.edit route-
+                            // model binding 404s a trashed record. So gate on
+                            // `! trashed()`: a trashed/missing customer degrades to «—»,
+                            // no dead-end link (the legal name still shows in the snapshot).
+                            ->getStateUsing(fn ($record) => ($record->customer && ! $record->customer->trashed())
+                                ? 'Άνοιγμα εγγραφής'
+                                : null)
                             ->icon('heroicon-m-arrow-top-right-on-square')
                             // Pass the Company model (Laravel uses its
                             // route key = slug, per Company::getRouteKeyName).
@@ -89,7 +98,7 @@ class InvoiceInfolist
                             // a URL with an integer in the {tenant} slug
                             // segment, which Filament's tenant-binding
                             // middleware then 404s.
-                            ->url(fn ($record) => $record->customer_id
+                            ->url(fn ($record) => ($record->customer && ! $record->customer->trashed())
                                 ? route('filament.admin.resources.customers.edit', [
                                     'tenant' => $record->company,
                                     'record' => $record->customer_id,
