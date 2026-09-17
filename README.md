@@ -167,4 +167,4 @@ toggle, upload-restore, and **«Διαγραφή δεδομένων»**) and a t
 - **`docs/BACKLOG.md`** — single source for what's left + ideas (incl. «looks like a gap
   but isn't» + an index of the kept design/reference docs).
 - **`docs/CLAUDE-history.md`** — archived per-PR history and resolved findings.
-- **`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** — the AADE spec.
+- **`docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md`** — the AADE spec.

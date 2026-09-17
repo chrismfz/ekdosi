@@ -146,7 +146,7 @@ class DeliveryLifecycleService
 
         $qrUrl = $this->requireQrUrl($note);
 
-        // transportType is MANDATORY (Delivery Note v2.0.1, TransportDetailType,
+        // transportType is MANDATORY (Delivery Note v2.0.2, TransportDetailType,
         // accepts 1–7). The UI requires it, but this service is ALSO reached by
         // console/API/import callers, so gate it here — a silent omission (the old
         // behaviour) just produced an avoidable AADE rejection, and an out-of-range

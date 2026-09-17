@@ -9,8 +9,8 @@ use Firebed\AadeMyData\Enums\IncomeClassificationType;
 
 /**
  * AADE myDATA code tables (the Παράρτημα / Appendix §8 of the official
- * "myDATA API Documentation v2.0.0"). The full doc lives in the repo
- * root: docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md.
+ * "myDATA API Documentation v2.0.2"). The full doc lives in the repo
+ * root: docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md.
  *
  * These are the authoritative value sets the SendInvoices payload is
  * validated against by AADE. Centralised here so `mydata:preflight`,
@@ -267,7 +267,7 @@ final class Codes
 
     /**
      * §8.3 human-readable reasons (ν.5144/2024) — verbatim from the AADE spec
-     * (myDATA_API_Documentation_v2.0.0 §8.3, lines 2187–2226). Used to label the
+     * (myDATA_API_Documentation_v2.0.2 §8.3, lines 1748–1789). Used to label the
      * exemption-reason picker so the operator picks the RIGHT reason instead of
      * a meaningless "Κατηγορία 16". Do NOT paraphrase — these are legal citations.
      *

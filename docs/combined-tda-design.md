@@ -51,9 +51,10 @@ diagrams are OCR-garbled; the field tables are reliable):
   11.5»*. So a ΤΔΑ-1.1 submission returns a **qrUrl** → the lifecycle key (when tracking is on).
 - **Validation [280]** (L1470) — `dispatchDate` must be ≥ current date.
 - The **movement lifecycle methods** (RegisterTransfer/…/ConfirmDeliveryReturn) are in the SEPARATE
-  AADE *«Ψηφιακή Διακίνηση Αγαθών»* REST doc. **We must obtain the v2.0.2 version** (we hold only
-  v2.0.1); it is the authority for the state machine + which states each call is reachable from (see
-  §11-Q2 and the Slice-2 confirmReturn reachable-from check). The ERP md gives only the issue payload.
+  AADE *«Ψηφιακή Διακίνηση Αγαθών»* REST doc. **We hold the v2.0.2 version**
+  (`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.2_preofficial.md`); it is the authority for
+  the state machine + which states each call is reachable from (see §11-Q2 and the Slice-2
+  confirmReturn reachable-from check). The ERP md gives only the issue payload.
 
 **Scope of types:** v2.0.2 `supportsDeliveryNote()` also allows 1.4/3.1/3.2/11.5, but the **classic
 ΤΔΑ is `1.1`**. This design targets **1.1 only**; the rest are a later, trivial allowlist extension.
