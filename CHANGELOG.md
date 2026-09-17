@@ -135,6 +135,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   το `laravel.log` άδειο) αλλά ΔΕΝ βγάζει exit-1/alert. Διόρθωσε τα midnight error emails και στους 2 prod
   hosts. (Ο guard για mode-off/missing-creds — `RuntimeException` — μένει ως έχει.)
 
+### Removed
+- **«Έλεγχος legacy» στα Εισερχόμενα WHMCS (cutover-phase εργαλείο).** Το header action «Έλεγχος
+  legacy», η στήλη «Legacy» και το ομώνυμο φίλτρο αφαιρέθηκαν — μαζί με το `LegacyInvoicedRefresher`
+  service και τις κλήσεις του στο `whmcs:fetch-pending`. Χρησίμευαν μόνο όσο έτρεχε παράλληλα η παλιά
+  εφαρμογή ekdosi (dual-run), για να μη διπλο-τιμολογηθεί ένα WHMCS invoice· μετά το cutover δεν
+  υπάρχει legacy να ρωτηθεί. **Η δικλείδα διπλής υποβολής παραμένει** ως αδρανές backstop: η στήλη
+  `legacy_invoiced`, το `PendingWhmcsInvoice::invoicedInLegacy()`, ο guard στο
+  `WhmcsInvoiceFiler::assertCanBeFiled()` και το candidate exclusion του `whmcs:auto-issue` μένουν (πάντα
+  false τώρα — καμία αλλαγή στη ροή έκδοσης, κανένα schema change).
+
 ## [2.3.0] - 2026-09-16
 
 ### Changed
