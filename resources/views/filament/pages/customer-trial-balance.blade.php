@@ -6,7 +6,7 @@
     @endphp
 
     {{-- Period --}}
-    <div class="flex flex-wrap items-end gap-3 mb-4">
+    <div class="flex flex-wrap gap-3">
         <label class="text-sm">
             <span class="block text-xs fi-color-gray mb-1">Από</span>
             <input type="date" wire:model.live="from"
@@ -17,8 +17,8 @@
             <input type="date" wire:model.live="to"
                 class="rounded border border-gray-300 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100 px-2 py-1 text-sm">
         </label>
-        <span class="text-xs fi-color-gray pb-1">Περίοδος: {{ $result->periodLabel }}</span>
     </div>
+    <div class="text-xs fi-color-gray mb-4 mt-1">Περίοδος: {{ $result->periodLabel }}</div>
 
     {{-- Totals --}}
     <div class="grid grid-cols-2 gap-3 md:grid-cols-4 mb-4">

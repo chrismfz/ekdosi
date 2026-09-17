@@ -130,6 +130,10 @@
   Χτισμένο πάνω στο `CustomerLedgerBuilder::periodBalances` (reuse όπως το AgedReceivables) → το «Τελικό»
   ισοσκελίζει με το υπόλοιπο Καρτέλας + τα receivables (test-guarded). Perm `View:CustomerTrialBalance`
   (shield:generate μετά το deploy). Per-customer iteration (consistency > raw speed, όπως AgedReceivables).
+- [ ] **(P2 review) Perf σε μεγάλο tenant:** candidate set = ΚΑΘΕ πελάτης με κίνηση (όχι narrowed σε
+  `onlyDebtors` όπως η ηλικίωση) — απαραίτητο για ιστορική περίοδο (χρειάζεται και opening-balance πελάτες,
+  που το «now»-debtors θα έχανε). 2 queries/πελάτη, re-run σε κάθε αλλαγή ημερομηνίας. Αν χρειαστεί:
+  debounce ή pre-agg SQL (με reconciliation test φύλακα). Αποδεκτό tradeoff προς το παρόν.
 - [ ] Ισοζύγιο Ειδών/Υπηρεσιών (κουμπώνει με #2)
 
 ### 5. Εργασίες Είσπραξης (dunning) — 3 φάσεις
