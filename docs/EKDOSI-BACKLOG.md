@@ -121,11 +121,19 @@
 
 ### 4. Ισοζύγιο Πελατών (και Ειδών)
 
-**Verdict: ✅ όντως λείπει (M).** Έχουμε «Πελάτες με υπόλοιπο» + ηλικίωση (`AgedReceivablesReport.php`), όχι
-ισοζύγιο περιόδου.
+**Verdict: ✅ όντως λείπει (M). — ✅ Πελατών DONE 2026-09-17.** Έχουμε «Πελάτες με υπόλοιπο» + ηλικίωση
+(`AgedReceivablesReport.php`)· τώρα και ισοζύγιο περιόδου πελατών.
 
 **Tasks**
-- [ ] Ισοζύγιο Πελατών: `Υπόλοιπο μεταφοράς | Χρέωση περιόδου | Πίστωση περιόδου | Τελικό` + σύνολα + περίοδος + export
+- [x] **Ισοζύγιο Πελατών** (`CustomerTrialBalance` page + `App\Services\Accounting\CustomerTrialBalanceReport`):
+  ανά πελάτη `Υπόλοιπο μεταφοράς | Χρέωση | Πίστωση | Τελικό`, ελεύθερη περίοδος, σύνολα, drill Καρτέλα, CSV.
+  Χτισμένο πάνω στο `CustomerLedgerBuilder::periodBalances` (reuse όπως το AgedReceivables) → το «Τελικό»
+  ισοσκελίζει με το υπόλοιπο Καρτέλας + τα receivables (test-guarded). Perm `View:CustomerTrialBalance`
+  (shield:generate μετά το deploy). Per-customer iteration (consistency > raw speed, όπως AgedReceivables).
+- [ ] **(P2 review) Perf σε μεγάλο tenant:** candidate set = ΚΑΘΕ πελάτης με κίνηση (όχι narrowed σε
+  `onlyDebtors` όπως η ηλικίωση) — απαραίτητο για ιστορική περίοδο (χρειάζεται και opening-balance πελάτες,
+  που το «now»-debtors θα έχανε). 2 queries/πελάτη, re-run σε κάθε αλλαγή ημερομηνίας. Αν χρειαστεί:
+  debounce ή pre-agg SQL (με reconciliation test φύλακα). Αποδεκτό tradeoff προς το παρόν.
 - [ ] Ισοζύγιο Ειδών/Υπηρεσιών (κουμπώνει με #2)
 
 ### 5. Εργασίες Είσπραξης (dunning) — 3 φάσεις

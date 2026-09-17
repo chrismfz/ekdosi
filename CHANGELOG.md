@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Αναφορά «Ισοζύγιο Πελατών» (#4).** Νέα σελίδα στα «Λογιστικά»: ανά πελάτη
+  `Υπόλοιπο μεταφοράς | Χρέωση περιόδου | Πίστωση περιόδου | Τελικό`, για ελεύθερη περίοδο (Από/Έως,
+  default φέτος-έως-σήμερα), με σύνολα, drill στην Καρτέλα και **εξαγωγή CSV**. Ίδια βάση με την Καρτέλα
+  (`CustomerLedgerBuilder::periodBalances` — χρέωση = επί-πιστώσει εισπρακτέο, πίστωση = εισπράξεις +
+  πιστωτικά, τα τοις-μετρητοίς εξαιρούνται), οπότε το «Τελικό» **ισοσκελίζει** με το υπόλοιπο της Καρτέλας
+  και τα ανεξόφλητα του dashboard (Σ Τελικό == receivables, χωρίς retail). Νέα permission
+  `View:CustomerTrialBalance` (**shield:generate + re-provision μετά το deploy**).
 - **«Αναφορές»: cache των μετρήσεων + € στα γραφήματα + «Ανανέωση» (#7).** Τα 9 report widgets ήταν
   ξεχωριστά (lazy) requests που το καθένα ξανα-έτρεχε τα δικά του aggregates σε κάθε άνοιγμα (~25s).
   Πλέον διαβάζουν **cache ανά κομμάτι** (`App\Support\Dashboard\DashboardMetricsCache`, version-keyed

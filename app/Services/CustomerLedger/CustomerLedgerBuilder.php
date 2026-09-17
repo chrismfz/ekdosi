@@ -4,6 +4,7 @@ namespace App\Services\CustomerLedger;
 
 use App\Models\Customer;
 use App\Support\InvoiceScope;
+use Carbon\CarbonInterface;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -117,6 +118,80 @@ class CustomerLedgerBuilder
         return [
             'stats' => $this->computeStats($invoices, $payments),
             'aging' => $this->computeAging($invoices, $payments),
+        ];
+    }
+
+    /**
+     * Period trial-balance figures for ONE customer — the row behind the
+     * «Ισοζύγιο Πελατών» report (#4):
+     *
+     *   opening = tracked balance carried in at $start (all activity before it)
+     *   debit   = credit-term charges (payable) issued within [$start, $end]
+     *   credit  = payments + credit notes within [$start, $end]
+     *   closing = opening + debit − credit
+     *
+     * Uses the SAME primitives as computeStats (isTracked credit-term gate, credit
+     * notes + payments as credits, payable as the collectible), so `closing` for an
+     * all-embracing window equals the Καρτέλα stats balance / the receivables
+     * figure — the row reconciles with every other money surface by construction.
+     * A payment with a NULL pay_date (legacy ETL raw insert) is folded into the
+     * carry-over (unknown date = pre-period) so the lifetime reconciliation holds.
+     * Activity dated AFTER $end is excluded (not yet on the books at $end).
+     *
+     * @return array{opening: float, debit: float, credit: float, closing: float}
+     */
+    public function periodBalances(Customer $customer, CarbonInterface $start, CarbonInterface $end): array
+    {
+        $invoices = $this->loadInvoices($customer);
+        $payments = $this->loadPayments($customer);
+        $paidIds = $this->paidInvoiceIds($payments);
+
+        $openingCharges = 0.0;   // credit-term charges before $start
+        $openingCredits = 0.0;   // credit notes + payments before $start
+        $periodDebit = 0.0;      // credit-term charges within [$start, $end]
+        $periodCredit = 0.0;     // credit notes + payments within [$start, $end]
+
+        foreach ($invoices as $inv) {
+            $issuedAt = Carbon::parse($inv->issued_at);
+            if ($issuedAt->gt($end)) {
+                continue; // future relative to the report end
+            }
+            $before = $issuedAt->lt($start);
+
+            if ($this->isCreditNote($inv)) {
+                $amount = $this->payable($inv);
+                $before ? $openingCredits += $amount : $periodCredit += $amount;
+            } elseif ($this->isTracked($inv, $paidIds)) {
+                $amount = $this->payable($inv);
+                $before ? $openingCharges += $amount : $periodDebit += $amount;
+            }
+            // A cash-term invoice with no payment is settled at issue — never a
+            // debit nor a credit (same exclusion as the balance).
+        }
+
+        foreach ($payments as $p) {
+            $amount = $this->signedAmount($p); // net of refunds
+            $payDate = $p->pay_date ? Carbon::parse($p->pay_date) : null;
+            if ($payDate !== null && $payDate->gt($end)) {
+                continue;
+            }
+            // NULL pay_date → carry-over; else bucket by pay_date vs $start.
+            ($payDate === null || $payDate->lt($start))
+                ? $openingCredits += $amount
+                : $periodCredit += $amount;
+        }
+
+        // Every input is a 2dp value, so each sum is a true multiple of 0.01 (bar
+        // float dust round() removes) → opening + debit − credit == closing exactly.
+        $opening = round($openingCharges - $openingCredits, 2);
+        $debit = round($periodDebit, 2);
+        $credit = round($periodCredit, 2);
+
+        return [
+            'opening' => $opening,
+            'debit' => $debit,
+            'credit' => $credit,
+            'closing' => round($opening + $debit - $credit, 2),
         ];
     }
 
