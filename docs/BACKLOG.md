@@ -1181,6 +1181,16 @@ create-only, tenant-scoped, idempotent. Ό,τι απέμεινε αγγίζει 
   `«ΑΦΜ …»` rows δεν re-enrichάρονται (θέλει customer equivalent του `suppliers:backfill-names`). Quality, όχι
   correctness.
 
+### Invoice γραμμές — surviving P2 (από το review, 2026-09-17)
+Το «Σημείωση γραμμής» έγινε enterable (νέα στήλη στον table-repeater· διορθώθηκε). **Προϋπάρχον** που έμεινε:
+- **`vat_exemption_category` required-αλλά-μη-renderable για 0% γραμμές.** Είναι το 10ο (non-column) παιδί του
+  table-repeater, οπότε δεν renderάρεται κελί — ακόμη κι όταν `->hidden(false)` (0% γραμμή). Δουλεύει μόνο μέσω
+  του auto-suggest (`VatExemptionGuidance::recommendForType()` στο afterStateUpdated του `vat_percent`). Αν ο
+  τύπος δεν έχει §8.3 mapping → επιστρέφει null → το πεδίο μένει null, το `->required()` (AADE [217]) αποτυγχάνει
+  σε **αόρατο** πεδίο και ο χειριστής κολλάει χωρίς DOM control. Χαμηλή συχνότητα (οι tenants είναι mainland, οι
+  τύποι έχουν mapping). Fix options: (α) δώσε στο exemption δική του στήλη (visible/editable για 0%· άδειο κελί
+  για μη-0%), ή (β) βγάλε το `required` από το πεδίο και επίβαλέ το σε save-time rule με σαφές μήνυμα.
+
 ## 💳 Paid/unpaid-aware WHMCS γέφυρα (αμφίδρομη) — epic
 _Ιδέα 2026-07-13 (chrismfz). Money-sensitive· Phase 2 γράφει χρήμα στο WHMCS → design-first._
 

@@ -19,6 +19,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Dashboard widgets: κορυφαία είδη + έσοδα ανά κατηγορία (#8).** Δύο νέα γραφήματα στο κεντρικό
+  dashboard: **«Κορυφαία είδη/υπηρεσίες — έσοδα»** (top-N κατά καθαρή αξία, reuse του
+  `CustomerTopProducts::forCompany`, cached 30' ανά tenant+έτος γιατί υλοποιεί τις γραμμές σε PHP) και
+  **«Έσοδα ανά κατηγορία»** (top-N καθαρά ανά ekdosi ProductCategory, μόνο θετικά, reuse του
+  `RevenueByCategory` — ίδια πηγή με την αναφορά #2· κι αυτό υλοποιεί γραμμές σε PHP → cached 30').
+  Vertical bar, € στους άξονες/tooltips (`FormatsReportChart`), κοινή παλέτα (`ReportPalette`),
+  tenant-scoped, read-only.
 - **Στατιστικά χρέωσης ανά συμβόλαιο + retro-link (#11).** Η προβολή μιας **Υπηρεσίας** δείχνει τώρα:
   πόσες φορές τιμολογήθηκε, **συνολικό έσοδο** (καθαρό, live παραστατικά, μείον πιστωτικά — μέσω
   `App\Services\ServiceContractBilling`, tenant-scoped/reusable), μικτό, πρώτη/τελευταία χρέωση, εκκρεμή
@@ -158,6 +165,13 @@ from `[Unreleased]`; `--major` explicit for milestones).
   `(object) []`, σύμβαση όπως `WhmcsInboxTool`/`OutstandingReceivablesTool`) **και** στο boundary
   (`ToolRegistry::definitionsFor` εξαναγκάζει κενό `properties` σε object — καθρέφτης του
   `AssistantRunner::normalizeToolInputs`), ώστε κανένα μελλοντικό εργαλείο να μην το ξανασπάσει.
+- **«Σημείωση γραμμής» εισάγεται ξανά — και εμφανίζεται στην προβολή.** Ο πίνακας γραμμών στη φόρμα
+  έκδοσης είναι table-repeater που renderάρει ένα κελί ανά **στήλη** και «κόβει» όσα πεδία περισσεύουν·
+  με 8 στήλες αλλά το `notes` ως 10ο πεδίο, το «Σημείωση γραμμής» **δεν εμφανιζόταν πουθενά** — ο
+  χειριστής δεν μπορούσε καν να το πληκτρολογήσει (τυπωνόταν μόνο στο PDF αν είχε μπει αλλιώς).
+  Προστέθηκε στήλη «Σημείωση» (το `notes` μπήκε εντός των στηλών· το `vat_exemption_category` μένει
+  auto-suggested εκτός πίνακα, ως πριν). Στην **προβολή παραστατικού**, η σημείωση γραμμής εμφανίζεται
+  πλέον κάτω από την περιγραφή (πλάγιο γκρι), όπως στο PDF.
 - **Αναφορά «Έσοδα ανά κατηγορία»: η έκπτωση παραστατικού δεν αγνοείται πλέον.** Η αναφορά αθροίζει τα
   `net_price`/`gross_price` των γραμμών, που κρατούν μόνο την έκπτωση *γραμμής* — η **έκπτωση
   παραστατικού** (`header_discount_percent`) εφαρμόζεται στα *σύνολα* (`RecomputeInvoiceTotals`), όχι στις

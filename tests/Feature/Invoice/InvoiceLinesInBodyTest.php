@@ -52,12 +52,18 @@ class InvoiceLinesInBodyTest extends TestCase
         InvoiceLine::create([
             'company_id' => $tenant->id, 'invoice_id' => $invoice->id, 'product_descr' => 'ΓΡΑΜΜΗ ΔΟΚΙΜΗΣ XYZ',
             'metric_unit' => 'τεμ', 'qty' => 2, 'price_per_item' => 50, 'vat_percent' => 24,
-            'net_price' => 100, 'gross_price' => 124,
+            'net_price' => 100, 'gross_price' => 124, 'notes' => 'ΣΗΜΕΙΩΣΗ ΓΡΑΜΜΗΣ ΤΕΣΤ',
         ]);
 
         Livewire::test(ViewInvoice::class, ['record' => $invoice->id, 'tenant' => $tenant->slug])
             ->assertSee('Γραμμές')               // the body section heading
             ->assertSee('ΓΡΑΜΜΗ ΔΟΚΙΜΗΣ XYZ')    // the line renders in the body
+            ->assertSee('ΣΗΜΕΙΩΣΗ ΓΡΑΜΜΗΣ ΤΕΣΤ') // the per-line note renders under the description (like the PDF)
+            // …and it renders as HTML, not double-escaped text: the note markup must
+            // reach the DOM as a real <div> (needs `->html()` on the entry). Asserting
+            // the note text alone would pass even if `->html()` were dropped and the
+            // markup escaped to `&lt;div…&gt;`, so guard the raw markup explicitly.
+            ->assertSee('<div style="margin-top:.15rem', false)
             ->assertSee('E3 (ΑΑΔΕ)');            // the E3 column renders (its state/tooltip closures run)
     }
 

@@ -173,7 +173,22 @@ class InvoiceInfolist
                                 TableColumn::make('E3 (ΑΑΔΕ)')->alignEnd(),
                             ])
                             ->schema([
-                                TextEntry::make('product_descr')->placeholder('—'),
+                                // Description + the per-line «Σημείωση» underneath (small,
+                                // muted italic), mirroring the PDF's .line-notes — shown only
+                                // when the line has a note. `opacity` (not a hardcoded grey)
+                                // so it stays legible in the panel's dark theme too; the view
+                                // additionally keeps the note's line breaks (nl2br).
+                                TextEntry::make('product_descr')
+                                    ->html()
+                                    ->getStateUsing(function (InvoiceLine $record): string {
+                                        $html = e($record->product_descr ?: '—');
+                                        if (filled($record->notes)) {
+                                            $html .= '<div style="margin-top:.15rem;font-size:.75rem;font-style:italic;opacity:.65">'
+                                                .nl2br(e($record->notes)).'</div>';
+                                        }
+
+                                        return $html;
+                                    }),
                                 TextEntry::make('metric_unit')->placeholder('—'),
                                 TextEntry::make('qty')->numeric(decimalPlaces: 3)->alignEnd(),
                                 TextEntry::make('price_per_item')->money('EUR')->alignEnd(),

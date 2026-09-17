@@ -180,13 +180,33 @@
 
 ### 8. Dashboard — widgets που λείπουν
 
-**Verdict: ✅ ισχύει (S ανά widget).** Υπάρχουν: receivables € (`OutstandingCustomersTable`/`OverdueInvoicesTable`),
+**Verdict: ✅ ισχύει (S ανά widget). — ⏳ PR-1 DONE 2026-09-17 (top είδη + έσοδα ανά κατηγορία).**
+Υπάρχουν: receivables € (`OutstandingCustomersTable`/`OverdueInvoicesTable`),
 Top **Πελάτες** (`TopCustomersTable`), renewals, myDATA/WHMCS stats. Λείπουν:
 
-- [ ] Top **είδη/υπηρεσίες** (υπάρχει `top_products` service — per-customer ήδη στην Καρτέλα — λείπει company-wide widget)
-- [ ] Έσοδα/Έξοδα ανά κατηγορία (βλ. #2)
-- [ ] Αξία **pipeline** leads σε € (τώρα `LeadsStats` δείχνει μόνο πλήθος)
-- [ ] Top προμηθευτές · Ημερολόγιο επόμενων 7 ημερών (widget)
+- [x] Top **είδη/υπηρεσίες** — `TopProductsChart` (top-N κατά καθαρή αξία, reuse `CustomerTopProducts::forCompany`,
+  cached 30' — υλοποιεί γραμμές σε PHP).
+- [x] **Έσοδα ανά κατηγορία** — `RevenueByCategoryChart` (reuse `RevenueByCategory`, ίδια πηγή με την αναφορά #2).
+- [ ] **Έξοδα** ανά κατηγορία widget (κουμπώνει με το «ίδιο για έξοδα» του #2).
+- [ ] Αξία **pipeline** leads σε € — τα leads ΔΕΝ έχουν πεδίο αξίας· θέλει πηγή (quote-derived ή νέο πεδίο) → PR-2.
+- [ ] Top προμηθευτές (aggregation εξόδων ανά `supplier_*`) · Ημερολόγιο επόμενων 7 ημερών (ποια events) → PR-2.
+- [ ] (deferred, #7 polish PR) skeleton/sparse states + dark/mobile pass στα νέα γραφήματα.
+- [ ] (P2 review, accepted) τα δύο νέα γραφήματα cache-άρονται per tenant+year (TTL 30', PHP materialisation)
+  χωρίς invalidation σε invoice write → έως 30' staleness. Overview surfaces (όχι money-consistency invariant),
+  αποδεκτό· proper version-keyed invalidation + scheduled warm = #7-polish follow-up (όπως `DashboardMetricsCache`).
+- [ ] (P2 review round-2, deferred — root-fixes εκτός του «2 widgets» scope):
+  - **Header-discount reconciliation:** το `TopProductsChart` αθροίζει `net_price` γραμμών (χωρίς invoice-level
+    header discount), όπως ήδη κάνει το `CustomerTopProducts::forCompany` (Καρτέλα + MCP top_products), ενώ το
+    `RevenueByCategoryChart` εφαρμόζει τον header-discount factor. Διαφέρουν ΜΟΝΟ όταν υπάρχει header discount
+    (σπάνιο). Root-fix = αλλαγή του shared service (επηρεάζει 3 surfaces) → χωριστό PR.
+  - **Perf:** `RevenueByCategory::build` υπολογίζει ΚΑΙ το prior year (για YoY) που το γράφημα πετά· και το
+    `forCompany(PHP_INT_MAX)` υλοποιεί όλες τις γραμμές του έτους σε PHP. Cached 30', αλλά ένα current-year-only
+    + SQL-aggregated variant θα το έκοβε → με το ίδιο caching follow-up.
+  - **Label collisions (#7 polish):** `Str::limit` μπορεί να κάνει δύο μακριά ονόματα ίδια στο γράφημα → μαζί με
+    το sparse/dark/mobile pass.
+  - **Dashboard revenue visibility:** τα widgets (όπως τα αδελφά `IncomeStatsOverview`/`TopCustomersTable`) δεν
+    έχουν `canView()` → όποιος βλέπει το panel βλέπει company-wide έσοδα. Συνεπές με το υπάρχον dashboard· αν
+    θέλουμε role-gate, είναι dashboard-wide απόφαση (όχι μόνο αυτών των δύο).
 - [ ] (προαιρετικό) user-customizable dashboard
 
 ---
