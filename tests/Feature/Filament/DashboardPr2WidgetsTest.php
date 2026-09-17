@@ -86,6 +86,20 @@ class DashboardPr2WidgetsTest extends TestCase
         $this->assertSame(['datasets' => [], 'labels' => []], (new TopSuppliersChart)->getData());
     }
 
+    public function test_top_suppliers_reports_empty_state(): void
+    {
+        Filament::setTenant($this->tenant); // no expenses yet
+        $this->assertTrue((new TopSuppliersChart)->isEmpty());
+        $this->assertSame('Κανένα έξοδο προς εμφάνιση φέτος.', (new TopSuppliersChart)->getEmptyStateHeading());
+    }
+
+    public function test_top_suppliers_is_not_empty_with_data(): void
+    {
+        $this->expense('ΑΛΦΑ ΕΠΕ', 300);
+        Filament::setTenant($this->tenant);
+        $this->assertFalse((new TopSuppliersChart)->isEmpty());
+    }
+
     public function test_pipeline_value_sums_quotes_of_open_leads_only(): void
     {
         $openLead = Lead::create(['company_id' => $this->tenant->id, 'name' => 'Ανοιχτό', 'status' => LeadStatus::Quoted]);

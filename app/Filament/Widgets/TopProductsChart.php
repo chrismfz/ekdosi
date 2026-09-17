@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Filament\Reports\Widgets\Concerns\FormatsReportChart;
+use App\Filament\Widgets\Concerns\HasChartEmptyNote;
 use App\Models\Company;
 use App\Services\CustomerLedger\CustomerTopProducts;
 use App\Support\Dashboard\ReportPalette;
@@ -24,8 +25,12 @@ use Illuminate\Support\Str;
 class TopProductsChart extends ChartWidget
 {
     use FormatsReportChart;
+    use HasChartEmptyNote;
 
     protected static ?int $sort = 10;
+
+    /** Shown (with the blank canvas hidden) when there's nothing to plot. */
+    protected ?string $emptyStateHeading = 'Καμία πώληση προς εμφάνιση φέτος.';
 
     /** How many bars to show (top-N by net). */
     private const TOP_N = 8;

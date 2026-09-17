@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Filament\Reports\Widgets\Concerns\FormatsReportChart;
+use App\Filament\Widgets\Concerns\HasChartEmptyNote;
 use App\Models\Company;
 use App\Models\Expense;
 use App\Support\Dashboard\ReportPalette;
@@ -29,8 +30,12 @@ use Illuminate\Support\Str;
 class TopSuppliersChart extends ChartWidget
 {
     use FormatsReportChart;
+    use HasChartEmptyNote;
 
     protected static ?int $sort = 11;
+
+    /** Shown (with the blank canvas hidden) when there's nothing to plot. */
+    protected ?string $emptyStateHeading = 'Κανένα έξοδο προς εμφάνιση φέτος.';
 
     /** How many bars to show (top-N by net spend). */
     private const TOP_N = 8;

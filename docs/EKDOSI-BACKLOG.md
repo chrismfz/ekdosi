@@ -174,9 +174,13 @@
   config-driven. `DashboardMetrics` έμεινε άθικτος (μηδέν αλλαγή στις μετρήσεις).
 - [x] **Μορφοποίηση €** στους άξονες/tooltips όλων των γραφημάτων (`FormatsReportChart`) + **κοινή παλέτα**
   (`ReportPalette`, ίδια χρώματα, μία πηγή).
-- [ ] **(deferred UI polish)** custom skeleton loaders (τώρα: το built-in lazy indicator του Filament)·
-  sparse/empty states στα γραφήματα (<3 σημεία → πίνακας/sparkline — οι δύο table-widgets έχουν ήδη empty
-  state)· έλεγχος dark/mobile ανά widget. Μικρότερης αξίας από το perf· χωριστό PR όποτε προκύψει.
+- [x] **Empty states** στα dashboard γραφήματα (2026-09-17) — Filament built-in empty state (κρυμμένο canvas +
+  κεντραρισμένο μήνυμα) στα `TopProductsChart`/`RevenueByCategoryChart`/`TopSuppliersChart` μέσω κοινού trait
+  `HasChartEmptyNote` (override `isEmpty()`) + `$emptyStateHeading`. Dark/mobile-safe by construction.
+- [ ] **(declined ως over-engineering)** custom skeleton loaders (το built-in lazy indicator του Filament αρκεί)
+  + sparse-<3-σημεία-→-πίνακας/sparkline (πολυπλοκότητα για overview γράφημα χωρίς αντίστοιχη αξία). Dark/mobile:
+  safe-by-construction (Chart.js responsive + `ReportPalette` dark-safe + € via `Intl`). Οι Reports charts (μηνιαία/
+  ετήσια σειρά) σπάνια είναι κενές· empty-state εκεί = μικρό follow-up αν ποτέ ζητηθεί.
 
 ### 8. Dashboard — widgets που λείπουν
 
@@ -194,10 +198,12 @@ Top **Πελάτες** (`TopCustomersTable`), renewals, myDATA/WHMCS stats. Λε
   (ανανεώσεις 30μ) + `LeadsCalendar` (επόμενα βήματα leads) + `OverdueInvoicesTable`. Μόνο τα collection
   next-steps (#5) δεν είναι σε dashboard widget (ζουν στην AgedReceivables) — μικρό follow-up αν χρειαστεί.
 - [ ] **Έξοδα** ανά κατηγορία widget (κουμπώνει με το «ίδιο για έξοδα» του #2).
-- [ ] (deferred, #7 polish PR) skeleton/sparse states + dark/mobile pass στα νέα γραφήματα.
-- [ ] (P2 review, accepted) τα δύο νέα γραφήματα cache-άρονται per tenant+year (TTL 30', PHP materialisation)
+- [x] Empty-state στα νέα γραφήματα — DONE 2026-09-17 (βλ. #7). Skeleton/sparse-table: declined (over-engineering).
+- [ ] (P2 review, accepted) τα τρία νέα γραφήματα cache-άρονται per tenant+year (TTL 30', PHP materialisation)
   χωρίς invalidation σε invoice write → έως 30' staleness. Overview surfaces (όχι money-consistency invariant),
   αποδεκτό· proper version-keyed invalidation + scheduled warm = #7-polish follow-up (όπως `DashboardMetricsCache`).
+  **Το empty-state το κάνει πιο ορατό** (νέος tenant βλέπει «προς εμφάνιση φέτος» ~30' μετά την 1η εγγραφή)· φθηνή
+  ενδιάμεση λύση = να ΜΗΝ cache-άρεται το άδειο αποτέλεσμα (empty compute είναι φθηνό) μέχρι να μπει το invalidation.
 - [ ] (P2 review round-2, deferred — root-fixes εκτός του «2 widgets» scope):
   - **Header-discount reconciliation:** το `TopProductsChart` αθροίζει `net_price` γραμμών (χωρίς invoice-level
     header discount), όπως ήδη κάνει το `CustomerTopProducts::forCompany` (Καρτέλα + MCP top_products), ενώ το
@@ -208,8 +214,8 @@ Top **Πελάτες** (`TopCustomersTable`), renewals, myDATA/WHMCS stats. Λε
     τα έξοδα του έτους σε PHP (χρειάζεται per-row credit-note sign, άρα όχι σκέτο SQL `SUM`). Όλα cached 30',
     αλλά current-year-only / SQL-aggregated (CASE sign + `GROUP BY COALESCE(supplier_id, name)`) variants θα τα
     έκοβαν → με το ίδιο caching follow-up.
-  - **Label collisions (#7 polish):** `Str::limit` μπορεί να κάνει δύο μακριά ονόματα ίδια στο γράφημα → μαζί με
-    το sparse/dark/mobile pass.
+  - **Label collisions:** `Str::limit` μπορεί να κάνει δύο μακριά ονόματα ίδια στο γράφημα → μαζί με το
+    shared-base cleanup (μικρό nicety· π.χ. tooltip με πλήρες όνομα).
   - **Pipeline heuristic (PR-2):** το «Αξία pipeline» παίρνει την ΤΕΛΕΥΤΑΙΑ ζωντανή προσφορά ανά ανοιχτό lead
     (created_at, tiebreak id)· ένα φρέσκο Draft revision μπορεί να υπερκεράσει ένα ζωντανό Accepted. Το quote-derived
     pipeline είναι εξ ορισμού προσεγγιστικό (τα leads δεν έχουν πεδίο αξίας)· status-priority (Accepted>Sent>Draft)
