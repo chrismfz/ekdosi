@@ -26,63 +26,17 @@ use WHMCS\Module\Addon\EkdosiBridge\ThirdPartyStore;
  */
 class Controller
 {
+    /**
+     * The addon landing IS the invoice list now (Direct Access): a compact
+     * status strip + the WHMCS→ekdosi list + footer tools, one page. The old
+     * standalone landing folded in — third-party readiness moved to the strip,
+     * «Προτιμήσεις τρίτων» + «Bridge logs» to the footer, the inspect box dropped
+     * (the list has its own jump-by-id), and «Sync from legacy» retired from the
+     * UI (the `sync()` action stays reachable for the rare manual re-run).
+     */
     public function index(array $vars): string
     {
-        $link = htmlspecialchars($vars['modulelink']);
-        $token = $this->csrfField();
-
-        // Third-party (timologia v2) status: own tables present + row counts.
-        $tpStatus = '<span class="label label-default">tables not created — activate or sync</span>';
-        if (ThirdPartyStore::hasOwnTables()) {
-            $contacts = (int) Capsule::table(ThirdPartyStore::CONTACTS)->count();
-            $routes = (int) Capsule::table(ThirdPartyStore::ROUTING)->count();
-            $tpStatus = '<span class="label label-success">ready</span> '
-                .htmlspecialchars((string) $contacts).' contacts, '
-                .htmlspecialchars((string) $routes).' routing rows';
-        }
-        $legacyNote = ThirdPartyStore::hasLegacyTables()
-            ? 'Legacy mod_timologia tables detected — syncable.'
-            : 'No legacy mod_timologia tables found on this WHMCS.';
-
-        $insights = $this->insightsPanel();
-        $invoicesLink = htmlspecialchars($link.'&action=invoices');
-
-        return <<<EOF
-<h2>Ekdosi Bridge</h2>
-{$insights}
-<p style="margin:12px 0">
-    <a class="btn btn-primary" href="{$invoicesLink}">
-        <i class="fa fa-list"></i> Λίστα τιμολογίων WHMCS → Ekdosi (ΤΠΥ / ΜΑΡΚ)
-    </a>
-    <a class="btn btn-default" href="{$link}&action=bridgeLog">
-        <i class="fa fa-exchange"></i> Bridge logs (τι ρωτάει το ekdosi)
-    </a>
-</p>
-<hr>
-<p class="text-muted">Ή επιθεώρησε ένα συγκεκριμένο τιμολόγιο (και εκτός λίστας):</p>
-<form action="{$link}&action=show" method="POST" class="form-inline" style="margin-bottom:8px">
-    <div class="input-group" style="max-width:340px">
-        <input class="form-control input-sm" name="invoiceid" placeholder="Invoice # (π.χ. 12345)" type="text" required>
-        <span class="input-group-btn"><button class="btn btn-sm btn-default" type="submit"><i class="fa fa-search"></i> Επιθεώρηση</button></span>
-    </div>
-</form>
-<hr>
-<h3>Παραστατικά σε τρίτους (timologia v2)</h3>
-<p>Own routing tables: {$tpStatus}</p>
-<p class="text-muted">{$legacyNote}</p>
-<form action="{$link}&action=sync" method="POST" style="display:inline-block;">
-    {$token}
-    <button class="btn btn-default" type="submit"
-        onclick="return confirm('Import third-party contacts + routing from the legacy mod_timologia tables into the bridge\'s own tables? Re-runnable and idempotent; legacy tables are only read.');">
-        <i class="fa fa-download"></i> Sync from legacy timologia
-    </button>
-</form>
-<p style="margin-top:14px">
-    <a class="btn btn-default" href="{$link}&action=prefs">
-        <i class="fa fa-users"></i> Προτιμήσεις τρίτων (πελάτες · επαφές · δρομολόγηση)
-    </a>
-</p>
-EOF;
+        return $this->invoices($vars);
     }
 
     /**
@@ -124,20 +78,17 @@ EOF;
                 .$contacts.' επαφές, '.$routes.' δρομολογήσεις';
         }
 
-        // «Τελευταίο ερώτημα ekdosi» — the inbound-poll freshness from the bridge
-        // log. STALE (>60′) or never = the silent-outage signal, shown here on the
-        // landing where the WHMCS admin sees it daily.
-        $lastPoll = BridgeLogStore::lastInboundPollAt();
-        $pollCell = $this->pollFreshnessCell($lastPoll);
+        // Inbound-poll freshness — folded INTO the «Γέφυρα» line as a compact
+        // ago-badge (green fresh / red stale >60′ / «ποτέ»), the exact timestamp
+        // on hover. This is the silent-outage tripwire the WHMCS admin sees daily.
+        $pollBadge = $this->pollAgoBadge(BridgeLogStore::lastInboundPollAt());
 
-        // Client-facing «Εκδοθέντα Παραστατικά» knobs, shown here so an admin sees
-        // (and can find where to flip) the two switches at a glance — the master
-        // «show page» kill-switch and the «also show old» historical toggle. The
-        // switches live on the addon's Configure screen (configaddonmods.php);
-        // this is read-only status + a jump link.
+        // Client-facing «Εκδοθέντα Παραστατικά» MASTER switch — read-only status +
+        // a jump link to Configure (where it's actually flipped, alongside the
+        // historical sub-toggle we no longer surface on this strip).
         $clientCfg = Capsule::table('tbladdonmodules')
             ->where('module', 'ekdosi_bridge')
-            ->whereIn('setting', ['show_client_issued', 'show_client_issued_historical', 'issued_pilot_clients'])
+            ->whereIn('setting', ['show_client_issued', 'issued_pilot_clients'])
             ->pluck('value', 'setting');
         $isOn = static fn (string $k): bool => in_array(strtolower((string) ($clientCfg[$k] ?? '')), ['on', 'yes', '1', 'true'], true);
         $onOff = static fn (bool $on): string => $on
@@ -149,21 +100,14 @@ EOF;
             ? ' <span class="text-muted">(pilot: '.htmlspecialchars($pilotRaw).')</span>'
             : '';
         $issuedCell = $onOff($issuedOn).$pilotNote;
-        // Historical only matters while the page itself is on.
-        $histCell = $issuedOn
-            ? $onOff($isOn('show_client_issued_historical'))
-            : '<span class="text-muted">—</span>';
         $configLink = '<a href="configaddonmods.php">Ρυθμίσεις γέφυρας (Configure)</a>';
 
         return <<<EOF
-<table class="table table-condensed" style="max-width:640px">
-    <tr><th style="width:220px">Γέφυρα</th><td>{$configured}</td></tr>
+<table class="table table-condensed" style="max-width:720px;margin-bottom:10px">
+    <tr><th style="width:200px">Γέφυρα</th><td>{$configured} · <span class="text-muted">ερώτημα ekdosi</span> {$pollBadge} · <span class="text-muted">v{$version}</span></td></tr>
     <tr><th>Ekdosi</th><td>{$target}</td></tr>
-    <tr><th>Έκδοση plugin</th><td>{$version}</td></tr>
-    <tr><th>Τελευταίο ερώτημα ekdosi</th><td>{$pollCell}</td></tr>
     <tr><th>Παραστατικά τρίτων</th><td>{$tp}</td></tr>
     <tr><th>Σελίδα «Εκδοθέντα» (πελάτες)</th><td>{$issuedCell}</td></tr>
-    <tr><th>— Παλαιά παραστατικά (historical)</th><td>{$histCell}</td></tr>
 </table>
 <p class="text-muted" style="margin-top:-6px">Άλλαξε τους διακόπτες πελατών στο {$configLink}.</p>
 EOF;
@@ -240,8 +184,8 @@ EOF;
             .' ('.htmlspecialchars($lastPoll).').</div>';
     }
 
-    /** Compact freshness label for the landing insights table. */
-    private function pollFreshnessCell(?string $lastPoll): string
+    /** Compact freshness badge (ago-label; exact timestamp on hover) for the strip. */
+    private function pollAgoBadge(?string $lastPoll): string
     {
         if ($lastPoll === null) {
             return '<span class="label label-warning">ποτέ</span>';
@@ -249,8 +193,8 @@ EOF;
         $age = time() - (int) strtotime($lastPoll);
         $cls = $age > 3600 ? 'label-danger' : 'label-success';
 
-        return '<span class="label '.$cls.'">'.$this->agoLabel($lastPoll).'</span> '
-            .'<span class="text-muted" style="font-size:11px">'.htmlspecialchars($lastPoll).'</span>';
+        return '<span class="label '.$cls.'" title="'.htmlspecialchars($lastPoll).'">'
+            .$this->agoLabel($lastPoll).'</span>';
     }
 
     /** Human "X πριν" for a stored datetime (server time, same clock as records). */
@@ -313,8 +257,13 @@ EOF;
             ->get(['id', 'userid', 'date', 'duedate', 'datepaid', 'paymentmethod', 'total', 'status', 'invoiced']);
 
         if ($invoices->isEmpty()) {
-            return '<p><a class="btn btn-default" href="'.$link.'">&larr; Back</a></p>'
-                .'<div class="alert alert-info">Κανένα τιμολόγιο για το φίλτρο «'.htmlspecialchars($status).'».</div>';
+            return $this->insightsPanel()
+                .'<h2>Τιμολόγια WHMCS → Ekdosi</h2>'
+                .$this->jumpForm($link)
+                .$this->periodTabs($link, $status, $period)
+                .$this->statusTabs($link, $status, $period)
+                .'<div class="alert alert-info">Κανένα τιμολόγιο για το φίλτρο «'.htmlspecialchars($status).'».</div>'
+                .$this->landingFooter($link);
         }
 
         // Client names in one query.
@@ -440,12 +389,25 @@ EOF;
 
             $kind = $this->kindCell($wantsInvoice[(int) $inv->userid] ?? null);
 
+            // «Καταχωρημένο»: the row tints LIGHT GREEN exactly when its status
+            // badge is green — a whole-row ECHO of the badge. Derive it FROM the
+            // $badge we just built (the green «Καταχωρημένο»/«Στο AADE» labels are
+            // the only `label-success` a row cell carries) rather than re-stating
+            // the predicate, so the tint can never drift from the badge if
+            // mapStatusBadge/legacyCells change. Cancelled → label-danger → no green.
+            $isFiled = str_contains($badge, 'label-success');
+
             // «Άμεσο»: badge on the client name; RED row only while the invoice is
             // still unfiled (state === null && hist === null → it shows «Αποστολή»),
             // i.e. the operator still needs to act. A filed immediate row keeps the
-            // badge but not the red (it's done).
+            // badge but not the red (it's done). Red (needs-action) wins over green.
             $isImmediate = $immediate[(int) $inv->userid] ?? false;
-            $rowClass = ($isImmediate && $state === null && $hist === null) ? ' class="danger"' : '';
+            $rowClass = '';
+            if ($isImmediate && $state === null && $hist === null) {
+                $rowClass = ' class="danger"';
+            } elseif ($isFiled) {
+                $rowClass = ' class="success"';
+            }
             if ($isImmediate) {
                 $name .= ' <span class="label label-danger" title="Άμεση τιμολόγηση — ο πελάτης ζητά άμεση έκδοση"><i class="fa fa-bolt"></i> Άμεσο</span>';
             }
@@ -484,15 +446,16 @@ EOF;
         // status/period filter (an old #12345 that doesn't show in «εβδομάδα»).
         // Same target as a row's «Άνοιγμα» — one door to the per-invoice detail,
         // so the standalone landing form is no longer needed.
-        $jump = '<form action="'.$link.'&action=show" method="POST" class="form-inline" style="margin:0 0 10px">'
-            .'<div class="input-group" style="max-width:340px">'
-            .'<input class="form-control input-sm" name="invoiceid" placeholder="Μετάβαση σε τιμολόγιο #… (και εκτός φίλτρου)" type="text" required>'
-            .'<span class="input-group-btn"><button class="btn btn-sm btn-default" type="submit">'
-            .'<i class="fa fa-search"></i> Επιθεώρηση</button></span>'
-            .'</div></form>';
+        $jump = $this->jumpForm($link);
+
+        // Merged landing (Direct Access): the compact status strip on top, the
+        // footer tools (Προτιμήσεις τρίτων · Bridge logs) at the bottom. No «Back»
+        // — this IS the addon's home page.
+        $strip = $this->insightsPanel();
+        $footer = $this->landingFooter($link);
 
         return <<<EOF
-<p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
+{$strip}
 <h2>Τιμολόγια WHMCS → Ekdosi</h2>
 {$bridgeWarn}
 {$jump}
@@ -507,6 +470,7 @@ EOF;
   <tbody>{$rows}</tbody>
 </table>
 {$pager}
+{$footer}
 EOF;
     }
 
@@ -681,6 +645,44 @@ EOF;
     }
 
     /**
+     * Footer tools for the merged landing/list page: the secondary actions that
+     * used to live on the old standalone landing — «Προτιμήσεις τρίτων» (the
+     * per-client routing browser) and «Bridge logs» (what ekdosi asks resolve.php).
+     * «Sync from legacy» is intentionally NOT here anymore (one-off, done); its
+     * `sync()` action stays reachable by URL for the rare manual re-run.
+     */
+    private function landingFooter(string $link): string
+    {
+        $prefs = htmlspecialchars($link.'&action=prefs');
+        $logs = htmlspecialchars($link.'&action=bridgeLog');
+
+        return <<<EOF
+<hr>
+<p>
+    <a class="btn btn-default btn-sm" href="{$prefs}"><i class="fa fa-users"></i> Προτιμήσεις τρίτων (πελάτες · επαφές · δρομολόγηση)</a>
+    <a class="btn btn-default btn-sm" href="{$logs}"><i class="fa fa-exchange"></i> Bridge logs (τι ρωτάει το ekdosi)</a>
+</p>
+EOF;
+    }
+
+    /**
+     * Jump-by-ID form → per-invoice detail (action=show). Reaches ANY invoice,
+     * even one outside the current status/period filter. Shown on the list AND on
+     * the empty-filter state, so the merged landing is never a dead end when the
+     * default Paid/week window returns nothing (it replaced the old landing's
+     * standalone inspect box).
+     */
+    private function jumpForm(string $link): string
+    {
+        return '<form action="'.$link.'&action=show" method="POST" class="form-inline" style="margin:0 0 10px">'
+            .'<div class="input-group" style="max-width:340px">'
+            .'<input class="form-control input-sm" name="invoiceid" placeholder="Μετάβαση σε τιμολόγιο #… (και εκτός φίλτρου)" type="text" required>'
+            .'<span class="input-group-btn"><button class="btn btn-sm btn-default" type="submit">'
+            .'<i class="fa fa-search"></i> Επιθεώρηση</button></span>'
+            .'</div></form>';
+    }
+
+    /**
      * «Είδος» cell from the client's "θέλω τιμολόγιο" intent: true → Τιμολόγιο,
      * false → Απόδειξη, null → unknown (field unmapped / not set).
      */
@@ -818,7 +820,7 @@ EOF;
     {
         $link = htmlspecialchars($vars['modulelink']);
         if (! ThirdPartyStore::hasOwnTables()) {
-            return $this->errorPage($link, 'Δεν υπάρχουν ακόμη πίνακες — ενεργοποιήστε το addon ή τρέξτε «Sync from legacy timologia».');
+            return $this->errorPage($link, 'Δεν υπάρχουν ακόμη πίνακες — ενεργοποιήστε ξανά το addon (οι πίνακες δημιουργούνται αυτόματα σε κάθε φόρτωση).');
         }
 
         $userid = (int) ($_GET['userid'] ?? 0);
@@ -844,7 +846,7 @@ EOF;
         )));
 
         if ($userids === []) {
-            return $this->errorPage($link, 'Καμία καταχωρημένη προτίμηση ακόμη. Τρέξτε «Sync from legacy timologia».');
+            return $this->errorPage($link, 'Καμία καταχωρημένη προτίμηση ακόμη — θα εμφανιστούν καθώς οι πελάτες/χειριστές ορίζουν δρομολόγηση.');
         }
 
         $clients = Capsule::table('tblclients')->whereIn('id', $userids)
