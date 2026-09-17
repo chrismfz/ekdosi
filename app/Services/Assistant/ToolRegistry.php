@@ -99,11 +99,14 @@ class ToolRegistry
                 continue;
             }
             $schema = $tool->inputSchema();
-            // A no-argument tool whose `properties` is an empty PHP `[]` would
-            // re-encode as a JSON array `[]`, and Anthropic 400s the whole call
-            // «input_schema.properties: Input should be an object». Force it to
-            // an object `{}` here so ANY tool is safe, not just the ones that
-            // remembered to cast. (Mirror of AssistantRunner::normalizeToolInputs.)
+            // A no-argument tool whose top-level `properties` is an empty PHP `[]`
+            // would re-encode as a JSON array `[]`, and Anthropic 400s the whole
+            // call «input_schema.properties: Input should be an object». Coerce it
+            // to an object `{}` so a tool that forgot the cast can't break every
+            // request — the no-arg shape all our tools use. (Mirror of
+            // AssistantRunner::normalizeToolInputs. Our schemas are flat, so a
+            // top-level check suffices; add recursion only if a tool ever nests
+            // an empty-`properties` object.)
             if (($schema['properties'] ?? null) === []) {
                 $schema['properties'] = (object) [];
             }
