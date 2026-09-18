@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Customers\Pages;
 
+use App\Filament\Concerns\ResolvesAadeFormConflicts;
 use App\Filament\Resources\Customers\CustomerResource;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
@@ -12,6 +13,8 @@ use Illuminate\Database\UniqueConstraintViolationException;
 
 class CreateCustomer extends CreateRecord
 {
+    use ResolvesAadeFormConflicts;
+
     protected static string $resource = CustomerResource::class;
 
     /**

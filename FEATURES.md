@@ -309,7 +309,11 @@
   transport, backlog).
 
 ## 7. Πελάτες & Καρτέλα
-- **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ».
+- **GSIS lookup** native (`AadeRegistryLookup`) + «Άντληση/Διόρθωση από ΑΑΔΕ». Το **«Άντληση»** είναι
+  diff-aware: συμπληρώνει αμέσως τα **κενά** πεδία και, αν κάποιο **ήδη συμπληρωμένο** διαφέρει από την
+  ΑΑΔΕ (π.χ. μετακόμιση → νέα διεύθυνση), ανοίγει **picker ανά πεδίο** («δικό μας → ΑΑΔΕ») για να διαλέξει
+  ο χειριστής τι θα αντικατασταθεί — δεν αγνοεί πια σιωπηλά την αλλαγή, ούτε σβήνει ό,τι έχει γραφτεί.
+  Το **«Διόρθωση»** παραμένει το overwrite-όλων χωρίς ερώτηση (`ResolvesAadeFormConflicts`).
 - **Ένας πελάτης ανά ΑΦΜ (DB-enforced)**: `customers.afm_key` (`Afm::uniqueKey`: ψηφία για GR με/χωρίς
   EL/GR, γράμματα για ξένο VAT, NULL για placeholder/κενό) + `UNIQUE(company_id, afm_key)` και σε
   soft-deleted· φιλικό validation στη φόρμα· ETL/importer/sync/WHMCS όλα μέσω `whereAfmKeyOf`.

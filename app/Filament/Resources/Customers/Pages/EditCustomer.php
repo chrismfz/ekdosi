@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Customers\Pages;
 
 use App\Exceptions\Whmcs\WhmcsApiException;
+use App\Filament\Concerns\ResolvesAadeFormConflicts;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Models\Customer;
 use App\Services\Customers\MergeCustomers;
@@ -21,6 +22,8 @@ use Illuminate\Database\UniqueConstraintViolationException;
 
 class EditCustomer extends EditRecord
 {
+    use ResolvesAadeFormConflicts;
+
     protected static string $resource = CustomerResource::class;
 
     /**
