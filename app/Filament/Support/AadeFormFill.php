@@ -23,8 +23,8 @@ use Filament\Notifications\Notification;
 class AadeFormFill
 {
     /**
-     * @return AadeRegistryRecord|null  the record on success, or null after
-     *         a notification has been shown for the failure.
+     * @return AadeRegistryRecord|null the record on success, or null after
+     *                                 a notification has been shown for the failure.
      */
     public static function lookup(?string $afm): ?AadeRegistryRecord
     {
@@ -84,5 +84,49 @@ class AadeFormFill
         if ($overwrite || empty($get($field))) {
             $set($field, $value);
         }
+    }
+
+    /**
+     * Classify AADE-sourced field values against the current form state into:
+     *   - `fills`     : field ⇒ AADE value, where the form field is EMPTY. Safe to
+     *                   apply immediately — nothing the operator typed is lost.
+     *   - `conflicts` : field ⇒ ['current' => …, 'aade' => …], where the field
+     *                   ALREADY has a (different) value. These need an explicit
+     *                   operator decision before we overwrite a typed value.
+     *
+     * Fields whose AADE value is empty, or already equal to what's in the form,
+     * are dropped from both buckets (nothing to do; never blank a field). Trim
+     * is applied on both sides so a stray space isn't a "difference".
+     *
+     * This is the shared rule behind the customer/supplier «Άντληση από ΑΑΔΕ»
+     * button: fill the gaps for free, ask before clobbering.
+     *
+     * @param  array<string, string|null>  $aadeValues  field ⇒ value from the AADE record
+     * @return array{fills: array<string, string>, conflicts: array<string, array{current: string, aade: string}>}
+     */
+    public static function splitFillsAndConflicts(callable $get, array $aadeValues): array
+    {
+        $fills = [];
+        $conflicts = [];
+
+        foreach ($aadeValues as $field => $aade) {
+            $aade = trim((string) ($aade ?? ''));
+            if ($aade === '') {
+                continue;   // AADE has nothing to offer for this field
+            }
+
+            $current = trim((string) ($get($field) ?? ''));
+            if ($current === $aade) {
+                continue;   // already in sync
+            }
+
+            if ($current === '') {
+                $fills[$field] = $aade;
+            } else {
+                $conflicts[$field] = ['current' => $current, 'aade' => $aade];
+            }
+        }
+
+        return ['fills' => $fills, 'conflicts' => $conflicts];
     }
 }

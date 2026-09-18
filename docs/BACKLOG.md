@@ -931,6 +931,26 @@ data model + phase gates: **`PLAN.md`**.
   πάντα array). Στον γκρινιάρη-mirror το καταπίνει το best-effort `\Throwable` catch· στο create-seed
   (`WhmcsCustomerCreator`) όχι. Fix = ένας κοινός guard `is_array($customfields)` στην κορυφή του reader.
 
+### «Άντληση από ΑΑΔΕ» diff-aware picker — surviving P2/P3s (από το review, 2026-09-18)
+Το κουμπί «Άντληση» στη φόρμα πελάτη έγινε diff-aware (γεμίζει κενά + picker ανά πεδίο σε σύγκρουση,
+`AadeFormFill::splitFillsAndConflicts` + trait `ResolvesAadeFormConflicts`). Πέρασε **χωρίς P0/P1** (κανένα
+data-loss/tenant-leak/money· 6 tests, both Create+Edit). Το finding «stale conflict PII στο public property»
+**διορθώθηκε** (τα conflicts ταξιδεύουν πλέον ως mounted-action arguments → σβήνονται σε submit/cancel).
+Round 2 findings: **country_code raw-ISO ψευδο-conflict** και **διπλότυπο notification block** → **διορθώθηκαν**
+(το country_code βγήκε από το conflict map — fill-empty/overwrite χωριστά· κοινό `sendAadeStatusNotification`).
+Επιβίωσαν:
+- **Δύο parallel maps (`aadeCustomerValues` + `aadeCustomerFieldLabels`) — P3, accepted.** Πρέπει να μένουν
+  in-sync· αν προστεθεί πεδίο στο πρώτο χωρίς label, ο picker δείχνει το raw key (fallback `?? $field`, όχι
+  crash). Αμελητέο για 6 σταθερά πεδία· δεν αξίζει abstraction.
+- **Length guard στα αντλημένα πεδία (P3, προϋπάρχει).** Το `$set`/`data_set` γράφει την τιμή ΑΑΔΕ χωρίς
+  έλεγχο `maxLength` — μια διεύθυνση > 60 χαρ. (address1) περνά στη φόρμα και σκάει ως validation error στην
+  Αποθήκευση (το `occupation` είναι ασφαλές, capped 120 στο DTO). Ίδια συμπεριφορά με το παλιό fill path —
+  δεν εισήχθη εδώ. Fix (αν χρειαστεί): trim/cap στο `aadeCustomerValues` ή inline validation. Άσε προς το παρόν.
+- **Root-statePath assumption του trait (P3, documented).** Τα empty-fills γράφουν με component-relative `$set`
+  και ο picker με `data_set($this->data, …)` (root) — ταυτίζονται μόνο επειδή όλα τα πεδία πελάτη είναι
+  root-level. Αν το trait ξαναχρησιμοποιηθεί σε nested statePath (Section/Repeater), θα αποκλίνουν. Τεκμηριωμένο
+  στο docblock του trait· δεν είναι bug σήμερα.
+
 ### «Έλεγχος legacy» removal — surviving P2s (από το review, 2026-09-17)
 Το dual-run legacy-invoiced check αφαιρέθηκε post-cutover (κουμπί «Έλεγχος legacy» + στήλη «Legacy» +
 φίλτρο + `LegacyInvoicedRefresher` + οι κλήσεις του στο `whmcs:fetch-pending`· καθαρίστηκε και το

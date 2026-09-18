@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Customers\Schemas;
 
+use App\DTOs\AadeRegistryRecord;
 use App\Enums\LeadActivityType;
 use App\Filament\Resources\Leads\LeadResource;
 use App\Filament\Support\AadeFormFill;
@@ -115,7 +116,7 @@ class CustomerForm
                                             ->label('Άντληση από ΑΑΔΕ')
                                             ->icon('heroicon-o-arrow-down-tray')
                                             ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
-                                            ->action(fn (callable $get, callable $set) => self::applyAadeToCustomer($get, $set, overwrite: false)),
+                                            ->action(fn (callable $get, callable $set, $livewire) => self::fetchAadeIntoCustomer($get, $set, $livewire)),
                                         FormAction::make('correct_customer_from_aade')
                                             ->label('Διόρθωση από ΑΑΔΕ')
                                             ->icon('heroicon-o-arrow-path')
@@ -123,7 +124,7 @@ class CustomerForm
                                             ->visible(fn () => Filament::getTenant()?->country_code === 'GR')
                                             ->requiresConfirmation()
                                             ->modalHeading('Διόρθωση στοιχείων από ΑΑΔΕ')
-                                            ->modalDescription('Αντικαθιστά επωνυμία/ΔΟΥ/διεύθυνση/δραστηριότητα με τα επίσημα στοιχεία του μητρώου ΑΑΔΕ (πηγή αλήθειας). Ό,τι έχει γράψει ο πελάτης λάθος θα διορθωθεί.')
+                                            ->modalDescription('Αντικαθιστά ΟΛΑ τα στοιχεία (επωνυμία/ΔΟΥ/διεύθυνση/δραστηριότητα) με τα επίσημα στοιχεία του μητρώου ΑΑΔΕ (πηγή αλήθειας), χωρίς ερώτηση ανά πεδίο. Για επιλεκτική ενημέρωση χρησιμοποίησε το «Άντληση από ΑΑΔΕ».')
                                             ->action(fn (callable $get, callable $set) => self::applyAadeToCustomer($get, $set, overwrite: true)),
                                     ]),
 
@@ -319,11 +320,101 @@ class CustomerForm
     }
 
     /**
-     * Look up the form's ΑΦΜ in the GSIS registry and apply the result to the
-     * customer fields. $overwrite=false fills only empty fields (import);
-     * $overwrite=true replaces them (AADE is the source of truth — correct a
-     * wrong/changed entry). Shared by both AADE buttons; the empty/overwrite
-     * rule lives in AadeFormFill::assign so customer + supplier can't drift.
+     * The AADE registry record mapped onto the customer form fields it can
+     * populate. Single source shared by BOTH AADE buttons («Άντληση» diff-fill
+     * and «Διόρθωση» overwrite) so the field list can't drift. country_code is
+     * handled outside this map (see the NOTE below).
+     *
+     * @return array<string, string> field ⇒ AADE value (may be '')
+     */
+    private static function aadeCustomerValues(AadeRegistryRecord $record): array
+    {
+        $primary = $record->primaryActivity();
+
+        // NOTE: country_code is deliberately NOT here. GSIS is GR-only, so it's
+        // a fixed 'GR' handled separately (fill-empty on «Άντληση», overwrite on
+        // «Διόρθωση») — never a per-field conflict, which would otherwise show a
+        // confusing raw-ISO row («CY» → «GR») in the picker.
+        return [
+            'name' => (string) $record->name,
+            'tax_office' => (string) $record->doy,
+            'address1' => (string) $record->address,
+            'city' => (string) $record->city,
+            'postcode' => (string) $record->postcode,
+            'kad_primary' => (string) ($primary['code'] ?? ''),
+            // occupation = human-readable activity, printed on invoices as
+            // "Δραστηριότητα: ...".
+            'occupation' => (string) ($primary['description'] ?? ''),
+        ];
+    }
+
+    /** @return array<string, string>  field ⇒ operator-facing Greek label */
+    private static function aadeCustomerFieldLabels(): array
+    {
+        return [
+            'name' => 'Επωνυμία',
+            'tax_office' => 'ΔΟΥ',
+            'address1' => 'Διεύθυνση',
+            'city' => 'Πόλη',
+            'postcode' => 'Τ.Κ.',
+            'kad_primary' => 'ΚΑΔ',
+            'occupation' => 'Δραστηριότητα',
+        ];
+    }
+
+    /**
+     * «Άντληση από ΑΑΔΕ»: fill every EMPTY field from the registry immediately
+     * (nothing typed is lost), and — if any ALREADY-filled field disagrees with
+     * AADE — chain into the per-field conflict picker so the operator decides
+     * which typed values to replace. This fixes the old "fill-only-empty"
+     * behaviour that silently skipped a changed address without a word.
+     *
+     * The conflict picker lives on the page (ResolvesAadeFormConflicts) so it
+     * can write back into the page's form state after mount.
+     */
+    private static function fetchAadeIntoCustomer(callable $get, callable $set, $livewire): void
+    {
+        $result = AadeFormFill::lookup($get('afm'));
+        if (! $result) {
+            return;   // failure already surfaced as a notification
+        }
+
+        $values = self::aadeCustomerValues($result);
+        $split = AadeFormFill::splitFillsAndConflicts($get, $values);
+
+        // Apply the safe empty-fills right away.
+        foreach ($split['fills'] as $field => $value) {
+            $set($field, $value);
+        }
+
+        // GSIS is GR-only → set the country only when empty (never clobber /
+        // never a conflict; the ISO picker mirrors into the free-text `country`).
+        AadeFormFill::assign($get, $set, 'country_code', 'GR', overwrite: false);
+
+        self::notifyAadeFetch($result, count($split['fills']), count($split['conflicts']));
+
+        // Hand any conflicts to the picker modal (labelled for display), then
+        // mount it. No conflicts → we're done in one click.
+        if ($split['conflicts'] !== []) {
+            $labels = self::aadeCustomerFieldLabels();
+            $conflicts = [];
+            foreach ($split['conflicts'] as $field => $pair) {
+                $conflicts[$field] = [
+                    'label' => $labels[$field] ?? $field,
+                    'current' => $pair['current'],
+                    'aade' => $pair['aade'],
+                ];
+            }
+
+            $livewire->replaceMountedAction('resolveAadeConflicts', arguments: ['conflicts' => $conflicts]);
+        }
+    }
+
+    /**
+     * «Διόρθωση από ΑΑΔΕ»: the registry is the source of truth — overwrite ALL
+     * mapped fields (a wrong/changed entry), no per-field prompt. The
+     * empty/overwrite rule lives in AadeFormFill::assign so customer + supplier
+     * can't drift.
      */
     private static function applyAadeToCustomer(callable $get, callable $set, bool $overwrite): void
     {
@@ -332,26 +423,48 @@ class CustomerForm
             return;
         }
 
-        AadeFormFill::assign($get, $set, 'name', $result->name, $overwrite);
-        AadeFormFill::assign($get, $set, 'tax_office', $result->doy, $overwrite);
-        AadeFormFill::assign($get, $set, 'address1', $result->address, $overwrite);
-        AadeFormFill::assign($get, $set, 'city', $result->city, $overwrite);
-        AadeFormFill::assign($get, $set, 'postcode', $result->postcode, $overwrite);
-        // The form's country control is the ISO picker (country_code); the model's
-        // saving() hook mirrors it into the free-text `country`. GSIS is GR-only.
+        foreach (self::aadeCustomerValues($result) as $field => $value) {
+            AadeFormFill::assign($get, $set, $field, $value, $overwrite);
+        }
+        // GSIS is GR-only (see aadeCustomerValues). Overwrite the country here.
         AadeFormFill::assign($get, $set, 'country_code', 'GR', $overwrite);
-        $primary = $result->primaryActivity();
-        if ($primary) {
-            AadeFormFill::assign($get, $set, 'kad_primary', $primary['code'] ?? null, $overwrite);
-            // occupation = human-readable activity, printed on invoices as
-            // "Δραστηριότητα: ...".
-            AadeFormFill::assign($get, $set, 'occupation', $primary['description'] ?? null, $overwrite);
+
+        self::sendAadeStatusNotification($result, 'Διορθώθηκε από ΑΑΔΕ: '.$result->name);
+    }
+
+    /**
+     * Post-«Άντληση» toast: what was auto-filled, whether differences are
+     * waiting in the picker, and the AADE activity/status.
+     */
+    private static function notifyAadeFetch(AadeRegistryRecord $result, int $filled, int $conflicts): void
+    {
+        $summary = [];
+        if ($filled > 0) {
+            $summary[] = "{$filled} κενά συμπληρώθηκαν";
+        }
+        if ($conflicts > 0) {
+            $summary[] = "{$conflicts} διαφέρουν — δες το παράθυρο";
+        }
+        if ($filled === 0 && $conflicts === 0) {
+            $summary[] = 'όλα ήδη συγχρονισμένα';
         }
 
-        // Surface AADE status — a suspended/deactivated AFM would fail myDATA
-        // on first invoice; the operator should see it now.
+        self::sendAadeStatusNotification(
+            $result,
+            'Άντληση από ΑΑΔΕ: '.$result->name.' ('.implode(' · ', $summary).')',
+        );
+    }
+
+    /**
+     * Shared AADE toast: title + activity body, success when the ΑΦΜ is active,
+     * a warning carrying the raw status text when it isn't (a suspended/
+     * deactivated ΑΦΜ would fail myDATA on the first invoice — surface it now).
+     */
+    private static function sendAadeStatusNotification(AadeRegistryRecord $result, string $title): void
+    {
+        $primary = $result->primaryActivity();
         $body = $result->doy.($primary ? ' · '.($primary['description'] ?? '') : '');
-        $title = ($overwrite ? 'Διορθώθηκε από ΑΑΔΕ: ' : 'Loaded from AADE: ').$result->name;
+
         $notification = Notification::make()->title($title);
         if ($result->active) {
             $notification->body($body)->success();
