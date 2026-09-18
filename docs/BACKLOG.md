@@ -963,6 +963,27 @@ P0/P1** για την πραγματική εξαγωγή (242 εμβάσματ�
   «~N ενημ.»). Τα ιστορικά ποσά δεν αλλάζουν· διόρθωση = σβήσε τη γραμμή και ξανα-import. Preserve
   operator work > auto-propagate.
 
+### Import-credit linking (`payments:apply-imported-credits`) — surviving P2 (από το review, 2026-09-18)
+Η εντολή που δένει FIFO τις εισαγόμενες «έναντι» (`EPS:`) πιστώσεις στα ανοιχτά τιμολόγια (net-zero,
+idempotent, `--dry-run`) πέρασε **χωρίς P0/P1**. Επιδιορθώθηκαν στο review: dry-run cap στο **net** available
+credit (== real run), per-customer **atomic transaction** + per-customer error isolation, fail-loud (χωρίς
+σιωπηλό skip), λιγότερα queries. **Απομένει (P2, συνειδητό):**
+- **Scope-creep σε γνήσια-ανοιχτά ΝΕΑ τιμολόγια όταν η EPS πίστωση ΞΕΠΕΡΝΑ τα ανοιχτά εισαγόμενα.** Το
+  `openInvoicesQuery` πιάνει ΟΛΑ τα live+active μη-πιστωτικά τιμολόγια· αν ένας πελάτης έχει EPS πίστωση >
+  ανοιχτά εισαγόμενα (π.χ. γνήσια προκαταβολή στο Epsilon), το πλεόνασμα θα έδενε σε νέο (πράγματι
+  απλήρωτο) τιμολόγιο. **Δεν μπορεί να scope-άρει σε «imported only»:** ο `EpsilonImporter` **ΔΕΝ** βάζει
+  `legacy_id` στα τιμολόγια, οπότε δεν υπάρχει καθαρό flag. **Mitigation σήμερα:** `--dry-run` (υποχρεωτική
+  προεπισκόπηση) + `--customer=ΑΦΜ` (ανά πελάτη)· και στην κανονική (balanced) περίπτωση (EPS πίστωση ==
+  ανοιχτά, υπόλοιπο ~0) δεν υπάρχει πλεόνασμα, άρα ούτε scope-creep. **Fix αν χρειαστεί:** προαιρετικό
+  `--issued-before=DATE` (cutover) ή marker column «imported» στα Epsilon τιμολόγια.
+- **`--dry-run` preview δεν είναι concurrency-safe (P2, εγγενές):** το `simulateImportedCreditsFifo`
+  διαβάζει χωρίς lock, ενώ το πραγματικό `applyCredit` κλειδώνει & ξαναδιαβάζει· μια πληρωμή/επιστροφή
+  ανάμεσα σε preview και apply μπορεί να αποκλίνει το πλάνο. Αποδεκτό για one-off off-hours εντολή· fix
+  μόνο αν χρειαστεί (π.χ. maintenance-window / advisory lock).
+- **N+1 στο `InvoiceBalance::for()` ανά ανοιχτό τιμολόγιο (P2, perf):** ο sweep + το preview υπολογίζουν
+  balance ανά τιμολόγιο ανά πελάτη. Τρέχει **μία φορά** (offline), οπότε όχι hot-path· fix αν ένας μεγάλος
+  tenant το κάνει αργό → batch/pre-aggregate των paid/credited sums.
+
 ### Mass-pay consolidation — surviving P2s (από το adversarial review, 2026-09-15)
 Το feature (CONSOLIDATE/EXPLODE ενός WHMCS συγκεντρωτικού) πέρασε **χωρίς reachable P0/P1** για τη σημερινή
 διαμόρφωση (όλοι mainland-GR, net-per-line WHMCS, single 24%). Εφαρμόστηκαν οι φθηνές θωρακίσεις (child-rate,
