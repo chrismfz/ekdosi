@@ -2201,7 +2201,7 @@ PR: **295 pass**.
 ## myDATA code tables + pre-flight audit (`mydata:preflight`)
 
 The official AADE spec is committed at the repo root:
-**`docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`** (the §8 appendix
+**`docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md`** (the §8 appendix
 has every code table; §7.2 has the full business-error list 101–280).
 
 **`App\Support\MyData\Codes`** bakes the §8 tables into one authoritative

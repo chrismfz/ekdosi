@@ -1,11 +1,13 @@
-# Support / Ticket system — implementation design (Πυλώνας E)
+# Support / Ticket system (Πυλώνας E)
 
-> **Status: design — NOT built.** Turns the decision in `docs/ticket-system-eval.md`
-> (build our own thin domain + borrow the mail libs) into a concrete schema, state
-> machine, mail flow, two-UI plan and PR breakdown. The eval is the *why*; this is the
-> *what/how*. Verify package versions + run the Phase-0 spike before writing code.
+> **Status: shipped.** Το Πυλώνας E core είναι χτισμένο (operator UI + customer portal + IMAP
+> ingestion + Phase-4 parity polish). Το παρακάτω είναι το **design reference** (schema / state
+> machine / mail flow / δύο UIs) — ό,τι είναι πραγματικά χτισμένο ζει στο `FEATURES.md` /
+> `CHANGELOG.md`, τα open follow-ups στο `docs/BACKLOG.md` («Πυλώνας E — Support / Ticket system»).
+> Στο τέλος: η **build-vs-buy απόφαση (spike)** που γέννησε αυτό το design, με την «WHMCS parity»
+> αναφορά που δείχνουν άλλα docs.
 
-## 0. The decisions this design inherits (from the eval — not re-litigated)
+## 0. The decisions this design inherits (from the spike — not re-litigated)
 - **Build our own thin ticket domain** (multi-tenancy is native here and nobody else has it);
   `jeffersongoncalves/laravel-service-desk` is a **MIT design reference**, not a dependency.
 - **Borrow only the mail layer:** `webklex/php-imap` (poll our own `mail.myip.gr`) +
@@ -108,7 +110,7 @@ department mailbox:
 **Outbound** (operator or customer reply): send via the department's SMTP identity, stamping a
 fresh `Message-ID` + `In-Reply-To`/`References` chain so the recipient's client threads it; persist
 `email_message_id`. Internal notes are **never** sent. (Optional later: a `pipe.php`
-forwarder for instant capture — the eval's method (a); we ship poll = method (b) first.)
+forwarder for instant capture — the spike's method (a); we ship poll = method (b) first.)
 
 ## 6. The two UIs
 **Operator — Filament Support Cluster «Υποστήριξη»** (new top entry, gated by `hasSupport()`):
@@ -177,6 +179,85 @@ Laravel 13 / PHP 8.4 compatibility in the spike). No provider SDKs, no webhooks.
    the Settings Cluster** (`ticket_departments`, encrypted), **never hardcoded**. Phase 0 (any `.env`
    scaffolding) is an optional throwaway we will likely **skip** — Phase 1 is mail-free. ✅
 
+---
+
+## Build-vs-buy decision (spike)
+
+> Η απόφαση που γέννησε το παραπάνω design (2026-09-06 eval, grounded από τα official package docs).
+> **Συμπέρασμα: build-our-own thin domain + δανεικό mail layer** — το `laravel-service-desk` ως MIT
+> design reference, ΟΧΙ dependency. Οι verbose comparison πίνακες (spent post-decision) αφαιρέθηκαν·
+> μένει το συμπέρασμα, το σκεπτικό και η «WHMCS parity» αναφορά.
+
+### Δύο στρώματα (το key insight)
+Ένα ticket system δεν είναι ΕΝΑ package — είναι **(1) ένα ticket domain** (departments, statuses, SLA,
+internal notes, ticket↔customer/service links) **+ (2) ένα mail-ingestion layer** (inbound email →
+ticket / reply → ticket message). Επιλέγονται ξεχωριστά. Οι περιορισμοί μας οδηγούν και τα δύο:
+- **Multi-tenant** (`company_id` + `CompanyScope` σε κάθε πίνακα) — ΚΑΝΕΝΑ ticket package δεν το έχει·
+  retrofit cost όπου δεν χτίζουμε δικό μας.
+- **Two-worlds UI** — operators στο **Filament panel**, πελάτες στο **Flux portal** (`/user`). Ένα
+  operator-only Filament plugin κάνει το μισό· ένα **headless** domain ή δικό μας μοντέλο κρατά και τα δύο.
+- **Self-hosted mail** (`mail.myip.gr`) → ingestion = **IMAP polling**, όχι paid provider webhook.
+- Τα tickets δένουν **βαθιά** με `Customer`/service/company + `TracksActivity`.
+
+### Σύσταση + σκεπτικό (γιατί build αντί για adopt)
+**Build-our-own thin ticket domain, δανεικό mail-ingestion, `laravel-service-desk` ως MIT design
+reference (schema + state machine) — όχι dependency.**
+- **Multi-tenancy είναι non-negotiable και κανείς δεν το έχει.** Retrofit `company_id`/`CompanyScope`
+  σε migrations + κάθε query ενός package = συχνά ΠΕΡΙΣΣΟΤΕΡΗ δουλειά από ~4 καθαρούς πίνακες, + μόνιμος
+  maintenance tax πάνω σε ξένο schema.
+- **Έχουμε ήδη το two-worlds UI pattern** (Filament resources για operators, Flux blades για το portal),
+  `TracksActivity` audit, τον scheduler και το mail config. Το state machine το αντιγράφουμε σε ένα απόγευμα.
+- **Τα tickets δένουν σφιχτά** με `Customer` (+ αργότερα `ServiceContract`/`Domain`) — native FKs +
+  `CompanyScope` > bridging σε ξένες `User`/morph σχέσεις.
+- Το **μόνο** ακριβό/error-prone κομμάτι είναι email ingestion/threading — αυτό το δανειζόμαστε.
+
+**Verdict (mail layer):** `webklex/php-imap` (poll το δικό μας mailbox στον scheduler) +
+`willdurand/email-reply-parser` (καθάρισμα quoted history + signature). Κανένας provider, webhook, κόστος.
+`directorytree/imapengine` = viable alt του webklex. Απορρίφθηκαν: `rasmuscnielsen/laravel-support-tickets`
+(Laravel 5.x, abandoned)· Filament-only plugins (Umnidev Helpdesk κ.ά. — operator UI μόνο, δεν λύνουν το
+customer-facing Flux)· Faveo (standalone app, όχι library). `beyondcode/laravel-mailbox` κρατιέται ως alt
+ΜΟΝΟ αν κάποτε μεταφερθεί το inbound mail σε provider (Mailgun/SES/Postmark webhooks).
+
+### WHMCS parity — τι κρατάμε (από το live panel, 2026-09-06)
+Το πραγματικό WHMCS Support module του tenant είναι το spec· τι αξίζει να αναπαραχθεί:
+
+- **Departments** — κάθε τμήμα = routing unit με **δική του email** (`support@/sales@/info@` στο `myip.gr`,
+  ανιχνεύει inbound & στέλνει outbound), per-department **mail import** (POP3/IMAP host `mail.myip.gr`,
+  «Test Configuration» — επιβεβαιώνει το IMAP-poll-our-own-mailbox, ένα mailbox ανά τμήμα), **assigned admin
+  users**, + toggles: **Clients Only**, Pipe Replies Only, No Autoresponder, **Feedback Request** on close,
+  **Prevent Client Closure**, **Hidden**.
+- **«Mail κλειδωμένο με πελάτη/εταιρία» — requester↔customer binding.** Το WHMCS ταιριάζει το sender email σε
+  registered client → **OWNER** badge· άγνωστος = **GUEST**. Το **«Clients Only»** dept toggle δέχεται
+  ticket/reply ΜΟΝΟ από registered client. Για εμάς = match inbound `From:` → `Customer` (by email) εντός
+  tenant· GUEST αλλιώς· per-department «μόνο πελάτες» flag.
+- **Service/context panel μέσα στο ticket** — το μεγαλύτερο operator win. Το WHMCS δείχνει τα Products/Services
+  του requester· **η δική μας native υπεροχή:** δείχνουμε ΚΑΙ τα ekdosi invoices / «Καρτέλα» / υπόλοιπο inline
+  (ίδιο `CustomerLedgerBuilder`) — που το WHMCS δεν μπορεί.
+- **Predefined / canned replies σε κατηγορίες** — του tenant είναι ήδη invoicing-shaped + Greek
+  (`Invoices → InvoiceSend`, `ΑπόδειξηΠαροχής`, `Επιβεβαίωση πληρωμής`, `Τραπεζικοί λογαριασμοί` με IBANs) →
+  δένουν στο δικό μας domain (templated από το linked invoice). Κράτα κατηγορίες + templating.
+- **Ticket operations να κρατηθούν** — customizable **Statuses** (Open/Answered/Customer-Reply/Awaiting
+  Reply/Closed), **priority**, **assigned-to**, **staff participants**, **watchers**, **CC**, **tags**,
+  **internal notes**, «Other Tickets» (same-client history), **merge**, **pin**, **Block Sender & Delete**,
+  scheduled actions, attachments, «Insert Predefined Reply». Plus **Escalation Rules** + **Spam Control**.
+- **Mail piping — δύο μέθοδοι:** (a) email-forwarder **pipe** στο `pipe.php` (instant), ή (b) **POP3/IMAP
+  cron** poll κάθε 5'. Διαλέξαμε (b) στον scheduler μας· κρατάμε την *επιλογή* pipe/forwarder αργότερα.
+- **Menu / IA — το WHMCS επιβεβαιώνει το «Settings Cluster».** Χωρίζει **configuration** (Support
+  Departments, Ticket Statuses, Escalation, Spam) κάτω από **«Configuration»/Setup**, ενώ τα **operational**
+  Support (Tickets, Predefined Replies, KB, Announcements) στο top **«Support»** μενού — ακριβώς το
+  Support-Cluster (daily ops) + Settings-Cluster (config) split.
+
+### Επόμενο βήμα (spike, ιστορικό)
+Time-boxed spike (1-2 μέρες): (α) διάβασε migrations/state-machine/IMAP poller του `laravel-service-desk`
+(MIT — legitimate to learn from) + μέτρησε το tenancy-retrofit κόστος· (β) απόδειξε IMAP poll στο
+`mail.myip.gr` + reply-parse σε πραγματικό Greek reply. Αποτέλεσμα → adopt (αν φθηνό retrofit) ή build
+(likely). Είτε-είτε, το mail layer + τα δύο UIs μένουν δικά μας. _(Το build-our-own επιλέχθηκε και το core
+είναι πλέον SHIPPED.)_
+
 ## Sources
-Carried from `docs/ticket-system-eval.md` §Sources (service-desk, webklex/php-imap,
-email-reply-parser, laravel-mailbox, Filament plugin landscape) + the live WHMCS Support module.
+- laravel-service-desk: https://github.com/jeffersongoncalves/laravel-service-desk
+- laravel-mailbox: https://github.com/beyondcode/laravel-mailbox
+- webklex/php-imap: https://github.com/Webklex/php-imap
+- email-reply-parser: https://github.com/willdurand/EmailReplyParser
+- Filament plugin landscape: https://filamentphp.com/plugins?categories=support (Umnidev Helpdesk, etc.)
+- + the live WHMCS Support module (screenshots 2026-09-06).

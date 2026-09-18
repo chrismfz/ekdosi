@@ -3,7 +3,7 @@
 > Extracted from `CLAUDE.md` (2026-09-06) to keep the root guide lean. This is the
 > field-by-field detail of the accepted `SendInvoices` payload. The rule of thumb in
 > `CLAUDE.md`: semantic equivalence with the lost `CMyData.cpp`, validated field-by-field.
-> The §-error references are to `docs/aade/myDATA_API_Documentation_v2.0.0_preofficial_erp.md`.
+> The §-error references are to `docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md`.
 
 ## The proven-accepted shape (validated against AADE sandbox 2026-05-28)
 

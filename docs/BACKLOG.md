@@ -21,212 +21,182 @@ Don't re-pick the **«Done recently»** or **«looks like a gap but isn't»** li
 
 ---
 
-## 🎯 Master priority index (start here — 2026-09-04)
+## 🎯 Master priority index (start here)
 
-The one ordered view of what's left. Each tier links to the detailed section below.
-The rule that governs the order (learned from the ten-round P2 PRs): **a finding's
-priority is not a property of the finding — it is the finding × this business × this
-date.** Cutover (1 Oct provider obligation) sorts everything.
+The one ordered view of what's left. The rule that governs the order (learned from the ten-round
+P2 PRs): **a finding's priority is not a property of the finding — it is the finding × this
+business × this date.** Each tier links to the detailed section below.
 
-> *The **Cutover gate** (ex-TIER 0) is **CLOSED** — all bucket-A code shipped, MYD-006/007
-> decided, and a live prod check (2026-09-05) found **0 real myDATA discrepancies** (the
-> earlier «92/2» came from a stale devbox backup, never real). The daily dry-run on the VM
-> is the operators' routine, not a backlog task. Kept as a closed record under «Cutover gate».*
-
-> **Sequencing (owner, 2026-09-05):** the **delivery-note family is HELD until the myDATA
-> API v2.0.2** ships (DEP-001). ✅ **UNBLOCKED 2026-09-12** — v2.0.2 shipped and `firebed/aade-mydata`
-> **5.12.0** (bumped from 5.10.4) implements it (backwards-compatible; suite green). The HOLD is
-> lifted — the family can start. **MYD-011 (country→ISO) ✅ DONE**
-> and **PROV-005 ✅ CLOSED (won't-do)** — no actionable-now item remains in TIER 1. TIER 2 is
-> **not urgent** («δεν καιγόμαστε»). The **AI «Βοηθός» Phase 2c** is **✅ COMPLETE** (α read
-> tools · ε ai_usage · β record_payment · ζ knowledge_search).
-
-**TIER 1 — Real in-scope code work, next deadline (delivery-note family + provider):**
-1. **Delivery-note family** — ✅ **UNBLOCKED 2026-09-12** (was HELD until myDATA API v2.0.2, DEP-001;
-   `firebed/aade-mydata` 5.12.0 now ships v2.0.2). Before the ψηφιακή-διακίνηση deadline, NOT 1 Oct:
-   MYD-023 strict-refusal + already-cancelled adoption on ΔΑ/provider paths (**P1**, ties to PROV-015)
-   · MYD-019 · MYD-026 · PROV-002 · STOCK-001 follow-ups · unblock 9.1/9.2 + combined ΤΔΑ. One block
-   with a 9.3 sandbox rehearsal. **Wired in 5.12.0:** `ConfirmDeliveryReturn` + `deliveryReturnMark`
-   (MYD-026/PROV-002 durable attempt-record — the exact DEP-001 gate) ✅ **Slice 1 DONE** (direct-myDATA
-   path: `confirmReturn()` + `return_mark` cache + `CONFIRM_RETURN` audit row + UI action; **provider
-   path PROV-002 still TODO**). `DeliveryStatus::IN_TRANSIT_RETURN` + the `CONFIRM_RETURN`/
-   `REGISTER_TRANSFER_RETURN` event types ✅ **Slice 2 DONE** (own `in_transit_return` state +
-   refresh visibility + event labels/summaries; carrier-reported, no submit action). **Still
-   available in 5.12.0 to wire:** `RequestDeliveryNoteStatus::handleUsingQrUrl()`,
-   `TransportDetails::packingsDeclaration`; PLUS the **new Receiving Note flow** (Δελτίο Ποσοτικής
-   Παραλαβής, types 10.1/10.2 — `CancelReceivingNote`, `ReceivingNotePurpose`) if in scope;
-   `supportsDeliveryNote()` now also allows 1.4/3.1/3.2/11.5.
-   **9.3 lifecycle sandbox rehearsal — RAN 2026-09-13** (`myip`, AADE test env; see
-   `docs/delivery-sandbox-rehearsal.md` §Findings). Confirmed from the ISSUER's own creds:
-   RegisterTransfer ✓, refreshStatus ✓, cancel-from-`registered` ✓; cancel-from-`in_transit`
-   ✗ [801]; ConfirmDeliveryReturn from `in_transit` ✗ [828] → **`in_transit` pruned** from
-   `CONFIRM_RETURN_FROM_STATES`. **DGM two-party sandbox validation — ✅ DONE 2026-09-13**
-   (myip⇄nexon, `docs/delivery-two-party-sandbox.md` §Findings): confirmReturn CONFIRMED at AADE
-   from `rejected`, `failed`, AND DeliveredByCarrier(PARTIAL) (posts a deliveryReturnMark). Fixed
-   the **P2-2** bug — `DELIVERED_BY_CARRIER` was collapsed to `'delivered'` (∉ CONFIRM_RETURN set),
-   now split by the ConfirmOutcome lifecycleHistory detail (PARTIAL→`partial`, FULL→`delivered`).
-   Empirical role rules recorded: CARRIER = whoever CALLS RegisterTransfer (not the declared
-   `carrierVatNumber`); recipient NONE = [817]; PARTIAL needs [814] `deliveredPackaging`. **Remaining
-   punch-list (P2):** (a) ✅ **DONE** — issuer-side `confirmDelivery()` + UI «Δήλωση παράδοσης» REMOVED
-   (was a [833]/[817]/[814] dead-end; outcome is recipient/carrier-only, only observed via refresh);
-   (b) ✅ **DONE** — `delivery:test-lifecycle --return` (confirmReturn from `in_transit` → [828]) removed,
-   command is now the issuer flow register→status(+cancel). _(Cleanup left: the `delivery_notes.outcome_mark`
-   + `reject_mark` cache columns are now write-only/vestigial — the outcome/rejection marks are the
-   recipient's/carrier's and surface in `delivery_note_events`; their blank infolist fields were removed.
-   Either populate them from the synced ConfirmOutcome/Rejection events on refresh, or drop the columns in a
-   later migration — P2, non-destructive to leave.)_ (c) a receiving-ekdosi
-   «Εισερχόμενα Διακίνησης» is net-new (RequestDocs discovers 9.3s to the counterpart by MARK — no qrUrl;
-   reject-by-MARK works, confirm is qrUrl-only). **Slice 4a ✅ SHIPPED** (PR #540 — `inbound_delivery_notes`
-   staging table + `InboundDeliveryFetcher` reusing the RequestDocs feed, movement-only filter,
-   `delivery:fetch-inbound` scheduler-gated OFF; design `docs/delivery-inbound-design.md`). **4b** = the inbox
-   Resource + Reject/Refresh/Acknowledge (desk-actionable). **4c** = the qrUrl/scan-gated Confirm-outcome —
-   **DEFERRED** (we are almost always the issuer; needs a physical-QR-scan UX for a flow no tenant hits today).
-   **Slice-4a review P2s (deferred, `docs/delivery-inbound-design.md`):**
-   - **P2-1** — the fetcher folds only `invoicesDoc`, not `cancelledInvoicesDoc` (unlike `ExpenseReconciler`).
-     A DGM *movement* cancel is a `DeliveryStatus::CANCELLED` transition the re-poll picks up; only a full
-     invoice-level cancellation of a received ΤΔΑ could leave `aade_delivery_status` stale until the 4b
-     per-row Refresh runs. Mitigated by 4b Refresh; fold the cancelled list if it proves to bite.
-   - **P2-4** — combined-ΤΔΑ discovery hooks on `otherDeliveryNoteHeader`/`invoiceDeliveryStatus` surviving in
-     the *counterpart* feed (the feed is known to strip `qrCodeUrl`). Extend the §2 sandbox `--raw` residual
-     check to also grep `<otherDeliveryNoteHeader>`/`<invoiceDeliveryStatus>` before relying on the filter.
-   - **P2-5** (low-confidence) — a `DeliveryLifecycle` with an unset `deliveryEvents` key would `TypeError` in
-     `parseLifecycle`; unreachable in practice (firebed defaults it to `[]`; a self-closing element lands as a
-     scalar caught by `is_iterable`). Add a defensive guard only if ever observed. (d) `deliveryStateFromAade` defaults a
-   DeliveredByCarrier with a MISSING ConfirmOutcome detail to `'delivered'` (conscious — a carrier FULL
-   also reports DeliveredByCarrier, so `'partial'` would mislabel the common case) — revisit only if a
-   real truncated-history case dead-ends a legitimate return; the authoritative outcome stays in
-   `delivery_marks`/lifecycleHistory regardless.
-2. **MYD-011 country→ISO normalization** — ✅ **DONE** (Option B): νέα καθαρή στήλη
-   `country_code` σε πελάτες/προμηθευτές + ISO picker + `IsoCountry::syncCountryCode`
-   (save-hook) + `ekdosi:backfill-country-codes` + ETL alignment + `suppliers.country`
-   nullable/no-default (τέλος το silent-GR freeze). Οι resolvers έκδοσης διαβάζουν
-   `isoCountryCode()` (zero-regression fallback). Βλ. «Done recently».
-3. **PROV-005** — ✅ **CLOSED (won't-do, owner 2026-09-05).** Ο authenticated credential/quota
-   probe εγκαταλείφθηκε συνειδητά: κάθε InvoSign κλήση (και δοκιμαστικό παραστατικό) **χρεώνεται
-   credits** και δεν υπάρχει non-issuing status endpoint, οπότε δεν έχει νόημα. Κρατάμε το **δωρεάν
-   reachability ping** (unauthenticated GET)· τα διαπιστευτήρια/quota αποδεικνύονται στην πρώτη
-   πραγματική αποστολή. Τα success messages λένε πλέον ρητά «έλεγχος μόνο διαθεσιμότητας».
-4. **WHMCS bridge Phase 2 — outbound payment sync** (money-write, opt-in, design-first).
+**TIER 1 — Real in-scope code work (delivery-note family + provider):**
+- **Delivery-note family** — core ✅ shipped (direct-myDATA path + two-party sandbox validated;
+  detail under «Provider / myDATA» + «myDATA / expenses completeness»). Residual punch-list:
+  inbound «Εισερχόμενα Διακίνησης» **4b** (inbox Resource + Reject/Refresh/Acknowledge) · **4c**
+  qrUrl Confirm-outcome (**DEFERRED** — almost always the issuer; needs a physical-QR-scan UX) ·
+  the `delivery_notes.outcome_mark`/`reject_mark` vestigial-column cleanup · the Slice-4a review
+  P2s (P2-1 fold `cancelledInvoicesDoc` · P2-4 combined-ΤΔΑ discovery · P2-5 `deliveryEvents` guard).
+- **WHMCS bridge Phase 2 — outbound payment sync** (money-write, opt-in, design-first).
 
 **TIER 2 — High-value net-new features / migration tooling:**
-5. **Generic CSV importer** (products/customers) — «biggest win for catalog/customer
-   migration»; column-map + dry-run + tenant-scope.
-6. **Cashflow / recurring-expenses** epic (accountant-gated; anti-double-count vs myDATA).
-7. **Dunning ladder** (escalating 3/7/15/30-day reminders on the existing auto-email).
-8. **Bank-statement import → payment match** (CSV/MT940 → proposed `Payment` rows).
+- **Generic CSV importer** (products/customers) — biggest win for catalog/customer migration.
+- **Cashflow / recurring-expenses** epic (accountant-gated; anti-double-count vs myDATA).
+- **Dunning ladder** (escalating 3/7/15/30-day reminders on the existing auto-email).
+- **Bank-statement import → payment match** (CSV/MT940 → proposed `Payment` rows).
 
-**TIER 3 — Strategic epic «Αντικατάσταση WHMCS» (`PLAN.md`, largely greenfield):**
-9. **Πυλώνας A — Domains** (A0→A5; design-only today, first pillar).
-10. **Πυλώνας B — Payment gateways** (online Stripe/PayPal/Eurobank/manual, WHMCS-style admin, modular
-    contract/registry — **design+threat-model: `docs/payment-gateways-design.md`**; office rails card-POS/IRIS
-    → `payment-connectors.md`).
-11. **Πυλώνας C — Provisioning modules** (real cPanel/DA/… on the existing seam).
-12. **Πυλώνας D — Customer portal** (foundation ✅ shipped; transactional surfaces per-pillar).
-13. **Πυλώνας E — Support/Ticket system** (NEW, eval-first — spike `laravel-service-desk` vs build).
-14. **Menu / IA architecture** (NEW, epic-wide + already pressing — Clusters-per-domain, Settings
-    Cluster, panel-split only when the audience differs). Both detailed under the epic section below.
+**TIER 3 — Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`** (largely greenfield): Domains →
+Payment gateways → Provisioning → Portal → Support → Menu/IA. Detailed under the epic section below.
 
-**TIER 4 — Blocked-on-external (not actionable now — keep parked, don't re-pick):**
-- **GR Πάροχος live** + **PEPPOL Phase 2** — need real provider creds + sandbox.
-- **PROV-003 archive half** — no InvoSign download endpoint. **PROV-011** — versioned
-  InvoSign API contract (empirically resolved already).
+**TIER 4 — Parked / blocked-on-external (not actionable now):**
+- **PEPPOL Phase 2 + EE Access-Point** — **PARKED, review 2027.** NOT blocked on creds: GR
+  e-invoicing is covered by InvoSign; cross-border intra-community is EU ViDA **2030** and Estonia
+  domestic e-invoicing is **2027 (proposed)**. The near-term unlock is i18n (see `PLAN.md`), not
+  transport. Blueprints kept under «Big features».
+- **PROV-003 archive half** — blocked on an InvoSign download endpoint. **PROV-011** — versioned
+  InvoSign API contract (empirically resolved; blocked on vendor).
 
-**TIER 5 — Out of current tenants' scope (re-raise if scope changes):** exotic VAT
-(island/ν.5057), multi-branch (MYD-010), B2G/POS (PROV-012), offline/Transmission
-Failure (PROV-008), fresh-install onboarding (SETUP-001/002, OPS-001, TEST-001),
-PROV-004/013/015/016. → see «Parked» below.
+**TIER 5 — Out of current tenants' scope (re-raise if scope changes) → «Parked»:** exotic VAT
+(island/ν.5057), multi-branch (MYD-010), B2G/POS (PROV-012), offline/Transmission-Failure
+(PROV-008), fresh-install onboarding (SETUP-001/002, OPS-001, TEST-001), PROV-004/013/015/016.
 
-**TIER 6 — Tech-debt / P2 pile** (DB-state-correct; cosmetic/perf/edge). Mostly leave;
-knock off the genuine one-liners opportunistically → see «Tech debt / latent». *(The
-three previously-listed «real small bugs» were re-verified 2026-09-06 and are all
-already fixed: `resolveWhmcsCustomField` has its `is_array` guard, `AgedReceivables`
-+ `LedgerBookExporter` pass `escape: ''`, and the expense submitter writes the fillable
-`mark_date`, not a bare `'date'`. Remaining CSV item = the shared `Csv::stream()` DRY,
-below.)*
+**TIER 6 — Tech-debt / P2 pile** (DB-state-correct; cosmetic/perf/edge) → «Tech debt / latent».
+Mostly leave; knock off the genuine one-liners opportunistically.
 
-**P2 (Καρτέλα NULL-pay_date payment, review 2026-09-16, deferred — pre-existing):** το `computeStats`
-αθροίζει στο `totalPaidLifetime` και πληρωμές με **NULL `pay_date`** (`CustomerLedgerBuilder` payments
-loop, χωρίς guard), ενώ το `computeYearly` και το `computeLedger` τις **παραλείπουν** (skip όταν
-`! $p->pay_date`). Άρα ένας πελάτης με πληρωμή χωρίς ημερομηνία (μόνο μέσω raw ETL insert που
-παρακάμπτει το μοντέλο — οι κανονικές πληρωμές έχουν πάντα `pay_date`) θα είχε `stats.balance` ≠
-`year_end_balance`/τελική running balance κατά αυτό το ποσό. Orthogonal στον credit-term gate,
-δεν αγγίζει normal-path γραμμή. Fix αν θέλουμε byte-identical: guard την ίδια `! pay_date` και στο
-`computeStats` (ή δώσε fallback ημερομηνία). Δεν μπλοκάρει.
-
-**P2 (Καρτέλα order — ✅ RESOLVED 2026-09-16):** η οθόνη + η **εξαγωγή CSV** + το **statement PDF** +
-η **πύλη «Η καρτέλα μου»** εμφανίζονται πλέον όλα **χρονολογικά (παλιά→νέα)** μέσω κοινού
-`CustomerLedgerResult::chronologicalLedger()`. Απομένει μόνο (αποδεκτό): το πρώτο κλικ στην
-«Ημερομηνία» είναι visual no-op (κύκλος default(παλιά)→asc(παλιά)→desc(νέα)) — τεκμηριωμένο στο
-σχόλιο του κώδικα.
-
-**P2 (review 2026-09-15, deferred — cosmetic/latent):** `BaseListRecords::removeTableFilter()`
-guards a request to clear a filter that no longer exists (fixed the reported 500) and, on the
-individual-remove path, also re-persists the cleaned state via `handleTableFilterUpdates()`.
-Two residual, harmless gaps remain — both deferred because **no table here persists filters in
-session or defers filters**, and an unregistered key is never applied to the query (wrong
-results impossible), so the worst case is a dead `?filters[x]=…` param lingering:
-- `removeTableFilters()` («καθαρισμός όλων») is NOT overridden; it iterates only currently-
-  registered filters, so an orphaned key survives a clear-all instead of being swept.
-- The guard sanitizes the *symptom* on removal, not the *source*: a page that persists filters
-  in session would keep re-hydrating a removed key on mount until it's individually dismissed.
-The clean fix for both is to strip keys absent from `getTable()->getFilters()` at
-hydration/mount, so a removed filter can never linger regardless of path. Not worth the code
-today.
-
-**P2 (review 2026-09-15, bulk «Αρχειοθέτηση επιλεγμένων», deferred):** two low-severity gaps,
-both consistent with the sibling bulk delete:
-- A **held WHMCS mass-pay «container»** row (awaiting «Ενοποίηση»/«Ανάλυση») is `status=held`, so
-  a bulk archive sweeps it like any other held row and its children are never resolved — the
-  consolidate/explode intent is lost (recoverable via «Επαναφορά προς έλεγχο»). The per-row
-  archive has the same gap; bulk just makes an accidental sweep easier. Fix if it bites: exclude
-  (or warn on) mass-pay containers in `isArchivable()`/the bulk action — deferred to avoid
-  coupling the bulk op to mass-pay internals for a reversible edge.
-- The archive loop issues N `update()`s (+ observer passes) **without a transaction** (same as
-  `deleteSelectedAction`), so a mid-batch failure leaves a partial result. Benign — re-running
-  finishes the rest (already-archived rows are skipped). Wrap the loop in `DB::transaction` if we
-  ever want atomic bulk writes across both actions.
-
-**TIER 7 — Ideas / low-commitment** (multi-currency, shared Contacts CRM, setup
-profiles per industry, AI «Βοηθός» Phase 2c). Reference only.
+**TIER 7 — Ideas / low-commitment** (multi-currency, shared Contacts CRM, setup profiles per
+industry). Reference only.
 
 ---
 
-## 🔐 Secrets hygiene — RESOLVED (2026-09-08)
+## 🆚 vs Epsilon — roadmap κενών
 
-Historical sensitive files were removed from the tree, the affected credentials were rotated,
-and the git history was rewritten to a single clean root (old commits, tags and branches dropped).
-No secret values remain in the tree or in reachable history. Closed — no further action.
+> Roadmap «τι μας λείπει vs ο ανταγωνισμός» (Epsilon Smart) — **folded εδώ από το πρώην ξεχωριστό
+> «vs Epsilon» backlog** (2026-09-17· ένα ενιαίο backlog πλέον). Ό,τι έχει γίνει ζει στο `CHANGELOG.md` /
+> `FEATURES.md`· το «γιατί» μιας απόφασης → `docs/CLAUDE-history.md`. (Αρχική VERIFIED σύγκριση 16/09/2026,
+> διασταυρωμένη με τον κώδικα — file:line.) Το λεπτομερές tech-debt / open-items ζει στις υπόλοιπες ενότητες
+> αυτού του αρχείου — εδώ είναι η roadmap-όψη «vs ανταγωνισμός», με pointers όπου το ίδιο work
+> παρακολουθείται ήδη παρακάτω.
+>
+> **Προτεραιότητα:** 🔴 P0 · 🟠 P1 · 🟡 P2   ·   **Effort:** S = ώρες · M = 1–3 μέρες · L = εβδομάδα+
 
----
+### ✅ Shipped (λεπτομέρειες στο CHANGELOG/FEATURES)
+#2 Έσοδα ανά κατηγορία (report + widget) · #3 Έξοδα «αταξινόμητο» (Βιβλίο fallback) · #4 Ισοζύγιο Πελατών + Ειδών/Υπηρεσιών ·
+#5 Dunning Φάση A · #7 Αναφορές (cache + € + Ανανέωση + empty states) · #8 Dashboard widgets (top είδη/έσοδα ανά
+κατηγορία/top προμηθευτές/αξία pipeline) · #9 Καρτέλα polish v2 · #10 Ταμειακό ημερολόγιο ·
+#11 Analytics ανά συμβόλαιο + retro-link.
 
-## 🚀 Cutover / go-live gate — bucket A: ✅ CLOSED (closed record)
+### 🔴 P0
+_(Κενό. Το πρώην #1 «Ηλεκτρονική τιμολόγηση» αναδιαρθρώθηκε μετά το **spike #1 (2026-09)**:
+το transport ΔΕΝ επείγει (ViDA 2030 · Estonia 2027 proposed · InvoSign καλύπτει GR) → parked·
+το κοντινό need είναι το **i18n** που ξεκλειδώνει το **Nixpal ως testbed**. Δες #1 στο P1 + **PLAN.md §6.5–6.6**.)_
 
-**Cutover:** ekdosi replaces the legacy C++Builder app for real invoicing; the
-ΥΠΑΗΕΣ/provider obligation lands **2026-10-01**. Delivery notes (9.x) follow on their
-own ψηφιακή-διακίνηση deadline — that family is TIER 1, **not** gated on 1 Oct.
+### 🟠 P1
 
-**All bucket-A code is DONE** (PROV-010, OBS-001, PROV-003-print #406, MYD-004 0% #410,
-MYD-006 #413, MYD-007 code #410, PROV-006 retail-via-provider sandbox-verified 2026-09-03),
-and the two residual decisions are made:
-- **MYD-007 — decided.** The intra-community 0% was essentially one large invoice to
-  Estonia; per-line §8.3 field + `VatExemptionGuidance` ship (GR→EE service = code 4).
-  Preflight still FLAGS any reason-less/wrong 0% rows for review (no auto-guess).
-- **MYD-006 — chosen.** `business_activity_type` selected per tenant (go-live gate forces
-  it); income class also configurable per product-category. Per-product override = UI follow-up.
-- **Discrepancies — none real.** Live prod check **2026-09-05**: **myip 0**. The earlier
-  «92/2» came from a **stale devbox backup** measured while prod moved ahead (myip filing
-  again, last MARK 2026-09-04; nexon's 2 were the same stale artifact) — never a real
-  backlog. Watch with `app_health` / `mydata_discrepancies` going forward.
-- **Cutover dry-run — ongoing, NOT a task.** Two operators run every day-one document type
-  (ΤΠΥ, ΤΙΜ, ΠΙΣ + αποδείξεις λιανικής 11.x) plus edge cases on the dev/test VM **daily** —
-  that IS the rehearsal, and it's enough. **PROV-007** rides along (verify InvoSign discount
-  semantics cent-for-cent on one discounted invoice); no separate project.
+#### 1. Ηλεκτρονική τιμολόγηση + i18n / Nixpal testbed — spike #1 (→ **PLAN.md §6.5–6.6**)
+✅ Phase 1 UBL (`PeppolInvoiceDocument`, country-agnostic) + `PdfLabels` dictionary + latent γλωσσικές
+στήλες (`invoices/quotes.language` live· `customer_users.locale`, `country_code`) = **ήδη υπάρχουν**.
 
-*Runtime facts that de-risk the provider path (measured, sandbox 2026-07-07): the
-InvoSign channel **de-duplicates** a blind re-POST of the same (series, ΑΑ), and
-`invoice_status.php` answers in real time — so a blind retry cannot create a second
-legal document on this provider. A **provider-filed 2.1/11.x cannot be cancelled at
-all** (AADE `[249]`, InvoSign `[283]`); reversal is a 5.1 credit, gated to 9.3 only.*
+**#1a — i18n (bilingual customer-facing) — το κοντινό unlock:**
+- [ ] **Slice 0 (S):** `CustomerLanguage::for()` resolver + `app()->setLocale()` (portal middleware + `SendInvoiceEmail`) — prereq
+- [ ] **Portal i18n (M):** `lang/{el,en}` (from scratch) + 12 blades `portal/*` + layout → `__()` (η επιφάνεια του testbed)
+- [ ] **Email i18n (M):** EL/EN Mailables (5) + `MailTemplateRenderer::DEFAULT_BODY_TEMPLATE` per-recipient
+- [ ] **PDF completion (S-M):** `PdfLabels` → delivery-note (heavy)/statement/receipt + invoice movement block (~10 slugs)
+
+**#1c — Multi-domain (per-tenant portal host) — ζευγαρώνει με το portal i18n:**
+- [ ] `companies.portal_host` + host→company resolver (`Route::domain()`/middleware)· portal 1η επιφάνεια (`cs.nixpal.com` vs `invoicer.myip.gr`)
+
+**#1b — PEPPOL transport (send / ee-peppol) — parked, review 2027:**
+- [ ] Access-Point (Telema/Billberry/Finbite/Unifiedpost)· ΕΝΑ PEPPOL AP = GR-send **και** EE-send· **check αν ο InvoSign κάνει ήδη PEPPOL send** (φθηνότερο)
+- [ ] Επιβεβαίωση legal deadline με λογιστή/πάροχο πριν χρονοπρογραμματιστεί (ViDA 2030 · Estonia 2027)
+
+_(Το transport half tracked και παρακάτω: «TIER 4 — PEPPOL Phase 2 + EE Access-Point» + «🔵 Big features → PEPPOL Phase 2» — ίδια parked-2027 απόφαση.)_
+
+#### 2. Έσοδα/έξοδα ανά κατηγορία — follow-ups
+- [ ] Backfill ιστορικών WHMCS γραμμών (description→package→group→category)· πριν = «Αταξινόμητα»
+- [ ] Bulk-assign κατηγορίας/tags στη λίστα ειδών + φίλτρο
+- [ ] Ίδιο για **έξοδα** (report + dashboard widget)· bonus: MRR/churn ανά κατηγορία
+- [ ] P2: WHMCS-map — «Κατηγορία ekdosi» χωρίς §8.6 → η γραμμή χάνεται (coupling)· per-row validation notice
+- [ ] P2: `RevenueByCategory` — footer round ±1λεπτό vs γραμμές· name fallback `description_short?:description?:#id`·
+  CSV «100,00» όταν total≤0· `header_discount_percent≥100` guard (τώρα σιωπηλά ≤0 έσοδα)
+
+#### 3. Έξοδα «αταξινόμητο» — follow-ups (προαιρετικά/P2)
+- [ ] auto-rule πρόταση χαρακτηρισμού από επαναλαμβανόμενο προμηθευτή
+- [ ] split ποσών ανά κατηγορία (τώρα και τα δύο paths χαρακτηρίζουν όλο το doc σε μία κυρίαρχη· μεγαλύτερο)
+
+#### 4. Ισοζύγια — follow-ups
+- [ ] P2 perf: το Ισοζύγιο Πελατών κάνει 2 queries/πελάτη σε κάθε αλλαγή περιόδου (αποδεκτό· debounce/pre-agg αν χρειαστεί)
+- [ ] P2: «Ισοζύγιο Ειδών/Υπηρεσιών» — προαιρετικό split «Πωλήσεις | Επιστροφές» ανά είδος (τώρα καθαρό, σαν #2)·
+  SQL-aggregated variant αντί PHP materialisation αν μεγαλώσει η καρδινότητα (τώρα top-200 on-screen + «Λοιπά»)
+- [ ] P2 cleanup: κοινός helper για το per-line net/gross/sign/header-discount query που μοιράζονται
+  `RevenueByItem` + `RevenueByCategory` (τώρα duplicated· το drift το πιάνει το reconciliation test)
+
+#### 5. Εργασίες Είσπραξης (dunning) — Φάσεις B & Γ
+→ βλ. **«Dunning ladder»** (Master priority index **TIER 2** + ενότητα **«🧾 ERP-parity ideas»** παρακάτω) — ίδιο
+work, tracked εκεί (κλιμακωτές υπενθυμίσεις 3/7/15/30 ημ., templates ανά σκαλί, opt-out ανά πελάτη). Οι ειδικές
+όψεις που έμεναν εδώ: **Φάση B (M)** ενέργεια→task με ημ/νία+υπεύθυνο στο ημερολόγιο + ιστορικό επαφών στην Καρτέλα·
+**Φάση Γ (S)** κλιμάκωση +7/+15/+30 με το `send_customer_statement`· P2 δικό του `Update`-ability για το collection
+metadata (τώρα κάτω από `View:AgedReceivables`).
+
+#### 6. Ενοποίηση ρυθμίσεων + Wizard νέας εταιρείας — ΟΥΣΙΑΣΤΙΚΑ ΙΚΑΝΟΠΟΙΗΜΕΝΟ (P2 polish μόνο)
+Το «ενιαίο settings με tabs» **υπάρχει ήδη σε δύο επίπεδα** (sweep 2026-09-17): (α) nav-level ο `SettingsCluster`
+(`/settings`, 17 members σε 4 collapsible υπο-ενότητες Τιμολόγηση&πληρωμές/Είδη&αποστολή/Εταιρεία/Λειτουργία) —
+βήματα 1+1.5 του `docs/menu-ia.md` = ✅ DONE· (β) form-level ο `CompanyResource` έχει ήδη `Tabs::make()`
+(Identity·myDATA·Πάροχος·GSIS·PDF&Email·WHMCS·AI·…) με progressive disclosure + secret-flagging. Ο company_admin
+vs super_admin διαχωρισμός είναι ήδη σωστός (`CompanySettings` whitelist vs super-admin `CompanyResource`/creds).
+- [ ] P2 (κοσμετικό, deferred): «Ρυθμίσεις» landing page αντί να πηγαίνει στο πρώτο member (το μόνο ρητά deferred item του IA plan)
+- [ ] P2 (χαμηλή αξία): onboarding wizard νέου tenant (`CreateCompany` = απλό CreateRecord)· σπάνιο (προσθέτεις tenant σπάνια),
+  το readiness το καλύπτουν ήδη `Preflight` + `ekdosi:go-live-check`
+
+#### 7–8. Γραφήματα/Dashboard — υπόλοιπα
+- [ ] **Έξοδα ανά κατηγορία widget** (βλ. #2)
+- [ ] (προαιρετικό) user-customizable dashboard
+- [ ] **P2 deferred (από reviews· «μαζί με το caching/charts cleanup»):**
+  - version-keyed cache invalidation + scheduled warm για τα 3 νέα charts (τώρα TTL 30' χωρίς invalidation·
+    φθηνή ενδιάμεση: μη-cache του άδειου αποτελέσματος)
+  - shared `TopNMoneyChart` base (τα 3 charts μοιράζονται ~όλο το scaffold) + label-collision tooltip
+  - header-discount reconciliation: `CustomerTopProducts::forCompany` αθροίζει net γραμμών χωρίς invoice-level
+    header discount (διαφορά μόνο όταν υπάρχει· root-fix στο shared service, επηρεάζει Καρτέλα+MCP)
+  - pipeline € status-priority (Accepted>Sent>Draft) αντί «τελευταία ζωντανή προσφορά»· + caching/Quote-gate αν χρειαστεί
+  - SQL-aggregated variants (RevenueByCategory prior-year· `forCompany`· TopSuppliers) αντί PHP materialisation
+  - dashboard revenue-visibility: τα revenue widgets δεν έχουν `canView()` (συνεπές με τα αδελφά· role-gate = dashboard-wide απόφαση)
+
+### 🟡 P2
+
+#### 10. Ταμειακό ημερολόγιο (Εισπράξεων–Πληρωμών) — ✅ shipped
+Νέα αναφορά «Λογιστικά» (`CashJournalReport`): ταμειακές κινήσεις πελατών/περίοδο ομαδοποιημένες **ανά λογαριασμό →
+τρόπο πληρωμής**, εισπράξεις vs πληρωμές/επιστροφές + καθαρή ροή + CSV. Λεπτομέρειες στο CHANGELOG/FEATURES.
+- [ ] P2 (μελλοντικό): προαιρετική συμπερίληψη εξόδων/πληρωμών προμηθευτών (τώρα μόνο `payments` — τα έξοδα στο Βιβλίο)
+
+#### 11. Χρεώσεις ανά συμβόλαιο — follow-ups
+- [ ] **(config, όχι κώδικας)** «προσχέδιο N μέρες πριν τη λήξη»: υπάρχει ήδη — `services:stage-renewals
+  --lead-days=N` (`EKDOSI_SERVICE_RENEWALS_LEAD_DAYS` + scheduler flag). Set στο deploy.
+- [ ] proactive «κουδούνι»/email για συμβόλαια που λήγουν σε N μέρες (τώρα: nav badge 7μ + widget 30μ + auto-προσχέδιο)
+- [ ] P2: inline εμφάνιση πιστωτικών στο tab «Ανανεώσεις» (δεν φέρουν `service_contract_id`· τα σύνολα τα αφαιρούν)
+
+> **🔒 Locked — Services module για MyIP/hosting:** κρατάμε **ΕΝΑ** «Υπηρεσίες», εξέλιξη **προσθετικά**
+> (service_type/κατηγορίες + ProvisioningModule drivers + addons ως child rows + progressive disclosure), **ΟΧΙ**
+> clone σε «Hosting Services». Πλήρες σκεπτικό → `docs/services-module-evolution.md` (+ CLAUDE.md architectural decisions).
+
+#### 12. Έργα (projects) (L) — χαμηλή προτεραιότητα, χωρίς χρονοδιάγραμμα
+Νόημα μόνο αν ένα έργο μαζεύει έσοδα+έξοδα από πολλά παραστατικά (μικτό περιθώριο). Για καθαρά recurring δεν χρειάζεται.
+
+#### 13. Πεδία χρήστη (custom fields) (S) — ιδέα για όταν προκύψει ανάγκη
+Τα εσωτερικά notes καλύπτουν σήμερα.
+
+### ⚪ Απορρίπτονται
+| Τι | Γιατί |
+|---|---|
+| Αξιόγραφα / επιταγές (+ widgets) | Καμία επιταγή από το 2007 — online & μετρητά μόνο |
+| Αποθήκη / απογραφή | Δεν κάνουμε εμπορία φυσικών αγαθών |
+| Λιανική (Χ/Ζ, Ευκαιρίες/Εργασίες Λιανικής) | Δεν υπάρχει λιανική· στο Epsilon απλώς διπλασιάζει το μενού |
+| ~120 items ρυθμίσεων του Epsilon | Εκεί γίνεται δυσκίνητο — βλ. #6 για τη σωστή εκδοχή |
+
+### Τι έχουμε και ΔΕΝ έχει το Epsilon (να μη χαλάσουν)
+Πύλη πελατών · Γέφυρα WHMCS (+ Εισερχόμενα + duplicate audit) · MRR/ανανεώσεις/`ServiceContract` · Διασταύρωση
+ΑΑΔΕ + Έλεγχος ΜΑΡΚ + αδέσποτα · **E3 income classification ορατό** · Βοηθός AI με κοστολόγηση · Υγεία συστήματος +
+Ενημερώσεις · Multi-tenant · Αναφορές (heatmap/εποχικότητα/πρόβλεψη/DSO/ΦΠΑ ανά συντελεστή) · CMR/φορτωτικές ·
+**MCP interface** (κανένας ανταγωνιστής).
+
+### Πηγές (legal — προς επιβεβαίωση με λογιστή/πάροχο)
+ΑΑΔΕ / Forin.gr / Taxheaven / lido.app: υποχρεωτική Η/Τ B2B σε δύο κύματα (2/2/2026 τζίρος >1εκ · 1/10/2026 λοιποί).
+Τρίτων πηγών — **επιβεβαίωσέ τις πριν χρονοπρογραμματίσεις το #1 Phase 2.**
 
 ---
 
@@ -253,14 +223,6 @@ the myDATA/Provider sections lower down — not repeated here.
   capture the acquirer's `ProvidersSignature` + `tid` + `transactionId` (natural path: **Cardlink/
   Eurobank vPOS** return → pass through `InvoSignDocument`/`AadeInvoiceDocument`) so type-7 can file.
   Until (c), operators map card/vPOS/PayPal to §8.12 **1** (επαγγ. λογαριασμός ημεδαπής), 3, 6 or 8.
-- **DEP-001 (WATCH → ✅ SATISFIED 2026-09-12 → ✅ WIRED 2026-09-12)** — AADE **v2.0.2**
-  delivery-lifecycle spec gated a durable attempt-record for MYD-026/PROV-002 (only a
-  protocol-agnostic cache-lock was safe until then). v2.0.2 shipped, `firebed/aade-mydata` 5.12.0
-  exposes it, and **Slice 1 wires it**: `DeliveryLifecycleService::confirmReturn()` drives
-  `ConfirmDeliveryReturn` → `Response::getDeliveryReturnMark()` → the guarded cache column
-  `delivery_notes.return_mark` + a `CONFIRM_RETURN` audit row (UI action «Δήλωση επιστροφής»,
-  `in_transit → returned`). The direct-myDATA path uses the real durable mark now; the **provider
-  path (PROV-002)** still needs its own wiring in a later slice.
 - **MYD-005 (P2)** — ordinary invoice XML omits the optional myDATA `measurementUnit`
   (data-fidelity enhancement; goods-tenant-conditional).
 - **ΤΔΑ measurementUnit from free-text (P2)** — a combined ΤΔΑ MUST emit a per-line
@@ -378,55 +340,6 @@ surfaced in the open-items sections further down.
   2026-07 production audit) — the «what happened / evidence» trail, moved out of the
   live `docs/` tree.
 - **`aade/`** — the AADE myDATA + Delivery-Note specs.
-
----
-
-## ✅ Done recently (so we don't re-pick them)
-- **`einvoice_provider_key` κανονικοποιείται στο ΓΡΑΨΙΜΟ (mutator στο `Company`) + data-fix migration.**
-  Ο `ProviderTransportRegistry::for()` κάνει `trim()`, άρα η ΥΠΟΒΟΛΗ δούλευε με κλειδί που κουβαλά κενά, ενώ
-  κάθε σύγκριση της ωμής στήλης αστοχούσε. **Μετρημένα** συμπτώματα (probes, όχι εικασία): η φόρμα εταιρείας
-  γινόταν ΑΔΥΝΑΤΟ να αποθηκευτεί (το συντιθέμενο channel δεν υπήρχε στα options → validation error σε κάθε
-  save, ακόμη και για άσχετη αλλαγή)· το preview payload στο ViewInvoice + το `einvoice:provider-test-submit`
-  έδειχναν **μη-augmented** XML ενώ η πραγματική υποβολή ήταν augmented· η κάρτα υπολοίπου έλεγε «καμία
-  υποβολή ακόμη»· το `go-live-check` έγραφε **pass** για κλειδί που έπεφτε σε `NullProviderTransport`.
-  **ΔΙΟΡΘΩΣΗ του προηγούμενου σημειώματος:** είχε καταγραφεί ότι «η αποθήκευση της φόρμας μηδενίζει το
-  `einvoice_provider_config`». **Δεν ισχύει** — probe στην πραγματική ροή Livewire: χωρίς αλλαγή channel το
-  save μπλοκάρεται από validation (τίποτα δεν γράφεται)· με επιλογή του σωστού channel το `->live()` Select
-  εμφανίζει το προ-συμπληρωμένο πεδίο και το token επιβιώνει. Το wipe εμφανιζόταν μόνο σε συνθετικό array
-  κατευθείαν στο bridge, που το UI δεν παράγει ποτέ. Το bridge σκληρύνθηκε πάντως (σύγκριση normalised).
-- **PEPPOL Phase 1** (PR #253) — provider-independent BIS 3.0 UBL builder + `peppol:test-submit`.
-- **DR / «work without APP_KEY»** (PR #254) — `MaybeEncrypted` cast + `secrets:reencrypt`; default plaintext.
-- **`$hidden` on secret models** (PR #255).
-- **Expense classification → AADE** (PR #256) — `SendExpensesClassification` + per-line + `expenses:test-classify`.
-- **FK-aware delete guard** (PR #258) — `GuardedDeleteAction`.
-- **«Σύστημα» area — 3 slices** (2026-06-10): «Υγεία συστήματος» page · durable `scheduled_task_runs` + queue retry · «Ρυθμίσεις χρονοπρογραμματιστή» (audited toggles, `system_settings`).
-- **«Ρυθμίσεις συστήματος» page** — global knobs (`require_2fa`, backup-alert on/off + email) ως audited live toggles· at-rest encryption + mailer status read-only.
-- **Expenses polish** (2026-06-10): χειροκίνητη καταχώριση εξόδου (`source=manual`, γραμμές, tab «Χειροκίνητα», edit μόνο για manual) + ιδιωτικό PDF/scan attachment με signed download.
-- **Δίγλωσσο/EN PDF** (2026-06-10): γλώσσα ανά invoice/quote (GR/EN/δίγλωσσο, default από χώρα πελάτη)· `PdfLabels` dictionary· localizes μόνο ετικέτες.
-- **Withholding/fees count toward owed** (2026-06-11): `invoices.payable_total` (= gross + AADE [208] adjustment)· owed/balance/Καρτέλα/receivables/dashboard + PDF «Πληρωτέο» = payable· `invoices:backfill-payable-total`· money-consistency proven με τιμολόγιο παρακράτησης.
-- **«Υπόλοιπο πελάτη» στο PDF** (2026-06-11): legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ» — snapshot-at-issue (`invoices.customer_balance_snapshot`, capture στον `InvoiceObserver`), block Προηγούμενο+παραστατικό=Νέο, opt-in per-tenant (`show_customer_balance_on_pdf`) + override per-customer (`show_balance_on_pdf`)· μόνο επί πιστώσει/πιστωτικά.
-- **Καρτέλα «αναλυτική παρακράτηση»** (2026-06-11): στο AR-ledger row, όταν το εισπρακτέο διαφέρει από την αξία εγγράφου (παρακράτηση/τέλη), εμφανίζεται detail «Αξία εγγράφου 1.240 · Παρακράτηση φόρου 200» κάτω από την αναφορά (page + statement PDF). Display-only — debit/credit/υπόλοιπο μένουν = payable (chose inline-detail αντί synthetic rows ώστε running-balance + paid/unpaid filters να μη χαλάνε).
-- **Onboarding** (2026-06-10): DEMO seeder · `ekdosi:install` wizard (+ lookup seeding via `MyDataLookupSeeder`) · global+per-company «Δοκιμή SMTP» · export/import χωρίς passphrase.
-- **myDATA console unification** (PR #272) — one «Κονσόλα myDATA» cluster (Πωλήσεις/Έξοδα/Ε3) + redirects.
-- **Expenses fetch** (PR #272) — «Άντληση από myDATA» κουμπί στη λίστα Έξοδα + tip + read-only `mydata:refresh-expenses` cron (UI toggle, default OFF).
-- **Already shipped earlier — docs were stale, now corrected:** ΔΑ **movement lifecycle**
-  (έναρξη/παράδοση/έλεγχος μέσω `DeliveryLifecycleService`: `registerTransfer`/`confirmDelivery`/`refreshStatus`) ·
-  **§8.13 μονάδες μέτρησης** + seeder (`MyDataLookupSeeder::seedMetricUnits`, `MetricUnit`) ·
-  **enrich/QR από MARK** (`EnrichInvoiceFromAade`).
-- **Sandbox round 2 ✅** (2026-06-10) — ΔΑ lifecycle + νέοι taxTypes (fees/stamp/deductions) +
-  product-linked taxes + 4% override, όλα AADE-accepted (`sandbox-results.txt`).
-- **Ηλικίωση οφειλών** (PR #308) — aged-receivables page (0-30/31-60/61-90/90+ ανά πελάτη, σύνολα,
-  drill στην Καρτέλα, CSV· reuse Καρτέλα FIFO aging). FEATURES §12.
-- **Βιβλίο Εσόδων-Εξόδων → myDATA period report** — ΜΑΡΚ+κατάσταση στήλες, Έσοδα/Έξοδα+σύνολα,
-  period presets, **PDF οριζόντιο A4**, exports CSV/XLSX/JSON. FEATURES §12. (Πλήρως κλεισμένο.)
-- **Panel utility CSS (no-build)** — `resources/css/panel.css` μέσω `FilamentAsset::register` →
-  `filament:assets`· όλα τα custom blade utilities πλέον styled, χωρίς npm/Vite/theme.
-  _(Maintenance: νέο utility σε blade → πρόσθεσέ το εκεί.)_
-- **Sendable customer statement (επαφή-aware)** (2026-06-17) — Καρτέλα → PDF/email σε πελάτη +
-  τις επαφές του (role-labelled) + ελεύθερα extras (validate/dedupe). FEATURES §7.
-- **Καρτέλα — όψη περιόδου + ομαδοποίηση header actions** (2026-06-17) — φίλτρα περιόδου πάνω από
-  τον πίνακα + **σύνολα έτους** (τζίρος/εισπράξεις/υπόλοιπο)· header actions σε dropdowns + **global
-  fix** στο overflow (`.fi-header-actions-ctn` wrap, αφορά όλες τις σελίδες με πολλά actions). FEATURES §7.
 
 ---
 
@@ -616,7 +529,9 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
 ## 🔵 Big features (blueprints kept — see index above)
 - **PEPPOL Phase 2** — Access-Point transport («send»). Phase 1 (UBL: builder + «Προβολή/Λήψη UBL»
   κουμπιά + `invoice_ubl` tool + `peppol:test-submit`) DONE· θέλει EE provider + sandbox creds
-  (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`.
+  (Billit/Finbite/Telema…). `paroxos/regulatory-blueprint.md §7`. **Parked, review 2027** — transport
+  is not deadline-driven yet: EU ViDA cross-border is 2030, Estonia domestic e-invoicing 2027
+  (proposed), and InvoSign already covers GR; the near-term unlock is i18n (see `PLAN.md`).
   - **Endpoint format για scheme 9933 (GR:VAT)** — ο `PeppolEndpoint` βγάζει τον **seller** endpoint
     bare (`9933:800561849`) ενώ ο **buyer** μπορεί να είναι EL-prefixed (`9933:EL…`) όταν το `vat_vies`
     έχει πρόθεμα. Εσωτερικά συνεπές (και τα δύο περνούν από την ίδια `fromVat`), ο invalid `GR…` έχει
@@ -624,7 +539,8 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
     κλείδωσέ τη με τον πραγματικό AP/Schematron πριν το «send» (η library `validate()` δεν ελέγχει
     endpoints). Αόρατο στο Phase 1 (show/download).
 - **GR Πάροχος live** — P2–P5 built/gated (mode=off)· θέλει πραγματικά provider creds + sandbox
-  (InvoSign/SBZ). `paroxos/`.
+  (InvoSign/SBZ). `paroxos/`. _(InvoSign is live for GR today; this blueprint remains for a 2nd GR
+  provider / SBZ.)_
 - **PROV-003 archive half** (print ✅ #406· snapshot + invoice-page evidence ✅ 2026-09-03) —
   απομένει **(α) ανάκτηση + ιδιωτική αρχειοθέτηση του επίσημου PDF παρόχου**: SHA-256, immutable πρώτη
   έκδοση, retry ΜΟΝΟ download (ποτέ re-file), allowlisted hosts/bounded size (anti-SSRF),
@@ -651,90 +567,25 @@ _Ιδέα 2026-07-12 (chrismfz). **Θα το δει με τον λογιστή �
   (honest status, no fake toggle). Phase 1 = move `companies.whmcs_*` → `billing_connections.config`,
   ExternalDocument DTO, generic ingest dispatcher, real is_active gating, + the 2nd connector —
   build WHEN a real 2nd source exists (designing the contract against WHMCS+guesswork bakes in WHMCS-isms)._
-- **AI «Βοηθός»** — _✅ Phase 1 SHIPPED 2026-06-17: read-only chat (σελίδα + floating widget, κοινό
-  `AssistantRunner`), tool layer isolation + per-tool permission, governance web/DB (on/off · model · token
-  cap · per-company key) + `ai_usage_log` metering + caps. ✅ Phase 2a SHIPPED 2026-06-17: 6 read-only
-  insight tools (`count_sales`/`outstanding_receivables`/`list_top_debtors`/`find_customer`/`recent_invoices`/
-  `vat_summary`) + **clickable same-origin links** (Καρτέλα/view/νέο παραστατικό) μέσω `ChatMarkup` +
-  prompt-caching toggle. ✅ Phase 2b SHIPPED 2026-06-17: **WRITE tools με operator-confirm** (ποτέ
-  αυτόματα) — `send_customer_statement` (επαφή-aware) + `create_reminder`· staging σε `ai_pending_actions`,
-  confirm/cancel κάρτες, `AiActionExecutor` (re-validate, scoped tenant+user), reminders → Filament DB
-  notifications μέσω `ai:dispatch-reminders`._
-  **Phase 2c (open) — ιδέες/σημειώσεις (καμία δέσμευση, χαμηλή προτεραιότητα):**
-  - **(α) Περισσότερα read tools** — **✅ SHIPPED (3/4): `income_vs_expense`, `top_products`,
-    `whmcs_inbox`** (dual-surface, chat + MCP). **Remaining: `backups_status`** — αφέθηκε γιατί
-    τα backups είναι super-admin/global (αδέξιο σε tenant-scoped operator chat)· καλύπτεται ήδη
-    μερικώς από το super-admin `app_health` MCP tool. Χτίσε το μόνο αν χρειαστεί operator-facing.
-  - **(β) Περισσότερα write tools με confirm** — **✅ `record_payment` SHIPPED (2026-09-05):**
-    «καταχώρισε είσπραξη» (reuse `PaymentAllocator::allocate`, `TYPE_RECORD_PAYMENT`, propose-only,
-    μονοσήμαντος πελάτης, gate `Create:Payment`, chat + MCP). **Remaining — «κόψε πρόχειρο
-    παραστατικό» (deferred):** τέμνει ανοιχτό design question — ένα draft «καίει» ΑΑ (βλ. pro-forma/
-    ΠΡΟΤ-N item παρακάτω) και θέλει πολλά structured inputs (τύπος + γραμμές/είδη/ΦΠΑ). Χτίσε το ΜΕΤΑ
-    την pro-forma απόφαση, με το ίδιο `ai_pending_actions` pattern.
-    _(P2 cleanup: το fuzzy customer-match (name/ΑΦΜ like) υπάρχει πλέον σε 3 tools —
-    `SendCustomerStatementTool`/`CreateReminderTool`/`RecordPaymentTool` με λίγο διαφορετικά
-    return shapes· ένας κοινός `AssistantCustomerResolver` (found/ambiguous/none) θα αφαιρούσε το drift.)_
-  - **(γ) Per-company κλειδί/βοηθός ξεχωριστά** — η στήλη `companies.ai_api_key` υπάρχει
-    (στο `$hidden`)· λείπει το UI exposure (στο `CompanySettings` ή super-admin only) +
-    per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).
-  - **(δ) Persistence συνομιλιών** — `ai_conversations` table (ιστορικό + πολλές
-    συνομιλίες ανά χρήστη, αντί session) — απαιτεί και UI επιλογής συνομιλίας.
-  - **(ε) Usage dashboard + `ai_usage` tool — tokens/κόστος ανά εταιρεία. ✅ SHIPPED (2026-09-05).**
-    Super-admin σελίδα «Χρήση & κόστος AI» (cross-tenant) **+ `ai_usage` chat/MCP tool** (per-tenant·
-    MCP `company="all"` → ανά-εταιρεία fan-out). Follow-up: per-tenant self-view UI για company_admin. Ιστορικό:
-    Χτίζεται ως **super_admin σελίδα «Χρήση & κόστος AI» ΜΕΣΑ στην περιοχή «AI Βοηθός»**
-    (group «Σύστημα», δίπλα στο «Βοηθός AI») — **ΟΧΙ** στο κεντρικό dashboard (owner). Τα
-    ΔΕΔΟΜΕΝΑ ΥΠΑΡΧΟΥΝ ΗΔΗ: το `ai_usage_log` κρατά input/output/cache tokens +
-    `cost_estimate` ανά εταιρεία/χρήστη/συνομιλία/μοντέλο (source of truth για τα caps, βλ.
-    `AiUsageMeter`). Surface: `sum(tokens)`/`sum(cost)` group-by μήνα × εταιρεία (ποιος
-    πληρώνει, ποιος κοντά στο όριο) + per-user + μηνιαία τάση, προαιρετικά CSV. Read-only.
-    _Follow-up: per-tenant self-view για company_admin (η δική του κατανάλωση vs cap)._
-  - **(στ) Streaming απαντήσεων** — τώρα είναι «σκέφτομαι…» μέχρι να ολοκληρωθεί το
-    tool-loop· streaming θα ήθελε SSE/Livewire polling (μεγαλύτερη αλλαγή στο surface).
-  - **(ζ) Helper / «βοήθεια & συμβουλή» με curated knowledge base. ✅ SHIPPED (2026-09-05).**
-    `knowledge_search` tool + `KnowledgeBase` (RAG-lite) πάνω στο `docs/assistant-kb/` (chat + MCP),
-    ΑΥΣΤΗΡΟ grounding («ρώτα λογιστή» όταν δεν καλύπτεται). **Follow-up:** πλούτισε το KB (ο λογιστής
-    προσθέτει επιβεβαιωμένες φορολογικές ενότητες με ημερομηνία ισχύος). _P2 follow-up:_ το
-    `knowledge_search` είναι **global** (δεν αγγίζει tenant data) αλλά μέσω MCP περνά από τον
-    `McpTenantResolver` — άρα multi-company χρήστης πρέπει να δώσει ένα (αδιάφορο) `company`. Θέλει
-    ένα «no-tenant» μονοπάτι στο `AssistantMcpTool` (framework· το in-app chat δεν επηρεάζεται).
-    _Το αρχικό σχέδιο:_ Δύο ΞΕΧΩΡΙΣΤΑ
-    πράγματα: **(i) app how-to** («πού βλέπω τι μου χρωστάνε;», «πώς κόβω πιστωτικό;») —
-    ασφαλές, γνώση της εφαρμογής· **(ii) domain advisory** («τι ΦΠΑ για Σκόπελο;», «τι
-    παραστατικό για αποστολή δικού μου εξοπλισμού στο datacenter;», «ποιον τύπο να
-    διαλέξω;») — ΕΠΙΚΙΝΔΥΝΟ αν απαντηθεί από γενική γνώση του μοντέλου (μειωμένα νησιά
-    άλλαξαν πολλές φορές· λάθος = λάθος ΦΠΑ/ΑΑΔΕ). **Σχέδιο:** curated KB σε markdown
-    (`docs/assistant-kb/`) που γράφεις εσύ/ο λογιστής + νέο tool `knowledge_search`
-    (RAG-lite: επιστρέφει σχετικά αποσπάσματα) → ο βοηθός στηρίζεται ΑΥΣΤΗΡΑ σε αυτό,
-    «δεν καλύπτεται → ρώτα λογιστή», ΠΟΤΕ εφευρεμένος φορολογικός κανόνας + πάντα
-    disclaimer για φορολογικά. **Κουμπώνει με τα έτοιμα:** links (π.χ. «πώς στέλνω
-    εξοπλισμό» → εξήγηση ΔΑ + link «Νέο Δελτίο Αποστολής»), `vat_categories` της
-    εταιρείας (δείξε τις ρυθμισμένες, μη μαντεύεις). Ίδιο grounding-discipline με τα
-    tools — απλώς προστίθεται μία ΕΓΚΕΚΡΙΜΕΝΗ πηγή δίπλα τους.
-  - _Σχεδιαστικά κλειδωμένα ήδη (μην ξανασυζητηθούν): tool-layer isolation (κανένα `company`
-    param), per-tool Shield permission, `#[Locked]` messages/transcript, `ChatMarkup`
-    same-origin links, writes ΠΟΤΕ auto (operator-confirm). Engine = Laravel HTTP/Messages
-    API χωρίς SDK. prompt-caching ✅ έγινε (2a)._ `ai-assistant-blueprint.md`
-  (πλέον καλύπτει: **«δεν χρειάζεται Console agent»** για το in-app chat — μόνο API key +
-  Messages API tool-loop· **abuse/resource safeguards** = no-code-execution + per-request
-  max_tokens/tool-loop/timeout/history caps + per-tenant/user rate-limit + monthly token caps +
-  audit· **grounding** system prompt (ξέρει ότι είναι ekdosi, ποια εταιρεία, off-task refusal)·
-  **υποψήφιο μοντέλο = Sonnet 4.6 default**, Haiku 4.5 cheap tier, Opus 4.8 για βαριά ανάλυση).
+- **AI «Βοηθός»** — Phase 1 / 2a / 2b + `ai_usage` + `knowledge_search` ✅ **shipped** (read-only chat +
+  insight/write tools με operator-confirm + governance/metering/caps· βλ. `FEATURES.md §16` /
+  `CHANGELOG.md` / `ai-assistant-blueprint.md`). **Phase 2c — still open (χαμηλή προτεραιότητα):**
+  - **(α remaining) `backups_status` read tool** — αφέθηκε γιατί τα backups είναι super-admin/global
+    (αδέξιο σε tenant-scoped operator chat)· καλύπτεται μερικώς από το super-admin `app_health` MCP tool.
+  - **(γ) per-company κλειδί/βοηθός UI** — η στήλη `companies.ai_api_key` υπάρχει (`$hidden`)· λείπει το
+    UI exposure + per-key billing separation (κάθε εταιρεία δικός της Anthropic account/DPA).
+  - **(δ) persistence συνομιλιών** — `ai_conversations` table (ιστορικό + πολλές συνομιλίες ανά χρήστη,
+    αντί session) — απαιτεί και UI επιλογής συνομιλίας.
+  - **(στ) streaming απαντήσεων** — τώρα «σκέφτομαι…» μέχρι να ολοκληρωθεί το tool-loop· θα ήθελε
+    SSE/Livewire polling (μεγαλύτερη αλλαγή στο surface).
+  - **P2 cleanup** — το fuzzy customer-match υπάρχει σε 3 tools (`SendCustomerStatementTool`/
+    `CreateReminderTool`/`RecordPaymentTool`) με λίγο διαφορετικά return shapes· ένας κοινός
+    `AssistantCustomerResolver` (found/ambiguous/none) θα αφαιρούσε το drift.
 - **Payment connectors** — IRIS + card-POS. `payment-connectors.md`.
-- **Leads / mini-CRM** (2026-09-01, ιδέα ιδιοκτήτη — «αποκτούμε άτομο να κυνηγάει πελάτες») —
-  ξεχωριστός `leads` πίνακας (όσα στοιχεία έχουμε, μόνο επωνυμία υποχρεωτική) + `lead_activities`
-  χρονολόγιο (τηλέφωνο/email/ραντεβού/σημείωση, append-only, ποιος/πότε/τι ειπώθηκε/επόμενο βήμα) +
-  status (νέο→…→πελάτης / χάθηκε / μην ξαναενοχλήσετε) + **dedupe warning** vs υπάρχοντες πελάτες &
-  παλιά leads («να μην ξαναζαλίζουμε κόσμο») + **`ConvertLeadToCustomer`** με αμφίδρομο link
-  (`leads.converted_customer_id`, μοτίβο quote→invoice) + section «Προέλευση» στον πελάτη +
-  **«Απολογισμός πωλήσεων»** page (τηλέφωνα/emails/μετατροπές ανά χειριστή×εβδομάδα — «δούλεψε ο
-  άνθρωπος;») + `next_action_at` reminders. **DESIGN ONLY, αποφάσεις κλειδωμένες** (§9: ρόλος =
-  `operator`, όλοι βλέπουν όλα, παντού/multi-tenant, ελεύθερη επεξεργασία, μόνο χειροκίνητα, keep it
-  simple) → `archive/leads-mini-crm.md`. **L0 + L1 ✅ SHIPPED** (resource + χρονολόγιο + καταστάσεις + dedupe +
-  μετατροπή σε πελάτη + «Προέλευση» + προσφορά από lead, FEATURES §7β). **L2 ✅ SHIPPED**
-  (`SalesActivityReport` + CSV, `leads:notify-due`, dashboard widget). **Μένει (προαιρετικά):** εβδομαδιαίο
-  digest email του απολογισμού στον company_admin (μοτίβο backup-failure alert). **L3 όψεις (kanban +
-  ημερολόγιο) ✅ SHIPPED**· email-από-lead + AI `lead_summary` = συνειδητά ΟΧΙ (owner: «too much»).
+- **Leads / mini-CRM** — L0 + L1 + L2 + L3 (kanban/calendar) ✅ **shipped** (leads + χρονολόγιο +
+  καταστάσεις + dedupe + μετατροπή σε πελάτη + «Προέλευση» + `SalesActivityReport`· βλ. `FEATURES.md
+  §7β` / `archive/leads-mini-crm.md`). **Μένει (προαιρετικά):** εβδομαδιαίο digest email του
+  απολογισμού στον company_admin (μοτίβο backup-failure alert).
 
 ---
 
@@ -875,7 +726,7 @@ data model + phase gates: **`PLAN.md`**.
     ακριβό κομμάτι είναι το email ingestion/threading, που δανειζόμαστε (`webklex/php-imap` +
     `willdurand/email-reply-parser`). Πιθανώς το καθαρότερο long-term δεδομένου πόσο δένουν τα tickets
     με customer/service/company.
-  - **Πλήρης ανάλυση + απόφαση → `docs/ticket-system-eval.md`** (2 στρώματα: ticket domain + mail
+  - **Πλήρης ανάλυση + απόφαση → `docs/ticket-system.md`** (2 στρώματα: ticket domain + mail
     ingestion). **Σύσταση:** **build-our-own thin model** (native multi-tenancy/Filament/Flux) +
     δανεικό mail layer — **`webklex/php-imap`** (poll το δικό μας `mail.myip.gr`, όχι provider webhook
     αφού έχουμε δικό μας mail) + **`willdurand/email-reply-parser`** (καθάρισμα quoted/signature) —
@@ -884,7 +735,7 @@ data model + phase gates: **`PLAN.md`**.
     του `laravel-service-desk` + μέτρησε το tenancy-retrofit κόστος, (β) απόδειξε IMAP poll στο
     `mail.myip.gr` + reply-parse. Αποτέλεσμα → adopt (αν φθηνό retrofit) ή build (πιθανό).
   - **Συγκεκριμένο design (schema + state machine + mail flow + 2 UIs + PR breakdown) →
-    `docs/ticket-system-design.md`** (build-our-own, thin 6-table domain, reuse των υπαρχόντων
+    `docs/ticket-system.md`** (build-our-own, thin 6-table domain, reuse των υπαρχόντων
     `HasAttachments`/`HasTags`/`TracksActivity`, Support Cluster + config στο Settings Cluster).
   - **Portability (deferred):** τα ticket tables είναι `INTENTIONALLY_EXCLUDED` από το per-tenant
     `CompanyExporter` bundle μέχρι να γραφτεί/τεσταριστεί το FK-rewiring (ticket→customer/department/
@@ -1020,7 +871,7 @@ data model + phase gates: **`PLAN.md`**.
   - **Επιβεβαίωση από το ίδιο το WHMCS** (screenshots 2026-09-06): χωρίζει **Configuration** (Support
     Departments/Ticket Statuses/Escalation/Spam κάτω από το «Configuration» sidebar) από τα **operational**
     Support (Tickets/Predefined Replies/KB κάτω από το top «Support» μενού) — ακριβώς το Settings-Cluster
-    split. Λεπτομέρειες στο `docs/ticket-system-eval.md` «WHMCS parity».
+    split. Λεπτομέρειες στο `docs/ticket-system.md` «WHMCS parity».
 
 ## 🟢 Services / Provisioning
 - **Real provisioning modules** (cPanel/Mailcow/license server) — σήμερα μόνο `NullProvisioningModule`. _(= Πυλώνας C του `PLAN.md`.)_
@@ -1242,18 +1093,6 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η
   διάσταση χειριστή συμφωνεί πλέον· η χρονική/πεδίου όχι. Θέλει είτε αποκλειστικά tabs είτε
   ρητότερο κείμενο στο banner.
-
-## ✅ ~~`UpdateRun` authorization boundary (ΜΗ shield-generated policy)~~ — ΕΓΙΝΕ
-- **Έκλεισε.** `app/Policies/UpdateRunPolicy.php` γραμμένη ΣΤΟ ΧΕΡΙ (view μόνο για system super
-  admin, κάθε mutation `false`) **+** το `UpdateRun` μπήκε στο `ADMIN_FORBIDDEN_RESOURCES`, με
-  Gate-level tests (`UpdateRunAuthorizationTest`). Ποτέ stock `shield:generate` template εδώ — δίνει
-  CRUD βάσει `*:UpdateRun` permissions, ακριβώς αυτό που απορρίφθηκε στο review του PR #389.
-  Έκλεισε ταυτόχρονα και το deploy deadlock: όσο ΔΕΝ υπήρχε αρχείο policy, το `shield:generate`
-  (deploy + seeder) το ξανάγραφε ως untracked και το pre-flight του `update.sh` αρνιόταν το επόμενο
-  deploy. Φύλακας: `ShieldPolicyDriftTest` (κανένα resource χωρίς committed policy).
-- **Υπόλοιπο (μικρό):** τα άλλα δύο global (`$isScopedToTenant = false`) resources — `Company`,
-  `User` — είναι ήδη στο `ADMIN_FORBIDDEN_RESOURCES` αλλά έχουν **stock** shield policies. Αξίζει
-  ίδιο πέρασμα (super-admin-only, mutations `false`) όταν ακουμπήσουμε ξανά τα δικαιώματα.
 
 ## 🔒 Backup / DR / Portability
 - **Installer pre-migrate passphrase gate validates only company secrets** _(P2, pre-existing,
@@ -1876,6 +1715,39 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 - **Bulk-delete guard** — single-record guarded (PR #258)· `DeleteBulkAction`/`ForceDeleteBulkAction` αφύλακτα.
 - **Soft-deleted FK rows render blank** — `withTrashed()` label + «deleted» badge για rows πριν τον guard.
 - _**`GrProviderSubmitter::cancel()` non-9.3 guard** — ✅ SHIPPED 2026-07-07: service-level hard-refuse με μήνυμα «έκδοσε πιστωτικό (5.1)» για κάθε τύπο ≠ 9.3, ώστε μη-UI callers (automation/bulk) να μη χτυπούν opaque `[283]`. (Το UI ήδη γκρεϊτάρει το `cancel_at_mydata` σε 9.3-only.) Βλ. `mydata-sandbox-myd2-retry-2026-07-07.md`._
+- **P2 (Καρτέλα NULL-pay_date payment, review 2026-09-16, deferred — pre-existing):** το `computeStats`
+  αθροίζει στο `totalPaidLifetime` και πληρωμές με **NULL `pay_date`** (`CustomerLedgerBuilder` payments
+  loop, χωρίς guard), ενώ το `computeYearly` και το `computeLedger` τις **παραλείπουν** (skip όταν
+  `! $p->pay_date`). Άρα ένας πελάτης με πληρωμή χωρίς ημερομηνία (μόνο μέσω raw ETL insert που
+  παρακάμπτει το μοντέλο — οι κανονικές πληρωμές έχουν πάντα `pay_date`) θα είχε `stats.balance` ≠
+  `year_end_balance`/τελική running balance κατά αυτό το ποσό. Orthogonal στον credit-term gate,
+  δεν αγγίζει normal-path γραμμή. Fix αν θέλουμε byte-identical: guard την ίδια `! pay_date` και στο
+  `computeStats` (ή δώσε fallback ημερομηνία). Δεν μπλοκάρει.
+- **P2 (review 2026-09-15, deferred — cosmetic/latent):** `BaseListRecords::removeTableFilter()`
+  guards a request to clear a filter that no longer exists (fixed the reported 500) and, on the
+  individual-remove path, also re-persists the cleaned state via `handleTableFilterUpdates()`.
+  Two residual, harmless gaps remain — both deferred because **no table here persists filters in
+  session or defers filters**, and an unregistered key is never applied to the query (wrong
+  results impossible), so the worst case is a dead `?filters[x]=…` param lingering:
+  - `removeTableFilters()` («καθαρισμός όλων») is NOT overridden; it iterates only currently-
+    registered filters, so an orphaned key survives a clear-all instead of being swept.
+  - The guard sanitizes the *symptom* on removal, not the *source*: a page that persists filters
+    in session would keep re-hydrating a removed key on mount until it's individually dismissed.
+  The clean fix for both is to strip keys absent from `getTable()->getFilters()` at
+  hydration/mount, so a removed filter can never linger regardless of path. Not worth the code
+  today.
+- **P2 (review 2026-09-15, bulk «Αρχειοθέτηση επιλεγμένων», deferred):** two low-severity gaps,
+  both consistent with the sibling bulk delete:
+  - A **held WHMCS mass-pay «container»** row (awaiting «Ενοποίηση»/«Ανάλυση») is `status=held`, so
+    a bulk archive sweeps it like any other held row and its children are never resolved — the
+    consolidate/explode intent is lost (recoverable via «Επαναφορά προς έλεγχο»). The per-row
+    archive has the same gap; bulk just makes an accidental sweep easier. Fix if it bites: exclude
+    (or warn on) mass-pay containers in `isArchivable()`/the bulk action — deferred to avoid
+    coupling the bulk op to mass-pay internals for a reversible edge.
+  - The archive loop issues N `update()`s (+ observer passes) **without a transaction** (same as
+    `deleteSelectedAction`), so a mid-batch failure leaves a partial result. Benign — re-running
+    finishes the rest (already-archived rows are skipped). Wrap the loop in `DB::transaction` if we
+    ever want atomic bulk writes across both actions.
 
 ## 💡 PDF / UX & ideas
 - **«Πρόχειρα»: legacy-imported stuck-drafts δεν φαίνονται στην καρτέλα, αλλά ΕΙΝΑΙ editable αλλού

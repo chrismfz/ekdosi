@@ -37,7 +37,7 @@ use Illuminate\Support\Facades\DB;
  * {@see RevenueByCategory::aggregate()} (the two differ only in the grouping axis).
  * That duplication is guarded by RevenueByItemTest::test_totals_reconcile_with_revenue_by_category
  * — if either service's money/scope rule ever drifts, that test goes red. Folding the
- * shared per-line computation into one helper is a tracked cleanup (docs/EKDOSI-BACKLOG.md #4).
+ * shared per-line computation into one helper is a tracked cleanup (docs/BACKLOG.md #4).
  */
 class RevenueByItem
 {

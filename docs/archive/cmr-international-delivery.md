@@ -233,6 +233,6 @@ NEW cmr_lines (goods table boxes 6–12):
 ---
 
 _Δες επίσης: **`docs/reference/cmr-template.pdf`** (η ακριβής φόρμα που αναπαράγουμε),
-`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.1_preofficial.md` (ΔΑ lifecycle),
+`docs/aade/myDATA_API_Documentation_DeliveryNote_v2.0.2_preofficial.md` (ΔΑ lifecycle),
 `app/Services/Delivery/DeliveryNotePdf.php` (το PDF pattern που αντιγράφουμε),
 `FEATURES.md §Ψηφιακό ΔΑ`._
