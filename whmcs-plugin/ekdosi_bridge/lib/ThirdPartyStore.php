@@ -457,6 +457,200 @@ class ThirdPartyStore
     }
 
     /**
+     * Batched: the ROUTED services per user, resolved to their WHMCS domain
+     * label — for the admin list's «Υπηρεσίες» column. Distinct live labels +
+     * a count of routes whose service no longer exists (dead). ~3 queries total
+     * regardless of user count (routing rows for the users, then the hosting +
+     * domain labels for the serviceids present).
+     *
+     * @param  array<int, int>  $userids
+     * @return array<int, array{labels: list<string>, dead: int}>
+     */
+    public static function routedServicesForUsers(array $userids): array
+    {
+        $out = [];
+        if ($userids === [] || ! self::hasOwnTables()) {
+            return $out;
+        }
+
+        $routes = Capsule::table(self::ROUTING)
+            ->whereIn('userid', $userids)
+            ->get(['userid', 'serviceid', 'service_type']);
+
+        // Normalise service_type the SAME way the SQL does: the column is
+        // utf8mb4_unicode_ci, so where('service_type','hosting') matches
+        // 'Hosting'/'HOSTING'/'hosting ' too. Match that here (strtolower+trim) or
+        // a legacy mixed-case route would read «live» in the list yet be counted
+        // dead and DELETED by the purge — the exact divergence to avoid.
+        $hostIds = [];
+        $domIds = [];
+        foreach ($routes as $r) {
+            $sid = (int) $r->serviceid;
+            $t = strtolower(trim((string) $r->service_type));
+            if ($t === 'hosting') {
+                $hostIds[$sid] = true;
+            } elseif ($t === 'domain') {
+                $domIds[$sid] = true;
+            }
+        }
+        $hostLabel = $hostIds === [] ? []
+            : Capsule::table('tblhosting')->whereIn('id', array_keys($hostIds))->pluck('domain', 'id')->all();
+        $domLabel = $domIds === [] ? []
+            : Capsule::table('tbldomains')->whereIn('id', array_keys($domIds))->pluck('domain', 'id')->all();
+
+        // Guard the «dead» verdict against an EMPTY service table (fresh install /
+        // transient during a reimport): if the table has no rows at all we can't
+        // tell «service deleted» from «not populated yet», so we never call that
+        // type dead — matching purgeOrphans(), which skips it for the same reason.
+        $hasHosting = self::tableHasRows('tblhosting');
+        $hasDomains = self::tableHasRows('tbldomains');
+
+        foreach ($routes as $r) {
+            $uid = (int) $r->userid;
+            $sid = (int) $r->serviceid;
+            $type = strtolower(trim((string) $r->service_type));
+            $out[$uid] ??= ['labels' => [], 'dead' => 0];
+
+            // «dead» must mean the SAME thing the purge does: the service ROW is
+            // GONE (existence gap), NOT merely a blank domain label. A live
+            // hosting product with an empty domain is valid — show it as «#id».
+            // Unknown service types can't be existence-checked here (the purge
+            // leaves them), so they are never counted dead.
+            if ($type === 'hosting' || $type === 'domain') {
+                $map = $type === 'hosting' ? $hostLabel : $domLabel;
+                $tableHasRows = $type === 'hosting' ? $hasHosting : $hasDomains;
+                if (array_key_exists($sid, $map)) {
+                    $label = trim((string) ($map[$sid] ?? ''));
+                    $out[$uid]['labels'][] = $label !== '' ? $label : ('#'.$sid);
+                } elseif ($tableHasRows) {
+                    $out[$uid]['dead']++;   // service row truly gone
+                } else {
+                    $out[$uid]['labels'][] = '#'.$sid;   // can't verify → not "dead"
+                }
+            } else {
+                $out[$uid]['labels'][] = '#'.$sid;
+            }
+        }
+        foreach ($out as $uid => $v) {
+            $out[$uid]['labels'] = array_values(array_unique($v['labels']));
+        }
+
+        return $out;
+    }
+
+    /**
+     * Read-only count of ORPHAN rows — rows in our tables that reference a WHMCS
+     * client / service / contact that no longer exists (no FKs, no cascade on
+     * WHMCS delete). Powers the admin list's orphan badge + the «Καθαρισμός»
+     * button decision. Categories can OVERLAP (a deleted client's route to a
+     * dead service counts in two rows), so `total` is a sum for a boolean
+     * "any orphans?" — the purge reports the authoritative deleted count.
+     *
+     * @return array{contacts_deleted_client:int, routes_deleted_client:int,
+     *               routes_dead_service:int, total:int}
+     */
+    public static function orphanSummary(): array
+    {
+        $z = [
+            'contacts_deleted_client' => 0, 'routes_deleted_client' => 0,
+            'routes_dead_service' => 0, 'total' => 0,
+        ];
+        if (! self::hasOwnTables()) {
+            return $z;
+        }
+
+        // Each existence check is guarded by the reference table being non-empty
+        // (see tableHasRows): an empty tblclients/tblhosting/tbldomains — fresh
+        // install or a transient reimport window — must NOT make every row look
+        // orphaned (`NOT IN (empty)` is TRUE for all rows).
+        if (self::tableHasRows('tblclients')) {
+            $z['contacts_deleted_client'] = (int) Capsule::table(self::CONTACTS)
+                ->whereNotIn('userid', fn ($q) => $q->select('id')->from('tblclients'))->count();
+            $z['routes_deleted_client'] = (int) Capsule::table(self::ROUTING)
+                ->whereNotIn('userid', fn ($q) => $q->select('id')->from('tblclients'))->count();
+        }
+        if (self::tableHasRows('tblhosting')) {
+            $z['routes_dead_service'] += (int) Capsule::table(self::ROUTING)
+                ->where('service_type', 'hosting')
+                ->whereNotIn('serviceid', fn ($q) => $q->select('id')->from('tblhosting'))->count();
+        }
+        if (self::tableHasRows('tbldomains')) {
+            $z['routes_dead_service'] += (int) Capsule::table(self::ROUTING)
+                ->where('service_type', 'domain')
+                ->whereNotIn('serviceid', fn ($q) => $q->select('id')->from('tbldomains'))->count();
+        }
+        $z['total'] = $z['contacts_deleted_client'] + $z['routes_deleted_client']
+            + $z['routes_dead_service'];
+
+        return $z;
+    }
+
+    /** True if a table has at least one row (guards NOT-IN-empty-subquery false positives). */
+    private static function tableHasRows(string $table): bool
+    {
+        try {
+            return Capsule::table($table)->exists();
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * DESTRUCTIVE: delete orphan rows — routes/contacts that can never match a
+     * real invoice because the WHMCS client or the WHMCS service they reference
+     * no longer exists — the SAME two categories the admin list surfaces and
+     * orphanSummary() counts. Scoped STRICTLY to those existence gaps (never
+     * touches a row that still resolves), transactional, and safe to re-run.
+     * Subqueries only ever read OTHER tables than the delete target (no MySQL
+     * same-table-delete conflict).
+     *
+     * @return array{contacts_deleted:int, routes_deleted:int}
+     */
+    public static function purgeOrphans(): array
+    {
+        $out = ['contacts_deleted' => 0, 'routes_deleted' => 0];
+        if (! self::hasOwnTables()) {
+            return $out;
+        }
+
+        Capsule::connection()->transaction(function () use (&$out) {
+            // Routes first (they reference contacts). Each delete removes rows the
+            // next condition would also catch, so the counts never double. Scope
+            // matches EXACTLY what the list surfaces + orphanSummary() counts:
+            // deleted-client and dead-service. (A live client's route to a deleted
+            // CONTACT — «dangling» — is not purged: it can't occur through the
+            // cascade/validation paths, is inert if it somehow does, and the list
+            // never shows it, so purging it silently would be a surprise.)
+            // Each delete is gated on its reference table being NON-EMPTY, so an
+            // empty tblclients/tblhosting/tbldomains (fresh install / transient
+            // reimport) can never turn `NOT IN (empty)` into "delete everything".
+            $hasClients = self::tableHasRows('tblclients');
+            if ($hasClients) {
+                $out['routes_deleted'] += (int) Capsule::table(self::ROUTING)
+                    ->whereNotIn('userid', fn ($q) => $q->select('id')->from('tblclients'))->delete();
+            }
+            if (self::tableHasRows('tblhosting')) {
+                $out['routes_deleted'] += (int) Capsule::table(self::ROUTING)
+                    ->where('service_type', 'hosting')
+                    ->whereNotIn('serviceid', fn ($q) => $q->select('id')->from('tblhosting'))->delete();
+            }
+            if (self::tableHasRows('tbldomains')) {
+                $out['routes_deleted'] += (int) Capsule::table(self::ROUTING)
+                    ->where('service_type', 'domain')
+                    ->whereNotIn('serviceid', fn ($q) => $q->select('id')->from('tbldomains'))->delete();
+            }
+
+            // Then orphan contacts (WHMCS client gone) — same empty-table guard.
+            if ($hasClients) {
+                $out['contacts_deleted'] += (int) Capsule::table(self::CONTACTS)
+                    ->whereNotIn('userid', fn ($q) => $q->select('id')->from('tblclients'))->delete();
+            }
+        });
+
+        return $out;
+    }
+
+    /**
      * Shape an own-contacts row into the resolve.php contact object. Values
      * are returned AS STORED (ekdosi decodes HTML entities when it
      * materialises a Customer).

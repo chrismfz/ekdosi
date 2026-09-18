@@ -831,7 +831,7 @@ EOF;
     }
 
     /** Client list: everyone with a contact and/or a route, with counts. */
-    private function prefsList(string $link): string
+    private function prefsList(string $link, ?string $flash = null): string
     {
         $contactCounts = Capsule::table(ThirdPartyStore::CONTACTS)
             ->select('userid', Capsule::raw('COUNT(*) AS c'))
@@ -846,38 +846,257 @@ EOF;
         )));
 
         if ($userids === []) {
-            return $this->errorPage($link, 'Καμία καταχωρημένη προτίμηση ακόμη — θα εμφανιστούν καθώς οι πελάτες/χειριστές ορίζουν δρομολόγηση.');
+            // Keep any flash (e.g. the «καθαρίστηκαν ορφανά» success) — errorPage
+            // doesn't render it, so prepend it here or the confirmation is lost
+            // when the purge empties the list.
+            return ($flash ?? '')
+                .$this->errorPage($link, 'Καμία καταχωρημένη προτίμηση ακόμη — θα εμφανιστούν καθώς οι πελάτες/χειριστές ορίζουν δρομολόγηση.');
         }
 
         $clients = Capsule::table('tblclients')->whereIn('id', $userids)
             ->get(['id', 'firstname', 'lastname', 'companyname'])->keyBy('id');
 
-        $rows = '';
-        foreach ($userids as $uid) {
-            $client = $clients->get($uid);
-            $name = $client
-                ? htmlspecialchars(trim((string) $client->companyname) !== ''
-                    ? (string) $client->companyname
-                    : trim($client->firstname.' '.$client->lastname))
-                : '—';
-            $nc = (int) ($contactCounts[$uid] ?? 0);
-            $nr = (int) ($routeCounts[$uid] ?? 0);
-            $detail = $link.'&action=prefs&userid='.$uid;
-            $rows .= '<tr><td>'.$name.' <span class="text-muted">#'.$uid.'</span></td>'
-                .'<td>'.$nc.'</td><td>'.$nr.'</td>'
-                .'<td class="text-right"><a class="btn btn-xs btn-primary" href="'.htmlspecialchars($detail).'">Προβολή</a></td></tr>';
+        // For deleted-client rows the WHMCS name is gone — fall back to the
+        // orphan contact's own company name so the row is still identifiable.
+        $deletedIds = array_values(array_filter($userids, static fn ($uid) => ! $clients->has($uid)));
+        $deletedContactName = [];
+        if ($deletedIds !== []) {
+            foreach (Capsule::table(ThirdPartyStore::CONTACTS)
+                ->whereIn('userid', $deletedIds)->get(['userid', 'company_name']) as $c) {
+                $uid = (int) $c->userid;
+                $nm = trim((string) ($c->company_name ?? ''));
+                if ($nm !== '' && ! isset($deletedContactName[$uid])) {
+                    $deletedContactName[$uid] = $nm;
+                }
+            }
         }
 
-        $count = count($userids);
+        $services = ThirdPartyStore::routedServicesForUsers($userids);
+        $orphans = ThirdPartyStore::orphanSummary();
+
+        // Build a sortable model, then sort by activity (routes desc, contacts
+        // desc, name asc) so the meaningful clients float to the top instead of
+        // being buried in #id order.
+        $model = [];
+        foreach ($userids as $uid) {
+            $client = $clients->get($uid);
+            $isDeleted = $client === null;
+            if ($isDeleted) {
+                $name = $deletedContactName[$uid] ?? '(άγνωστος)';
+            } else {
+                $name = trim((string) $client->companyname) !== ''
+                    ? (string) $client->companyname
+                    : trim($client->firstname.' '.$client->lastname);
+                if ($name === '') {
+                    $name = '(χωρίς επωνυμία)';
+                }
+            }
+            $svc = $services[$uid] ?? ['labels' => [], 'dead' => 0];
+            $nr = (int) ($routeCounts[$uid] ?? 0);
+            $dead = (int) $svc['dead'];
+            $model[] = [
+                'uid' => (int) $uid,
+                'name' => $name,
+                'sortname' => mb_strtolower($name),   // precomputed once (not per comparison)
+                'nc' => (int) ($contactCounts[$uid] ?? 0),
+                // A deleted client's routes are ALL orphan (the purge removes them),
+                // so NONE count as live — otherwise the row would show a blue
+                // «active» badge next to its «διαγραμμένος πελάτης» flag.
+                'live' => $isDeleted ? 0 : max(0, $nr - $dead),
+                'deleted' => $isDeleted,
+                'labels' => $svc['labels'],
+                'dead' => $dead,
+            ];
+        }
+        usort($model, static function (array $a, array $b): int {
+            return [$b['live'], $b['nc'], $a['sortname']]
+                <=> [$a['live'], $a['nc'], $b['sortname']];
+        });
+
+        $dash = '<span class="text-muted">—</span>';
+        $orphanRowCount = 0;
+        $sumLive = 0;
+        $rows = '';
+        foreach ($model as $m) {
+            $sumLive += $m['live'];
+            $uid = $m['uid'];
+            $nameEsc = htmlspecialchars($m['name']);
+            $isOrphanRow = $m['deleted'] || $m['dead'] > 0;
+            if ($isOrphanRow) {
+                $orphanRowCount++;
+            }
+
+            // Name cell: live client links to its WHMCS profile; a deleted client
+            // shows the orphan contact name + a warning badge (no profile link).
+            if ($m['deleted']) {
+                $nameCell = $nameEsc.' <span class="text-muted">#'.$uid.'</span>'
+                    .' <span class="label label-warning" title="Ο πελάτης δεν υπάρχει πλέον στο WHMCS">⚠ διαγραμμένος πελάτης</span>';
+            } else {
+                $prof = htmlspecialchars('clientssummary.php?userid='.$uid);
+                $nameCell = $nameEsc.' <a href="'.$prof.'" class="text-muted" title="Άνοιγμα πελάτη στο WHMCS">#'.$uid.'</a>';
+            }
+
+            // Services cell (compact): up to 3 distinct domains + «+N» (full list
+            // on hover) + «⚠ N νεκρές» for routes whose service is gone.
+            $labels = $m['labels'];
+            $svcBits = [];
+            if ($labels !== []) {
+                $shown = array_slice($labels, 0, 3);
+                $svcBits[] = htmlspecialchars(implode(' · ', $shown));
+                if (count($labels) > 3) {
+                    $svcBits[] = '<span class="text-muted" title="'.htmlspecialchars(implode(' · ', $labels)).'">+'
+                        .(count($labels) - 3).'</span>';
+                }
+            }
+            if ($m['dead'] > 0) {
+                $svcBits[] = '<span class="label label-warning" title="Δρομολογήσεις σε υπηρεσία που δεν υπάρχει πλέον">⚠ '
+                    .$m['dead'].' νεκρές</span>';
+            }
+            $svcCell = $svcBits === [] ? $dash : implode(' ', $svcBits);
+
+            $ncCell = $m['nc'] > 0 ? '<span class="label label-default">'.$m['nc'].'</span>' : $dash;
+            // Route badge = LIVE routes (total − dead) so a route is never counted
+            // as both live here and «νεκρή» in the services column.
+            $nrCell = $m['live'] > 0 ? '<span class="label label-info">'.$m['live'].'</span>' : $dash;
+
+            $detail = htmlspecialchars($link.'&action=prefs&userid='.$uid);
+            $search = htmlspecialchars(mb_strtolower($m['name'].' #'.$uid.' '.implode(' ', $labels)));
+            $rowClass = $m['deleted'] ? ' class="warning"' : '';
+
+            $rows .= '<tr'.$rowClass.' data-orphan="'.($isOrphanRow ? '1' : '0').'" data-search="'.$search.'">'
+                .'<td>'.$nameCell.'</td>'
+                .'<td>'.$svcCell.'</td>'
+                .'<td>'.$ncCell.'</td>'
+                .'<td>'.$nrCell.'</td>'
+                .'<td class="text-right"><a class="btn btn-xs btn-primary" href="'.$detail.'">Προβολή</a></td></tr>';
+        }
+
+        $count = count($model);
+        $sumContacts = (int) array_sum($contactCounts->all());
+        $flashHtml = $flash ?? '';
+
+        // Totals + orphan breakdown line. «ενεργές» counts only routes that still
+        // resolve (dead ones are reported separately below, never as live), and
+        // each orphan category is listed on its own — they can OVERLAP (a deleted
+        // client's route to a dead service is in two), so we never sum them into a
+        // misleading total; the purge dedupes and reports the real deleted count.
+        $totals = '<p class="text-muted">'.$count.' πελάτες · '.$sumContacts.' επαφές · '.$sumLive.' ενεργές δρομολογήσεις';
+        if ($orphans['total'] > 0) {
+            $bits = [];
+            if ($orphans['contacts_deleted_client'] > 0) {
+                $bits[] = $orphans['contacts_deleted_client'].' επαφές διαγρ. πελάτη';
+            }
+            if ($orphans['routes_deleted_client'] > 0) {
+                $bits[] = $orphans['routes_deleted_client'].' δρομολ. διαγρ. πελάτη';
+            }
+            if ($orphans['routes_dead_service'] > 0) {
+                $bits[] = $orphans['routes_dead_service'].' δρομολ. νεκρής υπηρεσίας';
+            }
+            $totals .= ' · <span class="text-danger">⚠ ορφανά — '.implode(' · ', $bits)
+                .'</span> <span class="text-muted">(οι κατηγορίες μπορεί να επικαλύπτονται)</span>';
+        }
+        $totals .= '</p>';
+
+        // Toolbar: instant search + «only orphans» toggle + (if any) a scoped,
+        // confirm-guarded cleanup of the orphan rows. Gated on the SAME per-row
+        // orphan count the toggle/highlights use (not the SQL summary), so the
+        // button is offered only for rows the operator can actually see & filter.
+        $cleanup = '';
+        if ($orphanRowCount > 0) {
+            $token = $this->csrfField();
+            $confirm = 'Διαγραφή ΟΛΩΝ των ορφανών γραμμών (δρομολογήσεις/επαφές που δείχνουν σε ανύπαρκτο πελάτη, υπηρεσία ή επαφή); Δεν επηρεάζει καμία ζωντανή δρομολόγηση. Μη αναστρέψιμο.';
+            $cleanup = '<form action="'.htmlspecialchars($link.'&action=cleanOrphans').'" method="POST" style="display:inline-block;margin-left:8px">'
+                .$token
+                .'<button class="btn btn-xs btn-danger" type="submit" onclick="return confirm('.htmlspecialchars(json_encode($confirm), ENT_QUOTES).');">'
+                .'<i class="fa fa-trash"></i> Καθαρισμός ορφανών</button></form>';
+        }
+        $orphanToggle = $orphanRowCount > 0
+            ? '<button id="ek-prefs-orphans" class="btn btn-xs btn-default" type="button">⚠ Μόνο ορφανά ('.$orphanRowCount.' πελάτες)</button>'
+            : '';
 
         return <<<EOF
 <p><a class="btn btn-default" href="{$link}">&larr; Back</a></p>
 <h2>Προτιμήσεις τρίτων — Πελάτες ({$count})</h2>
-<table class="table table-striped">
-    <thead><tr><th>Πελάτης</th><th>Επαφές</th><th>Δρομολογήσεις</th><th></th></tr></thead>
+{$flashHtml}
+{$totals}
+<div class="form-inline" style="margin-bottom:10px">
+    <input id="ek-prefs-q" class="form-control input-sm" type="text" placeholder="Αναζήτηση: επωνυμία, #id, ή domain…" style="max-width:320px" autocomplete="off">
+    {$orphanToggle}
+    {$cleanup}
+    <span class="text-muted" style="margin-left:8px"><span id="ek-prefs-count">{$count}</span> ορατά</span>
+</div>
+<table id="ek-prefs-tbl" class="table table-striped table-condensed">
+    <thead><tr><th>Πελάτης</th><th>Υπηρεσίες (δρομολογημένες)</th><th>Επαφές</th><th>Ενεργές δρομ.</th><th></th></tr></thead>
     <tbody>{$rows}</tbody>
 </table>
+<script>
+(function(){
+  var q=document.getElementById('ek-prefs-q');
+  var tbl=document.getElementById('ek-prefs-tbl');
+  var ob=document.getElementById('ek-prefs-orphans');
+  var cnt=document.getElementById('ek-prefs-count');
+  if(!q||!tbl)return;
+  var onlyOrphans=false;
+  function apply(){
+    var term=(q.value||'').toLowerCase().trim();
+    var rows=tbl.tBodies[0].rows, shown=0;
+    for(var i=0;i<rows.length;i++){
+      var r=rows[i];
+      var hay=r.getAttribute('data-search')||'';
+      var orphan=r.getAttribute('data-orphan')==='1';
+      var ok=(term===''||hay.indexOf(term)>-1)&&(!onlyOrphans||orphan);
+      r.style.display=ok?'':'none'; if(ok)shown++;
+    }
+    if(cnt)cnt.textContent=shown;
+  }
+  q.addEventListener('input',apply);
+  if(ob)ob.addEventListener('click',function(){
+    onlyOrphans=!onlyOrphans;
+    ob.className=onlyOrphans?'btn btn-xs btn-warning':'btn btn-xs btn-default';
+    apply();
+  });
+})();
+</script>
 EOF;
+    }
+
+    /**
+     * DESTRUCTIVE (CSRF-guarded): purge orphan routing/contact rows — those that
+     * reference a WHMCS client, service, or contact that no longer exists. Never
+     * touches a row that still resolves; logs to the activity log; reports the
+     * exact counts. Reached from the «Καθαρισμός ορφανών» button on the list.
+     */
+    public function cleanOrphans(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        // POST-only: a bulk DELETE must never be triggerable by a GET (crafted
+        // link / <img src>). Belt-and-braces over csrfValid() (which is lenient on
+        // legacy WHMCS builds without generate_token()).
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return $this->errorPage($link, 'Μη έγκυρο αίτημα.');
+        }
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage($link);
+        }
+        // Guard parity with prefs(): prefsList() queries the own tables directly.
+        if (! ThirdPartyStore::hasOwnTables()) {
+            return $this->errorPage($link, 'Δεν υπάρχουν πίνακες — τίποτα για καθαρισμό.');
+        }
+
+        $r = ThirdPartyStore::purgeOrphans();
+        $this->logActivity(sprintf(
+            'EkdosiBridge: purged orphans — %d contacts, %d routes (deleted-client / dead-service).',
+            $r['contacts_deleted'], $r['routes_deleted'],
+        ));
+
+        $flash = ($r['contacts_deleted'] === 0 && $r['routes_deleted'] === 0)
+            ? $this->alert('info', 'Δεν βρέθηκαν ορφανά για διαγραφή.')
+            : $this->alert('success', sprintf(
+                'Καθαρίστηκαν ορφανά: %d επαφές, %d δρομολογήσεις.',
+                $r['contacts_deleted'], $r['routes_deleted'],
+            ));
+
+        return $this->prefsList($link, $flash);
     }
 
     /** One client's contacts + service routing (read-only). */
