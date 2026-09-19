@@ -58,6 +58,14 @@ class EurobankReturnController
             : null;
 
         if ($intent === null) {
+            // The gateway logs the acquirer's field names on every return it sees —
+            // but it is never reached from here. Log them too, so a validation run
+            // whose orderid doesn't resolve still yields the one thing it was for.
+            // Keys only, never values.
+            Log::info('eurobank.return.fields', [
+                'posted_order' => array_keys($fields),
+                'note' => 'logged before intent lookup (orderid did not resolve)',
+            ]);
             $this->reject($request, 'intent_not_found', ['orderid' => $orderId], orderId: (string) $orderId);
 
             return redirect()->route('portal.home');

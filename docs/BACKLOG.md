@@ -975,10 +975,25 @@ cross-customer πρόσβαση (PDF / pay / statement / tickets) → flat 404, 
   χρεώνεται, το ekdosi δεν καταγράφει. Είναι θορυβώδες (log `eurobank.return.digest_mismatch` με το
   posted key order + «Log πύλης» + καμπάνα στους operators), αλλά **πρέπει να επιβεβαιωθεί με ΜΙΑ
   sandbox συναλλαγή πριν πάει live**.
-  **Πώς:** κάθε return γράφει πλέον `eurobank.return.fields` με την ακριβή σειρά κλειδιών (ονόματα
-  μόνο, ποτέ τιμές) — επιτυχία ή αποτυχία. Κάνε **μία** sandbox χρέωση και:
-  `grep eurobank.return.fields storage/logs/laravel.log | tail -1` → σύγκρινε με `RETURN_FIELD_ORDER`.
-  Αν εμφανιστεί `eurobank.return.unknown_fields`, το log ονομάζει ακριβώς το πεδίο που λείπει.
+  **RUNBOOK — μία sandbox χρέωση απαντά και στα τρία.** Κάνε μία πληρωμή από την πύλη
+  (`/user/pay/{customer}`) με `testmode` ενεργό, μετά:
+  ```bash
+  grep -E 'eurobank\.return\.(fields|unknown_fields|digest_mismatch)' storage/logs/laravel.log | tail -5
+  ```
+  Διάβασέ το έτσι:
+  - **Μόνο `eurobank.return.fields` + το intent έγινε settled** → όλα σωστά. Σύγκρινε το `posted_order`
+    με το `RETURN_FIELD_ORDER`· αν ταυτίζονται, το gate έκλεισε. Τσέκαρε ότι στη λίστα υπάρχουν
+    **`currency`** (είναι υποχρεωτικό) και **`txId`** (αν λείπει και υπάρχει μόνο `paymentRef`, βλ. πιο
+    κάτω).
+  - **`unknown_fields`** → το log ονομάζει ακριβώς το πεδίο που λείπει από τη λίστα· πρόσθεσέ το στο
+    `RETURN_FIELD_ORDER` στη θέση που δείχνει το `posted_order`.
+  - **`digest_mismatch` με `received_order_matches: true`** → το shared secret είναι **σωστό**, μόνο η
+    σειρά μας είναι λάθος. Αντέγραψε το `posted_order` αυτούσιο στο `RETURN_FIELD_ORDER`.
+  - **`digest_mismatch` με `received_order_matches: false`** → δεν είναι θέμα σειράς· κοίτα πρώτα το
+    shared secret της σύνδεσης.
+
+  Το `eurobank.return.fields` γράφεται σε **κάθε** return — επιτυχία, αποτυχία, ακόμη και όταν το
+  `orderid` δεν αντιστοιχεί σε intent — και περιέχει **μόνο ονόματα πεδίων, ποτέ τιμές**.
   **Ιστορικό:** τα δύο πειράματα της 2026-09-06 (`payment_intents` #1/#2, co=4) ΔΕΝ είναι ανακτήσιμα —
   το «Log πύλης» δεν υπήρχε ακόμα, το `laravel.log` έχει rotate-αριστεί και τα nginx logs ξεκινούν
   2026-09-10. Ό,τι επιβιώνει: το return επαληθεύτηκε (`settled_by=webhook:eurobank`) και έφερε

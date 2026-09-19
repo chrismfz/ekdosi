@@ -267,9 +267,28 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
         $verified = hash_equals($computed, $sent);
 
         if (! $verified) {
-            // Log the posted key order so a genuine acquirer change is diagnosable
-            // (the values are NOT logged — they carry the customer's order data).
-            Log::warning('eurobank.return.digest_mismatch', ['posted_order' => array_keys($posted)]);
+            // A bare mismatch is ambiguous: it means EITHER our canonical order is
+            // wrong OR the shared secret is. Disambiguate it here, because that is
+            // the whole question a sandbox validation run needs answered.
+            //
+            // Recompute the digest the OLD way — values in the order the acquirer
+            // posted them. If THAT matches, the secret is right and only our
+            // ordering is wrong, and `posted_order` is literally the list to paste
+            // into RETURN_FIELD_ORDER. If it doesn't match either, look at the
+            // secret. Diagnostic only: this value never authorises anything.
+            $receivedOrder = '';
+            foreach ($posted as $value) {
+                $receivedOrder .= is_scalar($value) ? (string) $value : '';
+            }
+            $receivedMatches = hash_equals($this->returnDigest($receivedOrder, $secret), $sent);
+
+            Log::warning('eurobank.return.digest_mismatch', [
+                'posted_order' => array_keys($posted),
+                'received_order_matches' => $receivedMatches,
+                'diagnosis' => $receivedMatches
+                    ? 'shared secret OK — RETURN_FIELD_ORDER is wrong; use posted_order above'
+                    : 'received order does not match either — check the shared secret first',
+            ]);
         }
 
         return new PaymentOutcome(
