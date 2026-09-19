@@ -7,6 +7,7 @@ use App\Models\Quote;
 use App\Models\QuoteMailLog;
 use App\Services\QuotePdfRenderer;
 use App\Services\TenantMailerFactory;
+use App\Support\CustomerLanguage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -79,7 +80,9 @@ class SendQuoteEmail implements ShouldQueue
 
             $mailerFactory->for($tenant)
                 ->to($email)
-                ->send(new QuoteOfferMail($quote, $pdfBytes));
+                // i18n Slice 0: stamp the recipient's language (inert until the
+                // mailable is localized — see SendInvoiceEmail).
+                ->send((new QuoteOfferMail($quote, $pdfBytes))->locale(CustomerLanguage::forDocumentMail($quote)));
 
             $log->update(['status' => 'sent', 'sent_at' => now()]);
 

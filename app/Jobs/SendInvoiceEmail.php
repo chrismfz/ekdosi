@@ -8,6 +8,7 @@ use App\Models\InvoiceMailLog;
 use App\Services\InvoicePdfRenderer;
 use App\Services\MailTemplateRenderer;
 use App\Services\TenantMailerFactory;
+use App\Support\CustomerLanguage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -210,7 +211,11 @@ class SendInvoiceEmail implements ShouldQueue
             $pdfBytes = $renderer->render($invoice);
             $mailerFactory->for($tenant)
                 ->to($email)
-                ->send(new InvoiceIssuedMail($invoice, $pdfBytes));
+                // i18n Slice 0: stamp the recipient's language on the mailable. Inert
+                // until InvoiceIssuedMail is localized (email-i18n slice) — the body is
+                // still the tenant's Greek MailTemplate — but routes every future __()
+                // through the one resolver.
+                ->send((new InvoiceIssuedMail($invoice, $pdfBytes))->locale(CustomerLanguage::forDocumentMail($invoice)));
 
             $log->update([
                 'status'  => 'sent',

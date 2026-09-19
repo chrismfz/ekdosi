@@ -56,7 +56,7 @@ class Customer extends Model
         return [
             'type', 'afm', 'name', 'address1', 'address2', 'city', 'postcode',
             'phone1', 'phone2', 'occupation', 'tax_office', 'email', 'secondary_email',
-            'discount', 'country', 'vat_vies', 'withhold_tax', 'payment_method_id',
+            'discount', 'country', 'language', 'vat_vies', 'withhold_tax', 'payment_method_id',
             'is_active', 'needs_immediate_invoice', 'needs_invoice_before_payment', 'auto_email_invoices',
         ];
     }
@@ -86,6 +86,9 @@ class Customer extends Model
         // MYD-011: normalised ISO-3166-1 alpha-2 cache of `country` (the picker binds
         // here). Fillable so the form can set it; re-normalised on save regardless.
         'country_code',
+        // i18n Slice 0: per-customer communication-language override (null|el|en|both;
+        // null = αυτόματο από τη χώρα). Resolved by App\Support\CustomerLanguage.
+        'language',
         'vat_vies',
         'withhold_tax',
         'sort_order',

@@ -16,6 +16,9 @@ namespace App\Support\Pdf;
  */
 class PdfLabels
 {
+    /** The languages a document may be rendered in — the single whitelist. */
+    public const LANGUAGES = ['el', 'en', 'both'];
+
     /** @var array<string, array{0:string,1:string}> slug => [el, en] */
     private const MAP = [
         // Document titles / banners
@@ -153,7 +156,7 @@ class PdfLabels
 
     public static function for(string $lang): self
     {
-        return new self(in_array($lang, ['el', 'en', 'both'], true) ? $lang : 'el');
+        return new self(in_array($lang, self::LANGUAGES, true) ? $lang : 'el');
     }
 
     /**
@@ -162,7 +165,7 @@ class PdfLabels
      */
     public static function resolveLanguage(?string $stored, ?string $countryCode): string
     {
-        if (in_array($stored, ['el', 'en', 'both'], true)) {
+        if (in_array($stored, self::LANGUAGES, true)) {
             return $stored;
         }
 

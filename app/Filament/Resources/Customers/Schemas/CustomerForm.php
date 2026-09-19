@@ -192,6 +192,19 @@ class CustomerForm
                                     ->searchable()
                                     ->native(false),
 
+                                // i18n Slice 0: per-customer communication-language
+                                // preference. Κενό = αυτόματο από τη χώρα. Resolved by
+                                // App\Support\CustomerLanguage.
+                                Select::make('language')
+                                    ->label('Γλώσσα επικοινωνίας')
+                                    ->options([
+                                        'el' => 'Ελληνικά',
+                                        'en' => 'Αγγλικά',
+                                        'both' => 'Δίγλωσσο (GR/EN)',
+                                    ])
+                                    ->placeholder('Αυτόματο (από χώρα πελάτη)')
+                                    ->helperText('Κενό = αυτόματο από τη χώρα (GR→Ελληνικά, ξένος→δίγλωσσο). Εφαρμόζεται στα email του πελάτη· στα PDF μέσω της «Γλώσσας PDF» του παραστατικού.'),
+
                                 TextInput::make('phone1')
                                     ->label('Phone')
                                     ->tel()
