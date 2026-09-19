@@ -723,8 +723,8 @@ class InvoiceForm
                             'en' => 'Αγγλικά',
                             'both' => 'Δίγλωσσο (GR/EN)',
                         ])
-                        ->placeholder('Αυτόματο (από χώρα πελάτη)')
-                        ->helperText('Κενό = αυτόματο: Ελληνικά για GR, δίγλωσσο για ξένο παραλήπτη. Αλλάζει μόνο τις ετικέτες του PDF.'),
+                        ->placeholder('Αυτόματο (προτίμηση πελάτη / χώρα)')
+                        ->helperText('Κενό = αυτόματο: παγώνει η αποθηκευμένη γλώσσα του πελάτη, αλλιώς Ελληνικά για GR / δίγλωσσο για ξένο. Αλλάζει μόνο τις ετικέτες του PDF.'),
 
                     // Quick-fill helper (preview): a curated «typical fee/tax» picker
                     // that sets the right §8.x category + auto-computes the amount from

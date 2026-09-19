@@ -6,6 +6,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\ServiceContract;
 use App\Services\RecomputeInvoiceTotals;
+use App\Support\CustomerLanguage;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
@@ -119,6 +120,8 @@ class StageServiceRenewal
                 'city' => $customer?->city,
                 'postcode' => $customer?->postcode,
                 'country' => $customer?->country ?: 'GR',
+                // i18n: freeze the customer's explicit PDF-language preference (null → auto).
+                'language' => CustomerLanguage::stampForCustomer($customer),
             ]);
 
             // One line from the contract snapshot. contract.amount is the

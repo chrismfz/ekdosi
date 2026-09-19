@@ -78,6 +78,8 @@ class ReissueInvoiceAsDraft
                 'city' => $original->city,
                 'postcode' => $original->postcode,
                 'country' => $original->country,
+                // i18n: the reissue mirrors the original's frozen PDF language.
+                'language' => $original->language,
                 'counterpart_branch' => $original->counterpart_branch,
             ]);
 

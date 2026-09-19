@@ -104,6 +104,35 @@ final class CustomerLanguage
     }
 
     /**
+     * The document language to STAMP onto an invoice/quote at issue (i18n stamp-at-
+     * issue). Returns the customer's EXPLICIT el/en/both choice, or null to leave the
+     * document on its country-derived default — which is ALREADY frozen via the
+     * document's own snapshotted `country` (PdfLabels resolves a null language from
+     * it). So we freeze only the one thing the country snapshot cannot capture: a
+     * customer who explicitly wants a language different from their country's default
+     * (e.g. a Greek customer who wants English documents). Never overrides a language
+     * the operator already set on the document, and never churns a country-default
+     * document to an explicit value it would render identically to.
+     */
+    public static function stampForCustomer(?Customer $customer): ?string
+    {
+        return in_array($customer?->language, self::DOCUMENT, true) ? $customer->language : null;
+    }
+
+    /**
+     * The language to persist on a NEW document at issue, from the create form's
+     * data. A valid explicit «Γλώσσα PDF» choice by the operator ALWAYS wins; when
+     * the operator left it on auto (null/blank/invalid), fall back to the customer's
+     * explicit preference ({@see stampForCustomer()}), else null (country-auto). Pure
+     * (no DB) so the operator-override rule is unit-testable; the caller resolves the
+     * tenant-scoped customer.
+     */
+    public static function stampForDocument(?string $chosen, ?Customer $customer): ?string
+    {
+        return in_array($chosen, self::DOCUMENT, true) ? $chosen : self::stampForCustomer($customer);
+    }
+
+    /**
      * Communication language for a customer: their explicit override, else derived
      * from their (live) country, else the tenant default, else Greek.
      */
