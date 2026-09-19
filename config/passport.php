@@ -15,7 +15,10 @@ return [
 
     'guard' => 'web',
 
-    'middleware' => [],
+    // Throttle every OAuth route. The limiter (App\Providers\AppServiceProvider)
+    // caps the unauthenticated Dynamic Client Registration endpoint hard and the
+    // rest generously — see the comment there for why DCR stays open.
+    'middleware' => ['throttle:oauth'],
 
     /*
     |--------------------------------------------------------------------------

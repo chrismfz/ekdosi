@@ -15,6 +15,7 @@ use App\Support\Payments\PaymentOutcome;
 use Filament\Notifications\Notification;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -57,6 +58,14 @@ class EurobankReturnController
             : null;
 
         if ($intent === null) {
+            // The gateway logs the acquirer's field names on every return it sees —
+            // but it is never reached from here. Log them too, so a validation run
+            // whose orderid doesn't resolve still yields the one thing it was for.
+            // Keys only, never values.
+            Log::info('eurobank.return.fields', [
+                'posted_order' => array_keys($fields),
+                'note' => 'logged before intent lookup (orderid did not resolve)',
+            ]);
             $this->reject($request, 'intent_not_found', ['orderid' => $orderId], orderId: (string) $orderId);
 
             return redirect()->route('portal.home');
@@ -73,9 +82,38 @@ class EurobankReturnController
 
         $outcome = $gateway->handleWebhook($request, $connection);
 
+        if (! $outcome->verified && ! $this->claimsCapture($request)) {
+            // The `cancelUrl` leg posts a different field set, so an ordinary «Άκυρο»
+            // can fail the strict field check. It settles nothing either way, so file
+            // it as the routine non-capture it is rather than as a forgery attempt —
+            // otherwise real cancellations become indistinguishable from attacks in
+            // «Log πύλης». The money path is untouched: a body claiming CAPTURED
+            // still goes through the branch below.
+            $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'not_captured', $outcome);
+
+            return $this->back($intent);
+        }
+
         if (! $outcome->verified) {
             // T1: forged / mis-signed return — never a side effect.
             $this->reject($request, 'digest_verification_failed', ['intent' => $intent->id], intent: $intent, outcome: $outcome);
+
+            // A verification failure is EITHER an attack OR the acquirer changing a
+            // field we don't know (see EurobankGateway::RETURN_FIELD_ORDER) — and in
+            // the second case every capture is now bouncing. It must not stay silent
+            // just because the outcome could not be verified.
+            //
+            // Only for a return that CLAIMS a capture, though: the `cancelUrl` leg
+            // posts a different field set, so a customer clicking «Άκυρο» would
+            // otherwise raise a «no payment is being recorded» alarm when nothing is
+            // wrong. The raw status is untrusted — fine here, it only gates an alert,
+            // never a money decision. Company-wide cooldown so a sprayer can't flood.
+            if ($this->claimsCapture($request)) {
+                $this->alertOperators($intent, 'digest_verification_failed',
+                    'Απορρίφθηκε επιτυχημένη χρέωση: η υπογραφή (digest) δεν επαληθεύτηκε. '
+                    .'Αν επαναλαμβάνεται, ΚΑΜΙΑ πληρωμή δεν καταχωρείται — έλεγξε το «Log πύλης» '
+                    .'και τα πεδία που στέλνει η τράπεζα.', perCompany: true);
+            }
 
             return $this->back($intent);
         }
@@ -91,18 +129,52 @@ class EurobankReturnController
             // A return that arrives when the intent is NOT settleable (already settled
             // = a replay, or human-cancelled) writes no money → log it as IGNORED, not
             // a second «Καταχωρίστηκε» (keeps the audit truthful).
-            $settleable = in_array($intent->status, [PaymentIntent::STATUS_PENDING, PaymentIntent::STATUS_EXPIRED], true);
-            $intents->settle(
+            // settle() is authoritative about what happened (it decides under the
+            // row lock), so the audit row is written from ITS answer rather than a
+            // status we read before the call.
+            $result = $intents->settle(
                 $intent,
                 settledBy: 'webhook:eurobank',
                 transactionId: $outcome->providerTxnId,
             );
-            if ($settleable) {
-                $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_SETTLED, null, $outcome);
+
+            if ($result === PaymentIntentService::SETTLE_OK) {
+                // A capture reporting no transaction id leaves the per-transaction
+                // dedup inert. We settle it anyway — the bank took the customer's
+                // money, and refusing would strand a real payment (the alternative
+                // rails this gateway advertises may not report one); the canonical
+                // digest rebuild + mid/status/currency pins, not the dedup, are what
+                // stop a re-partitioned replay. But it IS recorded as the reason on
+                // the settled event, so «Log πύλης» can be filtered for it, and the
+                // operators are told. Only here, inside SETTLE_OK: announcing it
+                // before settle() decided would claim money was recorded when a
+                // replay/cancelled intent wrote nothing.
+                $unidentified = ! filled($outcome->providerTxnId);
+                $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_SETTLED,
+                    $unidentified ? 'settled_without_transaction_id' : null, $outcome);
+                if ($unidentified) {
+                    $this->alertOperators($intent, 'settled_without_transaction_id',
+                        'Καταχωρίστηκε είσπραξη χωρίς κωδικό συναλλαγής από την τράπεζα — '
+                        .'δεν μπορεί να ελεγχθεί για διπλοκαταχώριση. Δες «Log πύλης».');
+                }
                 // The webhook settles UNATTENDED — ring the operators' bell so they
                 // know money landed (an operator-driven settle is already visible to
                 // the operator doing it, so only this automatic path notifies).
                 $this->notifyOperators($intent, $outcome);
+            } elseif ($result === PaymentIntentService::SETTLE_DUPLICATE_TRANSACTION) {
+                // This acquirer transaction already paid another intent — a replayed
+                // (possibly re-partitioned) return. No money, loud audit row.
+                $this->reject($request, 'duplicate_transaction', [
+                    'intent' => $intent->id, 'txn' => $outcome->providerTxnId,
+                ], intent: $intent, outcome: $outcome);
+            } elseif ($result === PaymentIntentService::SETTLE_CANCELLED) {
+                // The operator cancelled while the customer was still on the hosted
+                // page, and the charge went through anyway: money taken, none
+                // recorded. The one verified-CAPTURED branch that used to be filed
+                // as a routine «already settled».
+                $this->reject($request, 'settle_on_cancelled_intent', [
+                    'intent' => $intent->id, 'txn' => $outcome->providerTxnId,
+                ], intent: $intent, outcome: $outcome);
             } else {
                 $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'already_settled', $outcome);
             }
@@ -120,7 +192,8 @@ class EurobankReturnController
 
     /**
      * T3 (amount/currency tampering) + T6 (cross-tenant): the signed outcome must
-     * name THIS intent, its amount, its currency, and the connection's company.
+     * name THIS terminal (`mid`), THIS intent, its amount, its currency, and the
+     * connection's company.
      */
     private function matchesIntent(
         PaymentOutcome $outcome,
@@ -128,6 +201,35 @@ class EurobankReturnController
         PaymentGatewayConnection $connection,
         Request $request,
     ): bool {
+        // The vPOS digest is a concatenation of the returned field VALUES with no
+        // delimiters, in the order they arrived — so the field BOUNDARIES are not
+        // signed, only the resulting byte string is. Pin the one boundary that
+        // matters: `mid` must be exactly this connection's configured terminal.
+        //
+        // Without this, a customer who completed one genuine payment could replay
+        // its correctly-signed return with the same bytes re-split across
+        // mid|orderid (`mid=MID12`,`orderid=3…` instead of `mid=MID123`,`orderid=…`),
+        // keeping the digest valid while aiming the settlement at a DIFFERENT
+        // intent — one payment settling two intents. The per-transaction dedup in
+        // PaymentIntentService::settle() is the second, independent guard.
+        //
+        // A return with no `mid` at all is refused for the same reason: its absence
+        // is itself the re-partition (those bytes went somewhere else). Every real
+        // Cardlink return carries it, and a rejection is logged as `mid_mismatch`
+        // in «Log πύλης» so a protocol surprise is visible immediately.
+        // Trim ONLY the configured side (operator-typed in a plain Filament
+        // TextInput, so a stray space there must not refuse every capture). The
+        // REPORTED value is compared raw: it is attacker-chosen, and trimming it
+        // would let whitespace move across the very boundary this pin exists to fix.
+        $configuredMid = trim((string) (($connection->config ?? [])['merchant_id'] ?? ''));
+        $reportedMid = (string) $outcome->merchantId;
+        if ($configuredMid === '' || ! hash_equals($configuredMid, $reportedMid)) {
+            $this->reject($request, 'mid_mismatch', [
+                'intent' => $intent->id, 'mid' => $reportedMid,
+            ], intent: $intent, outcome: $outcome);
+
+            return false;
+        }
         // Strict canonical-orderid check: the signed orderid must be EXACTLY the
         // intent id we looked up (no leading zeros / trailing bytes that (int)-cast
         // to the same key). Not merely tautological — it rejects a malformed orderid
@@ -152,8 +254,10 @@ class EurobankReturnController
 
             return false;
         }
-        if ($outcome->currency !== null
-            && $this->normaliseCurrency($outcome->currency) !== $this->normaliseCurrency((string) $intent->currency)) {
+        // Required, not optional: a return may omit `currency` only by folding its
+        // bytes into a neighbouring field, which is the re-partition move itself.
+        if ($outcome->currency === null
+            || $this->normaliseCurrency($outcome->currency) !== $this->normaliseCurrency((string) $intent->currency)) {
             $this->reject($request, 'currency_mismatch', ['intent' => $intent->id, 'currency' => $outcome->currency], intent: $intent, outcome: $outcome);
 
             return false;
@@ -197,6 +301,18 @@ class EurobankReturnController
             ->first();
     }
 
+    /**
+     * Does this body CLAIM a successful capture? Reads the raw posted `status`, so
+     * it is untrusted by construction — it may only gate alerting, never money.
+     */
+    private function claimsCapture(Request $request): bool
+    {
+        $fields = [];
+        parse_str($request->getContent(), $fields);
+
+        return strtoupper(trim((string) ($fields['status'] ?? ''))) === 'CAPTURED';
+    }
+
     /** Send the customer to the portal status page (which reads the intent state). */
     private function back(PaymentIntent $intent): RedirectResponse
     {
@@ -223,6 +339,66 @@ class EurobankReturnController
         ], $context));
 
         $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_REJECTED, $reason, $outcome, $orderId);
+
+        // A refusal AFTER a verified CAPTURED status means the bank took the money and
+        // we declined to record it — exactly the event nobody should have to discover
+        // by reading «Log πύλης».
+        if ($outcome?->isSettled() === true && $intent !== null) {
+            $amount = Money::eur((float) ($outcome->amount ?? $intent->amount));
+            $this->alertOperators($intent, $reason,
+                "Η τράπεζα χρέωσε {$amount} αλλά η πληρωμή ΔΕΝ καταχωρίστηκε (αιτία: {$reason}). "
+                .'Δες «Log πύλης» — αν επαναλαμβάνεται, έλεγξε τις ρυθμίσεις του τερματικού.');
+        }
+    }
+
+    /**
+     * Ring the tenant's operators about a money-path anomaly, at most once an hour
+     * per key so a replayer (or a sprayer) can't turn the signal into a flood.
+     * `perCompany` widens the cooldown from one intent to the whole tenant — right
+     * for «the acquirer changed something», where every intent is affected and one
+     * alert says it all.
+     *
+     * FULLY best-effort, cache included: this runs on the rejection path, and a
+     * locked cache table must never turn a routine guard rejection into a 500
+     * instead of the customer's redirect.
+     */
+    private function alertOperators(?PaymentIntent $intent, string $reason, string $body, bool $perCompany = false): void
+    {
+        if ($intent === null) {
+            return;
+        }
+
+        try {
+            $recipients = $intent->company?->users;
+            if ($recipients === null || $recipients->isEmpty()) {
+                return;
+            }
+
+            $key = $perCompany
+                ? 'eurobank:alert:company:'.$intent->company_id.':'.$reason
+                : 'eurobank:alert:intent:'.$intent->id.':'.$reason;
+
+            // Claim the hour AFTER we know there is someone to tell, and release it
+            // if the send fails — otherwise a single hiccup silences the next hour
+            // of a genuine «every capture is bouncing» outage.
+            if (! Cache::add($key, true, now()->addHour())) {
+                return;
+            }
+
+            try {
+                Notification::make()
+                    ->title('Πρόβλημα σε είσπραξη μέσω πύλης')
+                    ->body($body)
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->danger()
+                    ->sendToDatabase($recipients);
+            } catch (Throwable $e) {
+                Cache::forget($key);
+                throw $e;
+            }
+        } catch (Throwable $e) {
+            Log::warning('eurobank.return.alert_failed', ['intent' => $intent->id, 'error' => $e->getMessage()]);
+        }
     }
 
     /**

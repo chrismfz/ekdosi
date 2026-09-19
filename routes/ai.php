@@ -1,6 +1,7 @@
 <?php
 
 use App\Mcp\Servers\EkdosiMcpServer;
+use Illuminate\Support\Facades\Route;
 use Laravel\Mcp\Facades\Mcp;
 use Laravel\Passport\Passport;
 
@@ -47,7 +48,18 @@ $passportReady = class_exists(Passport::class);
 if ($passportReady) {
     // Registers the OAuth2 discovery + Dynamic Client Registration routes the
     // claude.ai connector negotiates.
-    Mcp::oauthRoutes();
+    //
+    // Wrapped in `throttle:oauth` because laravel/mcp declares these itself, with
+    // NO middleware — in particular `POST /oauth/register` (Dynamic Client
+    // Registration), which is unauthenticated by spec. We keep it OPEN (that is
+    // how any MCP client — the claude.ai connector, another LLM, a local agent —
+    // self-registers) but capped per IP, so nobody can flood the clients table.
+    // Approval still happens on the consent screen, which names the client.
+    // (config/passport.php adds the same limiter to Passport's OWN oauth routes;
+    // these ones are not in that group.)
+    Route::middleware('throttle:oauth')->group(function (): void {
+        Mcp::oauthRoutes();
+    });
 }
 
 // auth:api = Passport (OAuth access token); auth:sanctum = personal-access token.

@@ -15,13 +15,16 @@ use Filament\Events\TenantSet;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
+use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandStarting;
+use Illuminate\Http\Request;
 use Illuminate\Queue\Events\JobFailed;
 use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
 use Laravel\Passport\Passport;
@@ -171,6 +174,42 @@ class AppServiceProvider extends ServiceProvider
                 fn ($parameters) => view('mcp.authorize', $parameters)
             );
         }
+
+        /*
+         * Rate limit for the OAuth endpoints (applied group-wide via
+         * config/passport.php `middleware`).
+         *
+         * `POST /oauth/register` is OAuth 2.1 Dynamic Client Registration — by
+         * spec UNAUTHENTICATED, and deliberately left open here: that is how any
+         * MCP client (the claude.ai connector, another LLM, a local agent)
+         * self-registers. Open, however, also means it is the one OAuth route with
+         * no credential to limit against, so an unthrottled endpoint lets anyone
+         * create unlimited client rows. A genuine client registers ONCE, so a tight
+         * per-IP cap costs nothing real and removes the flooding surface.
+         *
+         * Registration does NOT by itself grant access — a client still needs a
+         * logged-in operator to approve it on the consent screen (which names the
+         * client). Keeping the gate at «approve», not at «register», is what keeps
+         * third-party and local clients workable.
+         */
+        RateLimiter::for('oauth', function (Request $request): Limit {
+            // 'oauth' is HARDCODED to match laravel/mcp, which registers the DCR
+            // route at a hardcoded `oauth/register` (Server\Registrar::oauthRoutes()
+            // default arg, called with no argument in routes/ai.php). Deriving it
+            // from config('passport.path') instead would silently degrade the cap to
+            // the loose branch the moment that config differed — reopening exactly
+            // the flooding surface this limiter closes.
+            // DISTINCT bucket keys per branch. ThrottleRequests keys a named limiter
+            // as md5($name . $limit->key), so two branches sharing `by($ip)` would
+            // share ONE counter: discovery/authorize hits would spend the
+            // registration budget (false 429s), and — because the window TTL is set
+            // only on a bucket's first hit — a cheap 60s-decay request could reopen
+            // the bucket every minute and let ~9 registrations through each time,
+            // dissolving the hourly cap.
+            return $request->is('oauth/register')
+                ? Limit::perHour(10)->by('oauth-register:'.$request->ip())
+                : Limit::perMinute(60)->by('oauth:'.$request->ip());
+        });
 
         /*
          * No-build panel utility CSS. The admin panel ships only Filament's
