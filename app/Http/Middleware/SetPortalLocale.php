@@ -4,21 +4,23 @@ namespace App\Http\Middleware;
 
 use App\Models\CustomerUser;
 use App\Support\CustomerLanguage;
+use App\Support\Tenancy\PortalHost;
 use Closure;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Set the request locale for the customer portal from the logged-in customer
- * user's stored preference (`customer_users.locale`), via {@see CustomerLanguage}
- * (i18n Slice 0). A dedicated middleware kept SEPARATE from the auth guard so it
- * carries no security responsibility — it only picks a locale.
+ * Set the request locale for the customer portal, via {@see CustomerLanguage}
+ * (i18n). A dedicated middleware kept SEPARATE from the auth guard so it carries
+ * no security responsibility — it only picks a locale. Runs on ALL `/user` routes
+ * (guest + auth), AFTER ResolvePortalHost.
  *
- * Runs AFTER EnsurePortalAuthenticated in the portal group, so the `portal` guard
- * is already resolved. Until the portal blades are translated (a later slice)
- * this is inert plumbing — el stays el — but it establishes the single choke-point
- * every `__()` string will read once they exist.
+ *   - Authenticated: the logged-in customer user's stored preference
+ *     (`customer_users.locale`) wins — per-person.
+ *   - Guest (login/reset): fall back to the tenant resolved from the host (#1c),
+ *     so e.g. the Estonian tenant's portal_host shows an English login page. No
+ *     host / no tenant default → the app default.
  */
 class SetPortalLocale
 {
@@ -26,7 +28,10 @@ class SetPortalLocale
     {
         $user = Auth::guard('portal')->user();
 
-        app()->setLocale(CustomerLanguage::forUi($user instanceof CustomerUser ? $user : null));
+        app()->setLocale(CustomerLanguage::forPortal(
+            $user instanceof CustomerUser ? $user : null,
+            app(PortalHost::class)->company(),
+        ));
 
         return $next($request);
     }

@@ -99,7 +99,7 @@ _(Κενό. Το πρώην #1 «Ηλεκτρονική τιμολόγηση» �
   - [ ] P2: `companies.default_language` μόνο στο super-admin `CompanyResource` — πρόσθεσέ το και στο self-service `CompanySettings` (whitelist) για company_admin.
   - [ ] P2 (perf, αμελητέο): `forCustomer` κάνει lazy-load `$customer->company` ανά email· θα μπορούσε να επαναχρησιμοποιεί το ήδη φορτωμένο `$invoice->company` (ίδιος tenant). 1 query/email — άσε το μέχρι να ενοχλήσει σε batch.
 - [x] **Portal i18n (M) — SHIPPED:** `lang/{el,en}/portal.php` (parity) + 12 blades `portal/*` + `portal-layout` + flash μηνύματα (profile/tickets) → `__('portal.*')`· per-user locale (ίδια URLs)· el verbatim (tests πράσινα)· en-render test. Λεπτομέρειες → CHANGELOG/FEATURES.
-  - [ ] P2: **guest σελίδες (login/forgot/reset) locale** — τώρα πάντα el (καμία user-context). Χρειάζεται είτε host→tenant `default_language` (μαζί με multi-domain #1c) είτε manual language toggle στη σελίδα login. Και τα guest flash μηνύματα (`PasswordResetController`) μένουν el μέχρι τότε.
+  - [x] **guest σελίδες (login/forgot/reset) locale — ΚΛΕΙΣΤΟ από #1c-A:** στο custom host παίρνουν γλώσσα από τον tenant (`CustomerLanguage::forHost`). Στο κοινό default host μένουν app-default (el) — δεν υπάρχει tenant να διαλέξει (OK). Τα guest flash μηνύματα (`PasswordResetController`) μένουν el (guest context).
   - [ ] P3: pluralization — `home.recent_note` (:count), `statement.oldest_unpaid` (:days) χρησιμοποιούν απλό placeholder → «1 days»/«1 ημέρες» (ίδιο quirk με το legacy Greek)· `trans_choice` αν ενοχλήσει.
   - [ ] P3: copy — το `payment.redirect_intro` λέει «Συνέχεια»/«Continue» ενώ το κουμπί είναι «Συνέχεια στην πληρωμή» (προϋπάρχον quirk από το legacy)· ευθυγράμμισε label/κείμενο.
 - [ ] **Email i18n (M):** EL/EN Mailables (5) + `MailTemplateRenderer::DEFAULT_BODY_TEMPLATE` per-recipient
@@ -107,7 +107,11 @@ _(Κενό. Το πρώην #1 «Ηλεκτρονική τιμολόγηση» �
 - [ ] **Stamp-at-issue (S):** στην οριστικοποίηση, «πάγωσε» `invoices/quotes.language` = `CustomerLanguage::forCustomer($customer)` όταν είναι null — έτσι η προτίμηση πελάτη φτάνει στο PDF **χωρίς** να σπάει το freeze (τώρα το `forDocument` σκόπιμα ΔΕΝ διαβάζει τον live πελάτη). Καλύπτει και τα direct-active paths (WHMCS/ConvertQuote/IssueCreditNote/StageServiceRenewal).
 
 **#1c — Multi-domain (per-tenant portal host) — ζευγαρώνει με το portal i18n:**
-- [ ] `companies.portal_host` + host→company resolver (`Route::domain()`/middleware)· portal 1η επιφάνεια (`cs.nixpal.com` vs `invoicer.myip.gr`)
+- [x] **Option A «soft» — SHIPPED:** `companies.portal_host` + `ResolvePortalHost` middleware + `PortalHost` context· η πύλη απαντά και στο custom host (ίδια URLs)· guest σελίδες παίρνουν γλώσσα (`CustomerLanguage::forHost`) + branding από τον tenant. Host = hint (τα docs μένουν per-grant). Λεπτομέρειες → CHANGELOG/FEATURES.
+- [ ] **Option B «hard scope» (αν χρειαστεί):** το custom host να φιλτράρει το docs feed μόνο στον tenant του ή/και να περιορίζει ποιοι logins επιτρέπονται — πλήρως απομονωμένη βιτρίνα. Αλλάζει feed + login-gating + edge cases (πελάτης-στους-δύο, myip-only στο cs.nixpal.com).
+- [ ] Infra (deploy, όχι κώδικας): DNS + TLS cert + web-server vhost για κάθε custom host προς την app (ο κώδικας μόνο διαβάζει το `Host`).
+- [ ] P2 (perf): το `ResolvePortalHost` κάνει 1 indexed query `companies WHERE portal_host=?` σε κάθε `/user` request, ακόμα κι όταν κανείς tenant δεν έχει custom host. Portal = χαμηλό QPS + indexed· αν χρειαστεί, cache «υπάρχει έστω ένα portal_host;» ή skip όταν host==default.
+- [ ] P2 (Octane): το `View::share('portalCompany')` είναι worker-global· υπό Octane ένα non-portal view μετά από portal request θα έβλεπε τον προηγούμενο tenant (κανένα non-portal view δεν το χρησιμοποιεί σήμερα· FPM = non-issue). Ίδια οικογένεια με το locale-reset note.
 
 **#1b — PEPPOL transport (send / ee-peppol) — parked, review 2027:**
 - [ ] Access-Point (Telema/Billberry/Finbite/Unifiedpost)· ΕΝΑ PEPPOL AP = GR-send **και** EE-send· **check αν ο InvoSign κάνει ήδη PEPPOL send** (φθηνότερο)

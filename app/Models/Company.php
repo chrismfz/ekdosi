@@ -37,6 +37,8 @@ class Company extends Model
     protected $fillable = [
         'name',
         'slug',
+        // Multi-domain #1c: optional custom portal host (e.g. cs.nixpal.com).
+        'portal_host',
         'country_code',
         // i18n Slice 0: fallback document/mail language for this tenant (null|el|en|both;
         // null = app default el). App\Support\CustomerLanguage falls back here.
@@ -230,6 +232,47 @@ class Company extends Model
     }
 
     /**
+     * Normalise a portal host to a bare lowercase hostname — trims, lowercases, and
+     * strips an accidental scheme / path / port — or null when blank. Shared by the
+     * `portal_host` mutator, {@see resolveByPortalHost()}, and the CompanyResource
+     * form so all three agree (a pasted `https://cs.nixpal.com/x` still resolves to
+     * `cs.nixpal.com` and matches `request()->getHost()`).
+     */
+    public static function normalizePortalHost(?string $value): ?string
+    {
+        $host = strtolower(trim((string) $value));
+
+        if ($host === '') {
+            return null;
+        }
+
+        if (str_contains($host, '://')) {
+            $host = (string) parse_url($host, PHP_URL_HOST);
+        }
+
+        $host = explode('/', $host)[0];   // drop any path
+        $host = explode(':', $host)[0];   // drop any port
+
+        return $host === '' ? null : $host;
+    }
+
+    /**
+     * Resolve the tenant that owns a custom portal host (multi-domain #1c), or
+     * null for the shared default host / an unknown host. Normalises the incoming
+     * host the same way `portal_host` is stored so the match is robust.
+     */
+    public static function resolveByPortalHost(?string $host): ?self
+    {
+        $host = self::normalizePortalHost($host);
+
+        if ($host === null) {
+            return null;
+        }
+
+        return static::query()->where('portal_host', $host)->first();
+    }
+
+    /**
      * Derive the URL of the ekdosi_bridge plugin's inbound endpoint
      * from the tenant's whmcs_api_url. The plugin lives at a fixed
      * path relative to the WHMCS root:
@@ -370,6 +413,18 @@ class Company extends Model
     {
         return Attribute::make(
             set: fn (?string $value): ?string => ($trimmed = trim((string) $value)) === '' ? null : $trimmed,
+        );
+    }
+
+    /**
+     * Custom portal host (#1c). Normalise on write — lowercase + trimmed, empty →
+     * null — so it matches `request()->getHost()` (always lowercase) and so a
+     * blank field reads as «no custom host» rather than an empty configured one.
+     */
+    protected function portalHost(): Attribute
+    {
+        return Attribute::make(
+            set: fn (?string $value): ?string => self::normalizePortalHost($value),
         );
     }
 

@@ -19,6 +19,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **Multi-domain — προαιρετικό custom portal host ανά tenant (#1c, «soft»).** Νέα προαιρετική στήλη
+  **`companies.portal_host`** (π.χ. `cs.nixpal.com`) + host→tenant resolver (`ResolvePortalHost` middleware
+  σε όλα τα `/user` routes, singleton `App\Support\Tenancy\PortalHost`). Η πύλη απαντά **και** στο κοινό
+  default host **και** στο custom host — **ίδια URLs**. Στο custom host, οι **guest** σελίδες (login/reset)
+  ρίχνουν πλέον τη γλώσσα από το tenant (`CustomerLanguage::forHost` → `default_language`· both→en) —
+  **κλείνει το κενό** «ο Εσθονός βλέπει αγγλικό login πριν συνδεθεί» — και δείχνουν το **όνομα του tenant**
+  ως branding (login + header). Πεδίο στο `CompanyResource` (Identity), lowercase-normalized + unique. Το
+  host είναι **language/branding hint, ΟΧΙ security boundary**: η πρόσβαση σε docs μένει per-grant
+  (cross-tenant, αμετάβλητη). ⚠ Απαιτεί DNS + TLS + vhost προς την app (deploy step· ο κώδικας μόνο διαβάζει
+  το `Host`). Δες `PLAN.md §6.5`.
 - **i18n bilingual — Portal (πύλη πελατών) el/en.** Η **συνδεδεμένη** πύλη (`/user`) γίνεται **δίγλωσση**:
   τα 12 blades + το `portal-layout` component + τα flash μηνύματα (profile/tickets) μεταφράστηκαν σε
   `__('portal.*')` με νέα αρχεία `lang/el/portal.php` + `lang/en/portal.php` (parity). Η γλώσσα ανά

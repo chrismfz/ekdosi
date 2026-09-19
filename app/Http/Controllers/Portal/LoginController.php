@@ -52,7 +52,7 @@ class LoginController extends Controller
             $this->equalizeFailedLoginTiming($credentials['email'], $credentials['password']);
 
             throw ValidationException::withMessages([
-                'email' => __('Λάθος email ή κωδικός.'),
+                'email' => __('portal.login.failed'),
             ]);
         }
 
@@ -61,7 +61,7 @@ class LoginController extends Controller
             Auth::guard('portal')->logout();
 
             throw ValidationException::withMessages([
-                'email' => __('Λάθος email ή κωδικός.'),
+                'email' => __('portal.login.failed'),
             ]);
         }
 
