@@ -19,6 +19,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **i18n bilingual — stamp-at-issue (η προτίμηση γλώσσας του πελάτη φτάνει στο παγωμένο PDF).**
+  Στα σημεία έκδοσης, «παγώνει» η **ρητή** προτίμηση γλώσσας του πελάτη πάνω στο έγγραφο
+  (`invoices/quotes.language`) όταν ο operator άφησε το «Γλώσσα PDF» σε auto — ένας νέος helper
+  `CustomerLanguage::stampForCustomer()` επιστρέφει το `customers.language` (el/en/both) ή null. Έτσι
+  ένας π.χ. Έλληνας πελάτης που θέλει **αγγλικά** έγγραφα τα παίρνει, χωρίς να σπάει το freeze: null
+  μένει auto (το `PdfLabels` το resolve-άρει από την ήδη παγωμένη `country`). Καλύπτει: **CreateInvoice**
+  + **CreateQuote** (stamp όταν null· σέβεται operator override), **StageServiceRenewal** + **WHMCS**
+  draft (stamp από τον πελάτη), **IssueCreditNote** / **ConvertQuoteToInvoice** / **ReissueInvoiceAsDraft**
+  (κληρονομούν τη frozen γλώσσα του source). Δεν αγγίζει ETL imports (ιστορικά). Ολοκληρώνει το i18n (#1a).
 - **i18n bilingual — PDF completion (statement / receipt / delivery-note).** Τα υπόλοιπα
   customer-facing PDF περνούν πλέον από το `App\Support\Pdf\PdfLabels` (el/en/**both** «EL / EN»),
   όπως ήδη invoice + quote: **Καρτέλα** (`CustomerStatementPdfRenderer`) + **Απόδειξη Είσπραξης**

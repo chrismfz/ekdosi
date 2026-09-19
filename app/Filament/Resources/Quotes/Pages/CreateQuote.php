@@ -3,10 +3,12 @@
 namespace App\Filament\Resources\Quotes\Pages;
 
 use App\Filament\Resources\Quotes\QuoteResource;
+use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\Quote;
 use App\Services\QuoteNumberer;
 use App\Services\QuoteTotals;
+use App\Support\CustomerLanguage;
 use Filament\Facades\Filament;
 use Filament\Resources\Pages\CreateRecord;
 use Filament\Support\Enums\Width;
@@ -41,6 +43,14 @@ class CreateQuote extends CreateRecord
         return DB::transaction(function () use ($data, $tenant) {
             $data['company_id'] = $tenant->getKey();
             $data['code'] = app(QuoteNumberer::class)->allocate($tenant);
+
+            // i18n stamp-at-issue: an explicit «Γλώσσα PDF» choice wins; on auto, freeze
+            // the customer's explicit preference. Lead-only quotes have no customer →
+            // null (country-auto). The auto-vs-explicit decision is in the resolver.
+            $customer = ! empty($data['customer_id'])
+                ? Customer::query()->where('company_id', $tenant->getKey())->whereKey($data['customer_id'])->first()
+                : null;
+            $data['language'] = CustomerLanguage::stampForDocument($data['language'] ?? null, $customer);
 
             return Quote::create($data);
         });

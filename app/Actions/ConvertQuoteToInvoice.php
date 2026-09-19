@@ -94,6 +94,8 @@ class ConvertQuoteToInvoice
                 'city' => $quote->city,
                 'postcode' => $quote->postcode,
                 'country' => $quote->country,
+                // i18n: inherit the quote's frozen PDF language (stamped at quote issue).
+                'language' => $quote->language,
                 'notes' => $quote->customer_notes,
             ]);
 

@@ -44,8 +44,12 @@
   μεταβάλλεται. Ένας resolver `App\Support\CustomerLanguage` (i18n Slice 0) αποφασίζει τη γλώσσα για
   τις **ζωντανές** επιφάνειες: **προτίμηση πελάτη** (`customers.language` — π.χ. Έλληνας με αγγλικά
   έγγραφα) + **προεπιλογή εταιρείας** (`companies.default_language`) οδηγούν το **email** (προς τον
-  πελάτη) και θα είναι η βάση για μελλοντικό «πάγωμα στην έκδοση» στο PDF. Ο ίδιος resolver
-  καλωδιώνει portal (`SetPortalLocale`) + emails (`->locale()`).
+  πελάτη). Ο ίδιος resolver καλωδιώνει portal (`SetPortalLocale`) + emails (`->locale()`).
+- **Stamp-at-issue:** στα σημεία έκδοσης, η **ρητή** προτίμηση γλώσσας του πελάτη «παγώνει» πάνω στο
+  έγγραφο (`invoices/quotes.language`, μέσω `CustomerLanguage::stampForCustomer`) όταν το «Γλώσσα PDF»
+  είναι σε auto — έτσι φτάνει στο **παγωμένο** PDF χωρίς να το αλλάζει σε re-render (null μένει auto →
+  resolve από την παγωμένη χώρα). Ο operator μπορεί πάντα να κάνει override per-doc. Πιστωτικά/
+  μετατροπές προσφορών κληρονομούν τη frozen γλώσσα του πρωτότυπου.
 - **Emails στη γλώσσα του πελάτη (el/en):** και τα 5 customer-facing Mailables (invoice/quote/καρτέλα/
   ticket reply/feedback) + subjects ρίχνουν τη γλώσσα του **παραλήπτη** — `CustomerLanguage::forDocumentMail`
   (invoice/quote, recipient-tracking, both→en) ή `forCustomerMail` (καρτέλα/ticket) → `->locale()` στο

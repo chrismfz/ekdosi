@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\RecomputeInvoiceTotals;
+use App\Support\CustomerLanguage;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
@@ -118,6 +119,14 @@ class CreateInvoice extends CreateRecord
         // (InvoiceNumberer::assign, called by the submitters).
         unset($data['code'], $data['invcode']);
         $data['company_id'] = $tenant->getKey();
+
+        // i18n stamp-at-issue: an explicit «Γλώσσα PDF» choice wins; on auto, freeze the
+        // customer's explicit preference (else null → PdfLabels resolves from the frozen
+        // country). Tenant-scoped customer lookup; the decision itself is in the resolver.
+        $customer = ! empty($data['customer_id'])
+            ? Customer::query()->where('company_id', $tenant->getKey())->whereKey($data['customer_id'])->first()
+            : null;
+        $data['language'] = CustomerLanguage::stampForDocument($data['language'] ?? null, $customer);
 
         return Invoice::create($data);
     }

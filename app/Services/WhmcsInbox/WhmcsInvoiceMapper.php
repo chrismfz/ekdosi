@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
+use App\Support\CustomerLanguage;
 use InvalidArgumentException;
 
 /**
@@ -183,6 +184,12 @@ class WhmcsInvoiceMapper
                 'city' => (string) ($customer->city ?? ''),
                 'postcode' => (string) ($customer->postcode ?? ''),
                 'country' => (string) ($customer->country ?? 'GR'),
+                // i18n stamp-at-issue — NOT part of the party snapshot above (whose field
+                // set must mirror the form's customer_id handler). `language` is stamped
+                // separately, exactly as CreateInvoice::handleRecordCreation does it for a
+                // manually-issued invoice (the manual form sets it outside that snapshot).
+                // null → auto (PdfLabels resolves from the frozen country).
+                'language' => CustomerLanguage::stampForCustomer($customer),
                 'occupation' => (string) ($customer->occupation ?? ''),
                 'email' => (string) ($customer->email ?? ''),
                 // «Προτιμολόγιο» = how the operator refers to a WHMCS invoice
