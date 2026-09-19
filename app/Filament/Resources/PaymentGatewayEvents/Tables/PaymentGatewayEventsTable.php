@@ -5,6 +5,7 @@ namespace App\Filament\Resources\PaymentGatewayEvents\Tables;
 use App\Models\PaymentGatewayEvent;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Support\Money;
+use Filament\Actions\Action;
 use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -27,6 +28,7 @@ class PaymentGatewayEventsTable
         'settled_without_transaction_id' => 'Καταχωρίστηκε χωρίς κωδικό συναλλαγής',
         'already_settled' => 'Είχε ήδη εξοφληθεί',
         'settle_on_cancelled_intent' => 'Χρέωση σε ΑΚΥΡΩΜΕΝΗ παραγγελία — δεν καταχωρίστηκε',
+        'unverified_non_capture' => 'Ανεπαλήθευτη απάντηση χωρίς χρέωση (ακύρωση ή probe)',
     ];
 
     public static function configure(Table $table): Table
@@ -61,6 +63,25 @@ class PaymentGatewayEventsTable
                     ->formatStateUsing(fn ($state): string => $state !== null ? Money::eur($state) : '—'),
                 TextColumn::make('ip')->label('IP')->placeholder('—')->toggleable(isToggledHiddenByDefault: true),
             ])
+            ->recordActions([
+                // The «γιατί» behind a row. An operator has no server log, so a
+                // refusal has to be explainable from this screen alone — which
+                // fields the bank actually sent, which one we didn't recognise, and
+                // whether the shared secret or our expected order is at fault.
+                Action::make('diagnostics')
+                    ->label('Λεπτομέρειες')
+                    ->icon('heroicon-o-magnifying-glass')
+                    ->color('gray')
+                    ->modalHeading(fn (PaymentGatewayEvent $r): string => 'Διάγνωση — '
+                        .($r->order_id !== null ? 'παραγγελία '.$r->order_id : 'άγνωστη παραγγελία'))
+                    ->modalContent(fn (PaymentGatewayEvent $r) => view(
+                        'filament.payment-gateway-events.diagnostics',
+                        ['record' => $r],
+                    ))
+                    ->modalSubmitAction(false)
+                    ->modalCancelActionLabel('Κλείσιμο')
+                    ->modalWidth('2xl'),
+            ])
             ->filters([
                 SelectFilter::make('outcome')->label('Έκβαση')->options([
                     PaymentGatewayEvent::OUTCOME_SETTLED => 'Καταχωρίστηκε',
@@ -71,6 +92,23 @@ class PaymentGatewayEventsTable
                     ->options(fn (): array => collect($registry->keys())
                         ->mapWithKeys(fn (string $k): array => [$k => $registry->label($k)])
                         ->all()),
+                // «Δείξε μου μόνο όσα χρειάζονται ματιά» — the refusals whose cause
+                // is a protocol disagreement rather than a normal business outcome.
+                SelectFilter::make('diagnosis')->label('Διάγνωση')
+                    ->options([
+                        'unknown_fields' => 'Άγνωστο πεδίο στην απάντηση',
+                        'order_mismatch' => 'Λάθος σειρά πεδίων',
+                        'secret_or_payload_mismatch' => 'Υπογραφή δεν ταιριάζει',
+                        'no_digest' => 'Χωρίς υπογραφή',
+                        'intent_not_found' => 'Άγνωστη παραγγελία',
+                        'ok' => 'Επαληθευμένη υπογραφή',
+                    ])
+                    // `where(... -> ...)` not whereJsonContains(): the latter throws
+                    // «does not support JSON contains» on SQLite, which is the test
+                    // connection, so the filter could never be covered by a test.
+                    ->query(fn ($query, array $data) => filled($data['value'] ?? null)
+                        ? $query->where('diagnostics->code', $data['value'])
+                        : $query),
             ]);
     }
 }

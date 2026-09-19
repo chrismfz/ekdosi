@@ -1034,6 +1034,10 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Auto-λήξη εκκρεμών intents (SHIPPED):** `payments:expire-stale-intents` λήγει εγκαταλελειμμένα *online* intents
   (offline = worklist, ποτέ)· late verified capture settle-άρει ακόμη και expired (money truth).
 - **«Log πύλης» (SHIPPED):** read-only audit (super-admin) κάθε vPOS return — έκβαση/λόγος/υπογραφή/status/txn/IP/ID.
+  **«Λεπτομέρειες» ανά γραμμή:** δομημένη διάγνωση του *γιατί* — ποια πεδία έστειλε η τράπεζα, ποιο δεν
+  αναγνωρίσαμε, και αν φταίει η σειρά πεδίων ή το shared secret. Φίλτρο «Διάγνωση» για να ξεχωρίσεις τα
+  πρωτοκολλικά προβλήματα από τις κανονικές εκβάσεις. Ονόματα πεδίων μόνο, ποτέ τιμές — ο operator
+  διαγιγνώσκει χωρίς SSH.
   Το εργαλείο για «πλήρωσα, δεν φαίνεται». Best-effort, runtime (εκτός export).
 - **Κανάλι + auto myDATA «Τρόπος» (SHIPPED):** στήλη «Κανάλι» (Πύλη·gateway vs Χειροκίνητα) στις Πληρωμές· per-connection
   «Τρόπος πληρωμής (myDATA)» που το settle stamp-άρει αυτόματα (Eurobank → «Ηλεκτρονικά μέσα»).

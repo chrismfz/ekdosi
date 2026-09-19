@@ -43,6 +43,14 @@ final readonly class PaymentOutcome
         public ?string $providerTxnId = null,
         public ?string $message = null,
         public ?string $merchantId = null,
+        /**
+         * Why the gateway reached this verdict, in structured form, so the
+         * operator-facing «Log πύλης» can explain a refusal without anyone
+         * reading a server log. Field NAMES only — never values.
+         *
+         * @var array<string, mixed>
+         */
+        public array $diagnostics = [],
     ) {}
 
     /** A verified, captured payment — the only state that writes money. */
@@ -51,8 +59,9 @@ final readonly class PaymentOutcome
         return $this->verified && $this->status === self::STATUS_SETTLED;
     }
 
-    public static function unverified(?string $message = null): self
+    /** @param  array<string, mixed>  $diagnostics */
+    public static function unverified(?string $message = null, array $diagnostics = []): self
     {
-        return new self(verified: false, status: self::STATUS_UNKNOWN, message: $message);
+        return new self(verified: false, status: self::STATUS_UNKNOWN, message: $message, diagnostics: $diagnostics);
     }
 }

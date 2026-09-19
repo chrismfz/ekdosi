@@ -8,6 +8,7 @@ use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentGatewayEvent;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Payments\Gateways\EurobankGateway;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Services\Payments\PaymentIntentService;
 use App\Support\Money;
@@ -62,11 +63,17 @@ class EurobankReturnController
             // but it is never reached from here. Log them too, so a validation run
             // whose orderid doesn't resolve still yields the one thing it was for.
             // Keys only, never values.
-            Log::info('eurobank.return.fields', [
-                'posted_order' => array_keys($fields),
-                'note' => 'logged before intent lookup (orderid did not resolve)',
-            ]);
-            $this->reject($request, 'intent_not_found', ['orderid' => $orderId], orderId: (string) $orderId);
+            $diagnostics = [
+                'code' => 'intent_not_found',
+                // Same noise keys the gateway strips, so the two field lists are
+                // directly comparable wherever they are shown together.
+                'posted_order' => EurobankGateway::clampFieldNames(
+                    array_keys(array_diff_key($fields, array_flip(EurobankGateway::DIGEST_EXCLUDED))),
+                ),
+            ];
+            Log::info('eurobank.return.fields', $diagnostics);
+            $this->reject($request, 'intent_not_found', ['orderid' => $orderId],
+                orderId: (string) $orderId, diagnostics: $diagnostics);
 
             return redirect()->route('portal.home');
         }
@@ -89,7 +96,12 @@ class EurobankReturnController
             // otherwise real cancellations become indistinguishable from attacks in
             // «Log πύλης». The money path is untouched: a body claiming CAPTURED
             // still goes through the branch below.
-            $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'not_captured', $outcome);
+            // Its own reason code, NOT the acquirer's «not_captured»: the digest did
+            // not verify, so this is either a cancel leg with fields we don't list or
+            // someone probing with forged signatures. Filing it as the ordinary
+            // business outcome would hide the probes; filing it as a rejection would
+            // make every «Άκυρο» look like an attack. It is neither, so name it.
+            $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'unverified_non_capture', $outcome);
 
             return $this->back($intent);
         }
@@ -331,6 +343,7 @@ class EurobankReturnController
         ?PaymentIntent $intent = null,
         ?PaymentOutcome $outcome = null,
         ?string $orderId = null,
+        ?array $diagnostics = null,
     ): void {
         Log::warning('eurobank.return.rejected', array_merge([
             'reason' => $reason,
@@ -338,16 +351,22 @@ class EurobankReturnController
             'result' => (string) $request->query('result', ''),
         ], $context));
 
-        $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_REJECTED, $reason, $outcome, $orderId);
+        $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_REJECTED, $reason, $outcome, $orderId, $diagnostics);
 
         // A refusal AFTER a verified CAPTURED status means the bank took the money and
         // we declined to record it — exactly the event nobody should have to discover
         // by reading «Log πύλης».
         if ($outcome?->isSettled() === true && $intent !== null) {
             $amount = Money::eur((float) ($outcome->amount ?? $intent->amount));
+            // mid/currency mismatches mean the TERMINAL is misconfigured (or the
+            // acquirer changed), so every in-flight capture hits them on a different
+            // intent. Cool those down per COMPANY — one «your terminal is wrong»
+            // rather than hundreds. Per-intent stays right for the rest.
+            $systemic = in_array($reason, ['mid_mismatch', 'currency_mismatch'], true);
             $this->alertOperators($intent, $reason,
                 "Η τράπεζα χρέωσε {$amount} αλλά η πληρωμή ΔΕΝ καταχωρίστηκε (αιτία: {$reason}). "
-                .'Δες «Log πύλης» — αν επαναλαμβάνεται, έλεγξε τις ρυθμίσεις του τερματικού.');
+                .'Δες «Log πύλης» — αν επαναλαμβάνεται, έλεγξε τις ρυθμίσεις του τερματικού.',
+                perCompany: $systemic);
         }
     }
 
@@ -448,6 +467,7 @@ class EurobankReturnController
         ?string $reason,
         ?PaymentOutcome $providerOutcome,
         ?string $orderId = null,
+        ?array $diagnostics = null,
     ): void {
         try {
             // Log the RAW acquirer status («CAPTURED»/«REFUSED»… — what the bank's
@@ -471,6 +491,9 @@ class EurobankReturnController
                 'currency' => $providerOutcome?->currency,
                 'ip' => $request->ip(),
                 'message' => $providerOutcome?->message,
+                // Why the gateway ruled the way it did, so «Log πύλης» explains a
+                // refusal on its own instead of sending an operator to a server log.
+                'diagnostics' => $diagnostics ?? ($providerOutcome?->diagnostics ?: null),
             ]);
         } catch (Throwable $e) {
             Log::warning('eurobank.return.event_log_failed', ['error' => $e->getMessage()]);
