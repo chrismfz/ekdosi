@@ -10,6 +10,7 @@ use App\Services\Support\Inbound\WebklexImapMailbox;
 use App\Support\ErrorAlerts\ExceptionNotifier;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
+use App\Support\Tenancy\PortalHost;
 use Filament\Events\TenantSet;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Support\Assets\Css;
@@ -34,6 +35,10 @@ class AppServiceProvider extends ServiceProvider
         // Ambient tenant for the CompanyScope global scope. Singleton so the
         // current company id lives for the whole request / command.
         $this->app->singleton(CompanyContext::class);
+
+        // Tenant resolved from the customer-portal host (#1c). Singleton;
+        // ResolvePortalHost overwrites it per portal request (no stale leak).
+        $this->app->singleton(PortalHost::class);
 
         // Leads dedupe lookup — request-scoped so one form render shares a single
         // lookup across banner / DNC rule / create hook (memo inside the class).

@@ -1,5 +1,9 @@
 <x-portal-layout title="{{ __('portal.login.title') }}">
     <div class="mx-auto max-w-sm">
+        {{-- #1c branding: on a custom portal host the tenant name heads the page. --}}
+        @if ($portalCompany ?? null)
+            <flux:text class="mb-1 font-semibold text-zinc-500 dark:text-zinc-400">{{ $portalCompany->name }}</flux:text>
+        @endif
         <flux:heading size="xl">{{ __('portal.login.title') }}</flux:heading>
         <flux:text class="mt-2 mb-6">{{ __('portal.login.subtitle') }}</flux:text>
 

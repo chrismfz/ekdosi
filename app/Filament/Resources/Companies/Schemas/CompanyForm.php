@@ -77,6 +77,21 @@ class CompanyForm
                                     ->unique(ignoreRecord: true)
                                     ->helperText('Used in the URL: /admin/{slug}/...  Lowercase, dashes only.'),
 
+                                // Multi-domain #1c: optional custom host for the customer
+                                // portal (e.g. cs.nixpal.com). Κενό = μόνο το κοινό default
+                                // host. Ορίζει τη γλώσσα/branding των guest σελίδων του tenant.
+                                TextInput::make('portal_host')
+                                    ->label('Custom portal host')
+                                    ->maxLength(255)
+                                    // Normalise on blur (bare lowercase host) BEFORE the unique
+                                    // check, so a case/whitespace/scheme variant doesn't slip past
+                                    // validation and hit the DB unique index as a 500.
+                                    ->live(onBlur: true)
+                                    ->afterStateUpdated(fn (?string $state, callable $set) => $set('portal_host', Company::normalizePortalHost($state)))
+                                    ->unique(ignoreRecord: true)
+                                    ->placeholder('cs.nixpal.com')
+                                    ->helperText('Προαιρετικό. Hostname (χωρίς https:// ή /path — καθαρίζεται αυτόματα) όπου απαντά και η πύλη /user. Απαιτεί DNS + TLS + vhost προς την app. Κενό = μόνο το default host.'),
+
                                 Select::make('country_code')
                                     ->required()
                                     ->options([

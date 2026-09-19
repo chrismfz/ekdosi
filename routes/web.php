@@ -14,6 +14,7 @@ use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Controllers\TicketAttachmentController;
 use App\Http\Controllers\TicketFeedbackController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
+use App\Http\Middleware\ResolvePortalHost;
 use App\Http\Middleware\SetPortalLocale;
 use Illuminate\Support\Facades\Route;
 
@@ -33,24 +34,33 @@ Route::view('/', 'root-placeholder');
  * only the URL prefix is /user. Unauthenticated hits on a protected /user route
  * are redirected to /user/login by EnsurePortalAuthenticated.
  */
-Route::get('/user/login', [PortalLoginController::class, 'show'])->name('portal.login');
-Route::post('/user/login', [PortalLoginController::class, 'login'])
-    ->middleware('throttle:10,1')
-    ->name('portal.login.attempt');
-Route::post('/user/logout', [PortalLoginController::class, 'logout'])->name('portal.logout');
+// Guest portal pages (login / logout / password reset). Wrapped in the host
+// resolver + locale so a custom-host tenant's login/reset pages render in that
+// tenant's language + branding (#1c) — there is no logged-in user to read a
+// locale from here.
+Route::middleware([ResolvePortalHost::class, SetPortalLocale::class])->group(function (): void {
+    Route::get('/user/login', [PortalLoginController::class, 'show'])->name('portal.login');
+    Route::post('/user/login', [PortalLoginController::class, 'login'])
+        ->middleware('throttle:10,1')
+        ->name('portal.login.attempt');
+    Route::post('/user/logout', [PortalLoginController::class, 'logout'])->name('portal.logout');
 
-// Password reset / invited-login claim (guest — for logged-out customers). The
-// request endpoint is generic + honeypotted + throttled per-IP here and per-email
-// in the controller. See PasswordResetController.
-Route::get('/user/forgot-password', [PortalPasswordResetController::class, 'showLinkRequest'])
-    ->name('portal.password.request');
-Route::post('/user/forgot-password', [PortalPasswordResetController::class, 'sendLink'])
-    ->middleware('throttle:20,60')->name('portal.password.email');
-Route::get('/user/reset-password/{token}', [PortalPasswordResetController::class, 'showReset'])
-    ->name('portal.password.reset');
-Route::post('/user/reset-password', [PortalPasswordResetController::class, 'reset'])
-    ->middleware('throttle:20,60')->name('portal.password.update');
-Route::middleware([EnsurePortalAuthenticated::class, SetPortalLocale::class])->group(function (): void {
+    // Password reset / invited-login claim (guest — for logged-out customers). The
+    // request endpoint is generic + honeypotted + throttled per-IP here and per-email
+    // in the controller. See PasswordResetController.
+    Route::get('/user/forgot-password', [PortalPasswordResetController::class, 'showLinkRequest'])
+        ->name('portal.password.request');
+    Route::post('/user/forgot-password', [PortalPasswordResetController::class, 'sendLink'])
+        ->middleware('throttle:20,60')->name('portal.password.email');
+    Route::get('/user/reset-password/{token}', [PortalPasswordResetController::class, 'showReset'])
+        ->name('portal.password.reset');
+    Route::post('/user/reset-password', [PortalPasswordResetController::class, 'reset'])
+        ->middleware('throttle:20,60')->name('portal.password.update');
+});
+
+// Authenticated portal. ResolvePortalHost first (host → tenant branding), then the
+// auth gate, then the per-user locale (a logged-in user's own preference wins).
+Route::middleware([ResolvePortalHost::class, EnsurePortalAuthenticated::class, SetPortalLocale::class])->group(function (): void {
     Route::get('/user', [PortalHomeController::class, 'index'])->name('portal.home');
     // «Η καρτέλα μου» — read-only balance + ledger (same figures as the operator
     // Καρτέλα, grant-scoped). No «pay» yet — that lands with the gateway pillar.

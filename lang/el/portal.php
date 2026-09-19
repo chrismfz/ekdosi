@@ -106,6 +106,7 @@ return [
         'remember' => 'Να με θυμάσαι',
         'forgot' => 'Ξέχασα τον κωδικό',
         'submit' => 'Είσοδος',
+        'failed' => 'Λάθος email ή κωδικός.',
     ],
 
     // Forgot / reset password.

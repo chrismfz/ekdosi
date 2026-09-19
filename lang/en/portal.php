@@ -106,6 +106,7 @@ return [
         'remember' => 'Remember me',
         'forgot' => 'Forgot password',
         'submit' => 'Sign in',
+        'failed' => 'Wrong email or password.',
     ],
 
     // Forgot / reset password.

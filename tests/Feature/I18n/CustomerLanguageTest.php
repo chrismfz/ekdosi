@@ -36,22 +36,33 @@ class CustomerLanguageTest extends TestCase
         return $invoice;
     }
 
-    // ---- forUi (portal chrome: el/en only) --------------------------------
+    // ---- forPortal (portal chrome: el/en only) ----------------------------
 
-    public function test_for_ui_uses_stored_locale_when_valid(): void
+    public function test_for_portal_uses_stored_user_locale_when_valid(): void
     {
-        $this->assertSame('en', CustomerLanguage::forUi(new CustomerUser(['locale' => 'en'])));
-        $this->assertSame('el', CustomerLanguage::forUi(new CustomerUser(['locale' => 'el'])));
+        $this->assertSame('en', CustomerLanguage::forPortal(new CustomerUser(['locale' => 'en'])));
+        $this->assertSame('el', CustomerLanguage::forPortal(new CustomerUser(['locale' => 'el'])));
     }
 
-    public function test_for_ui_falls_back_to_app_locale_when_missing_or_invalid(): void
+    public function test_for_portal_falls_back_to_app_locale_when_no_user_or_host(): void
     {
         config(['app.locale' => 'el']);
 
         // null user, null locale, and 'both' (not a UI language) all fall back.
-        $this->assertSame('el', CustomerLanguage::forUi(null));
-        $this->assertSame('el', CustomerLanguage::forUi(new CustomerUser([])));
-        $this->assertSame('el', CustomerLanguage::forUi(new CustomerUser(['locale' => 'both'])));
+        $this->assertSame('el', CustomerLanguage::forPortal(null));
+        $this->assertSame('el', CustomerLanguage::forPortal(new CustomerUser([])));
+        $this->assertSame('el', CustomerLanguage::forPortal(new CustomerUser(['locale' => 'both'])));
+    }
+
+    public function test_for_portal_uses_host_tenant_when_user_has_no_explicit_locale(): void
+    {
+        // A null-locale user on a custom host inherits that tenant's language
+        // (so they don't land on Greek right after an English login).
+        $tenant = Company::make(['default_language' => 'en']);
+        $this->assertSame('en', CustomerLanguage::forPortal(new CustomerUser([]), $tenant));
+
+        // …but an explicit user preference still wins over the host.
+        $this->assertSame('el', CustomerLanguage::forPortal(new CustomerUser(['locale' => 'el']), $tenant));
     }
 
     // ---- forCustomer -------------------------------------------------------

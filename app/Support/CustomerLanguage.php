@@ -13,12 +13,13 @@ use App\Support\Pdf\PdfLabels;
  * The ONE place that decides which language a customer-facing surface speaks
  * (i18n Slice 0). Distinct signals, deliberately NOT conflated:
  *
- *   • {@see forUi()}       — the portal CHROME for the logged-in `customer_user`.
- *                            Per-login, ephemeral, no legal weight. UI has only
- *                            `el`/`en` (never bilingual). Driven by
- *                            `customer_users.locale` (the profile dropdown); a login
- *                            maps to many customers via a grant table, so there is
- *                            NO single "customer language" to borrow here.
+ *   • {@see forPortal()}   — the portal CHROME (el/en only). A logged-in user's
+ *                            `customer_users.locale` preference wins; otherwise the
+ *                            portal host's tenant ({@see forHost()}) decides — so
+ *                            guest pages AND null-locale users on a custom host get
+ *                            that tenant's language. A login maps to many customers
+ *                            via a grant table, so there is NO per-customer language
+ *                            to borrow for the chrome.
  *   • {@see forCustomer()} — the COMMUNICATION language of a customer: their explicit
  *                            preference, else derived from their country, else the
  *                            tenant default. `el`/`en`/`both`.
@@ -53,14 +54,38 @@ final class CustomerLanguage
      * else the app default. Clamped to the {@see UI} set ('both' is meaningless
      * for chrome). Accepts null (guest/edge) → app default.
      */
-    public static function forUi(?CustomerUser $user): string
+    public static function forPortal(?CustomerUser $user, ?Company $hostCompany = null): string
     {
-        $preferred = $user?->locale;
-
-        if (in_array($preferred, self::UI, true)) {
-            return $preferred;
+        // A logged-in user's explicit UI preference wins…
+        if (in_array($user?->locale, self::UI, true)) {
+            return $user->locale;
         }
 
+        // …otherwise the portal host's tenant language — this covers BOTH guest
+        // pages AND a logged-in user who has no explicit locale yet (e.g. a freshly
+        // invited Nixpal customer), so they don't land on Greek after an English
+        // login. forHost() falls back to the app default when there is no host.
+        return self::forHost($hostCompany);
+    }
+
+    /**
+     * Portal UI locale for a GUEST page (login/reset) resolved from the portal
+     * host's tenant (#1c). The chrome is single-language: a tenant whose default
+     * is bilingual ('both') gets English guest chrome (its foreign-facing case).
+     * No host / no tenant default → the app default (clamped to the UI set).
+     */
+    public static function forHost(?Company $company): string
+    {
+        return match ($company?->default_language) {
+            'el' => 'el',
+            'en', 'both' => 'en',
+            default => self::appDefaultUi(),
+        };
+    }
+
+    /** The app default locale, clamped to the portal UI set (el/en). */
+    private static function appDefaultUi(): string
+    {
         $app = (string) config('app.locale', self::FALLBACK);
 
         return in_array($app, self::UI, true) ? $app : self::FALLBACK;
