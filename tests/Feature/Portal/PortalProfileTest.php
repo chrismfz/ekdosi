@@ -33,6 +33,27 @@ class PortalProfileTest extends TestCase
             ->assertSee('Τα στοιχεία μου');
     }
 
+    public function test_portal_renders_in_english_for_an_en_locale_user(): void
+    {
+        // i18n Portal slice: SetPortalLocale reads customer_users.locale and the
+        // blades resolve through __('portal.*'), so an 'en' user sees English UI
+        // (same URL) while Greek strings are absent.
+        $user = CustomerUser::factory()->create([
+            'email' => 'ee@example.com',
+            'password' => Hash::make('secret-pass-123'),
+            'status' => CustomerUser::STATUS_ACTIVE,
+            'locale' => 'en',
+        ]);
+
+        $this->actingAs($user, 'portal')
+            ->get('/user/settings')
+            ->assertOk()
+            ->assertSee('My details')          // profile title + nav (en)
+            ->assertSee('Sign out')            // layout nav (en)
+            ->assertDontSee('Τα στοιχεία μου') // Greek title absent
+            ->assertDontSee('Αποσύνδεση');     // Greek nav absent
+    }
+
     public function test_updates_own_details(): void
     {
         $user = $this->user();

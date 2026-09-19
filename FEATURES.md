@@ -949,6 +949,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 ---
 
 ## 18. Πύλη πελατών (customer portal) — foundation
+- **Δίγλωσση (el/en):** η **συνδεδεμένη** πύλη (blades + layout + flash μηνύματα profile/tickets)
+  μεταφράζεται μέσω `__('portal.*')` (`lang/{el,en}/portal.php`), με τη γλώσσα ανά **συνδεδεμένο χρήστη**
+  (`customer_users.locale`, dropdown στο προφίλ) να εφαρμόζεται από το `SetPortalLocale` middleware —
+  **ίδια URLs**, κανένα locale prefix. `<html lang>` δυναμικό. Οι **guest** σελίδες (login/reset) μένουν
+  ελληνικά (χωρίς user-context· follow-up). Βάση για το Nixpal (Εσθονική) ως testbed. (Τα emails/PDF: βλ.
+  i18n — email slice επόμενο· PDF παγωμένο.)
 - **Slice 0 (auth shell):** ξεχωριστός **`portal` auth guard** + πίνακας/model `customer_users`
   (global login identity, unique email σε όλες τις εταιρίες· λιτός — auth + account-safety, καμία
   νομική ταυτότητα). `/user/login`·`/user/logout`·`/user`·**προφίλ** `/user/settings` (στοιχεία + αλλαγή

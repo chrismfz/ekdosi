@@ -1,12 +1,12 @@
 @php use App\Support\Money; @endphp
-<x-portal-layout title="Πληρωμή">
+<x-portal-layout title="{{ __('portal.common.payment') }}">
     <div class="mx-auto max-w-md">
-        <flux:heading size="xl">Πληρωμή</flux:heading>
+        <flux:heading size="xl">{{ __('portal.common.payment') }}</flux:heading>
         <flux:text class="mt-2 mb-6">{{ $customer->name }}</flux:text>
 
         @if ($methods->isEmpty())
             <div class="rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-700 dark:bg-zinc-800">
-                <flux:text>Δεν υπάρχει διαθέσιμος τρόπος πληρωμής αυτή τη στιγμή. Επικοινώνησε μαζί μας.</flux:text>
+                <flux:text>{{ __('portal.payment.no_method') }}</flux:text>
             </div>
         @else
             @php
@@ -26,11 +26,11 @@
                      invoice's balance (progressive enhancement; server caps it anyway). --}}
                 @if ($openInvoices->isNotEmpty())
                     <div>
-                        <label for="pay-target" class="mb-2 block font-medium">Τι πληρώνεις;</label>
+                        <label for="pay-target" class="mb-2 block font-medium">{{ __('portal.payment.what') }}</label>
                         <select id="pay-target" name="invoice_id"
                             class="w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 dark:border-zinc-600 dark:bg-zinc-800">
                             <option value="" data-amount="{{ number_format($owed, 2, '.', '') }}"
-                                @selected(! $selectedInvoice)>Όλο το υπόλοιπο ({{ Money::eur($owed) }})</option>
+                                @selected(! $selectedInvoice)>{{ __('portal.payment.whole_balance', ['amount' => Money::eur($owed)]) }}</option>
                             @foreach ($openInvoices as $inv)
                                 <option value="{{ $inv->id }}" data-amount="{{ number_format((float) $inv->open_balance, 2, '.', '') }}"
                                     @selected($selectedInvoice && $selectedInvoice->id === $inv->id)>{{ $inv->invcode }} — {{ Money::eur($inv->open_balance) }}</option>
@@ -44,13 +44,13 @@
                     type="number"
                     step="0.01"
                     min="0.01"
-                    label="Ποσό (€)"
+                    label="{{ __('portal.payment.amount_field') }}"
                     value="{{ old('amount', number_format($defaultAmount, 2, '.', '')) }}"
                     required
                     autofocus
                 />
                 @if ($owed > 0)
-                    <flux:text class="-mt-3 text-sm text-zinc-500">Οφειλόμενο υπόλοιπο: {{ Money::eur($owed) }}</flux:text>
+                    <flux:text class="-mt-3 text-sm text-zinc-500">{{ __('portal.common.owed_balance') }}: {{ Money::eur($owed) }}</flux:text>
                 @endif
 
                 {{-- Native radios (not flux:radio.group variant="cards"): the Flux
@@ -60,7 +60,7 @@
                      could not pay. A native radio always renders (styled when the
                      build is present, plain but functional when it is not). --}}
                 <div>
-                    <flux:text class="mb-2 font-medium">Τρόπος πληρωμής</flux:text>
+                    <flux:text class="mb-2 font-medium">{{ __('portal.payment.method') }}</flux:text>
                     <div class="flex flex-col gap-2">
                         @foreach ($methods as $m)
                             <label class="flex cursor-pointer items-center gap-3 rounded-xl border border-zinc-200 bg-white p-4 has-[:checked]:border-zinc-900 has-[:checked]:ring-1 has-[:checked]:ring-zinc-900 dark:border-zinc-700 dark:bg-zinc-800 dark:has-[:checked]:border-white dark:has-[:checked]:ring-white">
@@ -73,7 +73,7 @@
                     </div>
                 </div>
 
-                <flux:button type="submit" variant="primary" class="w-full">Συνέχεια</flux:button>
+                <flux:button type="submit" variant="primary" class="w-full">{{ __('portal.payment.continue') }}</flux:button>
             </form>
 
             @if ($openInvoices->isNotEmpty())
@@ -95,7 +95,7 @@
         @endif
 
         <flux:text class="mt-6 text-sm">
-            <flux:link href="{{ route('portal.statement') }}">Επιστροφή στην καρτέλα</flux:link>
+            <flux:link href="{{ route('portal.statement') }}">{{ __('portal.payment.back_to_statement') }}</flux:link>
         </flux:text>
     </div>
 </x-portal-layout>

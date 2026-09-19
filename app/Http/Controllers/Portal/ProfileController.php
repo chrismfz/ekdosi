@@ -37,7 +37,7 @@ class ProfileController extends Controller
 
         Auth::guard('portal')->user()->forceFill($data)->save();
 
-        return back()->with('status', 'Τα στοιχεία σου αποθηκεύτηκαν.');
+        return back()->with('status', __('portal.flash.profile_saved'));
     }
 
     public function updatePassword(Request $request): RedirectResponse
@@ -70,6 +70,6 @@ class ProfileController extends Controller
         // their next request while this one survives.
         $request->session()->put(EnsurePortalAuthenticated::PW_HASH_KEY, (string) $user->getAuthPassword());
 
-        return back()->with('status', 'Ο κωδικός σου άλλαξε.');
+        return back()->with('status', __('portal.flash.password_changed'));
     }
 }

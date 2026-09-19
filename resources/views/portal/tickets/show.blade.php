@@ -2,9 +2,9 @@
     use App\Enums\TicketStatus;
     $fluxColor = ['warning' => 'amber', 'danger' => 'red', 'success' => 'green', 'info' => 'blue', 'gray' => 'zinc'];
 @endphp
-<x-portal-layout title="Αίτημα {{ $ticket->reference }}">
+<x-portal-layout title="{{ __('portal.tickets.show_title', ['reference' => $ticket->reference]) }}">
     <div class="mb-4">
-        <flux:link href="{{ route('portal.tickets') }}" class="text-sm">← Τα αιτήματά μου</flux:link>
+        <flux:link href="{{ route('portal.tickets') }}" class="text-sm">← {{ __('portal.common.my_requests') }}</flux:link>
     </div>
 
     <flux:heading size="xl">{{ $ticket->subject }}</flux:heading>
@@ -23,7 +23,7 @@
                 ? 'border-blue-200 bg-blue-50 dark:border-blue-900 dark:bg-blue-950/40'
                 : 'border-zinc-200 bg-white dark:border-zinc-700 dark:bg-zinc-800' }}">
                 <div class="mb-1 flex items-center justify-between gap-2">
-                    <flux:badge size="sm" color="{{ $msg->isFromCustomer() ? 'blue' : 'zinc' }}">{{ $msg->isFromCustomer() ? 'Εσείς' : 'Υποστήριξη' }}</flux:badge>
+                    <flux:badge size="sm" color="{{ $msg->isFromCustomer() ? 'blue' : 'zinc' }}">{{ $msg->isFromCustomer() ? __('portal.tickets.you') : __('portal.tickets.support') }}</flux:badge>
                     <flux:text class="text-xs text-zinc-500">{{ $msg->created_at->diffForHumans() }}</flux:text>
                 </div>
                 <div class="text-sm whitespace-pre-line">{{ $msg->body }}</div>
@@ -43,9 +43,9 @@
     {{-- Feedback on close — only on a closed ticket of a feedback-enabled department. --}}
     @if ($ticket->canBeRated())
         <div class="mb-6 max-w-xl rounded-xl border border-zinc-200 bg-white p-4 dark:border-zinc-700 dark:bg-zinc-800">
-            <flux:heading size="sm">Πώς σας φάνηκε η εξυπηρέτηση;</flux:heading>
+            <flux:heading size="sm">{{ __('portal.tickets.feedback_heading') }}</flux:heading>
             @if ($ticket->isRated())
-                <flux:text class="mt-1 text-sm text-zinc-500">Η αξιολόγησή σας: {{ $ticket->rating }}/5 — μπορείτε να την αλλάξετε.</flux:text>
+                <flux:text class="mt-1 text-sm text-zinc-500">{{ __('portal.tickets.rating_current', ['rating' => $ticket->rating]) }}</flux:text>
             @endif
             <form method="POST" action="{{ route('portal.tickets.rate', $ticket->id) }}" class="mt-3 flex flex-col gap-3">
                 @csrf
@@ -58,26 +58,26 @@
                     @endfor
                 </div>
                 @error('rating') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
-                <flux:textarea name="rating_comment" label="Σχόλιο (προαιρετικά)" rows="2">{{ old('rating_comment', $ticket->rating_comment) }}</flux:textarea>
+                <flux:textarea name="rating_comment" label="{{ __('portal.tickets.comment_optional') }}" rows="2">{{ old('rating_comment', $ticket->rating_comment) }}</flux:textarea>
                 @error('rating_comment') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
-                <div><flux:button type="submit" variant="primary">Υποβολή αξιολόγησης</flux:button></div>
+                <div><flux:button type="submit" variant="primary">{{ __('portal.tickets.submit_rating') }}</flux:button></div>
             </form>
         </div>
     @endif
 
     {{-- Reply --}}
     @if ($ticket->status === TicketStatus::Closed)
-        <flux:text class="mb-2 text-sm text-zinc-500">Το αίτημα είναι κλειστό — μια νέα απάντηση θα το ανοίξει ξανά.</flux:text>
+        <flux:text class="mb-2 text-sm text-zinc-500">{{ __('portal.tickets.closed_note') }}</flux:text>
     @endif
     <form method="POST" action="{{ route('portal.tickets.reply', $ticket->id) }}" enctype="multipart/form-data" class="flex max-w-xl flex-col gap-3">
         @csrf
-        <flux:textarea name="body" label="Η απάντησή σας" rows="4" required>{{ old('body') }}</flux:textarea>
+        <flux:textarea name="body" label="{{ __('portal.tickets.your_reply') }}" rows="4" required>{{ old('body') }}</flux:textarea>
         @error('body') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
         <div>
-            <flux:text class="mb-1 text-sm text-zinc-500">Συνημμένα (προαιρετικά, έως {{ \App\Support\TicketAttachments::MAX_COUNT }} αρχεία)</flux:text>
+            <flux:text class="mb-1 text-sm text-zinc-500">{{ __('portal.tickets.attachments', ['max' => \App\Support\TicketAttachments::MAX_COUNT]) }}</flux:text>
             <input type="file" name="attachments[]" multiple class="text-sm">
             @error('attachments.*') <flux:text class="text-sm text-red-600">{{ $message }}</flux:text> @enderror
         </div>
-        <div><flux:button type="submit" variant="primary">Αποστολή απάντησης</flux:button></div>
+        <div><flux:button type="submit" variant="primary">{{ __('portal.tickets.send_reply') }}</flux:button></div>
     </form>
 </x-portal-layout>
