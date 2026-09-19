@@ -43,8 +43,14 @@
   τις **ζωντανές** επιφάνειες: **προτίμηση πελάτη** (`customers.language` — π.χ. Έλληνας με αγγλικά
   έγγραφα) + **προεπιλογή εταιρείας** (`companies.default_language`) οδηγούν το **email** (προς τον
   πελάτη) και θα είναι η βάση για μελλοντικό «πάγωμα στην έκδοση» στο PDF. Ο ίδιος resolver
-  καλωδιώνει portal (`SetPortalLocale`) + emails (`->locale()`) — foundation για πλήρες bilingual
-  portal/email (επόμενα slices· βλ. `PLAN.md §6.5`).
+  καλωδιώνει portal (`SetPortalLocale`) + emails (`->locale()`).
+- **Emails στη γλώσσα του πελάτη (el/en):** και τα 5 customer-facing Mailables (invoice/quote/καρτέλα/
+  ticket reply/feedback) + subjects ρίχνουν τη γλώσσα του **παραλήπτη** — `CustomerLanguage::forDocumentMail`
+  (invoice/quote, recipient-tracking, both→en) ή `forCustomerMail` (καρτέλα/ticket) → `->locale()` στο
+  Mailable· strings σε `lang/{el,en}/mail.php`. Ο **operator-editable** default invoice body/MARK section
+  (`MailTemplateRenderer`) έχει EN twin (μόνο όταν ο tenant δεν έχει δικό του template — custom = as-is).
+  Το **PDF** μένει παγωμένο (transient email vs νομικό έγγραφο). Νέος κανόνας στο `CLAUDE.md` («Conventions»):
+  κάθε νέα customer-facing επιφάνεια δίγλωσση από την πρώτη μέρα. Βλ. `PLAN.md §6.5`.
 - **Στοιχεία εκδότη στην κεφαλίδα**: επωνυμία/διεύθυνση/ΑΦΜ/ΔΟΥ/τηλ/email
   + **ΓΕΜΗ** (`companies.gemi`, ν.4919/2022) + **Δραστηριότητα/ΚΑΔ** (`kad_primary`)· απαλλαγή
   ΦΠΑ (§8.3 αιτία) σε 0% γραμμές.
@@ -952,8 +958,8 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Δίγλωσση (el/en):** η **συνδεδεμένη** πύλη (blades + layout + flash μηνύματα profile/tickets)
   μεταφράζεται μέσω `__('portal.*')` (`lang/{el,en}/portal.php`), με τη γλώσσα ανά **συνδεδεμένο χρήστη**
   (`customer_users.locale`, dropdown στο προφίλ) να εφαρμόζεται από το `SetPortalLocale` middleware —
-  **ίδια URLs**, κανένα locale prefix. `<html lang>` δυναμικό. (Τα emails/PDF: βλ. i18n — email slice
-  επόμενο· PDF παγωμένο.)
+  **ίδια URLs**, κανένα locale prefix. `<html lang>` δυναμικό. (Τα **emails** επίσης δίγλωσσα — ρίχνουν
+  τη γλώσσα του παραλήπτη· βλ. §1 «QR + PDF». Το **PDF** μένει παγωμένο.)
 - **Multi-domain (#1c, soft):** προαιρετικό **`companies.portal_host`** (π.χ. `cs.nixpal.com`) → η πύλη
   απαντά και στο custom host. Εκεί ένας host→tenant resolver (`ResolvePortalHost`) δίνει στις **guest**
   σελίδες (login/reset) τη γλώσσα (`default_language`) + το **branding** του tenant. Host = hint, ΟΧΙ

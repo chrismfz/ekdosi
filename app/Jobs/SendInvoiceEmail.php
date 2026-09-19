@@ -211,10 +211,10 @@ class SendInvoiceEmail implements ShouldQueue
             $pdfBytes = $renderer->render($invoice);
             $mailerFactory->for($tenant)
                 ->to($email)
-                // i18n Slice 0: stamp the recipient's language on the mailable. Inert
-                // until InvoiceIssuedMail is localized (email-i18n slice) — the body is
-                // still the tenant's Greek MailTemplate — but routes every future __()
-                // through the one resolver.
+                // i18n: stamp the recipient's language on the mailable. The default
+                // (non-custom) invoice body + subject + MARK section render in that
+                // language (MailTemplateRenderer); a tenant's CUSTOM template stays in
+                // its own language. The PDF stays frozen (a separate slice).
                 ->send((new InvoiceIssuedMail($invoice, $pdfBytes))->locale(CustomerLanguage::forDocumentMail($invoice)));
 
             $log->update([

@@ -80,8 +80,8 @@ class SendQuoteEmail implements ShouldQueue
 
             $mailerFactory->for($tenant)
                 ->to($email)
-                // i18n Slice 0: stamp the recipient's language (inert until the
-                // mailable is localized — see SendInvoiceEmail).
+                // i18n: stamp the recipient's language — the quote email subject +
+                // body render in that language (both→en). PDF stays frozen.
                 ->send((new QuoteOfferMail($quote, $pdfBytes))->locale(CustomerLanguage::forDocumentMail($quote)));
 
             $log->update(['status' => 'sent', 'sent_at' => now()]);

@@ -1,5 +1,4 @@
 {{ $body }}
 
 ---
-Απάντηση στο αίτημα υποστήριξης {{ $ticket->reference }}.
-Απαντήστε σε αυτό το email για να συνεχίσετε τη συνομιλία.
+{{ __('mail.ticket.reply.footer', ['reference' => $ticket->reference]) }}

@@ -6,6 +6,7 @@ use App\Mail\TicketFeedbackMail;
 use App\Models\Scopes\CompanyScope;
 use App\Models\Ticket;
 use App\Services\TenantMailerFactory;
+use App\Support\CustomerLanguage;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Bus\Dispatchable;
@@ -74,12 +75,16 @@ class SendTicketFeedbackInvite implements ShouldQueue
         $url = URL::temporarySignedRoute('support.feedback.show', now()->addDays(30), ['ticket' => $ticket->id]);
 
         try {
-            $mailerFactory->for($company)->to($recipient)->send(new TicketFeedbackMail(
+            $locale = $ticket->customer
+                ? CustomerLanguage::forCustomerMail($ticket->customer)
+                : CustomerLanguage::forHost($company);
+
+            $mailerFactory->for($company)->to($recipient)->send((new TicketFeedbackMail(
                 ticket: $ticket,
                 url: $url,
                 fromAddress: $fromAddress,
                 fromName: $fromName,
-            ));
+            ))->locale($locale));
         } catch (\Throwable $e) {
             Log::warning('SendTicketFeedbackInvite: send failed', ['ticket_id' => $ticket->id, 'error' => $e->getMessage()]);
             // On the SYNC driver the job runs inline, so a throw would surface into the

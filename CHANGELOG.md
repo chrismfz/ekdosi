@@ -19,6 +19,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **i18n bilingual — Emails στη γλώσσα του πελάτη (el/en).** Τα customer-facing emails ρίχνουν πλέον
+  τη γλώσσα του **παραλήπτη**, όχι σταθερά ελληνικά: κάθε dispatcher κάνει `->locale(...)` το Mailable
+  μέσω του `CustomerLanguage` (`forDocumentMail` για invoice/quote — recipient-tracking, both→en·
+  `forCustomerMail` για statement/ticket). Νέα αρχεία `lang/{el,en}/mail.php` (parity) + τα 8 mail views
+  (`resources/views/mail/*`) και τα subjects (Προσφορά/Καρτέλα/feedback) περνούν από `__('mail.*')`· ο
+  `MailTemplateRenderer` απέκτησε **αγγλικό default invoice body** + locale-aware MARK section (μόνο όταν
+  ο tenant ΔΕΝ έχει δικό του template — custom template = as-is, η επιλογή του tenant). Τα ελληνικά strings
+  είναι **verbatim** (υπάρχοντα mail tests μένουν πράσινα). Το **PDF μένει FROZEN** (ξεχωριστό slice) — το
+  email είναι transient, το νομικό PDF όχι. Δες `CLAUDE.md → Conventions` (νέος κανόνας: κάθε νέα
+  customer-facing επιφάνεια δίγλωσση από την πρώτη μέρα).
 - **Multi-domain — προαιρετικό custom portal host ανά tenant (#1c, «soft»).** Νέα προαιρετική στήλη
   **`companies.portal_host`** (π.χ. `cs.nixpal.com`) + host→tenant resolver (`ResolvePortalHost` middleware
   σε όλα τα `/user` routes, singleton `App\Support\Tenancy\PortalHost`). Η πύλη απαντά **και** στο κοινό

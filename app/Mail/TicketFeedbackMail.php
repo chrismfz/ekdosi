@@ -29,7 +29,7 @@ class TicketFeedbackMail extends Mailable
         return new Envelope(
             from: $from,
             replyTo: [$from],
-            subject: '['.$this->ticket->reference.'] Πώς σας φάνηκε η εξυπηρέτηση;',
+            subject: '['.$this->ticket->reference.'] '.__('mail.ticket.feedback.title'),
         );
     }
 

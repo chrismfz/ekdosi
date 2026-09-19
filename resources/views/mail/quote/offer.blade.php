@@ -1,24 +1,28 @@
 @component('mail::message')
-# Προσφορά {{ $quote->code }}
+# {{ __('mail.quote.heading', ['code' => $quote->code]) }}
 
-Αξιότιμε/η πελάτη,
+{{ __('mail.quote.greeting') }}
 
-Σας αποστέλλουμε συνημμένα την προσφορά μας{{ $quote->subject ? ' για: '.$quote->subject : '' }}.
-
-@if ($quote->valid_until)
-**Ισχύει έως:** {{ $quote->valid_until->format('d/m/Y') }}
+@if($quote->subject)
+{{ __('mail.quote.intro_with', ['subject' => $quote->subject]) }}
+@else
+{{ __('mail.quote.intro') }}
 @endif
 
-**Συνολική αξία:** {{ number_format((float) $quote->gross_total, 2, ',', '.') }} €
+@if ($quote->valid_until)
+**{{ __('mail.quote.valid_until') }}** {{ $quote->valid_until->format('d/m/Y') }}
+@endif
+
+**{{ __('mail.quote.total') }}** {{ number_format((float) $quote->gross_total, 2, ',', '.') }} €
 
 @if ($quote->customer_notes)
 {{ $quote->customer_notes }}
 @endif
 
-Παραμένουμε στη διάθεσή σας για οποιαδήποτε διευκρίνιση.
+{{ __('mail.quote.closing') }}
 
-Με εκτίμηση,
+{{ __('mail.common.regards') }}
 {{ $tenant->name }}
 
-<small>Η παρούσα προσφορά δεν αποτελεί φορολογικό παραστατικό.</small>
+<small>{{ __('mail.quote.not_tax_doc') }}</small>
 @endcomponent
