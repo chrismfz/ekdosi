@@ -14,6 +14,13 @@ namespace App\Support\Payments;
  * provider's stated figures, cross-checked against the intent before settling
  * (T3 amount-tampering). `providerTxnId` is the acquirer's transaction id, kept
  * for the money trail + dedup.
+ *
+ * `merchantId` is the terminal the provider says the message belongs to (the vPOS
+ * `mid`). The controller cross-checks it against the connection's configured
+ * merchant id: the digest is a concatenation of the returned values with NO
+ * delimiters, so an unverified `mid` leaves the `mid|orderid` boundary free to be
+ * re-partitioned by a replayer while the digest still matches (see
+ * EurobankReturnController::matchesIntent).
  */
 final readonly class PaymentOutcome
 {
@@ -35,6 +42,7 @@ final readonly class PaymentOutcome
         public ?string $currency = null,
         public ?string $providerTxnId = null,
         public ?string $message = null,
+        public ?string $merchantId = null,
     ) {}
 
     /** A verified, captured payment — the only state that writes money. */

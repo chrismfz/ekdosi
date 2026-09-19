@@ -950,6 +950,84 @@ data model + phase gates: **`PLAN.md`**.
   πάντα array). Στον γκρινιάρη-mirror το καταπίνει το best-effort `\Throwable` catch· στο create-seed
   (`WhmcsCustomerCreator`) όχι. Fix = ένας κοινός guard `is_array($customfields)` στην κορυφή του reader.
 
+### Security audit εξωτερικής επιφάνειας — surviving P2s (2026-09-19)
+Audit της **εξωτερικής** επιφάνειας (τι μπορεί κάποιος χωρίς πρόσβαση, ή ως πελάτης στο `/user/`): code
+review + live probing στο devbox. Τα **δύο P1 διορθώθηκαν** (βλ. CHANGELOG «Security» 2026-09-19): vPOS
+digest-boundary (`mid` καρφωμένο + dedup ανά acquirer transaction) και unthrottled OAuth DCR. Το authz
+μοντέλο του portal επαληθεύτηκε **live** με δύο πραγματικά logins σε διαφορετικούς πελάτες: κάθε
+cross-customer πρόσβαση (PDF / pay / statement / tickets) → flat 404, anonymous → redirect στο login.
+Επιβίωσαν, **απορρίφθηκαν συνειδητά από τον operator ως «security through obscurity»** — δεν αλλάζουν το
+μοντέλο απειλής, μόνο τον θόρυβο:
+- **`X-Powered-By: PHP/8.4.21` version disclosure (P2, declined).** Ο nginx/FPM διαφημίζει τη minor έκδοση
+  PHP. Δεν δίνει πρόσβαση — μόνο στοχευμένο fingerprinting όταν βγει CVE. Fix αν αλλάξει η γνώμη:
+  `expose_php=Off` στο php.ini. Σχετικό: διπλά security headers (τα στέλνει και ο nginx και το
+  `SecurityHeaders` middleware) — καθαρά καλλωπιστικό.
+- **Κανένα CSP (P2, declined — ήδη τεκμηριωμένη απόφαση στο `SecurityHeaders`).** Το panel είναι δύσκολο
+  (Filament/Livewire/Alpine inline + `data:` QR), αλλά ο **portal** (`/user/*`) είναι σκέτο Tailwind/Vite
+  χωρίς Livewire — εκεί ένα CSP είναι εφικτό και θα ανέβαζε τον πήχη σε τυχόν μελλοντικό XSS. Σήμερα δεν
+  υπάρχει XSS: μηδέν `{!! !!}` σε customer-facing views (επαληθεύτηκε).
+
+**Surviving P2 από το adversarial review του ίδιου fix (κανένα P0/P1· 5/7 διορθώθηκαν):**
+- **⚠ `EurobankGateway::RETURN_FIELD_ORDER` ΔΕΝ έχει επαληθευτεί σε πραγματικό return (P1 πριν το live).**
+  Η canonical λίστα πεδίων προέκυψε από τα request fields + τη documented μορφή απάντησης· **καμία**
+  πραγματική απάντηση παραγωγής δεν ελέγχθηκε. Αν η τράπεζα στέλνει πεδίο εκτός λίστας (`authCode`,
+  `eci`/`xid`, echoed `lang`) ή σε άλλη σειρά, **κάθε** είσπραξη απορρίπτεται (fail-closed): ο πελάτης
+  χρεώνεται, το ekdosi δεν καταγράφει. Είναι θορυβώδες (log `eurobank.return.digest_mismatch` με το
+  posted key order + «Log πύλης» + καμπάνα στους operators), αλλά **πρέπει να επιβεβαιωθεί με ΜΙΑ
+  sandbox συναλλαγή πριν πάει live**.
+  **Πώς:** κάθε return γράφει πλέον `eurobank.return.fields` με την ακριβή σειρά κλειδιών (ονόματα
+  μόνο, ποτέ τιμές) — επιτυχία ή αποτυχία. Κάνε **μία** sandbox χρέωση και:
+  `grep eurobank.return.fields storage/logs/laravel.log | tail -1` → σύγκρινε με `RETURN_FIELD_ORDER`.
+  Αν εμφανιστεί `eurobank.return.unknown_fields`, το log ονομάζει ακριβώς το πεδίο που λείπει.
+  **Ιστορικό:** τα δύο πειράματα της 2026-09-06 (`payment_intents` #1/#2, co=4) ΔΕΝ είναι ανακτήσιμα —
+  το «Log πύλης» δεν υπήρχε ακόμα, το `laravel.log` έχει rotate-αριστεί και τα nginx logs ξεκινούν
+  2026-09-10. Ό,τι επιβιώνει: το return επαληθεύτηκε (`settled_by=webhook:eurobank`) και έφερε
+  transaction id `320255868967` (12ψήφιος — μορφή `txId` της Cardlink).
+- **Δύο ακόμη pins χρειάζονται την ΙΔΙΑ sandbox επιβεβαίωση (P1 πριν το live).** Μαζί με το
+  `RETURN_FIELD_ORDER` επιβεβαίωσε στην ίδια συναλλαγή ότι: (α) το return **echo-άρει `currency`** —
+  έγινε υποχρεωτικό (πριν ήταν skip-if-null), άρα αν λείπει, κάθε είσπραξη πέφτει σε
+  `currency_mismatch`· (β) ο acquirer στέλνει **`txId`** και όχι μόνο `paymentRef` — το `paymentRef`
+  βγήκε από το `providerTxnId()` (δεν έχει τεκμηριωμένη μοναδικότητα ανά συναλλαγή, θα απέρριπτε
+  νόμιμη δεύτερη πληρωμή σε collision). Αν ο πραγματικός txn id ερχόταν μέσω `paymentRef`, το dedup
+  μένει μόνιμα αδρανές και η καμπάνα `settled_without_transaction_id` χτυπά σε **κάθε** πληρωμή. Το
+  μόνο σωζόμενο στοιχείο (`320255868967`, 12ψήφιος) μοιάζει με `txId` αλλά δεν είναι αποδεικτικό.
+- **Το per-company cooldown της καμπάνας μπορεί να «καεί» από τρίτον (P3).** Το alert χτυπά όταν
+  αποτυγχάνει το digest, άρα δεν χρειάζεται μυστικό: ένα POST με `status=CAPTURED&digest=x` πιάνει το
+  ωριαίο κλειδί. Συνέπεια: γνήσιο drift μέσα σε εκείνο το παράθυρο καθυστερεί έως 1 ώρα. Αποδεκτό —
+  το να χτυπά η καμπάνα σε επίθεση είναι κι αυτό σήμα· η διαδρομή χρημάτων δεν επηρεάζεται.
+- **Το dedup δεν είναι race-safe (P2, τεκμηριωμένο).** Το `lockForUpdate()` κλειδώνει το **intent** row,
+  οπότε δύο returns προς **διαφορετικά** intents δεν σειριοποιούνται και το `transactionAlreadySettled()`
+  είναι σκέτο SELECT (REPEATABLE READ → δεν βλέπει το uncommitted Payment του άλλου). Σταματά sequential
+  replay, όχι race. Αποδεκτό γιατί είναι defence-in-depth — ο κύριος φραγμός είναι η canonical
+  επαλήθευση digest. Σωστό κλείσιμο: uniqueness constraint στα gateway rows (generated column +
+  unique index, ή advisory lock στο txn id).
+- **CAPTURED χωρίς transaction id → settle-and-flag (by design).** Το dedup μένει αδρανές σε αυτά, αλλά
+  η άρνηση θα άφηνε πραγματικό χρήμα ακαταχώριστο (πιθανό σε IRIS/alternative rails). Καταχωρείται, το
+  settled event παίρνει `reason=settled_without_transaction_id` (φιλτράρεται στο «Log πύλης») και χτυπά
+  καμπάνα μία φορά/ώρα.
+- **Η «ουρά» του return μένει unpinned (P3, τεκμηριωμένο).** Τα `paymentTotal`/`message`/`riskScore`/
+  `payMethod`/`txId` δεν έχουν άγκυρα, άρα ένα re-partition θα μπορούσε θεωρητικά να μετακινήσει το
+  σύνορο του `txId` και να παρουσιάσει άλλο id — παρακάμπτοντας το dedup. **Δεν είναι exploitable**:
+  χωρίς δεύτερο έγκυρο `orderid` (κλειδωμένο από canonical rebuild + mid/status/currency pins) δεν
+  υπάρχει δεύτερο intent να στοχεύσει. Μην στηριχθείς στο dedup σαν να στέκει μόνο του.
+- **Το `throttle:oauth` κλειδώνει στο `$request->ip()` (P2).** Όσο ο nginx σερβίρει απευθείας είναι σωστό.
+  Πίσω από edge/CDN **χωρίς** `TRUSTED_PROXIES`, γίνεται app-wide cap: ένας πολυάσχολος connector μπορεί
+  να κλειδώσει operators έξω από το consent screen. Δένει με το `TRUSTED_PROXIES` item παρακάτω — λύνονται
+  μαζί με μία ρύθμιση.
+
+**ΔΕΝ declined — παραμένει ανοιχτό, χαμηλή προτεραιότητα:**
+- **Host header δεν είναι pinned (P2).** Δεν υπάρχει `trustHosts()` και ο nginx έχει ένα μόνο vhost (άρα
+  implicit default_server) → κάθε `Host` φτάνει στην app. **Σήμερα ακίνδυνο**: το
+  `PortalResetPasswordNotification` είναι `ShouldQueue` με `QUEUE_CONNECTION=database`, οπότε το `route()`
+  τρέχει στον worker και χτίζει από `APP_URL`. Η ασφάλεια όμως είναι **συμπτωματική** — ένα
+  `QUEUE_CONNECTION=sync` (συνηθισμένο σε debugging) κάνει το `/user/forgot-password` reset-link poisoning
+  → portal account takeover. Fix: `->trustHosts(at: [...portal hosts])` στο `bootstrap/app.php` +
+  nginx `default_server { return 444; }`.
+- **`TRUSTED_PROXIES` κενό (P3).** Σωστό όσο ο nginx σερβίρει απευθείας. Αν μπει CFM/CDN μπροστά, **όλα**
+  τα throttles (portal login, webhooks, oauth) θα κλειδώνουν στο edge IP αντί στον πελάτη.
+- **Webhook HMAC χωρίς timestamp/nonce (P3).** Replay δυνατό σε όποιον υποκλέψει υπογραφή. Τα endpoints
+  είναι read-only ή idempotent staging, οπότε το impact είναι χαμηλό.
+
 ### «Άντληση από ΑΑΔΕ» diff-aware picker — surviving P2/P3s (από το review, 2026-09-18)
 Το κουμπί «Άντληση» στη φόρμα πελάτη έγινε diff-aware (γεμίζει κενά + picker ανά πεδίο σε σύγκρουση,
 `AadeFormFill::splitFillsAndConflicts` + trait `ResolvesAadeFormConflicts`). Πέρασε **χωρίς P0/P1** (κανένα

@@ -22,6 +22,11 @@ class PaymentGatewayEventsTable
         'amount_mismatch' => 'Αναντιστοιχία ποσού',
         'currency_mismatch' => 'Αναντιστοιχία νομίσματος',
         'not_captured' => 'Δεν ολοκληρώθηκε (μη CAPTURED)',
+        'mid_mismatch' => 'Αναντιστοιχία κωδικού εμπόρου (mid)',
+        'duplicate_transaction' => 'Διπλή συναλλαγή (ήδη εξοφλημένη αλλού)',
+        'settled_without_transaction_id' => 'Καταχωρίστηκε χωρίς κωδικό συναλλαγής',
+        'already_settled' => 'Είχε ήδη εξοφληθεί',
+        'settle_on_cancelled_intent' => 'Χρέωση σε ΑΚΥΡΩΜΕΝΗ παραγγελία — δεν καταχωρίστηκε',
     ];
 
     public static function configure(Table $table): Table

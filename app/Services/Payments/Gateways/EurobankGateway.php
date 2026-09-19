@@ -19,6 +19,7 @@ use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 /**
  * Eurobank / Cardlink-Modirum vPOS (the tenant's primary provider) — card +
@@ -48,6 +49,52 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
 
     /** vPOS return fields that are NOT part of the digest (mirrors the WHMCS module). */
     private const DIGEST_EXCLUDED = ['_charset_', 'digest', 'submitButton'];
+
+    /**
+     * The CANONICAL vPOS return field order — the backbone of return verification.
+     *
+     * The digest signs a delimiter-less concatenation of the field VALUES, so the
+     * field boundaries are NOT signed: only the resulting byte string is. Hashing
+     * "whatever arrived, in whatever order" therefore accepts any body that
+     * re-partitions the same bytes — including inserting a filler field between
+     * `mid` and `orderid` to re-aim a genuine, correctly-signed capture at a
+     * different PaymentIntent (one payment, two settlements).
+     *
+     * So we do NOT hash the received order. We reject unknown fields outright and
+     * rebuild the sign-string in THIS fixed order, keeping only the keys actually
+     * present.
+     *
+     * Note what this does and does NOT do. Reordering is *normalised away* — a
+     * shuffled body rebuilds to the same string and still verifies (by design; the
+     * acquirer's transmission order is not a security property). What closes the
+     * re-partition attack is that the attacker can no longer choose where a byte
+     * lands: every value is re-anchored to a FIXED position, unknown fields (the
+     * classic filler) are refused, and the surrounding slots are pinned — `mid` to
+     * the configured terminal, `status` to exactly CAPTURED, `currency` required.
+     * `orderid` therefore sits between two fixed anchors and can neither absorb nor
+     * donate bytes; `orderAmount` is likewise boxed in between `status` and
+     * `currency`.
+     *
+     * ⚠ UNVALIDATED AGAINST A LIVE RETURN. This list is derived from the vPOS
+     * request fields + the documented response shape; no captured production return
+     * has been checked against it. If the acquirer posts a field we don't list (an
+     * `authCode`, an `eci`/`xid`, an echoed `lang`) or omits one, verification fails
+     * and EVERY capture is refused — the bank charges the customer and ekdosi
+     * records nothing.
+     *
+     * It is FAIL-CLOSED and LOUD on purpose: a mismatch logs the posted key order
+     * (`eurobank.return.digest_mismatch` / `eurobank.return.unknown_fields`), writes
+     * a «Log πύλης» row, and rings the operators' bell (see
+     * EurobankReturnController::reject()). Confirm this list against ONE real
+     * sandbox capture before going live — the log line hands you the exact order.
+     */
+    private const RETURN_FIELD_ORDER = [
+        'version', 'mid', 'orderid', 'status', 'orderAmount', 'currency',
+        'paymentTotal', 'message', 'riskScore', 'payMethod', 'txId', 'paymentRef',
+        // Probed by providerTxnId(); allowlisted so a return using this name is
+        // tolerated instead of refused as an unknown field.
+        'transactionId',
+    ];
 
     public function key(): string
     {
@@ -136,7 +183,10 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
         // hosted-page encoding ambiguity (the human ΠΛ-reference lives on our side).
         $fields = [
             'version' => '2',
-            'mid' => (string) ($config['merchant_id'] ?? ''),
+            // Trimmed here as well as at the return comparison: an operator-typed
+            // stray space would otherwise go out on the wire, come back intact, and
+            // lose against the trimmed configured value on every capture.
+            'mid' => trim((string) ($config['merchant_id'] ?? '')),
             'lang' => (string) ($config['lang'] ?? 'el'),
             'deviceCategory' => '0',
             'orderid' => (string) $intent->id,
@@ -168,28 +218,59 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
             return PaymentOutcome::unverified('no shared secret configured');
         }
 
-        // Parse the RAW body ourselves to preserve field ORDER — the digest is a
-        // positional concatenation, and $request->all() gives no order guarantee.
+        // Parse the RAW body ourselves — $request->all() gives no order guarantee and
+        // we need to see exactly which keys were posted.
         $fields = [];
         parse_str($request->getContent(), $fields);
+
+        // Record the acquirer's actual field NAMES + order on EVERY return, success
+        // or failure. RETURN_FIELD_ORDER is derived from documentation, not from a
+        // captured production return, and this is the line that settles the question
+        // from the first real transaction instead of only when something breaks.
+        // Keys only — never the values, which carry the customer's order data.
+        Log::info('eurobank.return.fields', [
+            'posted_order' => array_keys(array_diff_key($fields, array_flip(self::DIGEST_EXCLUDED))),
+        ]);
 
         $sent = (string) ($fields['digest'] ?? '');
         if ($sent === '') {
             return PaymentOutcome::unverified('no digest on the return');
         }
 
-        // Concatenate every returned value in received order EXCEPT the excluded
-        // keys, append the shared secret, and compare in constant time (T1).
+        // Any key we don't know is refused before hashing: an unrecognised field is
+        // how a replayer smuggles the bytes that let the same digest describe a
+        // different orderid. (Refusing is also the honest response to genuine
+        // protocol drift — see RETURN_FIELD_ORDER.)
+        $posted = array_diff_key($fields, array_flip(self::DIGEST_EXCLUDED));
+        $unknown = array_diff(array_keys($posted), self::RETURN_FIELD_ORDER);
+        if ($unknown !== []) {
+            Log::warning('eurobank.return.unknown_fields', [
+                'unknown' => array_values($unknown),
+                'posted_order' => array_keys($posted),
+            ]);
+
+            return PaymentOutcome::unverified('unexpected field(s) on the return: '.implode(', ', $unknown));
+        }
+
+        // Rebuild the sign-string in CANONICAL order (not the posted order), keeping
+        // only the keys present, then compare in constant time (T1).
         $signString = '';
-        foreach ($fields as $fieldName => $value) {
-            if (in_array($fieldName, self::DIGEST_EXCLUDED, true)) {
+        foreach (self::RETURN_FIELD_ORDER as $fieldName) {
+            if (! array_key_exists($fieldName, $posted)) {
                 continue;
             }
+            $value = $posted[$fieldName];
             $signString .= is_scalar($value) ? (string) $value : '';
         }
         $computed = $this->returnDigest($signString, $secret);
 
         $verified = hash_equals($computed, $sent);
+
+        if (! $verified) {
+            // Log the posted key order so a genuine acquirer change is diagnosable
+            // (the values are NOT logged — they carry the customer's order data).
+            Log::warning('eurobank.return.digest_mismatch', ['posted_order' => array_keys($posted)]);
+        }
 
         return new PaymentOutcome(
             verified: $verified,
@@ -199,6 +280,11 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
             currency: isset($fields['currency']) ? (string) $fields['currency'] : null,
             providerTxnId: $this->providerTxnId($fields),
             message: isset($fields['message']) ? (string) $fields['message'] : null,
+            // Reported so the controller can pin it to the connection's configured
+            // terminal. The digest concatenates values with NO delimiters, so an
+            // unchecked `mid` lets a replayer shift the mid|orderid boundary and
+            // re-aim a genuine, correctly-signed return at another intent.
+            merchantId: isset($fields['mid']) ? (string) $fields['mid'] : null,
         );
     }
 
@@ -232,9 +318,19 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
     }
 
     /** The acquirer's transaction id, for the money trail (several field names seen). */
+    /**
+     * The acquirer's TRANSACTION id — the value the settle dedup keys on, so it must
+     * be a per-transaction identifier and nothing else.
+     *
+     * `paymentRef` is deliberately NOT consulted: it is a payment/approval reference
+     * with no documented per-transaction uniqueness, and feeding it to the dedup
+     * would let it collide with an earlier genuine payment and REFUSE a second,
+     * perfectly legitimate capture (money taken, nothing recorded). It stays
+     * available for the human money trail via the raw event log.
+     */
     private function providerTxnId(array $fields): ?string
     {
-        foreach (['txId', 'paymentRef', 'transactionId'] as $k) {
+        foreach (['txId', 'transactionId'] as $k) {
             if (filled($fields[$k] ?? null)) {
                 return (string) $fields[$k];
             }

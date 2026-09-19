@@ -18,6 +18,52 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+### Security
+- **vPOS return: canonical επαλήθευση digest — ένα payment δεν settle-άρει δύο intents.** Το digest της Cardlink υπογράφει **concatenation των τιμών χωρίς delimiters**, οπότε τα
+  *σύνορα* των πεδίων ΔΕΝ είναι υπογεγραμμένα — μόνο το τελικό byte string. Πελάτης που ολοκλήρωσε μία
+  γνήσια πληρωμή μπορούσε να κάνει replay το σωστά υπογεγραμμένο return ξανα-μοιράζοντας τα ίδια bytes
+  ώστε το `orderid` να δείχνει σε **άλλο** intent — μία χρέωση €100 κατέγραφε €200 (επαληθεύτηκε live).
+  **Ρίζα:** το `handleWebhook()` έκανε hash «ό,τι ήρθε, με όποια σειρά ήρθε», άρα ο επιτιθέμενος απλώς
+  παρεμβάλλει ένα filler πεδίο ανάμεσα σε `mid` και `orderid`. **Fix:** το sign-string ξαναχτίζεται σε
+  **canonical σειρά** (`EurobankGateway::RETURN_FIELD_ORDER`) και κάθε άγνωστο πεδίο απορρίπτεται πριν το
+  hashing· έτσι ένα padded/ανακατεμένο body κανονικοποιείται σε διαφορετικό string και κόβεται. Πάνω σε
+  αυτό, τρία pins κλειδώνουν τα money πεδία ανάμεσα σε σταθερά άγκυρα: `mid` == configured terminal,
+  `status` == CAPTURED, `currency` **υποχρεωτικό** — οπότε τα `orderid`/`orderAmount` δεν μπορούν πλέον
+  να δανειστούν ή να δώσουν bytes. Τέλος, `PaymentIntentService::settle()` απορρίπτει transaction id του
+  acquirer που έχει ήδη πληρώσει **άλλο** intent (μέσα στο ίδιο locked transaction με το write), ενώ ένα
+  CAPTURED return **χωρίς** transaction id **καταχωρείται** (η τράπεζα πήρε τα χρήματα· η άρνηση θα
+  άφηνε πραγματική πληρωμή ακαταχώριστη) αλλά σημαδεύεται με `settled_without_transaction_id` στο
+  «Log πύλης» και χτυπά καμπάνα στους operators. Το `settle()` επιστρέφει πλέον `SETTLE_*` και ο controller
+  γράφει το audit row από **την απάντησή του** αντί για status που διάβασε πριν την κλήση. Οι
+  operator settles (χωρίς transaction id) δεν επηρεάζονται.
+- **Post-review σκληραγώγηση των δύο παραπάνω (adversarial review, κανένα P0/P1):** (α) το dedup
+  περιορίστηκε σε **gateway-written** rows (`payment_intent_id` not null) — το `payments.transaction_id`
+  είναι κοινό free-text πεδίο (operator φόρμες, Epsilon importer, WHMCS syncer, ΠΛ- fallback), οπότε ο
+  αρχικός έλεγχος θα μετέτρεπε έναν operator που καταχωρεί χειροκίνητα από extrait σε **μόνιμο μπλόκο**
+  της γνήσιας είσπραξης· (β) νέο index `payments(company_id, transaction_id)` — το lookup τρέχει **μέσα**
+  στο `lockForUpdate()`, χωρίς index θα σάρωνε τα payments της εταιρίας κρατώντας το row lock (ωφελεί και
+  `WhmcsPaymentSyncer` / `payments:apply-imported-credits`)· (γ) **καμπανάκι στους operators όταν
+  απορρίπτεται CAPTURED είσπραξη** (`mid_mismatch` / `duplicate_transaction`) — η τράπεζα χρέωσε και εμείς
+  δεν καταχωρήσαμε· χωρίς ειδοποίηση μια αλλαγή του acquirer θα έτρωγε σιωπηλά κάθε πληρωμή· (δ) `trim()` στο **configured**
+  `mid` και στις δύο κατευθύνσεις (outbound `redirectForm()` + inbound σύγκριση) ώστε ένα κενό από
+  operator typo να μη ρίχνει κάθε είσπραξη· το **reported** `mid` συγκρίνεται raw, γιατί είναι
+  attacker-chosen και το trim θα επέτρεπε μετακίνηση whitespace πάνω από το σύνορο· (ε) το prefix του DCR limiter καρφώθηκε σε `oauth` ώστε να
+  ταιριάζει με το hardcoded route του `laravel/mcp`· (στ) χρέωση που φτάνει σε **ακυρωμένη**
+  παραγγελία (ο operator ακύρωσε όσο ο πελάτης πλήρωνε) δεν καταγράφεται πια ως ρουτίνα «είχε ήδη
+  εξοφληθεί» — γίνεται `settle_on_cancelled_intent` με καμπάνα, γιατί η τράπεζα πήρε χρήματα και εμείς
+  δεν γράψαμε κανένα· (ζ) το σκέλος **ακύρωσης** (`cancelUrl`, που στέλνει άλλα πεδία) καταγράφεται ως
+  `not_captured` και όχι ως αποτυχία υπογραφής — αλλιώς κάθε πελάτης που πατά «Άκυρο» θα έμοιαζε με
+  απόπειρα πλαστογραφίας στο «Log πύλης»· (η) κάθε vPOS return γράφει πλέον
+  `eurobank.return.fields` με τη **σειρά κλειδιών** που έστειλε η τράπεζα (ονόματα μόνο, ποτέ τιμές),
+  ώστε η canonical λίστα να επιβεβαιώνεται από την πρώτη κιόλας πραγματική συναλλαγή αντί μόνο όταν
+  κάτι σπάσει.
+- **Throttling στα OAuth endpoints (`throttle:oauth`).** Το `POST /oauth/register` (OAuth 2.1 Dynamic
+  Client Registration, που δηλώνει το `laravel/mcp`) έτρεχε **χωρίς κανένα middleware** — unauthenticated
+  by spec, αλλά και χωρίς όριο, άρα απεριόριστα client rows από οποιονδήποτε. Παραμένει **ανοιχτό**
+  (έτσι αυτο-εγγράφεται κάθε MCP client: claude.ai connector, άλλο LLM, τοπικός agent) αλλά με σφιχτό
+  per-IP cap (10/ώρα· τα υπόλοιπα oauth routes 60/λεπτό). Η έγκριση παραμένει εκεί που ανήκει — στο
+  consent screen, που ονομάζει το client.
+
 ### Added
 - **i18n bilingual — stamp-at-issue (η προτίμηση γλώσσας του πελάτη φτάνει στο παγωμένο PDF).**
   Στα σημεία έκδοσης, «παγώνει» η **ρητή** προτίμηση γλώσσας του πελάτη πάνω στο έγγραφο

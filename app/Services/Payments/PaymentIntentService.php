@@ -5,6 +5,7 @@ namespace App\Services\Payments;
 use App\Models\Customer;
 use App\Models\CustomerUser;
 use App\Models\Invoice;
+use App\Models\Payment;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
@@ -23,6 +24,25 @@ use RuntimeException;
  */
 class PaymentIntentService
 {
+    /** settle() wrote the money on this call. */
+    public const SETTLE_OK = 'settled';
+
+    /** The intent was already settled — a benign re-delivery of the same return. */
+    public const SETTLE_NOT_SETTLEABLE = 'not_settleable';
+
+    /**
+     * The intent was CANCELLED by a human before the capture landed. Distinct from
+     * an already-settled replay: here the bank took the customer's money and we
+     * wrote none, so the caller must raise it rather than log it as routine.
+     */
+    public const SETTLE_CANCELLED = 'cancelled';
+
+    /**
+     * REFUSED: this provider transaction has already paid a DIFFERENT intent of
+     * this company. One acquirer transaction may never settle two intents.
+     */
+    public const SETTLE_DUPLICATE_TRANSACTION = 'duplicate_transaction';
+
     public function __construct(
         private PaymentGatewayRegistry $registry,
         private PaymentAllocator $allocator,
@@ -107,6 +127,31 @@ class PaymentIntentService
      * transition, so a double confirmation (or a replayed webhook, B1) can never
      * create two payments. `$actualAmount` lets the operator record what was truly
      * received (a manual deposit may differ from the intended amount).
+     *
+     * `$transactionId` (the ACQUIRER's transaction id, gateway paths only) is also
+     * the dedup key: one provider transaction may settle at most ONE intent. The
+     * vPOS digest signs a delimiter-less concatenation of the returned values, so a
+     * genuine signed return can in principle be re-partitioned to name a different
+     * orderid; this guard refuses the second settlement when the SAME transaction id
+     * comes back.
+     *
+     * It is defence-in-depth, NOT an independent second barrier: the unpinned tail
+     * of the return (`paymentTotal`, `message`, `riskScore`, `payMethod`, `txId`)
+     * means a re-partition could in principle also shift the txId boundary and
+     * present a different id. Nothing is exploitable today — the canonical digest
+     * rebuild plus the mid/status/currency pins box `orderid` in, so no second valid
+     * orderid can be produced at all — but do not let a future change lean on this
+     * guard as if it stood alone. Operator settles pass null and are
+     * unaffected (they fall back to our own per-intent ΠΛ- reference).
+     *
+     * NOTE: it is therefore only live when the provider actually reports a
+     * transaction id. A CAPTURED return carrying none (no `txId`/`paymentRef`/
+     * `transactionId`) skips this check; the vPOS controller settles it anyway —
+     * refusing money the bank already took would strand a real payment — and alerts
+     * the operators instead. What keeps that safe is the caller's own verification:
+     * canonical digest reconstruction plus the mid/status/currency pins.
+     *
+     * @return self::SETTLE_* what actually happened
      */
     public function settle(
         PaymentIntent $intent,
@@ -114,8 +159,8 @@ class PaymentIntentService
         ?float $actualAmount = null,
         ?int $paymentMethodId = null,
         ?string $transactionId = null,
-    ): void {
-        DB::transaction(function () use ($intent, $settledBy, $actualAmount, $paymentMethodId, $transactionId): void {
+    ): string {
+        return DB::transaction(function () use ($intent, $settledBy, $actualAmount, $paymentMethodId, $transactionId): string {
             /** @var PaymentIntent $locked */
             $locked = PaymentIntent::query()
                 ->withoutGlobalScope(CompanyScope::class)   // context-independent (operator now, webhook in B1)
@@ -127,7 +172,28 @@ class PaymentIntentService
             // must still be recorded — money truth overrides the sweep. A human
             // CANCELLED or an already-SETTLED intent stays a no-op (idempotent).
             if (! in_array($locked->status, [PaymentIntent::STATUS_PENDING, PaymentIntent::STATUS_EXPIRED], true)) {
-                return;
+                return $locked->status === PaymentIntent::STATUS_CANCELLED
+                    ? self::SETTLE_CANCELLED
+                    : self::SETTLE_NOT_SETTLEABLE;
+            }
+
+            // One acquirer transaction = one settlement. Scoped to the company (ids
+            // are only unique per acquirer account) and to OTHER intents (a
+            // re-delivery of the same return for the same intent is the idempotent
+            // case above).
+            //
+            // LIMIT: this is a plain SELECT and the lockForUpdate() above locks the
+            // INTENT row, so two returns aimed at two DIFFERENT intents lock
+            // different rows, never serialise, and under REPEATABLE READ cannot see
+            // each other's uncommitted Payment — fired concurrently, both can pass.
+            // It stops sequential replay, not a race. That is acceptable because the
+            // dedup is defence-in-depth: the primary guard is the canonical digest
+            // reconstruction + mid/status/currency pins in EurobankGateway, which
+            // deny the attacker a second valid orderid in the first place. Closing
+            // the race properly needs a uniqueness constraint on the gateway rows
+            // (see docs/BACKLOG.md).
+            if (filled($transactionId) && $this->transactionAlreadySettled($locked, (string) $transactionId)) {
+                return self::SETTLE_DUPLICATE_TRANSACTION;
             }
 
             $customer = Customer::query()
@@ -189,7 +255,35 @@ class PaymentIntentService
                 'settled_at' => Carbon::now(),
                 'settled_by' => $settledBy,
             ])->save();
+
+            return self::SETTLE_OK;
         });
+    }
+
+    /**
+     * Has this acquirer transaction id already produced money for a DIFFERENT
+     * intent of the same company? CompanyScope is dropped (webhook/CLI context)
+     * and the company filtered explicitly.
+     *
+     * Deliberately limited to GATEWAY-written rows (`payment_intent_id` not null).
+     * `payments.transaction_id` is a shared free-text column: operator forms (the
+     * Καρτέλα / invoice payment dialogs), the Epsilon importer and the WHMCS syncer
+     * all write into it, and manual settles fall back to our own ΠΛ- reference.
+     * Matching those too would turn an operator who reconciles a stranded payment
+     * from the bank statement — typing the Cardlink txId by hand — into a permanent
+     * block on the real return that arrives later, stranding the intent at pending
+     * until the stale sweep expires it. The guard only needs to stop ONE acquirer
+     * transaction from settling TWO intents, which is exactly this narrower set.
+     */
+    private function transactionAlreadySettled(PaymentIntent $intent, string $transactionId): bool
+    {
+        return Payment::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $intent->company_id)
+            ->where('transaction_id', $transactionId)
+            ->whereNotNull('payment_intent_id')
+            ->where('payment_intent_id', '!=', $intent->getKey())
+            ->exists();
     }
 
     /** The myDATA payment-method the intent's channel is configured to stamp, or null. */
