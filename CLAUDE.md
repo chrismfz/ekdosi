@@ -114,7 +114,23 @@ cutover.
 - snake_case tables (plural), `id` PK, `timestamps`, `softDeletes` where it makes sense.
   utf8mb4 / utf8mb4_unicode_ci.
 - Money `decimal(14,2)`, qty `decimal(9,3)`, vat% `decimal(5,2)`.
-- Operator-facing UI text is Greek; code identifiers stay English.
+- Operator **panel** UI text is Greek; code identifiers stay English.
+- **Customer-facing i18n (bilingual el/en) — the rule for ANY new customer surface.** The
+  operator panel stays Greek (above), but everything a **CUSTOMER** sees is bilingual and MUST go
+  through the i18n path — **never hardcode Greek** in a customer-facing blade/email/PDF:
+  - **Portal pages** (`resources/views/portal/*`, guard `portal`) → `__('portal.*')` keys in
+    `lang/{el,en}/portal.php` (Greek values **verbatim** — existing `assertSee` tests depend on it).
+    Locale is per-request via `SetPortalLocale`: `CustomerLanguage::forPortal($user, $hostCompany)` =
+    the logged-in `customer_users.locale` → the portal host's tenant `default_language` → app default.
+  - **Emails to customers** → resolve the recipient language with `CustomerLanguage::forDocumentMail($doc)`
+    (or `forCustomer`) and `->locale()` the Mailable; strings in `lang/{el,en}/*`.
+  - **PDF / legal documents** → labels via `App\Support\Pdf\PdfLabels` (`el`/`en`/`both`); the document's
+    language is **FROZEN** (`invoices/quotes.language` → snapshotted `country`), never live customer data.
+  - **New customer surfaces** (Cart, self-registration, a new document type…): under the `/user`
+    route group they inherit `ResolvePortalHost`+`SetPortalLocale` automatically; a customer-facing
+    route **outside** that group must add those middlewares. So a future Cart / registration page /
+    new παραστατικό ships bilingual **from day one** — add its strings to `lang/`, never inline Greek.
+  Full model: `docs/BACKLOG.md #1a/#1c`, `PLAN.md §6.5`.
 - **VAT seeding = mainland only.** `MyDataLookupSeeder` seeds 24/13/6 (+ one reasoned 0%); the
   island 17/9/4 and ν.5057 rates are deliberately not seeded (all tenants mainland) — the codes
   still live in `Codes::VAT_CATEGORY_RATES`, add by hand if ever needed.

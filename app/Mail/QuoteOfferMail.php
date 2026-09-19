@@ -44,7 +44,8 @@ class QuoteOfferMail extends Mailable
             $bcc[] = new Address($bccAddr);
         }
 
-        $subject = trim(($tenant->name ?: 'Προσφορά').' — Προσφορά '.$this->quote->code
+        $label = __('mail.quote.subject_label');
+        $subject = trim(($tenant->name ?: $label).' — '.$label.' '.$this->quote->code
             .($this->quote->subject ? ' · '.$this->quote->subject : ''));
 
         return new Envelope(

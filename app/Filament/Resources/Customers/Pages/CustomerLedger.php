@@ -23,6 +23,7 @@ use App\Services\Payments\PaymentAllocator;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\CustomerWhmcsLedger;
 use App\Services\Whmcs\CustomerWhmcsLedgerResult;
+use App\Support\CustomerLanguage;
 use App\Support\InvoiceScope;
 use App\Support\Money;
 use Filament\Actions\Action;
@@ -1259,6 +1260,8 @@ class CustomerLedger extends Page implements HasTable
                 bodyMessage: $message,
                 subjectLine: $subject ?: null,
             );
+            // i18n: the statement email follows the customer's language.
+            $mail->locale(CustomerLanguage::forCustomerMail($this->record));
 
             app(TenantMailerFactory::class)->for($tenant)->to($recipients)->send($mail);
 

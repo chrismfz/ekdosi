@@ -14,10 +14,10 @@
 
 @php
     $contact = [];
-    if ($tenant?->phone) { $contact[] = 'Τηλέφωνο: '.$tenant->phone; }
-    if ($tenant?->email) { $contact[] = 'Email: '.$tenant->email; }
-    if ($tenant?->afm)   { $contact[] = 'ΑΦΜ: '.$tenant->afm; }
-    if ($tenant?->gemi)  { $contact[] = 'ΓΕΜΗ: '.$tenant->gemi; }
+    if ($tenant?->phone) { $contact[] = __('mail.invoice.contact.phone').': '.$tenant->phone; }
+    if ($tenant?->email) { $contact[] = __('mail.invoice.contact.email').': '.$tenant->email; }
+    if ($tenant?->afm)   { $contact[] = __('mail.invoice.contact.afm').': '.$tenant->afm; }
+    if ($tenant?->gemi)  { $contact[] = __('mail.invoice.contact.gemi').': '.$tenant->gemi; }
 @endphp
 {!! implode(' · ', $contact) !!}
 @endif

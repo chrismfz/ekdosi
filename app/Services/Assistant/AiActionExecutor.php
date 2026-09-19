@@ -9,6 +9,7 @@ use App\Models\User;
 use App\Services\CustomerLedger\CustomerStatementPdfRenderer;
 use App\Services\Payments\PaymentAllocator;
 use App\Services\TenantMailerFactory;
+use App\Support\CustomerLanguage;
 use App\Support\Tenancy\CompanyContext;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -99,6 +100,7 @@ class AiActionExecutor
         try {
             $bytes = app(CustomerStatementPdfRenderer::class)->render($customer);
             $mail = new CustomerStatementMail(customer: $customer, pdfBytes: $bytes);
+            $mail->locale(CustomerLanguage::forCustomerMail($customer));
             app(TenantMailerFactory::class)->for($action->company)->to($recipients)->send($mail);
         } catch (\Throwable $e) {
             Log::error('AI statement send failed', ['action_id' => $action->id, 'error' => $e->getMessage()]);

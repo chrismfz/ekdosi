@@ -60,10 +60,51 @@ class MailTemplateRenderer
 {tenant_name}
 TXT;
 
+    /** English default body (i18n) — twin of DEFAULT_BODY_TEMPLATE; placeholders identical. */
+    public const DEFAULT_BODY_TEMPLATE_EN = <<<'TXT'
+Dear customer,
+
+Please find attached the document {invoice_type} {invoice_code} issued by our company {tenant_name}.
+
+Issue date: {issued_at}
+Total amount: {total}
+
+{mark_section}
+
+We remain at your disposal for any clarification.
+
+Kind regards,
+{tenant_name}
+TXT;
+
+    /**
+     * The default body template in the CURRENT locale (i18n). Used only when the
+     * tenant has NOT customised its own template — a custom template is stored as a
+     * single string and is emitted as-is (the tenant's language, their choice).
+     */
+    private function defaultBody(): string
+    {
+        return app()->getLocale() === 'en'
+            ? self::DEFAULT_BODY_TEMPLATE_EN
+            : self::DEFAULT_BODY_TEMPLATE;
+    }
+
+    /**
+     * Whether our COMPOSED placeholders (the MARK section, currency formatting, the
+     * invoice-type fallback) should be rendered in English. True ONLY when the
+     * SYSTEM default template is used AND the recipient locale is en — a tenant's
+     * CUSTOM template is emitted as-is in the tenant's own language, so its composed
+     * values stay Greek (the default), never a mixed-language body.
+     */
+    private function localizeComposed(?string $template): bool
+    {
+        return trim((string) $template) === '' && app()->getLocale() === 'en';
+    }
+
     public function renderSubject(Invoice $invoice, ?string $template): string
     {
         $tpl = trim((string) $template) !== '' ? $template : self::DEFAULT_SUBJECT_TEMPLATE;
-        $rendered = $this->interpolate($tpl, $this->vars($invoice));
+        $rendered = $this->interpolate($tpl, $this->vars($invoice, $this->localizeComposed($template)));
         // Subjects are single-line; collapse any newline an operator
         // accidentally pasted in.
         return trim(preg_replace('/\s+/', ' ', $rendered) ?? '');
@@ -71,11 +112,11 @@ TXT;
 
     public function renderBody(Invoice $invoice, ?string $template): string
     {
-        $tpl = trim((string) $template) !== '' ? $template : self::DEFAULT_BODY_TEMPLATE;
+        $tpl = trim((string) $template) !== '' ? $template : $this->defaultBody();
         // DOC-8: escape markdown in the interpolated values — the body is
         // rendered through CommonMark, so an un-escaped «[x](url)» in e.g. the
         // customer name would become a live link.
-        return $this->interpolate($tpl, $this->vars($invoice), escapeMarkdown: true);
+        return $this->interpolate($tpl, $this->vars($invoice, $this->localizeComposed($template)), escapeMarkdown: true);
     }
 
     /**
@@ -87,8 +128,8 @@ TXT;
      */
     public function renderBodyPlain(Invoice $invoice, ?string $template): string
     {
-        $tpl = trim((string) $template) !== '' ? $template : self::DEFAULT_BODY_TEMPLATE;
-        return $this->interpolate($tpl, $this->vars($invoice));
+        $tpl = trim((string) $template) !== '' ? $template : $this->defaultBody();
+        return $this->interpolate($tpl, $this->vars($invoice, $this->localizeComposed($template)));
     }
 
     /**
@@ -160,9 +201,12 @@ TXT;
     }
 
     /**
+     * @param  bool  $localize  render COMPOSED placeholders (mark_section, currency,
+     *                          the invoice-type fallback) in English — see
+     *                          {@see localizeComposed()}.
      * @return array<string, string>
      */
-    private function vars(Invoice $invoice): array
+    private function vars(Invoice $invoice, bool $localize = false): array
     {
         $tenant = $invoice->company;
         $mark = (string) ($invoice->mydata_mark ?? '');
@@ -172,35 +216,43 @@ TXT;
         // can include "{mark_section}" anywhere in their template and
         // get either the full myDATA confirmation paragraph OR
         // nothing (for drafts) — without having to wire conditional
-        // logic into the template language.
+        // logic into the template language. Its language follows the body
+        // (English only for the localized default template).
         $markSection = '';
         if ($mark !== '') {
-            $markSection = "Το παραστατικό έχει υποβληθεί στη myDATA της ΑΑΔΕ ".
-                "και πιστοποιήθηκε με τον μοναδικό αριθμό MARK: {$mark}.";
+            $markSection = $localize
+                ? "The document has been submitted to AADE myDATA and certified with the unique MARK number: {$mark}."
+                : "Το παραστατικό έχει υποβληθεί στη myDATA της ΑΑΔΕ και πιστοποιήθηκε με τον μοναδικό αριθμό MARK: {$mark}.";
             if ($url !== '') {
-                $markSection .= "\nΕπαλήθευση: {$url}";
+                $markSection .= ($localize ? "\nVerify: " : "\nΕπαλήθευση: ").$url;
             }
         }
 
         return [
             'tenant_name'   => (string) ($tenant->name ?? ''),
             'invoice_code'  => (string) ($invoice->invcode ?? ''),
-            'invoice_type'  => (string) ($invoice->invoiceType?->name ?? 'Παραστατικό'),
+            'invoice_type'  => (string) ($invoice->invoiceType?->name ?? ($localize ? 'Document' : 'Παραστατικό')),
             'issued_at'     => $invoice->issued_at?->format('d/m/Y H:i') ?? '',
             'customer_name' => (string) ($invoice->company_name ?? ''),
-            'total'         => $this->money($invoice->payableTotal()),
-            'net_total'     => $this->money($invoice->net_total),
+            'total'         => $this->money($invoice->payableTotal(), $localize),
+            'net_total'     => $this->money($invoice->net_total, $localize),
             'mark'          => $mark,
             'verify_url'    => $url,
             'mark_section'  => $markSection,
         ];
     }
 
-    private function money(mixed $amount): string
+    /**
+     * Format an amount as currency. Greek convention by default (1.234,56 €);
+     * English convention (1,234.56 €) when the body is the localized default.
+     */
+    private function money(mixed $amount, bool $en = false): string
     {
         if ($amount === null || $amount === '') {
             return '';
         }
-        return number_format((float) $amount, 2, ',', '.').' €';
+        return $en
+            ? number_format((float) $amount, 2, '.', ',').' €'
+            : number_format((float) $amount, 2, ',', '.').' €';
     }
 }

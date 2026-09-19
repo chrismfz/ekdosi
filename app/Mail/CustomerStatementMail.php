@@ -48,7 +48,7 @@ class CustomerStatementMail extends Mailable
         }
 
         $subject = $this->subjectLine
-            ?: (($tenant?->name ? $tenant->name.' — ' : '').'Καρτέλα πελάτη: '.$this->customer->name);
+            ?: (($tenant?->name ? $tenant->name.' — ' : '').__('mail.statement.heading').': '.$this->customer->name);
 
         return new Envelope(
             from: new Address($fromAddr, $fromName),

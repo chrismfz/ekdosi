@@ -92,6 +92,18 @@ final class CustomerLanguage
     }
 
     /**
+     * Single language for an EMAIL addressed to a customer (statement, ticket) —
+     * {@see forCustomer()} collapsed to one language (both→en), since an email body
+     * is single-language. Twin of {@see forDocumentMail()} for customer-level mail.
+     */
+    public static function forCustomerMail(Customer $customer): string
+    {
+        $language = self::forCustomer($customer);
+
+        return $language === 'both' ? 'en' : $language;
+    }
+
+    /**
      * Communication language for a customer: their explicit override, else derived
      * from their (live) country, else the tenant default, else Greek.
      */

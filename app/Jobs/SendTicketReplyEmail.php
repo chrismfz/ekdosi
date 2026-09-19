@@ -7,6 +7,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Models\TicketMessage;
 use App\Services\Support\Inbound\InboundTicketRouter;
 use App\Services\TenantMailerFactory;
+use App\Support\CustomerLanguage;
 use App\Support\TicketAttachments;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -135,7 +136,12 @@ class SendTicketReplyEmail implements ShouldQueue
             ]);
         }
 
-        $mailerFactory->for($company)->to($recipient)->send(new TicketReplyMail(
+        // i18n: the reply follows the customer's language (else the tenant default).
+        $locale = $ticket->customer
+            ? CustomerLanguage::forCustomerMail($ticket->customer)
+            : CustomerLanguage::forHost($company);
+
+        $mailerFactory->for($company)->to($recipient)->send((new TicketReplyMail(
             ticket: $ticket,
             body: (string) $message->body,
             fromAddress: $fromAddress,
@@ -146,6 +152,6 @@ class SendTicketReplyEmail implements ShouldQueue
             ccAddresses: $cc,
             bccAddresses: $bcc,
             attachmentFiles: $attachmentFiles,
-        ));
+        ))->locale($locale));
     }
 }

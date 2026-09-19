@@ -1,16 +1,16 @@
 @component('mail::message')
-# Καρτέλα πελάτη
+# {{ __('mail.statement.heading') }}
 
-Αγαπητέ/ή {{ $customer->name }},
+{{ __('mail.statement.greeting', ['name' => $customer->name]) }}
 
 @if ($bodyMessage)
 {{ $bodyMessage }}
 @else
-Επισυνάπτεται η καρτέλα κινήσεων του λογαριασμού σας σε μορφή PDF.
+{{ __('mail.statement.default_body') }}
 @endif
 
 @if ($tenant)
-Με εκτίμηση,
+{{ __('mail.common.regards') }}
 {{ $tenant->name }}
 @endif
 @endcomponent

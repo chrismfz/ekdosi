@@ -1,9 +1,9 @@
-Πώς σας φάνηκε η εξυπηρέτηση;
+{{ __('mail.ticket.feedback.title') }}
 
-Το αίτημά σας {{ $ticket->reference }} — «{{ $ticket->subject }}» — έκλεισε.
-Θα εκτιμούσαμε πολύ μια σύντομη αξιολόγηση:
+{{ __('mail.ticket.feedback.closed', ['reference' => $ticket->reference, 'subject' => $ticket->subject]) }}
+{{ __('mail.ticket.feedback.ask_text') }}
 
 {{ $url }}
 
-Σας ευχαριστούμε,
+{{ __('mail.ticket.feedback.thanks') }}
 {{ config('app.name') }}

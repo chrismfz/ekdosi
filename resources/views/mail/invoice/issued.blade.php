@@ -15,10 +15,10 @@
 
 @if($tenant?->phone || $tenant?->email || $tenant?->afm || $tenant?->gemi)
 @component('mail::subcopy')
-@if($tenant?->phone) Τηλέφωνο: {{ $tenant->phone }} @endif
-@if($tenant?->email) · Email: {{ $tenant->email }} @endif
-@if($tenant?->afm) · ΑΦΜ: {{ $tenant->afm }} @endif
-@if($tenant?->gemi) · ΓΕΜΗ: {{ $tenant->gemi }} @endif
+@if($tenant?->phone) {{ __('mail.invoice.contact.phone') }}: {{ $tenant->phone }} @endif
+@if($tenant?->email) · {{ __('mail.invoice.contact.email') }}: {{ $tenant->email }} @endif
+@if($tenant?->afm) · {{ __('mail.invoice.contact.afm') }}: {{ $tenant->afm }} @endif
+@if($tenant?->gemi) · {{ __('mail.invoice.contact.gemi') }}: {{ $tenant->gemi }} @endif
 @endcomponent
 @endif
 @endcomponent
