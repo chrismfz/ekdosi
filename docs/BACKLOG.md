@@ -976,7 +976,14 @@ cross-customer πρόσβαση (PDF / pay / statement / tickets) → flat 404, 
   posted key order + «Log πύλης» + καμπάνα στους operators), αλλά **πρέπει να επιβεβαιωθεί με ΜΙΑ
   sandbox συναλλαγή πριν πάει live**.
   **RUNBOOK — μία sandbox χρέωση απαντά και στα τρία.** Κάνε μία πληρωμή από την πύλη
-  (`/user/pay/{customer}`) με `testmode` ενεργό, μετά:
+  (`/user/pay/{customer}`) με `testmode` ενεργό.
+
+  **Από το panel (χωρίς SSH):** «Log πύλης» → «Λεπτομέρειες» στη γραμμή της συναλλαγής. Δείχνει τη
+  σειρά πεδίων της τράπεζας δίπλα σε αυτή που περιμέναμε, μαρκάρει ό,τι δεν αναγνωρίσαμε, και σε
+  αποτυχία υπογραφής λέει αν φταίει η σειρά ή το shared secret. Το φίλτρο «Διάγνωση» απομονώνει τα
+  πρωτοκολλικά προβλήματα.
+
+  **Από το shell** (ίδια πληροφορία):
   ```bash
   grep -E 'eurobank\.return\.(fields|unknown_fields|digest_mismatch)' storage/logs/laravel.log | tail -5
   ```

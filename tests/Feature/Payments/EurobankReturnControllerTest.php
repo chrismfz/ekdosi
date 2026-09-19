@@ -603,4 +603,88 @@ class EurobankReturnControllerTest extends TestCase
         $this->assertSame(PaymentGatewayEvent::OUTCOME_REJECTED, $event->outcome);
         $this->assertSame('digest_verification_failed', $event->reason);
     }
+
+    /**
+     * «Log πύλης» must explain a refusal on its own — the operator has no server
+     * log. The structured diagnosis rides on the event row, field NAMES only.
+     */
+    public function test_an_unknown_field_records_its_diagnosis_on_the_event(): void
+    {
+        $intent = $this->pendingIntent(100);
+
+        $this->postReturn([
+            'mid' => 'MID123', 'orderid' => (string) $intent->id, 'status' => 'CAPTURED',
+            'orderAmount' => '100.00', 'currency' => 'EUR', 'txId' => 'TX-D',
+            'authCode' => '999', 'digest' => 'whatever',
+        ]);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertSame('unknown_fields', $event->diagnostics['code']);
+        $this->assertSame(['authCode'], $event->diagnostics['unknown_fields']);
+        $this->assertContains('authCode', $event->diagnostics['posted_order']);
+        $this->assertSame(
+            ['version', 'mid', 'orderid', 'status', 'orderAmount', 'currency',
+                'paymentTotal', 'message', 'riskScore', 'payMethod', 'txId', 'paymentRef', 'transactionId'],
+            $event->diagnostics['expected_order'],
+        );
+    }
+
+    /**
+     * A digest that matches under the acquirer's own order but not ours says the
+     * secret is fine and only our expected order is wrong — the single most useful
+     * thing a sandbox validation run can learn, so it must reach the panel.
+     */
+    public function test_an_order_mismatch_is_distinguished_from_a_bad_secret(): void
+    {
+        $intent = $this->pendingIntent(100);
+
+        // Signed over the acquirer's order (status before orderid), which is NOT
+        // our canonical order — so canonical rebuild fails, received order matches.
+        $fields = [
+            'mid' => 'MID123', 'status' => 'CAPTURED', 'orderid' => (string) $intent->id,
+            'orderAmount' => '100.00', 'currency' => 'EUR', 'txId' => 'TX-O',
+        ];
+        $fields['digest'] = $this->sign($fields, self::SECRET);
+        $this->postReturn($fields);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertSame('order_mismatch', $event->diagnostics['code']);
+        $this->assertTrue($event->diagnostics['received_order_matches']);
+
+        // …and a genuinely wrong secret must NOT be reported as an ordering problem.
+        $other = $this->pendingIntent(100);
+        $bad = [
+            'mid' => 'MID123', 'orderid' => (string) $other->id, 'status' => 'CAPTURED',
+            'orderAmount' => '100.00', 'currency' => 'EUR', 'txId' => 'TX-B',
+        ];
+        $bad['digest'] = $this->sign($bad, 'the-wrong-secret');
+        $this->postReturn($bad);
+
+        $badEvent = PaymentGatewayEvent::query()->where('order_id', (string) $other->id)->firstOrFail();
+        $this->assertSame('secret_or_payload_mismatch', $badEvent->diagnostics['code']);
+        $this->assertFalse($badEvent->diagnostics['received_order_matches']);
+    }
+
+    /** A verified capture records what the acquirer sent — the validation evidence. */
+    public function test_a_settled_return_records_the_acquirer_field_order(): void
+    {
+        $this->creditInvoice(100);
+        $intent = $this->pendingIntent(100);
+
+        $this->postReturn($this->capturedReturn($intent));
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertSame('ok', $event->diagnostics['code']);
+        $this->assertContains('mid', $event->diagnostics['posted_order']);
+    }
+
+    /** Even an unattributable return keeps its field list, so a stray test is not lost. */
+    public function test_an_unknown_orderid_still_records_the_field_list(): void
+    {
+        $this->postReturn(['orderid' => '999999', 'status' => 'CAPTURED', 'digest' => 'x']);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', '999999')->firstOrFail();
+        $this->assertSame('intent_not_found', $event->diagnostics['code']);
+        $this->assertSame(['orderid', 'status'], $event->diagnostics['posted_order']);
+    }
 }

@@ -36,6 +36,7 @@ class PaymentGatewayEvent extends Model
         'currency',
         'ip',
         'message',
+        'diagnostics',
     ];
 
     protected function casts(): array
@@ -43,6 +44,7 @@ class PaymentGatewayEvent extends Model
         return [
             'verified' => 'boolean',
             'amount' => 'decimal:2',
+            'diagnostics' => 'array',
         ];
     }
 

@@ -8,6 +8,7 @@ use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentGatewayEvent;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Payments\Gateways\EurobankGateway;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Services\Payments\PaymentIntentService;
 use App\Support\Money;
@@ -62,11 +63,15 @@ class EurobankReturnController
             // but it is never reached from here. Log them too, so a validation run
             // whose orderid doesn't resolve still yields the one thing it was for.
             // Keys only, never values.
-            Log::info('eurobank.return.fields', [
-                'posted_order' => array_keys($fields),
-                'note' => 'logged before intent lookup (orderid did not resolve)',
-            ]);
-            $this->reject($request, 'intent_not_found', ['orderid' => $orderId], orderId: (string) $orderId);
+            $diagnostics = [
+                'code' => 'intent_not_found',
+                // Same noise keys the gateway strips, so the two field lists are
+                // directly comparable wherever they are shown together.
+                'posted_order' => array_keys(array_diff_key($fields, array_flip(EurobankGateway::DIGEST_EXCLUDED))),
+            ];
+            Log::info('eurobank.return.fields', $diagnostics);
+            $this->reject($request, 'intent_not_found', ['orderid' => $orderId],
+                orderId: (string) $orderId, diagnostics: $diagnostics);
 
             return redirect()->route('portal.home');
         }
@@ -331,6 +336,7 @@ class EurobankReturnController
         ?PaymentIntent $intent = null,
         ?PaymentOutcome $outcome = null,
         ?string $orderId = null,
+        ?array $diagnostics = null,
     ): void {
         Log::warning('eurobank.return.rejected', array_merge([
             'reason' => $reason,
@@ -338,7 +344,7 @@ class EurobankReturnController
             'result' => (string) $request->query('result', ''),
         ], $context));
 
-        $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_REJECTED, $reason, $outcome, $orderId);
+        $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_REJECTED, $reason, $outcome, $orderId, $diagnostics);
 
         // A refusal AFTER a verified CAPTURED status means the bank took the money and
         // we declined to record it — exactly the event nobody should have to discover
@@ -448,6 +454,7 @@ class EurobankReturnController
         ?string $reason,
         ?PaymentOutcome $providerOutcome,
         ?string $orderId = null,
+        ?array $diagnostics = null,
     ): void {
         try {
             // Log the RAW acquirer status («CAPTURED»/«REFUSED»… — what the bank's
@@ -471,6 +478,9 @@ class EurobankReturnController
                 'currency' => $providerOutcome?->currency,
                 'ip' => $request->ip(),
                 'message' => $providerOutcome?->message,
+                // Why the gateway ruled the way it did, so «Log πύλης» explains a
+                // refusal on its own instead of sending an operator to a server log.
+                'diagnostics' => $diagnostics ?? ($providerOutcome?->diagnostics ?: null),
             ]);
         } catch (Throwable $e) {
             Log::warning('eurobank.return.event_log_failed', ['error' => $e->getMessage()]);

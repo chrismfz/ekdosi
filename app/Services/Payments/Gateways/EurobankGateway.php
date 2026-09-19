@@ -47,8 +47,14 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
     /** Sandbox acquirer endpoint. */
     private const ENDPOINT_TEST = 'https://eurocommerce-test.cardlink.gr/vpos/shophandlermpi';
 
-    /** vPOS return fields that are NOT part of the digest (mirrors the WHMCS module). */
-    private const DIGEST_EXCLUDED = ['_charset_', 'digest', 'submitButton'];
+    /**
+     * vPOS return fields that are NOT part of the digest (mirrors the WHMCS module).
+     *
+     * Public so the return controller can strip exactly the same noise when it
+     * records a field list from a path that never reaches this class — the two
+     * lists end up side by side in «Log πύλης», so they must agree.
+     */
+    public const DIGEST_EXCLUDED = ['_charset_', 'digest', 'submitButton'];
 
     /**
      * The CANONICAL vPOS return field order — the backbone of return verification.
@@ -234,7 +240,11 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
 
         $sent = (string) ($fields['digest'] ?? '');
         if ($sent === '') {
-            return PaymentOutcome::unverified('no digest on the return');
+            return PaymentOutcome::unverified('no digest on the return', [
+                'code' => 'no_digest',
+                'posted_order' => array_keys($posted),
+                'expected_order' => self::RETURN_FIELD_ORDER,
+            ]);
         }
 
         // Any key we don't know is refused before hashing: an unrecognised field is
@@ -249,7 +259,12 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
                 'posted_order' => array_keys($posted),
             ]);
 
-            return PaymentOutcome::unverified('unexpected field(s) on the return: '.implode(', ', $unknown));
+            return PaymentOutcome::unverified('unexpected field(s) on the return: '.implode(', ', $unknown), [
+                'code' => 'unknown_fields',
+                'posted_order' => array_keys($posted),
+                'expected_order' => self::RETURN_FIELD_ORDER,
+                'unknown_fields' => array_values($unknown),
+            ]);
         }
 
         // Rebuild the sign-string in CANONICAL order (not the posted order), keeping
@@ -282,13 +297,14 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
             }
             $receivedMatches = hash_equals($this->returnDigest($receivedOrder, $secret), $sent);
 
-            Log::warning('eurobank.return.digest_mismatch', [
+            $diagnostics = [
+                'code' => $receivedMatches ? 'order_mismatch' : 'secret_or_payload_mismatch',
                 'posted_order' => array_keys($posted),
+                'expected_order' => self::RETURN_FIELD_ORDER,
                 'received_order_matches' => $receivedMatches,
-                'diagnosis' => $receivedMatches
-                    ? 'shared secret OK — RETURN_FIELD_ORDER is wrong; use posted_order above'
-                    : 'received order does not match either — check the shared secret first',
-            ]);
+            ];
+
+            Log::warning('eurobank.return.digest_mismatch', $diagnostics);
         }
 
         return new PaymentOutcome(
@@ -304,6 +320,14 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
             // unchecked `mid` lets a replayer shift the mid|orderid boundary and
             // re-aim a genuine, correctly-signed return at another intent.
             merchantId: isset($fields['mid']) ? (string) $fields['mid'] : null,
+            // On success this still records what the acquirer actually sent, so the
+            // «Log πύλης» row doubles as the evidence that RETURN_FIELD_ORDER is
+            // correct — the sandbox validation gate, readable from the panel.
+            diagnostics: $diagnostics ?? [
+                'code' => 'ok',
+                'posted_order' => array_keys($posted),
+                'expected_order' => self::RETURN_FIELD_ORDER,
+            ],
         );
     }
 
