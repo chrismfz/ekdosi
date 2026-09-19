@@ -19,6 +19,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **i18n bilingual — Portal (πύλη πελατών) el/en.** Η **συνδεδεμένη** πύλη (`/user`) γίνεται **δίγλωσση**:
+  τα 12 blades + το `portal-layout` component + τα flash μηνύματα (profile/tickets) μεταφράστηκαν σε
+  `__('portal.*')` με νέα αρχεία `lang/el/portal.php` + `lang/en/portal.php` (parity). Η γλώσσα ανά
+  **συνδεδεμένο χρήστη** (`customer_users.locale`, το dropdown στο προφίλ· ίδια URLs — **κανένα** `/en/`
+  path), μέσω του `SetPortalLocale` (Slice 0). Το layout παίρνει `lang="{{ app()->getLocale() }}"`. Τα
+  ελληνικά strings είναι **verbatim** (τα υπάρχοντα portal tests μένουν πράσινα)· το dropdown γλώσσας
+  δείχνει endonyms («Ελληνικά | English») σε κάθε locale. **Οι guest σελίδες (login/forgot/reset) μένουν
+  προς το παρόν ελληνικά** — δεν υπάρχει user-context για locale (follow-up: multi-domain #1c ή manual
+  toggle· δες `docs/BACKLOG.md #1a`). Ξεκλειδώνει το **Nixpal (Εσθονική) ως testbed**. Δες `PLAN.md §6.5`.
 - **i18n bilingual — Slice 0 (θεμέλιο).** Ένας resolver `App\Support\CustomerLanguage` = η μία πηγή
   απόφασης γλώσσας, με ξεχωριστά σήματα (ΔΕΝ συγχέονται): `forUi()` (portal chrome, el/en, από
   `customer_users.locale`)· `forCustomer()` (προτίμηση → χώρα → προεπιλογή εταιρείας → el)· `forDocumentMail()`

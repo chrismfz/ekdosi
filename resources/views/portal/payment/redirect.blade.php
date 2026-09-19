@@ -1,10 +1,9 @@
 @php use App\Support\Money; @endphp
-<x-portal-layout title="Ανακατεύθυνση στην πληρωμή">
+<x-portal-layout title="{{ __('portal.payment.redirect_title') }}">
     <div class="mx-auto max-w-md text-center">
-        <flux:heading size="xl">Ανακατεύθυνση στην πληρωμή</flux:heading>
+        <flux:heading size="xl">{{ __('portal.payment.redirect_title') }}</flux:heading>
         <flux:text class="mt-2 mb-6">
-            Σε μεταφέρουμε με ασφάλεια στη σελίδα πληρωμής της τράπεζας για {{ Money::eur($intent->amount) }}.
-            Αν δεν μεταφερθείς αυτόματα, πάτησε «Συνέχεια».
+            {{ __('portal.payment.redirect_intro', ['amount' => Money::eur($intent->amount)]) }}
         </flux:text>
 
         {{-- Auto-submitting signed vPOS form. Values are Blade-escaped (no attribute
@@ -14,11 +13,11 @@
             @foreach ($form->fields as $name => $value)
                 <input type="hidden" name="{{ $name }}" value="{{ $value }}">
             @endforeach
-            <flux:button type="submit" variant="primary" class="w-full">Συνέχεια στην πληρωμή</flux:button>
+            <flux:button type="submit" variant="primary" class="w-full">{{ __('portal.payment.continue_to_payment') }}</flux:button>
         </form>
 
         <flux:text class="mt-6 text-sm">
-            <flux:link href="{{ route('portal.statement') }}">Άκυρο — επιστροφή στην καρτέλα</flux:link>
+            <flux:link href="{{ route('portal.statement') }}">{{ __('portal.payment.cancel_back') }}</flux:link>
         </flux:text>
     </div>
 

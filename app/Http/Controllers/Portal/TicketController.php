@@ -134,7 +134,7 @@ class TicketController extends Controller
 
         return redirect()
             ->route('portal.tickets.show', $ticket->id)
-            ->with('status', 'Το αίτημα καταχωρήθηκε — θα ειδοποιηθείτε για την απάντηση.');
+            ->with('status', __('portal.flash.ticket_created'));
     }
 
     public function show(int $ticket): View|RedirectResponse
@@ -178,7 +178,7 @@ class TicketController extends Controller
 
         return redirect()
             ->route('portal.tickets.show', $model->id)
-            ->with('status', 'Η απάντησή σας στάλθηκε.');
+            ->with('status', __('portal.flash.reply_sent'));
     }
 
     public function rate(Request $request, int $ticket): RedirectResponse
@@ -200,7 +200,7 @@ class TicketController extends Controller
 
         return redirect()
             ->route('portal.tickets.show', $model->id)
-            ->with('status', 'Ευχαριστούμε για την αξιολόγηση!');
+            ->with('status', __('portal.flash.rating_thanks'));
     }
 
     public function attachment(int $ticket, int $attachment): StreamedResponse

@@ -1,7 +1,7 @@
-<x-portal-layout title="Ορισμός κωδικού">
+<x-portal-layout title="{{ __('portal.password.title') }}">
     <div class="mx-auto max-w-sm">
-        <flux:heading size="xl">Όρισε νέο κωδικό</flux:heading>
-        <flux:text class="mt-2 mb-6">Διάλεξε έναν κωδικό για τον λογαριασμό σου.</flux:text>
+        <flux:heading size="xl">{{ __('portal.password.reset_heading') }}</flux:heading>
+        <flux:text class="mt-2 mb-6">{{ __('portal.password.reset_intro') }}</flux:text>
 
         <form method="POST" action="{{ route('portal.password.update') }}" class="flex flex-col gap-5">
             @csrf
@@ -10,7 +10,7 @@
             <flux:input
                 name="email"
                 type="email"
-                label="Email"
+                label="{{ __('portal.common.email') }}"
                 value="{{ old('email', $email) }}"
                 autocomplete="username"
                 required
@@ -19,7 +19,7 @@
             <flux:input
                 name="password"
                 type="password"
-                label="Νέος κωδικός"
+                label="{{ __('portal.common.new_password') }}"
                 autocomplete="new-password"
                 required
                 autofocus
@@ -27,12 +27,12 @@
             <flux:input
                 name="password_confirmation"
                 type="password"
-                label="Επιβεβαίωση κωδικού"
+                label="{{ __('portal.password.confirm_password') }}"
                 autocomplete="new-password"
                 required
             />
 
-            <flux:button type="submit" variant="primary" class="w-full">Αποθήκευση</flux:button>
+            <flux:button type="submit" variant="primary" class="w-full">{{ __('portal.common.save') }}</flux:button>
         </form>
     </div>
 </x-portal-layout>
