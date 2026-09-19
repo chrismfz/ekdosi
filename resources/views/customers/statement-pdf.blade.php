@@ -1,11 +1,16 @@
 @php
     /** @var \App\Models\Customer $customer */
     /** @var \App\Models\Company|null $company */
+    /** @var \App\Support\Pdf\PdfLabels $L */
+    // Defensive default: the renderer always passes the customer-resolved $L, but the
+    // view may be rendered directly (previews/tests). Resolve the SAME live-customer
+    // language here so a direct view() call never fatals on an undefined $L.
+    $L = $L ?? \App\Support\Pdf\PdfLabels::for(\App\Support\CustomerLanguage::forCustomer($customer));
     $fmt = fn ($v) => \App\Support\Money::eur($v);
     $balance = (float) ($stats['balance'] ?? 0);
 @endphp
 <!DOCTYPE html>
-<html lang="el">
+<html lang="{{ $L->lang() === 'en' ? 'en' : 'el' }}">
 <head>
     <meta charset="utf-8">
     <style>
@@ -32,18 +37,18 @@
     <table class="header" width="100%">
         <tr>
             <td>
-                <h1>{{ $company?->name ?? 'Καρτέλα' }}</h1>
+                <h1>{{ $company?->name ?? $L('statement_short') }}</h1>
                 <div class="muted">
-                    @if ($company?->afm)ΑΦΜ: {{ $company->afm }}@endif
-                    @if ($company?->tax_office) &middot; ΔΟΥ: {{ $company->tax_office }}@endif
+                    @if ($company?->afm){{ $L('vat_no') }}: {{ $company->afm }}@endif
+                    @if ($company?->tax_office) &middot; {{ $L('tax_office') }}: {{ $company->tax_office }}@endif
                 </div>
                 @if ($company?->address)
                     <div class="muted">{{ $company->address }}{{ $company->city ? ', ' . $company->city : '' }} {{ $company->postcode }}</div>
                 @endif
             </td>
             <td class="right" style="width: 220px;">
-                <div class="muted">Καρτέλα Πελάτη</div>
-                <div class="muted">Ημ/νία έκδοσης: {{ $generatedAt->format('d/m/Y H:i') }}</div>
+                <div class="muted">{{ $L('statement_title') }}</div>
+                <div class="muted">{{ $L('issue_date') }}: {{ $generatedAt->format('d/m/Y H:i') }}</div>
             </td>
         </tr>
     </table>
@@ -51,18 +56,18 @@
     <table width="100%">
         <tr>
             <td style="vertical-align: top;">
-                <div class="section-title" style="margin-top: 0;">Πελάτης</div>
+                <div class="section-title" style="margin-top: 0;">{{ $L('customer') }}</div>
                 <strong>{{ $customer->name }}</strong><br>
-                @if ($customer->afm)ΑΦΜ: {{ $customer->afm }}<br>@endif
-                @if ($customer->tax_office)ΔΟΥ: {{ $customer->tax_office }}<br>@endif
+                @if ($customer->afm){{ $L('vat_no') }}: {{ $customer->afm }}<br>@endif
+                @if ($customer->tax_office){{ $L('tax_office') }}: {{ $customer->tax_office }}<br>@endif
                 @if ($customer->address1){{ $customer->address1 }}{{ $customer->city ? ', ' . $customer->city : '' }} {{ $customer->postcode }}@endif
             </td>
             <td class="right" style="width: 220px; vertical-align: top;">
                 <div class="balance-box">
-                    <div class="muted">Υπόλοιπο</div>
+                    <div class="muted">{{ $L('balance') }}</div>
                     <div class="amount {{ $balance > 0 ? 'danger' : 'success' }}">{{ $fmt($balance) }}</div>
                     @if (! empty($stats['oldest_unpaid_days']))
-                        <div class="muted">Παλαιότερο ανεξόφλητο: {{ $stats['oldest_unpaid_days'] }} ημ.</div>
+                        <div class="muted">{{ $L('oldest_unpaid') }}: {{ $stats['oldest_unpaid_days'] }} {{ $L('days_short') }}</div>
                     @endif
                 </div>
             </td>
@@ -70,16 +75,16 @@
     </table>
 
     @if (count($yearly) > 0)
-        <div class="section-title">Ετήσια ανάλυση</div>
+        <div class="section-title">{{ $L('yearly_breakdown') }}</div>
         <table class="data">
             <thead>
                 <tr>
-                    <th>@gup('Έτος')</th>
-                    <th class="right">@gup('Τιμολόγια')</th>
-                    <th class="right">@gup('Καθαρή αξία')</th>
-                    <th class="right">@gup('Με ΦΠΑ')</th>
-                    <th class="right">@gup('Πληρωμές')</th>
-                    <th class="right">@gup('Υπόλοιπο τέλους έτους')</th>
+                    <th>@gup($L('year'))</th>
+                    <th class="right">@gup($L('invoices'))</th>
+                    <th class="right">@gup($L('net_value'))</th>
+                    <th class="right">@gup($L('gross_incl_vat'))</th>
+                    <th class="right">@gup($L('payments'))</th>
+                    <th class="right">@gup($L('year_end_balance'))</th>
                 </tr>
             </thead>
             <tbody>
@@ -97,16 +102,16 @@
         </table>
     @endif
 
-    <div class="section-title">Καρτέλα κινήσεων</div>
+    <div class="section-title">{{ $L('ledger_movements') }}</div>
     <table class="data">
         <thead>
             <tr>
-                <th>@gup('Ημερομηνία')</th>
-                <th>@gup('Τύπος')</th>
-                <th>@gup('Αναφορά')</th>
-                <th class="right">@gup('Χρέωση')</th>
-                <th class="right">@gup('Πίστωση')</th>
-                <th class="right">@gup('Υπόλοιπο')</th>
+                <th>@gup($L('date_full'))</th>
+                <th>@gup($L('type'))</th>
+                <th>@gup($L('reference'))</th>
+                <th class="right">@gup($L('debit'))</th>
+                <th class="right">@gup($L('credit'))</th>
+                <th class="right">@gup($L('balance'))</th>
                 <th>myDATA</th>
             </tr>
         </thead>
@@ -127,7 +132,7 @@
                     <td>{{ $row['mydata_state'] ?? '' }}</td>
                 </tr>
             @empty
-                <tr><td colspan="7" class="muted">Δεν υπάρχουν κινήσεις.</td></tr>
+                <tr><td colspan="7" class="muted">{{ $L('no_movements') }}</td></tr>
             @endforelse
         </tbody>
     </table>

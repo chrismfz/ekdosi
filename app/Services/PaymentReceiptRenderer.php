@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Models\Company;
 use App\Models\Payment;
+use App\Support\CustomerLanguage;
+use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
 
@@ -27,6 +29,14 @@ class PaymentReceiptRenderer
     {
         $payment->loadMissing(['company', 'customer', 'paymentMethod', 'paymentIntent']);
 
+        // i18n: a receipt is an informal per-customer acknowledgement (not a frozen
+        // legal document), so it follows the customer's current language; with no
+        // linked customer, fall back to the tenant's default (then its country).
+        $customer = $payment->customer;
+        $L = PdfLabels::for($customer
+            ? CustomerLanguage::forCustomer($customer)
+            : PdfLabels::resolveLanguage($payment->company?->default_language, $payment->company?->country_code));
+
         // The full είσπραξη: every INCOMING row of THIS customer sharing this
         // reference (a refund is never part of a receipt). Scoped to the customer
         // too — `reference` is not customer-unique (an ETL import can reuse a bank
@@ -46,7 +56,7 @@ class PaymentReceiptRenderer
             ->get();
 
         $lines = $rows->map(fn (Payment $p): array => [
-            'label' => $p->invoice?->invcode ?: 'Έναντι λογαριασμού',
+            'label' => $p->invoice?->invcode ?: $L('on_account'),
             'amount' => (float) $p->amount,
         ])->all();
 
@@ -71,6 +81,7 @@ class PaymentReceiptRenderer
                 'transactionId' => $payment->transaction_id,
                 'lines' => $lines,
                 'total' => $total,
+                'L' => $L,
             ])
                 ->setPaper('A4', 'portrait')
                 ->output();

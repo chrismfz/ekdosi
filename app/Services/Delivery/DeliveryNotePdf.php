@@ -5,6 +5,7 @@ namespace App\Services\Delivery;
 use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Support\MyData\QrImage;
+use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Dompdf\Dompdf;
 use Illuminate\Support\Facades\Storage;
@@ -44,6 +45,13 @@ class DeliveryNotePdf
 
         $logoDataUri = $this->loadLogoDataUri($note->company);
 
+        // i18n: a ΔΑ is a legal document, so once FILED its language is frozen on the
+        // note — resolved from the snapshotted recipient country (GR/internal → Greek,
+        // foreign → bilingual), the same rule as the invoice. recipientCountryIso()
+        // falls back to the linked customer's country only for an UNFILED draft (no
+        // snapshot yet — nothing is frozen); a filed note reads the snapshot alone.
+        $L = PdfLabels::for(PdfLabels::resolveLanguage(null, $note->recipientCountryIso()));
+
         $previousMemory = ini_get('memory_limit');
         $previousTime = ini_get('max_execution_time');
 
@@ -56,6 +64,7 @@ class DeliveryNotePdf
                 'tenant' => $note->company,
                 'qrDataUri' => $qrDataUri,
                 'logoDataUri' => $logoDataUri,
+                'L' => $L,
                 // Two audit trails, printed when present: the movement lifecycle
                 // (carrier/recipient events; events() already orders oldest→newest)
                 // + the myDATA SUBMISSION marks only. delivery_marks also stores
@@ -80,7 +89,7 @@ class DeliveryNotePdf
             // render that carries recipient data. Same approach as InvoicePdfRenderer.
             $dompdf = $pdf->getDomPDF();
             $dompdf->render();
-            $this->drawPager($dompdf);
+            $this->drawPager($dompdf, $L);
 
             return $dompdf->output();
         } finally {
@@ -91,17 +100,17 @@ class DeliveryNotePdf
 
     /**
      * «Σελίδα X από Y», centred at the page bottom on every page, via the DomPDF
-     * canvas (mirrors InvoicePdfRenderer::drawPager). Greek-only, matching the
-     * δελτίο template. Kept ~6.5mm above the sheet edge to clear a typical
-     * printer's non-printable margin; colour matches the footer text (#6b7280).
+     * canvas (mirrors InvoicePdfRenderer::drawPager). Localized via the note's frozen
+     * $labels. Kept ~6.5mm above the sheet edge to clear a typical printer's
+     * non-printable margin; colour matches the footer text (#6b7280).
      */
-    private function drawPager(Dompdf $dompdf): void
+    private function drawPager(Dompdf $dompdf, callable $labels): void
     {
         $canvas = $dompdf->getCanvas();
         $fontMetrics = $dompdf->getFontMetrics();
         $font = $fontMetrics->getFont('DejaVu Sans', 'normal');
         $size = 7;
-        $text = 'Σελίδα {PAGE_NUM} από {PAGE_COUNT}';
+        $text = $labels('page').' {PAGE_NUM} '.$labels('of').' {PAGE_COUNT}';
         $x = ($canvas->get_width() - $fontMetrics->getTextWidth($text, $font, $size)) / 2;
         $y = $canvas->get_height() - 18;
 
