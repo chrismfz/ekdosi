@@ -500,6 +500,18 @@ class CompanyForm
                                         Toggle::make('show_customer_balance_on_pdf')
                                             ->label('Υπόλοιπο πελάτη στο PDF')
                                             ->helperText('Προεπιλογή: τυπώνει block «Νέο υπόλοιπο» (Προηγούμενο + παραστατικό = Νέο) στα τιμολόγια επί πιστώσει. Ανά πελάτη υπερισχύει η δική του ρύθμιση.'),
+                                        // i18n Slice 0: tenant fallback language for documents/mails
+                                        // when a customer has NO explicit language and no usable
+                                        // country to derive one from (App\Support\CustomerLanguage).
+                                        Select::make('default_language')
+                                            ->label('Προεπιλεγμένη γλώσσα επικοινωνίας')
+                                            ->options([
+                                                'el' => 'Ελληνικά',
+                                                'en' => 'Αγγλικά',
+                                                'both' => 'Δίγλωσσο (GR/EN)',
+                                            ])
+                                            ->placeholder('Αυτόματο (Ελληνικά)')
+                                            ->helperText('Fallback γλώσσα του tenant όταν ο πελάτης δεν έχει ρητή γλώσσα ούτε χώρα (ο πελάτης/η χώρα του υπερισχύουν). Εφαρμόζεται στα email· το PDF μένει «παγωμένο» στο έγγραφο.'),
                                     ])
                                     ->columns(2),
 

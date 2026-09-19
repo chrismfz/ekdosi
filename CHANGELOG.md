@@ -19,6 +19,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **i18n bilingual — Slice 0 (θεμέλιο).** Ένας resolver `App\Support\CustomerLanguage` = η μία πηγή
+  απόφασης γλώσσας, με ξεχωριστά σήματα (ΔΕΝ συγχέονται): `forUi()` (portal chrome, el/en, από
+  `customer_users.locale`)· `forCustomer()` (προτίμηση → χώρα → προεπιλογή εταιρείας → el)· `forDocumentMail()`
+  για το **email** — ως προσωρινό μήνυμα προς τον πελάτη, τιμά τη ζωντανή προτίμηση του **παραλήπτη** (όχι το
+  PDF-override του εγγράφου), both→en. Νέες στήλες **`customers.language`** (προτίμηση πελάτη) +
+  **`companies.default_language`** (fallback ανά tenant), με Selects στις φόρμες Πελάτη + Εταιρείας (η αλλαγή
+  στον πελάτη καταγράφεται στο «Ιστορικό»). **Το PDF μένει αμετάβλητο/παγωμένο** (γλώσσα στο ίδιο το έγγραφο
+  → snapshotted χώρα, μέσω `PdfLabels` στους renderers)· η προτίμηση πελάτη θα φτάσει στο PDF με «πάγωμα στην
+  έκδοση» (επόμενο slice). Το portal (`SetPortalLocale` middleware) + τα emails (`SendInvoiceEmail`/
+  `SendQuoteEmail` → `->locale()`) καλωδιώνονται στον ίδιο resolver — ενεργό visually μόλις μεταφραστούν
+  blades/templates (επόμενα slices). Δες `PLAN.md §6.5`.
 - **Αντιστοίχιση εισαγόμενων «έναντι» πιστώσεων → ανοιχτά τιμολόγια (import cleanup).** Νέα εντολή
   `php artisan payments:apply-imported-credits --company=SLUG [--customer=ΑΦΜ] [--dry-run]`: για πελάτες
   από Epsilon, όπου οι πληρωμές έρχονται **σε επίπεδο πελάτη** (on-account, `transaction_id` `EPS:…`) και

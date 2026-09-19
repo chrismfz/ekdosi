@@ -1,0 +1,121 @@
+<?php
+
+namespace App\Support;
+
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\CustomerUser;
+use App\Models\Invoice;
+use App\Models\Quote;
+use App\Support\Pdf\PdfLabels;
+
+/**
+ * The ONE place that decides which language a customer-facing surface speaks
+ * (i18n Slice 0). Distinct signals, deliberately NOT conflated:
+ *
+ *   • {@see forUi()}       — the portal CHROME for the logged-in `customer_user`.
+ *                            Per-login, ephemeral, no legal weight. UI has only
+ *                            `el`/`en` (never bilingual). Driven by
+ *                            `customer_users.locale` (the profile dropdown); a login
+ *                            maps to many customers via a grant table, so there is
+ *                            NO single "customer language" to borrow here.
+ *   • {@see forCustomer()} — the COMMUNICATION language of a customer: their explicit
+ *                            preference, else derived from their country, else the
+ *                            tenant default. `el`/`en`/`both`.
+ *   • {@see forDocumentMail()} — the language of the EMAIL that carries a document.
+ *                            The mail goes TO the linked customer, so it tracks that
+ *                            customer (a transient message, unlike a legal PDF), then
+ *                            collapses bilingual → English (one language per body).
+ *
+ * The PDF is deliberately NOT resolved here: its language stays FROZEN on the
+ * document (`invoices/quotes.language` → snapshotted country, via PdfLabels in the
+ * renderers), so a re-rendered legal document never changes language. The
+ * per-customer language reaches a PDF only by being stamped onto the document at
+ * issue — a later slice — or via the operator's per-doc «Γλώσσα PDF» Select.
+ *
+ * Resolution tail (first usable wins): explicit choice → recipient country (GR→el,
+ * foreign→both) → company default → el. The country tier only fires when a country
+ * is actually known, so the company default (e.g. the Estonian tenant's) is
+ * reachable for a country-less party.
+ */
+final class CustomerLanguage
+{
+    /** Languages a document/mail may be rendered in (the single whitelist). */
+    public const DOCUMENT = PdfLabels::LANGUAGES;
+
+    /** Languages the portal UI can switch to (no bilingual chrome). */
+    public const UI = ['el', 'en'];
+
+    public const FALLBACK = 'el';
+
+    /**
+     * Portal UI locale for a logged-in customer user: their stored preference,
+     * else the app default. Clamped to the {@see UI} set ('both' is meaningless
+     * for chrome). Accepts null (guest/edge) → app default.
+     */
+    public static function forUi(?CustomerUser $user): string
+    {
+        $preferred = $user?->locale;
+
+        if (in_array($preferred, self::UI, true)) {
+            return $preferred;
+        }
+
+        $app = (string) config('app.locale', self::FALLBACK);
+
+        return in_array($app, self::UI, true) ? $app : self::FALLBACK;
+    }
+
+    /**
+     * Communication language for a customer: their explicit override, else derived
+     * from their (live) country, else the tenant default, else Greek.
+     */
+    public static function forCustomer(Customer $customer): string
+    {
+        if (in_array($customer->language, self::DOCUMENT, true)) {
+            return $customer->language;
+        }
+
+        // isoCountryCode() prefers the country_code cache but falls back to
+        // normalising the free-text `country`, so a customer whose cache was never
+        // backfilled still resolves correctly (matches the model's own resolver).
+        return self::fromCountryOrCompany($customer->isoCountryCode(), $customer->company);
+    }
+
+    /**
+     * Language for a document's EMAIL. The mail is addressed to the linked customer,
+     * so it tracks that customer's preference ({@see forCustomer()}) — NOT the
+     * document's «Γλώσσα PDF» override, which is a PDF-only choice. Falls back to the
+     * document's snapshotted country/tenant default when there is no linked customer.
+     * Collapses bilingual to English (an email body is one language). Plumbing for
+     * the email-i18n slice.
+     */
+    public static function forDocumentMail(Invoice|Quote $document): string
+    {
+        $customer = $document->customer;
+
+        $language = $customer !== null
+            ? self::forCustomer($customer)
+            : self::fromCountryOrCompany($document->country, $document->company);
+
+        return $language === 'both' ? 'en' : $language;
+    }
+
+    /**
+     * Shared tail: a known country decides (GR/empty → el, any other → both, via
+     * PdfLabels — the single source of that rule); an EMPTY/unknown country falls
+     * through to the tenant default; nothing usable → Greek.
+     */
+    private static function fromCountryOrCompany(?string $country, ?Company $company): string
+    {
+        // Emptiness only here; PdfLabels::resolveLanguage does the upper/trim + the
+        // GR-vs-foreign decision, so that logic lives in exactly one place.
+        if (trim((string) $country) !== '') {
+            return PdfLabels::resolveLanguage(null, $country);
+        }
+
+        $default = $company?->default_language;
+
+        return in_array($default, self::DOCUMENT, true) ? $default : self::FALLBACK;
+    }
+}

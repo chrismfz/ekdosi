@@ -14,6 +14,7 @@ use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Controllers\TicketAttachmentController;
 use App\Http\Controllers\TicketFeedbackController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
+use App\Http\Middleware\SetPortalLocale;
 use Illuminate\Support\Facades\Route;
 
 // Two wholly separate surfaces: the operator/Filament panel at /admin and the
@@ -49,7 +50,7 @@ Route::get('/user/reset-password/{token}', [PortalPasswordResetController::class
     ->name('portal.password.reset');
 Route::post('/user/reset-password', [PortalPasswordResetController::class, 'reset'])
     ->middleware('throttle:20,60')->name('portal.password.update');
-Route::middleware(EnsurePortalAuthenticated::class)->group(function (): void {
+Route::middleware([EnsurePortalAuthenticated::class, SetPortalLocale::class])->group(function (): void {
     Route::get('/user', [PortalHomeController::class, 'index'])->name('portal.home');
     // «Η καρτέλα μου» — read-only balance + ledger (same figures as the operator
     // Καρτέλα, grant-scoped). No «pay» yet — that lands with the gateway pillar.

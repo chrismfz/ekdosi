@@ -94,10 +94,14 @@ _(Κενό. Το πρώην #1 «Ηλεκτρονική τιμολόγηση» �
 στήλες (`invoices/quotes.language` live· `customer_users.locale`, `country_code`) = **ήδη υπάρχουν**.
 
 **#1a — i18n (bilingual customer-facing) — το κοντινό unlock:**
-- [ ] **Slice 0 (S):** `CustomerLanguage::for()` resolver + `app()->setLocale()` (portal middleware + `SendInvoiceEmail`) — prereq
+- [x] **Slice 0 (S) — SHIPPED:** `App\Support\CustomerLanguage` resolver (forUi/forCustomer/forDocumentMail) + `customers.language` **+** `companies.default_language` (+ φόρμες, audited) + `SetPortalLocale` middleware + `SendInvoiceEmail`/`SendQuoteEmail` `->locale()`. **PDF αμετάβλητο** (frozen μέσω `PdfLabels`)· η προτίμηση πελάτη φτάνει στο PDF με το «stamp-at-issue» παρακάτω. Λεπτομέρειες → CHANGELOG/FEATURES.
+  - [ ] P2 (Octane): το `SetPortalLocale` κάνει `setLocale` χωρίς reset — υπό Octane μπορεί να «διαρρεύσει» σε επόμενο non-portal request στον ίδιο worker (σε FPM μη-θέμα· inert τώρα αφού δεν υπάρχουν μεταφρασμένα strings). Global locale-reset όταν/αν πάμε Octane.
+  - [ ] P2: `companies.default_language` μόνο στο super-admin `CompanyResource` — πρόσθεσέ το και στο self-service `CompanySettings` (whitelist) για company_admin.
+  - [ ] P2 (perf, αμελητέο): `forCustomer` κάνει lazy-load `$customer->company` ανά email· θα μπορούσε να επαναχρησιμοποιεί το ήδη φορτωμένο `$invoice->company` (ίδιος tenant). 1 query/email — άσε το μέχρι να ενοχλήσει σε batch.
 - [ ] **Portal i18n (M):** `lang/{el,en}` (from scratch) + 12 blades `portal/*` + layout → `__()` (η επιφάνεια του testbed)
 - [ ] **Email i18n (M):** EL/EN Mailables (5) + `MailTemplateRenderer::DEFAULT_BODY_TEMPLATE` per-recipient
 - [ ] **PDF completion (S-M):** `PdfLabels` → delivery-note (heavy)/statement/receipt + invoice movement block (~10 slugs)
+- [ ] **Stamp-at-issue (S):** στην οριστικοποίηση, «πάγωσε» `invoices/quotes.language` = `CustomerLanguage::forCustomer($customer)` όταν είναι null — έτσι η προτίμηση πελάτη φτάνει στο PDF **χωρίς** να σπάει το freeze (τώρα το `forDocument` σκόπιμα ΔΕΝ διαβάζει τον live πελάτη). Καλύπτει και τα direct-active paths (WHMCS/ConvertQuote/IssueCreditNote/StageServiceRenewal).
 
 **#1c — Multi-domain (per-tenant portal host) — ζευγαρώνει με το portal i18n:**
 - [ ] `companies.portal_host` + host→company resolver (`Route::domain()`/middleware)· portal 1η επιφάνεια (`cs.nixpal.com` vs `invoicer.myip.gr`)

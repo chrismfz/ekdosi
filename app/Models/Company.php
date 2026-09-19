@@ -38,6 +38,9 @@ class Company extends Model
         'name',
         'slug',
         'country_code',
+        // i18n Slice 0: fallback document/mail language for this tenant (null|el|en|both;
+        // null = app default el). App\Support\CustomerLanguage falls back here.
+        'default_language',
         'einvoice_provider',
         'einvoice_provider_key',
         'einvoice_provider_config',
