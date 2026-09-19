@@ -67,7 +67,9 @@ class EurobankReturnController
                 'code' => 'intent_not_found',
                 // Same noise keys the gateway strips, so the two field lists are
                 // directly comparable wherever they are shown together.
-                'posted_order' => array_keys(array_diff_key($fields, array_flip(EurobankGateway::DIGEST_EXCLUDED))),
+                'posted_order' => EurobankGateway::clampFieldNames(
+                    array_keys(array_diff_key($fields, array_flip(EurobankGateway::DIGEST_EXCLUDED))),
+                ),
             ];
             Log::info('eurobank.return.fields', $diagnostics);
             $this->reject($request, 'intent_not_found', ['orderid' => $orderId],
@@ -94,7 +96,12 @@ class EurobankReturnController
             // otherwise real cancellations become indistinguishable from attacks in
             // «Log πύλης». The money path is untouched: a body claiming CAPTURED
             // still goes through the branch below.
-            $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'not_captured', $outcome);
+            // Its own reason code, NOT the acquirer's «not_captured»: the digest did
+            // not verify, so this is either a cancel leg with fields we don't list or
+            // someone probing with forged signatures. Filing it as the ordinary
+            // business outcome would hide the probes; filing it as a rejection would
+            // make every «Άκυρο» look like an attack. It is neither, so name it.
+            $this->record($request, $intent, PaymentGatewayEvent::OUTCOME_IGNORED, 'unverified_non_capture', $outcome);
 
             return $this->back($intent);
         }
@@ -351,9 +358,15 @@ class EurobankReturnController
         // by reading «Log πύλης».
         if ($outcome?->isSettled() === true && $intent !== null) {
             $amount = Money::eur((float) ($outcome->amount ?? $intent->amount));
+            // mid/currency mismatches mean the TERMINAL is misconfigured (or the
+            // acquirer changed), so every in-flight capture hits them on a different
+            // intent. Cool those down per COMPANY — one «your terminal is wrong»
+            // rather than hundreds. Per-intent stays right for the rest.
+            $systemic = in_array($reason, ['mid_mismatch', 'currency_mismatch'], true);
             $this->alertOperators($intent, $reason,
                 "Η τράπεζα χρέωσε {$amount} αλλά η πληρωμή ΔΕΝ καταχωρίστηκε (αιτία: {$reason}). "
-                .'Δες «Log πύλης» — αν επαναλαμβάνεται, έλεγξε τις ρυθμίσεις του τερματικού.');
+                .'Δες «Log πύλης» — αν επαναλαμβάνεται, έλεγξε τις ρυθμίσεις του τερματικού.',
+                perCompany: $systemic);
         }
     }
 

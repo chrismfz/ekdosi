@@ -975,6 +975,13 @@ cross-customer πρόσβαση (PDF / pay / statement / tickets) → flat 404, 
   χρεώνεται, το ekdosi δεν καταγράφει. Είναι θορυβώδες (log `eurobank.return.digest_mismatch` με το
   posted key order + «Log πύλης» + καμπάνα στους operators), αλλά **πρέπει να επιβεβαιωθεί με ΜΙΑ
   sandbox συναλλαγή πριν πάει live**.
+  **Γιατί είναι πιθανότερο απ' όσο φαίνεται να είναι λάθος:** εκτός από τα προφανή (`authCode`,
+  `eci`/`xid`), υποψήφια echo είναι και **τα ίδια μας τα request fields** — το `redirectForm()` στέλνει
+  `lang`, `deviceCategory`, `orderDesc`, `payerEmail`, `billCountry`, `billZip`, `billCity`,
+  `billAddress`, και **κανένα** δεν είναι στη λίστα. Αν ο acquirer τα επιστρέφει έστω και μερικώς, κάθε
+  χρέωση θα απορρίπτεται. Ο κώδικας στο `main` πριν το #607 έκανε hash τη σειρά που ερχόταν και ήταν
+  **επαληθευμένος στον πραγματικό acquirer** — αυτό το αντικαθιστά με ασφαλέστερο αλλά **ανεπιβεβαίωτο**
+  συμβόλαιο. Το alerting μειώνει τον χρόνο ανίχνευσης, όχι την απώλεια.
   **RUNBOOK — μία sandbox χρέωση απαντά και στα τρία.** Κάνε μία πληρωμή από την πύλη
   (`/user/pay/{customer}`) με `testmode` ενεργό.
 
@@ -1017,6 +1024,14 @@ cross-customer πρόσβαση (PDF / pay / statement / tickets) → flat 404, 
   αποτυγχάνει το digest, άρα δεν χρειάζεται μυστικό: ένα POST με `status=CAPTURED&digest=x` πιάνει το
   ωριαίο κλειδί. Συνέπεια: γνήσιο drift μέσα σε εκείνο το παράθυρο καθυστερεί έως 1 ώρα. Αποδεκτό —
   το να χτυπά η καμπάνα σε επίθεση είναι κι αυτό σήμα· η διαδρομή χρημάτων δεν επηρεάζεται.
+- **Το dedup είναι χρονικά αόριστο και προϋποθέτει μοναδικό `txId` ανά merchant (P2).** Το
+  `transactionAlreadySettled()` ταιριάζει **οποιοδήποτε** gateway-written payment της εταιρίας με το
+  ίδιο `transaction_id`, για πάντα. Δεν έχει επαληθευτεί ότι το `txId` της Modirum είναι μοναδικό ανά
+  merchant account (αντί για order-scoped ή ανακυκλούμενο). Αν επαναληφθεί, μια **γνήσια** δεύτερη
+  χρέωση πέφτει σε `SETTLE_DUPLICATE_TRANSACTION` και τα χρήματα μένουν ακαταχώριστα — ακριβώς η
+  αποτυχία που ο υπόλοιπος κώδικας αποφεύγει σκόπιμα. Περιορισμός blast radius: χρονικό παράθυρο
+  (π.χ. τελευταίες N ημέρες) ή uniqueness constraint σε `(company_id, gateway, transaction_id)`.
+  Επιβεβαίωσέ το στην ίδια sandbox συναλλαγή.
 - **Το dedup δεν είναι race-safe (P2, τεκμηριωμένο).** Το `lockForUpdate()` κλειδώνει το **intent** row,
   οπότε δύο returns προς **διαφορετικά** intents δεν σειριοποιούνται και το `transactionAlreadySettled()`
   είναι σκέτο SELECT (REPEATABLE READ → δεν βλέπει το uncommitted Payment του άλλου). Σταματά sequential

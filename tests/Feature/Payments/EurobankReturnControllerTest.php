@@ -584,7 +584,9 @@ class EurobankReturnControllerTest extends TestCase
 
         $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
         $this->assertSame(PaymentGatewayEvent::OUTCOME_IGNORED, $event->outcome);
-        $this->assertSame('not_captured', $event->reason);
+        // Its OWN code — not the acquirer's «not_captured», which would hide a
+        // forged-digest probe among routine cancellations.
+        $this->assertSame('unverified_non_capture', $event->reason);
     }
 
     /** …but a body CLAIMING a capture with unknown fields is still a hard refusal. */
@@ -686,5 +688,78 @@ class EurobankReturnControllerTest extends TestCase
         $event = PaymentGatewayEvent::query()->where('order_id', '999999')->firstOrFail();
         $this->assertSame('intent_not_found', $event->diagnostics['code']);
         $this->assertSame(['orderid', 'status'], $event->diagnostics['posted_order']);
+    }
+
+    /**
+     * A return with NO `digest` key at all. Reachable from the cancel leg and from
+     * any unauthenticated probe — it must produce an audit row, never a 500 (a
+     * fatal here would take out the very logging this screen depends on).
+     */
+    public function test_a_return_without_a_digest_key_is_recorded_not_fatal(): void
+    {
+        $intent = $this->pendingIntent(100);
+
+        $this->postReturn([
+            'mid' => 'MID123', 'orderid' => (string) $intent->id, 'status' => 'CANCELED',
+        ], result: 'failure')->assertRedirect(route('portal.payment.show', $intent->id));
+
+        $this->assertSame(PaymentIntent::STATUS_PENDING, $intent->fresh()->status);
+        $this->assertSame(0, Payment::where('company_id', $this->t->id)->count());
+        $this->assertSame(1, PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->count());
+    }
+
+    /** …and one that DOES claim a capture without a digest is a hard refusal. */
+    public function test_a_claimed_capture_without_a_digest_is_refused_with_its_diagnosis(): void
+    {
+        $intent = $this->pendingIntent(100);
+
+        $this->postReturn([
+            'mid' => 'MID123', 'orderid' => (string) $intent->id, 'status' => 'CAPTURED',
+            'orderAmount' => '100.00', 'currency' => 'EUR', 'txId' => 'TX-ND',
+        ]);
+
+        $this->assertSame(PaymentIntent::STATUS_PENDING, $intent->fresh()->status);
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertSame(PaymentGatewayEvent::OUTCOME_REJECTED, $event->outcome);
+        $this->assertSame('no_digest', $event->diagnostics['code']);
+        $this->assertContains('mid', $event->diagnostics['posted_order']);
+    }
+
+    /** Field names are attacker-chosen on an unauthenticated route — bound them. */
+    public function test_attacker_chosen_field_names_are_clamped_before_persisting(): void
+    {
+        $intent = $this->pendingIntent(100);
+
+        $fields = ['mid' => 'MID123', 'orderid' => (string) $intent->id, 'status' => 'CAPTURED'];
+        for ($i = 0; $i < 80; $i++) {
+            $fields['junk'.str_repeat('x', 200).$i] = 'v';
+        }
+        $fields['digest'] = 'whatever';
+
+        $this->postReturn($fields);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertLessThanOrEqual(40, count($event->diagnostics['posted_order']));
+        foreach ($event->diagnostics['posted_order'] as $name) {
+            $this->assertLessThanOrEqual(40, mb_strlen($name));
+        }
+    }
+
+    /** The acquirer's own reference survives for reconciliation when txId is absent. */
+    public function test_the_provider_reference_is_kept_on_a_settled_event(): void
+    {
+        $this->creditInvoice(100);
+        $intent = $this->pendingIntent(100);
+
+        $fields = [
+            'mid' => 'MID123', 'orderid' => (string) $intent->id, 'status' => 'CAPTURED',
+            'orderAmount' => '100.00', 'currency' => 'EUR', 'paymentRef' => 'REF-9911',
+        ];
+        $fields['digest'] = $this->sign($fields, self::SECRET);
+
+        $this->postReturn($fields);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertSame('REF-9911', $event->diagnostics['provider_reference']);
     }
 }

@@ -234,15 +234,17 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
         // captured production return, and this is the line that settles the question
         // from the first real transaction instead of only when something breaks.
         // Keys only — never the values, which carry the customer's order data.
-        Log::info('eurobank.return.fields', [
-            'posted_order' => array_keys(array_diff_key($fields, array_flip(self::DIGEST_EXCLUDED))),
-        ]);
+        // Computed ONCE, before anything reads it — every branch below reports it.
+        $posted = array_diff_key($fields, array_flip(self::DIGEST_EXCLUDED));
+        $postedOrder = self::clampFieldNames(array_keys($posted));
+
+        Log::info('eurobank.return.fields', ['posted_order' => $postedOrder]);
 
         $sent = (string) ($fields['digest'] ?? '');
         if ($sent === '') {
             return PaymentOutcome::unverified('no digest on the return', [
                 'code' => 'no_digest',
-                'posted_order' => array_keys($posted),
+                'posted_order' => $postedOrder,
                 'expected_order' => self::RETURN_FIELD_ORDER,
             ]);
         }
@@ -251,19 +253,18 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
         // how a replayer smuggles the bytes that let the same digest describe a
         // different orderid. (Refusing is also the honest response to genuine
         // protocol drift — see RETURN_FIELD_ORDER.)
-        $posted = array_diff_key($fields, array_flip(self::DIGEST_EXCLUDED));
-        $unknown = array_diff(array_keys($posted), self::RETURN_FIELD_ORDER);
+        $unknown = self::clampFieldNames(array_values(array_diff(array_keys($posted), self::RETURN_FIELD_ORDER)));
         if ($unknown !== []) {
             Log::warning('eurobank.return.unknown_fields', [
-                'unknown' => array_values($unknown),
-                'posted_order' => array_keys($posted),
+                'unknown' => $unknown,
+                'posted_order' => $postedOrder,
             ]);
 
             return PaymentOutcome::unverified('unexpected field(s) on the return: '.implode(', ', $unknown), [
                 'code' => 'unknown_fields',
-                'posted_order' => array_keys($posted),
+                'posted_order' => $postedOrder,
                 'expected_order' => self::RETURN_FIELD_ORDER,
-                'unknown_fields' => array_values($unknown),
+                'unknown_fields' => $unknown,
             ]);
         }
 
@@ -299,7 +300,7 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
 
             $diagnostics = [
                 'code' => $receivedMatches ? 'order_mismatch' : 'secret_or_payload_mismatch',
-                'posted_order' => array_keys($posted),
+                'posted_order' => $postedOrder,
                 'expected_order' => self::RETURN_FIELD_ORDER,
                 'received_order_matches' => $receivedMatches,
             ];
@@ -325,8 +326,12 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
             // correct — the sandbox validation gate, readable from the panel.
             diagnostics: $diagnostics ?? [
                 'code' => 'ok',
-                'posted_order' => array_keys($posted),
+                'posted_order' => $postedOrder,
                 'expected_order' => self::RETURN_FIELD_ORDER,
+                // The acquirer's own reference, kept for reconciliation when it is
+                // the only identifier a return carries. It is a bank-side code, not
+                // customer data — the one VALUE this structure holds, deliberately.
+                'provider_reference' => isset($fields['paymentRef']) ? (string) $fields['paymentRef'] : null,
             ],
         );
     }
@@ -368,9 +373,26 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
      * `paymentRef` is deliberately NOT consulted: it is a payment/approval reference
      * with no documented per-transaction uniqueness, and feeding it to the dedup
      * would let it collide with an earlier genuine payment and REFUSE a second,
-     * perfectly legitimate capture (money taken, nothing recorded). It stays
-     * available for the human money trail via the raw event log.
+     * perfectly legitimate capture (money taken, nothing recorded). It is instead
+     * kept verbatim on the event's `diagnostics.provider_reference`, so a return
+     * that carries only a `paymentRef` is still reconcilable against the bank.
      */
+    /**
+     * Bound a field-name list before it is logged or persisted. The return endpoint
+     * needs no credential, so both the names and how many there are are chosen by
+     * whoever posts — and they land in a JSON column and the log.
+     *
+     * @param  list<string>  $names
+     * @return list<string>
+     */
+    public static function clampFieldNames(array $names): array
+    {
+        return array_map(
+            static fn (string $n): string => mb_substr($n, 0, 40),
+            array_slice($names, 0, 40),
+        );
+    }
+
     private function providerTxnId(array $fields): ?string
     {
         foreach (['txId', 'transactionId'] as $k) {

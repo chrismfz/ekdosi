@@ -28,6 +28,7 @@ class PaymentGatewayEventsTable
         'settled_without_transaction_id' => 'Καταχωρίστηκε χωρίς κωδικό συναλλαγής',
         'already_settled' => 'Είχε ήδη εξοφληθεί',
         'settle_on_cancelled_intent' => 'Χρέωση σε ΑΚΥΡΩΜΕΝΗ παραγγελία — δεν καταχωρίστηκε',
+        'unverified_non_capture' => 'Ανεπαλήθευτη απάντηση χωρίς χρέωση (ακύρωση ή probe)',
     ];
 
     public static function configure(Table $table): Table
@@ -102,8 +103,11 @@ class PaymentGatewayEventsTable
                         'intent_not_found' => 'Άγνωστη παραγγελία',
                         'ok' => 'Επαληθευμένη υπογραφή',
                     ])
+                    // `where(... -> ...)` not whereJsonContains(): the latter throws
+                    // «does not support JSON contains» on SQLite, which is the test
+                    // connection, so the filter could never be covered by a test.
                     ->query(fn ($query, array $data) => filled($data['value'] ?? null)
-                        ? $query->whereJsonContains('diagnostics->code', $data['value'])
+                        ? $query->where('diagnostics->code', $data['value'])
                         : $query),
             ]);
     }
