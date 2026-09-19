@@ -1,6 +1,14 @@
 @php use App\Support\Money; @endphp
+@php
+    /** @var \App\Support\Pdf\PdfLabels $L */
+    // Defensive default: the renderer passes the customer-resolved $L, but the view
+    // may be rendered directly (previews/tests). This blade has no Customer object
+    // (only $customerName), so fall back to the tenant's default/country — non-fatal,
+    // and the renderer's authoritative $L still wins on the real path.
+    $L = $L ?? \App\Support\Pdf\PdfLabels::for(\App\Support\Pdf\PdfLabels::resolveLanguage($tenant?->default_language, $tenant?->country_code));
+@endphp
 <!DOCTYPE html>
-<html lang="el">
+<html lang="{{ $L->lang() === 'en' ? 'en' : 'el' }}">
 <head>
     <meta charset="utf-8">
     <style>
@@ -29,12 +37,12 @@
             <td>
                 <div class="company">{{ $tenant?->name }}</div>
                 <div class="muted">
-                    @if ($tenant?->afm) ΑΦΜ {{ $tenant->afm }}@endif
-                    @if ($tenant?->tax_office) · ΔΟΥ {{ $tenant->tax_office }}@endif<br>
+                    @if ($tenant?->afm) {{ $L('vat_no') }} {{ $tenant->afm }}@endif
+                    @if ($tenant?->tax_office) · {{ $L('tax_office') }} {{ $tenant->tax_office }}@endif<br>
                     @if ($tenant?->address){{ $tenant->address }}@endif
                     @if ($tenant?->postcode) {{ $tenant->postcode }}@endif
                     @if ($tenant?->city) {{ $tenant->city }}@endif<br>
-                    @if ($tenant?->phone)Τηλ. {{ $tenant->phone }}@endif
+                    @if ($tenant?->phone){{ $L('phone') }}. {{ $tenant->phone }}@endif
                     @if ($tenant?->email) · {{ $tenant->email }}@endif
                 </div>
             </td>
@@ -46,20 +54,20 @@
         </tr>
     </table>
 
-    <h1>ΑΠΟΔΕΙΞΗ ΕΙΣΠΡΑΞΗΣ</h1>
-    <div class="muted">Άτυπο αποδεικτικό — δεν αποτελεί φορολογικό παραστατικό</div>
+    <h1>{{ $L('receipt_title') }}</h1>
+    <div class="muted">{{ $L('receipt_informal') }}</div>
 
     <table class="meta">
-        <tr><td class="k">Πελάτης</td><td>{{ $customerName }}@if ($customerAfm) · ΑΦΜ {{ $customerAfm }}@endif</td></tr>
-        <tr><td class="k">Ημερομηνία</td><td>{{ $date }}</td></tr>
-        @if ($reference)<tr><td class="k">Αριθμός αναφοράς</td><td>{{ $reference }}</td></tr>@endif
-        <tr><td class="k">Κανάλι / τρόπος</td><td>{{ $channel }}</td></tr>
-        @if ($transactionId)<tr><td class="k">Κωδικός συναλλαγής</td><td>{{ $transactionId }}</td></tr>@endif
+        <tr><td class="k">{{ $L('customer') }}</td><td>{{ $customerName }}@if ($customerAfm) · {{ $L('vat_no') }} {{ $customerAfm }}@endif</td></tr>
+        <tr><td class="k">{{ $L('date_full') }}</td><td>{{ $date }}</td></tr>
+        @if ($reference)<tr><td class="k">{{ $L('account_ref') }}</td><td>{{ $reference }}</td></tr>@endif
+        <tr><td class="k">{{ $L('channel_method') }}</td><td>{{ $channel }}</td></tr>
+        @if ($transactionId)<tr><td class="k">{{ $L('transaction_id') }}</td><td>{{ $transactionId }}</td></tr>@endif
     </table>
 
     <table class="lines">
         <thead>
-            <tr><th>Αφορά</th><th class="amt">Ποσό</th></tr>
+            <tr><th>{{ $L('concerns') }}</th><th class="amt">{{ $L('amount_col') }}</th></tr>
         </thead>
         <tbody>
             @foreach ($lines as $line)
@@ -71,11 +79,10 @@
         </tbody>
     </table>
 
-    <div class="total">Σύνολο είσπραξης: {{ Money::eur($total) }}</div>
+    <div class="total">{{ $L('receipt_total') }}: {{ Money::eur($total) }}</div>
 
     <div class="note">
-        Η παρούσα βεβαιώνει την είσπραξη του ανωτέρω ποσού. Δεν υποκαθιστά το φορολογικό
-        παραστατικό (τιμολόγιο/απόδειξη) που εκδίδεται μέσω myDATA.
+        {{ $L('receipt_disclaimer') }}
     </div>
 </body>
 </html>

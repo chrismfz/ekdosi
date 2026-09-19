@@ -1,5 +1,13 @@
+@php
+    /** @var \App\Support\Pdf\PdfLabels $L */
+    // Defensive default: the renderer (DeliveryNotePdf) always passes the frozen $L,
+    // but the view is also rendered directly (tests, previews). Resolve the SAME
+    // frozen language here from the note's snapshotted recipient country so a direct
+    // view() call never breaks on an undefined $L and never diverges from the renderer.
+    $L = $L ?? \App\Support\Pdf\PdfLabels::for(\App\Support\Pdf\PdfLabels::resolveLanguage(null, $note->recipientCountryIso()));
+@endphp
 <!DOCTYPE html>
-<html lang="el">
+<html lang="{{ $L->lang() === 'en' ? 'en' : 'el' }}">
 <head>
     <meta charset="UTF-8">
     <title>{{ $note->invcode }}</title>
@@ -12,8 +20,10 @@
         draft shows the «ΠΡΟΧΕΙΡΟ» banner and no QR.
 
         DomPDF subset of CSS only — no flexbox/grid/calc; table layouts +
-        display:table-cell. Greek labels resolved in the controller/Blade via
-        App\Support\MyData\DeliveryCodes.
+        display:table-cell. Chrome labels localize via $L (PdfLabels); the myDATA
+        code descriptions (σκοπός διακίνησης / τρόπος μεταφοράς / μονάδα μέτρησης)
+        stay Greek — resolved via App\Support\MyData\DeliveryCodes, like the
+        invoice's §8.3 legal citations.
     --}}
     <style>
         /* Compact single-page layout (PDF-COMPACT): mirrors the invoice PDF's
@@ -131,9 +141,9 @@
 
 {{-- ====================== State banner ====================== --}}
 @if($isCancelled)
-    <div class="banner banner-cancelled">ΑΚΥΡΩΘΕΝ ΔΕΛΤΙΟ — Δεν έχει νόμιμη ισχύ</div>
+    <div class="banner banner-cancelled">{{ $L('banner_cancelled_dn') }}</div>
 @elseif(! $isFiled)
-    <div class="banner banner-draft">ΠΡΟΧΕΙΡΟ — ΜΗ ΔΙΑΒΙΒΑΣΜΕΝΟ ΣΤΗ myDATA</div>
+    <div class="banner banner-draft">{{ $L('banner_draft_dn') }}</div>
 @endif
 
 {{-- ====================== Header ====================== --}}
@@ -147,23 +157,23 @@
             @if($tenant->address) {{ $tenant->address }}<br> @endif
             @if($tenant->city || $tenant->postcode){{ $tenant->postcode }} {{ $tenant->city }}<br>@endif
             @if($tenant->afm)
-                ΑΦΜ: {{ $tenant->afm }}@if($tenant->tax_office) · ΔΟΥ {{ $tenant->tax_office }}@endif
+                {{ $L('vat_no') }}: {{ $tenant->afm }}@if($tenant->tax_office) · {{ $L('tax_office') }} {{ $tenant->tax_office }}@endif
                 <br>
             @endif
             {{-- DOC-4: ΓΕΜΗ (ν.4919/2022 αρ.22) + δραστηριότητα — ένα ΔΑ είναι κι αυτό εκδοθέν έγγραφο. --}}
-            @if($tenant->gemi)ΓΕΜΗ: {{ $tenant->gemi }}@if($tenant->kad_primary) · Δραστηριότητα {{ $tenant->kad_primary }}@endif<br>
-            @elseif($tenant->kad_primary)Δραστηριότητα: {{ $tenant->kad_primary }}<br>
+            @if($tenant->gemi){{ $L('gemi') }}: {{ $tenant->gemi }}@if($tenant->kad_primary) · {{ $L('activity') }} {{ $tenant->kad_primary }}@endif<br>
+            @elseif($tenant->kad_primary){{ $L('activity') }}: {{ $tenant->kad_primary }}<br>
             @endif
-            @if($tenant->phone) Τηλ: {{ $tenant->phone }} @endif
+            @if($tenant->phone) {{ $L('phone') }}: {{ $tenant->phone }} @endif
             @if($tenant->email) · {{ $tenant->email }} @endif
         </p>
     </div>
     <div class="hdr-right">
-        <p class="doc-type">@gup('Δελτίο Αποστολής')</p>
+        <p class="doc-type">@gup($L('delivery_note_title'))</p>
         <p class="doc-code">{{ $note->invcode }}</p>
         <p class="doc-date">{{ optional($note->issued_at)->format('d/m/Y H:i') }}</p>
         @if($mydataType)
-            <p class="doc-mydata">Τύπος myDATA: {{ $mydataType }}</p>
+            <p class="doc-mydata">{{ $L('dn_mydata_type') }}: {{ $mydataType }}</p>
         @endif
     </div>
 </div>
@@ -171,26 +181,26 @@
 {{-- ====================== Εκδότης / Παραλήπτης ====================== --}}
 <div class="meta">
     <div class="meta-cell">
-        <h3>@gup('Εκδότης')</h3>
+        <h3>@gup($L('issuer'))</h3>
         <div class="name">{{ $tenant->name ?? '—' }}</div>
         <div class="meta-row">
             @if($tenant->address) {{ $tenant->address }}<br> @endif
             @if($tenant->city || $tenant->postcode){{ $tenant->postcode }} {{ $tenant->city }}<br>@endif
-            @if($tenant->afm)ΑΦΜ: {{ $tenant->afm }}@endif
+            @if($tenant->afm){{ $L('vat_no') }}: {{ $tenant->afm }}@endif
         </div>
     </div>
     <div class="meta-cell">
-        <h3>@gup('Παραλήπτης')</h3>
+        <h3>@gup($L('recipient'))</h3>
         @if($isInternal)
-            <div class="name">Ενδοδιακίνηση</div>
-            <div class="meta-row meta-label">Διακίνηση εντός της επιχείρησης</div>
+            <div class="name">{{ $L('internal_movement') }}</div>
+            <div class="meta-row meta-label">{{ $L('internal_movement_desc') }}</div>
         @else
             <div class="name">{{ $recipientName }}</div>
-            <div class="meta-row">ΑΦΜ: {{ $recipientAfm }}</div>
+            <div class="meta-row">{{ $L('vat_no') }}: {{ $recipientAfm }}</div>
             {{-- MYD-011: the frozen country is part of what was filed — show it for a
                  non-GR recipient so a wrong value is visible on the printed δελτίο. --}}
             @if($recipientIso !== null && $recipientIso !== 'GR')
-                <div class="meta-row">Χώρα: {{ $recipientIso }}</div>
+                <div class="meta-row">{{ $L('country') }}: {{ $recipientIso }}</div>
             @endif
         @endif
     </div>
@@ -198,35 +208,35 @@
 
 {{-- ====================== Στοιχεία διακίνησης ====================== --}}
 <div class="move">
-    <h3>@gup('Στοιχεία Διακίνησης')</h3>
+    <h3>@gup($L('movement_details'))</h3>
     <div class="move-grid">
         <div class="move-col">
             @if($movePurposeLabel)
-                <div class="move-row"><span class="move-label">Σκοπός διακίνησης:</span> {{ $movePurposeLabel }}</div>
+                <div class="move-row"><span class="move-label">{{ $L('movement_purpose') }}:</span> {{ $movePurposeLabel }}</div>
             @endif
             @if($note->loading_street || $note->loading_city || $note->loading_postcode)
-                <div class="move-row"><span class="move-label">Τόπος φόρτωσης:</span>
+                <div class="move-row"><span class="move-label">{{ $L('loading_place') }}:</span>
                     {{ trim(($note->loading_street ?? '').' '.($note->loading_number ?? '')) }}{{ ($note->loading_street || $note->loading_number) && ($note->loading_postcode || $note->loading_city) ? ', ' : '' }}{{ trim(($note->loading_postcode ?? '').' '.($note->loading_city ?? '')) }}
                 </div>
             @endif
             @if($note->delivery_street || $note->delivery_city || $note->delivery_postcode)
-                <div class="move-row"><span class="move-label">Τόπος παράδοσης:</span>
+                <div class="move-row"><span class="move-label">{{ $L('delivery_place') }}:</span>
                     {{ trim(($note->delivery_street ?? '').' '.($note->delivery_number ?? '')) }}{{ ($note->delivery_street || $note->delivery_number) && ($note->delivery_postcode || $note->delivery_city) ? ', ' : '' }}{{ trim(($note->delivery_postcode ?? '').' '.($note->delivery_city ?? '')) }}
                 </div>
             @endif
         </div>
         <div class="move-col">
             @if($transportLabel)
-                <div class="move-row"><span class="move-label">Μεταφορικό μέσο:</span> {{ $transportLabel }}</div>
+                <div class="move-row"><span class="move-label">{{ $L('transport_means') }}:</span> {{ $transportLabel }}</div>
             @endif
             @if($note->vehicle_number)
-                <div class="move-row"><span class="move-label">Όχημα:</span> {{ $note->vehicle_number }}</div>
+                <div class="move-row"><span class="move-label">{{ $L('vehicle') }}:</span> {{ $note->vehicle_number }}</div>
             @endif
             @if($note->carrier_afm)
-                <div class="move-row"><span class="move-label">Μεταφορέας (ΑΦΜ):</span> {{ $note->carrier_afm }}</div>
+                <div class="move-row"><span class="move-label">{{ $L('carrier_vat') }}:</span> {{ $note->carrier_afm }}</div>
             @endif
             @if($note->dispatch_at)
-                <div class="move-row"><span class="move-label">Ημ/ώρα έναρξης:</span> {{ optional($note->dispatch_at)->format('d/m/Y H:i') }}</div>
+                <div class="move-row"><span class="move-label">{{ $L('dispatch_time') }}:</span> {{ optional($note->dispatch_at)->format('d/m/Y H:i') }}</div>
             @endif
         </div>
     </div>
@@ -237,10 +247,10 @@
     <table class="lines">
         <thead>
             <tr>
-                <th class="center" style="width: 8%">@gup('Α/Α')</th>
-                <th style="width: 62%">@gup('Είδος')</th>
-                <th class="num" style="width: 15%">@gup('Ποσότητα')</th>
-                <th class="center" style="width: 15%">@gup('Μονάδα')</th>
+                <th class="center" style="width: 8%">@gup($L('line_no'))</th>
+                <th style="width: 62%">@gup($L('item'))</th>
+                <th class="num" style="width: 15%">@gup($L('quantity'))</th>
+                <th class="center" style="width: 15%">@gup($L('unit_full'))</th>
             </tr>
         </thead>
         <tbody>
@@ -261,7 +271,7 @@
                     <td class="center">{{ $unitLbl }}</td>
                 </tr>
             @empty
-                <tr><td colspan="4" style="text-align:center; color:#9ca3af; font-style:italic">— Καμία γραμμή —</td></tr>
+                <tr><td colspan="4" style="text-align:center; color:#9ca3af; font-style:italic">— {{ $L('no_lines') }} —</td></tr>
             @endforelse
         </tbody>
     </table>
@@ -270,7 +280,7 @@
 {{-- ====================== Παρατηρήσεις ====================== --}}
 @if($note->notes)
     <div class="notes-box">
-        <h3>@gup('Παρατηρήσεις')</h3>
+        <h3>@gup($L('notes'))</h3>
         {!! nl2br(e($note->notes)) !!}
     </div>
 @endif
@@ -285,9 +295,9 @@
             @endif
         </div>
         <div class="mydata-info">
-            <div>Διαβιβάστηκε στη myDATA — επαληθεύστε σαρώνοντας το QR ή στη διεύθυνση:</div>
+            <div>{{ $L('mydata_submitted_verify') }}</div>
             @if($note->mydata_mark)
-                <div class="mark">ΜΑΡΚ: {{ $note->mydata_mark }}</div>
+                <div class="mark">{{ $L('mark_label') }}: {{ $note->mydata_mark }}</div>
             @endif
             {{-- The verification URL is one long token with no spaces (AADE qrUrl or
                  the provider's viewinvoice.php?…). DomPDF won't break it and it
@@ -297,7 +307,7 @@
         </div>
     </div>
 @else
-    <div class="draft-foot">ΠΡΟΧΕΙΡΟ — δεν έχει διαβιβαστεί στη myDATA (χωρίς ΜΑΡΚ/QR)</div>
+    <div class="draft-foot">{{ $L('draft_no_mydata') }}</div>
 @endif
 
 {{-- ====================== Ιστορικό (διακίνηση + υποβολές myDATA) ====================== --}}
@@ -305,17 +315,17 @@
 @php($histMarks = $marks ?? collect())
 @if($histEvents->isNotEmpty() || $histMarks->isNotEmpty())
     <div class="history">
-        <h3>@gup('Ιστορικό')</h3>
+        <h3>@gup($L('history'))</h3>
 
         @if($histEvents->isNotEmpty())
-            <div class="hist-sub">Διακίνηση</div>
+            <div class="hist-sub">{{ $L('movement') }}</div>
             <table class="hist">
                 <thead>
                     <tr>
-                        <th style="width:24%">Ημ/νία</th>
-                        <th style="width:26%">Γεγονός</th>
-                        <th style="width:34%">Λεπτομέρειες</th>
-                        <th style="width:16%">Από</th>
+                        <th style="width:24%">{{ $L('date') }}</th>
+                        <th style="width:26%">{{ $L('event') }}</th>
+                        <th style="width:34%">{{ $L('details') }}</th>
+                        <th style="width:16%">{{ $L('from_actor') }}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -332,13 +342,13 @@
         @endif
 
         @if($histMarks->isNotEmpty())
-            <div class="hist-sub">Υποβολές myDATA</div>
+            <div class="hist-sub">{{ $L('mydata_submissions') }}</div>
             <table class="hist">
                 <thead>
                     <tr>
-                        <th style="width:24%">Ημ/νία</th>
-                        <th style="width:26%">Ενέργεια</th>
-                        <th style="width:50%">ΜΑΡΚ</th>
+                        <th style="width:24%">{{ $L('date') }}</th>
+                        <th style="width:26%">{{ $L('action') }}</th>
+                        <th style="width:50%">{{ $L('mark_label') }}</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -351,7 +361,7 @@
                                  column. Show both so the printed audit still proves WHICH
                                  cancellation produced the terminal state — the provider path
                                  used to display the cancellation MARK here instead. --}}
-                            <td class="mono">{{ $m->mark ?: '—' }}@if($m->cancellation_mark)<br>ακύρωση: {{ $m->cancellation_mark }}@endif</td>
+                            <td class="mono">{{ $m->mark ?: '—' }}@if($m->cancellation_mark)<br>{{ $L('cancellation') }}: {{ $m->cancellation_mark }}@endif</td>
                         </tr>
                     @endforeach
                 </tbody>

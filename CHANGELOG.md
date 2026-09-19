@@ -19,6 +19,17 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **i18n bilingual — PDF completion (statement / receipt / delivery-note).** Τα υπόλοιπα
+  customer-facing PDF περνούν πλέον από το `App\Support\Pdf\PdfLabels` (el/en/**both** «EL / EN»),
+  όπως ήδη invoice + quote: **Καρτέλα** (`CustomerStatementPdfRenderer`) + **Απόδειξη Είσπραξης**
+  (`PaymentReceiptRenderer`) ακολουθούν τη **ζωντανή** γλώσσα του πελάτη (`CustomerLanguage::forCustomer`
+  — regenerated documents)· το **Δελτίο Αποστολής** (`DeliveryNotePdf`) είναι **FROZEN** στη
+  snapshotted χώρα παραλήπτη (`recipient_country`, ίδιος κανόνας με το τιμολόγιο) + localized pager.
+  Νέα PdfLabels slugs (el byte-verbatim)· ο ΔΑ blade έχει defensive `$L` default (frozen από το note)
+  για direct `view()` (tests/previews). Τα myDATA code labels (σκοπός/τρόπος/μονάδα διακίνησης) +
+  τα audit-trail event labels μένουν ελληνικά (data/legal, όπως οι §8.3 exemption citations). Το
+  **CMR** μένει σκόπιμα **αγγλικό** (διεθνής standard 24-box φόρμα — το διαβάζουν ξένοι
+  μεταφορείς/τελωνεία, ποτέ Greek-only). Test: `tests/Feature/I18n/PdfLocaleTest`.
 - **i18n bilingual — Emails στη γλώσσα του πελάτη (el/en).** Τα customer-facing emails ρίχνουν πλέον
   τη γλώσσα του **παραλήπτη**, όχι σταθερά ελληνικά: κάθε dispatcher κάνει `->locale(...)` το Mailable
   μέσω του `CustomerLanguage` (`forDocumentMail` για invoice/quote — recipient-tracking, both→en·

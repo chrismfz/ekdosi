@@ -3,7 +3,9 @@
 namespace App\Services\CustomerLedger;
 
 use App\Models\Customer;
+use App\Support\CustomerLanguage;
 use App\Support\Filename;
+use App\Support\Pdf\PdfLabels;
 use Barryvdh\DomPDF\Facade\Pdf;
 
 /**
@@ -38,6 +40,12 @@ class CustomerStatementPdfRenderer
                 // Chronological (old→new) — a printed statement reads top→bottom.
                 'ledger' => $result->chronologicalLedger(),
                 'generatedAt' => now(),
+                // i18n: a statement is a LIVE document (regenerated on demand, not a
+                // frozen legal snapshot), so it follows the customer's current
+                // communication language (el/en/both). Unlike the statement EMAIL — a
+                // single-language body that collapses 'both' to English (forCustomerMail)
+                // — the PDF can stay bilingual, like the invoice/quote PDFs.
+                'L' => PdfLabels::for(CustomerLanguage::forCustomer($customer)),
             ])
                 ->setPaper('a4', 'portrait')
                 ->output();
