@@ -9,6 +9,7 @@ use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
+use App\Models\Scopes\CompanyScope;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
@@ -104,6 +105,96 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
+     * Is this a «προτιμολόγιο» — a draft the operator has finalised and offered to
+     * the customer? Still a draft in every sense that matters (no ΑΑ, no myDATA, not
+     * in any money total); the flag only means «this is the final proposal, the
+     * customer may act on it», which also locks it against further editing.
+     */
+    public function isOffered(): bool
+    {
+        return $this->local_status === 'draft' && $this->offered_at !== null;
+    }
+
+    /**
+     * May the LOGGED-IN CUSTOMER see this document in the portal?
+     *
+     * Deliberately separate from {@see isPubliclyViewable()}, which stays the
+     * allow-list for legal documents and is shared by the signed public PDF route,
+     * the WHMCS PDF proxy, the issued-for-client list and the invoice e-mail.
+     * Widening THAT would push proformas into channels that promise a «παραστατικό
+     * ΑΑΔΕ» — so the portal gets its own, wider predicate instead.
+     *
+     * A proforma shown here must be labelled as one wherever it is rendered: it is
+     * not a tax document and must never be mistaken for one.
+     */
+    public function isCustomerVisible(): bool
+    {
+        return $this->isPubliclyViewable() || $this->isOffered();
+    }
+
+    /**
+     * Does this document already hold customer money?
+     *
+     * Before the προτιμολόγιο a draft could never carry payments, so the draft
+     * lifecycle (free editing, delete) assumed there was nothing to protect. A paid
+     * proforma breaks that assumption: reassigning it to another customer would move
+     * A's money onto B's document, and deleting it would leave the Payment rows
+     * pointing at a soft-deleted invoice — money reducing a balance with no document
+     * to explain it.
+     */
+    public function hasRecordedPayments(): bool
+    {
+        return $this->payments()->exists();
+    }
+
+    /**
+     * Captures still in flight for THIS document. Withdrawing an offer (or issuing)
+     * re-checks the settle target, so a pending intent would silently fall back to
+     * FIFO and pay something else — the operator should be told before, not after.
+     */
+    public function pendingPaymentIntentsCount(): int
+    {
+        return PaymentIntent::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $this->company_id)
+            ->where('invoice_id', $this->getKey())
+            ->where('status', PaymentIntent::STATUS_PENDING)
+            ->count();
+    }
+
+    /**
+     * An UNISSUED SALE draft — the PHP twin of
+     * {@see InvoiceScope::onlyUnissuedDrafts()}: a local draft, new-app
+     * (no `legacy_id`) and not a credit note.
+     *
+     * This is exactly the set the SQL money surfaces drop via excludeUnissuedDrafts().
+     * InvoiceBalance keys its cash-term carve-out on it so the two can never disagree:
+     * a broader rule (every draft) would also catch unfiled credit-note drafts, which
+     * the SQL surfaces DO count — and the cached badge would then report a receivable
+     * that the dashboard and the ledger both say is nothing.
+     */
+    public function isUnissuedSaleDraft(): bool
+    {
+        return $this->local_status === 'draft'
+            && $this->legacy_id === null
+            && $this->credited_invoice_id === null
+            && ! ($this->invoiceType?->is_credit ?? false);
+    }
+
+    /**
+     * May the customer settle this document (pay it, or point existing credit at
+     * it)? Both a live issued invoice and an offered proforma qualify — the point
+     * of the proforma is that money can land on it BEFORE it becomes a legal
+     * document, so a service the customer drops never has to be issued and then
+     * cancelled.
+     */
+    public function isCustomerPayable(): bool
+    {
+        return $this->mydata_state !== 'CANCELLED'
+            && ($this->local_status === 'active' || $this->isOffered());
+    }
+
+    /**
      * Audited columns — lifecycle + money figures + the myDATA state mirror, but
      * NOT the money cache (paid_total / credited_total / payment_status), which
      * InvoiceBalance rewrites on every payment recompute. See TracksActivity.
@@ -113,6 +204,9 @@ class Invoice extends Model implements MovableDocument
     protected function loggedAttributes(): array
     {
         return [
+            // Offering/withdrawing locks editing, exposes the document in the
+            // portal and makes it payable — «Ιστορικό» must show who did it and when.
+            'offered_at',
             'code', 'customer_id', 'invoice_type_id', 'issued_at', 'local_status',
             'cancel_reason', 'header_discount_percent', 'net_total', 'gross_total',
             'withhold_amount', 'withhold_category', 'payment_method_id',
@@ -171,6 +265,7 @@ class Invoice extends Model implements MovableDocument
         'whmcs_pending_id',
         'service_contract_id',
         'local_status',
+        'offered_at',
         'cancel_reason',
         'delivery_date',
         'header_discount_percent',
@@ -236,6 +331,7 @@ class Invoice extends Model implements MovableDocument
     {
         return [
             'issued_at' => 'datetime',
+            'offered_at' => 'datetime',
             // Combined ΤΔΑ (Slice 3a/3b)
             'is_delivery_note' => 'boolean',
             'without_digital_transport_tracking' => 'boolean',

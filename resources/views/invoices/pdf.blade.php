@@ -183,7 +183,9 @@
         {{ $L('banner_cancelled') }}@if($bannerState['note'] === 'cancel_pending_mydata')<br><span style="font-size:8.5pt; font-weight:400">{{ $L('banner_cancel_pending_mydata') }}</span>@endif
     </div>
 @elseif($bannerState['kind'] === 'draft')
-    <div class="banner banner-draft">{{ $L('banner_draft') }}</div>
+    {{-- An offered προτιμολόγιο is a draft the CUSTOMER is holding, so it names
+         itself rather than saying «πρόχειρο». Same banner, same bilingual path. --}}
+    <div class="banner banner-draft">{{ $L($invoice->offered_at !== null ? 'banner_proforma' : 'banner_draft') }}</div>
 @elseif($bannerState['kind'] === 'pending_mydata')
     <div class="banner banner-draft">{{ $L('banner_pending_mydata') }}</div>
 @elseif($isCredit)

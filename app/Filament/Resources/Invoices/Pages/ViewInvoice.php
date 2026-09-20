@@ -183,6 +183,73 @@ class ViewInvoice extends ViewRecord
                 }),
 
             // --- Local lifecycle: Πρόχειρο → Ενεργό → Ακυρωμένο.
+            /*
+             * «Προσφορά στον πελάτη» — turn a draft into a προτιμολόγιο: locked
+             * against further editing, visible in the portal, and payable there
+             * (or settleable from the customer's existing credit).
+             *
+             * It stays a DRAFT: no ΑΑ, no myDATA, outside every money total. That is
+             * the point. Recurring-service renewals are staged as drafts
+             * (StageServiceRenewal); issuing them unilaterally and then cancelling
+             * the ones the customer dropped would produce a stream of ΑΚΥ/πιστωτικά,
+             * which is exactly the pattern that draws AADE attention. Letting the
+             * customer settle the proforma first means those cancellations never
+             * need to exist — the document is issued only once the money is there.
+             */
+            Action::make('offer_to_customer')
+                ->label('Προσφορά στον πελάτη')
+                ->icon('heroicon-o-paper-airplane')
+                ->color('info')
+                // Not for a πιστωτικό (you don't ask a customer to settle a credit
+                // note) nor for a customer-less retail slip (nobody to offer it to).
+                ->visible(fn (Invoice $record): bool => $record->local_status === 'draft'
+                    && ! $record->isOffered()
+                    && $record->customer_id !== null
+                    && $record->credited_invoice_id === null
+                    && ! ($record->invoiceType?->is_credit ?? false))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Προσφορά στον πελάτη (προτιμολόγιο)')
+                ->modalDescription('Κλειδώνει για επεξεργασία και γίνεται ορατό στην πύλη, ώστε ο πελάτης να μπορεί να το πληρώσει ή να χρησιμοποιήσει την πίστωσή του. ΔΕΝ εκδίδεται: δεν παίρνει ΑΑ και δεν πάει στο myDATA.')
+                ->action(function (Invoice $record) {
+                    $record->forceFill(['offered_at' => now()])->save();
+
+                    Notification::make()->success()
+                        ->title('Το παραστατικό προσφέρθηκε στον πελάτη')
+                        ->body('Ο πελάτης το βλέπει πλέον στην πύλη και μπορεί να το εξοφλήσει.')
+                        ->send();
+                }),
+
+            // Back to an editable draft. The customer stops seeing it immediately;
+            // any money already settled against it stays attached to the document
+            // (it is the same row), so nothing has to be unwound.
+            Action::make('withdraw_offer')
+                ->label('Ανάκληση προσφοράς')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('gray')
+                ->visible(fn (Invoice $record): bool => $record->isOffered())
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Ανάκληση προσφοράς')
+                ->modalDescription(function (Invoice $record): string {
+                    if ($record->hasRecordedPayments()) {
+                        return 'ΠΡΟΣΟΧΗ: το παραστατικό έχει ήδη εισπράξεις. Η ανάκληση θα το ξανακάνει επεξεργάσιμο — ΜΗΝ αλλάξεις πελάτη και μην το διαγράψεις όσο κρατά χρήματα τρίτου.';
+                    }
+                    // A capture already on its way to the acquirer can no longer land
+                    // here: settle() re-checks the target and falls back to FIFO, so
+                    // the money would quietly pay other invoices instead of this one.
+                    if ($record->pendingPaymentIntentsCount() > 0) {
+                        return 'ΠΡΟΣΟΧΗ: υπάρχει πληρωμή σε εξέλιξη για αυτό το παραστατικό. Αν ανακληθεί τώρα, τα χρήματα όταν έρθουν ΔΕΝ θα δεθούν εδώ — θα πάνε σε άλλα ανοιχτά παραστατικά ή στο υπόλοιπο του πελάτη.';
+                    }
+
+                    return 'Επιστρέφει σε επεξεργάσιμο πρόχειρο και παύει να είναι ορατό στον πελάτη.';
+                })
+                ->action(function (Invoice $record) {
+                    $record->forceFill(['offered_at' => null])->save();
+
+                    Notification::make()->success()->title('Η προσφορά ανακλήθηκε')->send();
+                }),
+
             // Independent of myDATA (the AADE truth). Reviving an
             // AADE-cancelled invoice is blocked (terminal there).
             Action::make('finalize')
@@ -253,7 +320,11 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->action(function (Invoice $record) {
-                    $record->update(['local_status' => 'draft']);
+                    // Clear any stale offer along with the status. Otherwise a
+                    // document that was offered → issued → reverted comes back as an
+                    // OFFERED draft: instantly visible and payable in the portal
+                    // again, and locked against the very edit it was reverted for.
+                    $record->update(['local_status' => 'draft', 'offered_at' => null]);
                     Notification::make()->title('Επαναφορά σε πρόχειρο')->success()->send();
                     $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),
@@ -327,6 +398,11 @@ class ViewInvoice extends ViewRecord
                 ->action(function (Invoice $record) {
                     $record->update([
                         'local_status' => $record->mydata_state === 'VALID' ? 'active' : 'draft',
+                        // Same stale-offer trap as revert_to_draft: without this a
+                        // cancelled-then-revived proforma comes back OFFERED — visible
+                        // and payable in the portal again with no operator decision,
+                        // and locked against the edit the revive was for.
+                        'offered_at' => null,
                         'cancel_reason' => null,
                     ]);
                     Notification::make()->title('Επαναφέρθηκε')->success()->send();

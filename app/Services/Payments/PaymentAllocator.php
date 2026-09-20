@@ -187,8 +187,8 @@ class PaymentAllocator
                 ->withoutGlobalScope(CompanyScope::class)
                 ->where('company_id', $customer->company_id)
                 ->where('customer_id', $customer->id)
-                ->where('local_status', 'active')
                 ->whereKey($invoice->id);
+            InvoiceScope::customerSettleable($target);
             InvoiceScope::excludeCreditNotes($target);
             $target = $target->first();
 

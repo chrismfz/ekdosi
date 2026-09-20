@@ -105,6 +105,7 @@ class CustomerLedgerFeed
             'payment' => 'Πληρωμή',
             'refund' => 'Επιστροφή χρημάτων',
             'credit' => 'Πιστωτικό',
+            'proforma' => 'Προτιμολόγιο',
             default => 'Παραστατικό',
         };
     }
@@ -115,6 +116,12 @@ class CustomerLedgerFeed
      */
     private function kind(array $e): string
     {
+        // A προτιμολόγιο is kept on the statement once it carries money, but it is
+        // NOT a tax document — it gets its own badge rather than reading as one.
+        if (($e['is_proforma'] ?? false) === true) {
+            return 'proforma';
+        }
+
         return match ($e['type']) {
             'refund' => 'refund',
             'payment' => 'payment',

@@ -142,7 +142,10 @@ class DashboardMetrics
         // MON-5: an unissued sale draft is not a receivable yet (credit-note drafts,
         // which reduce, are kept via the helper's carve-out). Mirror in
         // Customer::scopeWithOutstandingBalance so headline == Σ per-customer.
-        InvoiceScope::excludeUnissuedDrafts($base);
+        // The paid-proforma exception is the same money-trail rule as the cash-term
+        // one above: once it carries a payment the charge must be counted so the two
+        // net to zero instead of showing a negative receivable.
+        InvoiceScope::excludeUnpaidUnissuedDrafts($base);
 
         // Receivable base = payable_total (collectible) per row, gross_total fallback
         // for not-yet-backfilled rows. Revenue/turnover sums elsewhere stay on gross_total.
@@ -246,6 +249,41 @@ class DashboardMetrics
             'net' => round((float) ($row->net ?? 0), 2),
             'gross' => round((float) ($row->gross ?? 0), 2),
         ];
+    }
+
+    /**
+     * «Προτιμολόγια» pipeline: the OFFERED drafts — documents the customer is
+     * currently being asked to settle — split by whether the money has arrived.
+     *
+     * An offered προτιμολόγιο is deliberately invisible to «Απαιτήσεις» while it is
+     * unpaid (nothing is owed yet — either side may still call the service off), so
+     * without this figure a tenant has no way to see that 2, 3 or 10 of them are
+     * sitting out there waiting. Paid ones matter for the opposite reason: they are
+     * the queue of documents that still need ISSUING.
+     *
+     * @return array{unpaid_count:int, unpaid_gross:float, paid_count:int, paid_gross:float}
+     */
+    public function proformaPipeline(): array
+    {
+        $rows = DB::table('invoices')
+            ->where('invoices.company_id', $this->tenant->id)
+            ->whereNull('invoices.deleted_at')
+            ->where('invoices.local_status', 'draft')
+            ->whereNotNull('invoices.offered_at')
+            ->selectRaw('EXISTS (SELECT 1 FROM payments WHERE payments.invoice_id = invoices.id'
+                .' AND payments.deleted_at IS NULL) AS is_paid')
+            ->selectRaw('COUNT(*) cnt, COALESCE(SUM(COALESCE(invoices.payable_total, invoices.gross_total)), 0) gross')
+            ->groupBy('is_paid')
+            ->get();
+
+        $out = ['unpaid_count' => 0, 'unpaid_gross' => 0.0, 'paid_count' => 0, 'paid_gross' => 0.0];
+        foreach ($rows as $row) {
+            $key = ((int) $row->is_paid) === 1 ? 'paid' : 'unpaid';
+            $out[$key.'_count'] = (int) $row->cnt;
+            $out[$key.'_gross'] = round((float) $row->gross, 2);
+        }
+
+        return $out;
     }
 
     /**

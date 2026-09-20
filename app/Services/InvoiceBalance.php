@@ -95,7 +95,23 @@ class InvoiceBalance
         // payments it stays the synthetic settled-at-issue default, so the
         // ~6.7k imported invoices (whose legacy payments are on-account) are
         // unchanged.
-        if ($this->isCashTerm($invoice) && ! $this->hasRecordedPayments($invoice, $locking)) {
+        // …and it does not apply to a DRAFT. A draft — in particular an offered
+        // «προτιμολόγιο» — has no issue to be settled at, so synthesising payment
+        // for it would both misreport it as paid (the thing that made a
+        // paid-looking, unpaid proforma so confusing) and make it impossible to
+        // point credit at it: applyCredit() caps on this balance and would see zero.
+        //
+        // Keyed on isUnissuedSaleDraft(), NOT on «is a draft»: the carve-out must
+        // cover exactly the rows the SQL money surfaces drop (excludeUnissuedDrafts).
+        // A broader rule also caught unfiled CREDIT-NOTE drafts — which those surfaces
+        // DO count — so the cached badge reported a €X receivable while the dashboard
+        // and the ledger both reported nothing: the «τρία διαφορετικά υπόλοιπα»
+        // divergence this money model exists to prevent. A CANCELLED cash-term invoice
+        // likewise keeps its synthetic settlement, so voiding cannot conjure a
+        // phantom receivable.
+        if (! $invoice->isUnissuedSaleDraft()
+            && $this->isCashTerm($invoice)
+            && ! $this->hasRecordedPayments($invoice, $locking)) {
             return new InvoiceBalanceData(
                 gross: $gross, credited: $credited, paid: $owed,
                 owed: $owed, balance: 0.0,

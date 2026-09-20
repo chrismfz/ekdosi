@@ -214,6 +214,36 @@ class InvoicesTable
                     ->toggle()
                     ->query(fn (Builder $query) => $query->overdue()),
 
+                // «Προτιμολόγια»: offered drafts, split by whether the money has
+                // arrived. They are invisible to «Απαιτήσεις» by design (an unpaid
+                // proforma owes nothing yet), so this is how an operator finds them —
+                // and the paid ones are the queue still waiting to be ISSUED.
+                SelectFilter::make('proforma')
+                    ->label('Προτιμολόγια')
+                    ->options([
+                        'all' => 'Όλα τα προτιμολόγια',
+                        'unpaid' => 'Απλήρωτα',
+                        'paid' => 'Πληρωμένα (προς έκδοση)',
+                    ])
+                    ->query(function ($query, array $data) {
+                        if (blank($data['value'] ?? null)) {
+                            return $query;
+                        }
+
+                        $query->where('invoices.local_status', 'draft')
+                            ->whereNotNull('invoices.offered_at');
+
+                        $hasPayment = fn ($q) => $q->from('payments')
+                            ->whereColumn('payments.invoice_id', 'invoices.id')
+                            ->whereNull('payments.deleted_at');
+
+                        return match ($data['value']) {
+                            'paid' => $query->whereExists($hasPayment),
+                            'unpaid' => $query->whereNotExists($hasPayment),
+                            default => $query,
+                        };
+                    }),
+
                 SelectFilter::make('local_status')
                     ->label('Κατάσταση')
                     ->options(collect(LocalStatus::cases())

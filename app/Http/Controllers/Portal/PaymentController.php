@@ -9,10 +9,12 @@ use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
+use App\Services\Payments\PaymentAllocator;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Services\Payments\PaymentIntentService;
 use App\Services\Portal\CustomerDocumentFeed;
 use App\Support\InvoiceScope;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -53,6 +55,10 @@ class PaymentController extends Controller
             'owed' => $owed,
             'openInvoices' => $openInvoices,
             'preselectedInvoiceId' => $preselected?->id,
+            // Money the customer already has with us (overpayment, unapplied credit
+            // note, on-account gateway payment). Surfaced so it stops being a number
+            // they can see but not use.
+            'availableCredit' => app(PaymentAllocator::class)->availableCredit($model),
         ]);
     }
 
@@ -98,6 +104,87 @@ class PaymentController extends Controller
         }
 
         return redirect()->route('portal.payment.show', $result['intent']->id);
+    }
+
+    /**
+     * «Χρήση πίστωσης»: move on-account credit onto one of the customer's own
+     * documents — an issued invoice or an offered προτιμολόγιο.
+     *
+     * This creates NO money: PaymentAllocator::applyCredit re-points payments the
+     * customer has already made, so their total balance is unchanged and the
+     * operator's confirmation adds nothing. The guards that matter are ownership
+     * (grant-scoped customer, and a target drawn from their own payable set) and
+     * the allocator's own caps (never more than the credit, never more than the
+     * document's balance).
+     */
+    public function applyCredit(Request $request, int $customer): RedirectResponse
+    {
+        $model = $this->resolveCustomer($customer);
+
+        $data = $request->validate([
+            // Several documents at once («αυτό, εκείνο και το άλλο»): the customer
+            // has one pot of credit and usually wants it gone, not parcelled out by
+            // hand. A single `invoice_id` is still accepted so a «pay this one»
+            // deep-link keeps working.
+            'invoice_ids' => ['nullable', 'array'],
+            'invoice_ids.*' => ['integer'],
+            'invoice_id' => ['nullable', 'integer'],
+        ]);
+
+        $ids = array_map('intval', $data['invoice_ids'] ?? []);
+        if ($ids === [] && filled($data['invoice_id'] ?? null)) {
+            $ids = [(int) $data['invoice_id']];
+        }
+        if ($ids === []) {
+            return back()->withErrors(['invoice_ids' => __('portal.payment.credit_pick_one')]);
+        }
+
+        // Never trust the ids: keep only THIS customer's payable documents, in the
+        // page's own order (oldest first) so the outcome matches what was shown.
+        $targets = $this->payableInvoices($model)
+            ->filter(fn ($inv): bool => in_array((int) $inv->id, $ids, true))
+            ->values();
+        if ($targets->isEmpty()) {
+            abort(Response::HTTP_NOT_FOUND);
+        }
+
+        $allocator = app(PaymentAllocator::class);
+        $applied = 0.0;
+        $touched = [];
+
+        foreach ($targets as $invoice) {
+            // Re-read the pot each round: the previous iteration spent some of it.
+            $remaining = $allocator->availableCredit($model);
+            if ($remaining <= 0.005) {
+                break;
+            }
+
+            try {
+                // The allocator caps at min(asked, document balance, credit), so
+                // asking for the whole remaining pot settles as much of this
+                // document as it can and leaves the rest for the next one.
+                $part = $allocator->applyCredit($model, $invoice, $remaining);
+            } catch (\InvalidArgumentException) {
+                // Nothing left to settle on this one (paid in the meantime) — skip it
+                // rather than abandoning the documents the customer also chose.
+                continue;
+            }
+
+            if ($part > 0.005) {
+                $applied = round($applied + $part, 2);
+                $touched[] = (string) $invoice->invcode;
+            }
+        }
+
+        if ($touched === []) {
+            return back()->withErrors(['invoice_ids' => __('portal.payment.credit_nothing_applied')]);
+        }
+
+        return redirect()->route('portal.statement')
+            ->with('status', __('portal.payment.credit_applied', [
+                'amount' => Money::eur($applied),
+                'document' => implode(', ', $touched),
+            ]));
     }
 
     /**
@@ -210,9 +297,10 @@ class PaymentController extends Controller
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $customer->company_id)
             ->where('customer_id', $customer->id)
-            ->where('local_status', 'active')
             ->orderBy('issued_at')
             ->orderBy('id');
+        // Issued invoice OR offered προτιμολόγιο — the one shared definition.
+        InvoiceScope::customerSettleable($q);
         InvoiceScope::excludeCreditNotes($q);
 
         return $q->get()

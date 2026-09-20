@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Invoice;
+
 /**
  * The single definition of a "live" invoice for money/reporting purposes:
  * NOT cancelled locally AND NOT cancelled at myDATA. Centralised so the
@@ -20,6 +22,35 @@ namespace App\Support;
  */
 class InvoiceScope
 {
+    /**
+     * Documents the CUSTOMER may settle: issued (`local_status=active`) or an
+     * offered «προτιμολόγιο» (a draft the operator finalised and put in front of
+     * them). The SQL twin of {@see Invoice::isCustomerPayable()}.
+     *
+     * THE single definition. It was originally re-typed at each call site, and the
+     * one copy that got missed — PaymentAllocator::allocateToInvoice() — threw on a
+     * proforma, rolling back the whole settle transaction: the bank had taken the
+     * money and we wrote no Payment, no intent transition and no «Log πύλης» row.
+     * Every site that decides «may money land here» now shares this one predicate,
+     * so the next widening cannot miss one.
+     */
+    public static function customerSettleable($query, string $prefix = '')
+    {
+        $local = $prefix.'local_status';
+        $offered = $prefix.'offered_at';
+
+        return $query
+            // Carried here, not left to the call sites: this helper exists precisely
+            // to stop «one site missed part of the predicate» drift, and its PHP twin
+            // refuses an AADE-cancelled document. A future site using the helper alone
+            // would otherwise let money land on a voided invoice.
+            ->where(fn ($q) => $q->whereNull($prefix.'mydata_state')
+                ->orWhere($prefix.'mydata_state', '!=', 'CANCELLED'))
+            ->where(fn ($q) => $q
+                ->where($local, 'active')
+                ->orWhere(fn ($o) => $o->where($local, 'draft')->whereNotNull($offered)));
+    }
+
     public static function live($query, string $prefix = '')
     {
         $state = $prefix.'mydata_state';
@@ -108,6 +139,42 @@ class InvoiceScope
             ->orWhereExists(fn ($sub) => $sub->from('invoice_types')
                 ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
                 ->where('invoice_types.is_credit', true)));
+    }
+
+    /**
+     * The BALANCE-surface variant of {@see excludeUnissuedDrafts()}: drop unissued
+     * sale drafts EXCEPT the ones that already carry money.
+     *
+     * An offered προτιμολόγιο is not a receivable — the service can still be called
+     * off by either side, so nothing is owed yet and it must not inflate «Απαιτήσεις».
+     * But the moment the customer PAYS it, the payment is counted by every balance
+     * surface while the charge was not, which drove the customer's balance and the
+     * tenant receivables NEGATIVE by the paid amount: the portal told the customer
+     * they held credit that availableCredit() then refused to spend. Debit and credit
+     * have to move together.
+     *
+     * This is the SAME money-trail exception the cash-term rule already uses («plus
+     * any cash-term invoice that carries a recorded payment — it then nets to zero
+     * against its payment»), applied to the other kind of not-yet-owed document.
+     *
+     * Use this on BALANCE surfaces only (receivables, Καρτέλα, customer balance).
+     * Revenue/turnover/VAT keep plain excludeUnissuedDrafts(): a paid proforma is
+     * still not issued revenue.
+     */
+    public static function excludeUnpaidUnissuedDrafts($query)
+    {
+        return $query->where(fn ($q) => $q
+            ->where('invoices.local_status', '!=', 'draft')
+            ->orWhereNotNull('invoices.legacy_id')
+            ->orWhereNotNull('invoices.credited_invoice_id')
+            ->orWhereExists(fn ($sub) => $sub->from('invoice_types')
+                ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
+                ->where('invoice_types.is_credit', true))
+            // …and the money-trail exception: it carries a payment, so the charge
+            // must be counted for that payment to net against something.
+            ->orWhereExists(fn ($sub) => $sub->from('payments')
+                ->whereColumn('payments.invoice_id', 'invoices.id')
+                ->whereNull('payments.deleted_at')));
     }
 
     /**

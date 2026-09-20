@@ -110,22 +110,17 @@ class EurobankReturnController
             // T1: forged / mis-signed return — never a side effect.
             $this->reject($request, 'digest_verification_failed', ['intent' => $intent->id], intent: $intent, outcome: $outcome);
 
-            // A verification failure is EITHER an attack OR the acquirer changing a
-            // field we don't know (see EurobankGateway::RETURN_FIELD_ORDER) — and in
-            // the second case every capture is now bouncing. It must not stay silent
-            // just because the outcome could not be verified.
-            //
-            // Only for a return that CLAIMS a capture, though: the `cancelUrl` leg
-            // posts a different field set, so a customer clicking «Άκυρο» would
-            // otherwise raise a «no payment is being recorded» alarm when nothing is
-            // wrong. The raw status is untrusted — fine here, it only gates an alert,
-            // never a money decision. Company-wide cooldown so a sprayer can't flood.
-            if ($this->claimsCapture($request)) {
-                $this->alertOperators($intent, 'digest_verification_failed',
-                    'Απορρίφθηκε επιτυχημένη χρέωση: η υπογραφή (digest) δεν επαληθεύτηκε. '
-                    .'Αν επαναλαμβάνεται, ΚΑΜΙΑ πληρωμή δεν καταχωρείται — έλεγξε το «Log πύλης» '
-                    .'και τα πεδία που στέλνει η τράπεζα.', perCompany: true);
-            }
+            // Reaching here means the body DID claim a capture — the branch above
+            // already returned for an unverified non-capture (the `cancelUrl` leg,
+            // which posts a different field set and must not raise an alarm). So a
+            // failure here is either an attack or the acquirer changing a field we
+            // don't know (see EurobankGateway::RETURN_FIELD_ORDER), and in the second
+            // case EVERY capture is now bouncing. Company-wide cooldown so a sprayer
+            // can't turn it into a flood.
+            $this->alertOperators($intent, 'digest_verification_failed',
+                'Απορρίφθηκε επιτυχημένη χρέωση: η υπογραφή (digest) δεν επαληθεύτηκε. '
+                .'Αν επαναλαμβάνεται, ΚΑΜΙΑ πληρωμή δεν καταχωρείται — έλεγξε το «Log πύλης» '
+                .'και τα πεδία που στέλνει η τράπεζα.', perCompany: true);
 
             return $this->back($intent);
         }
@@ -313,6 +308,12 @@ class EurobankReturnController
             ->first();
     }
 
+    /** Fit an untrusted value to its column, keeping the row writable. */
+    private static function clamp(?string $value, int $max): ?string
+    {
+        return $value === null ? null : mb_substr($value, 0, $max);
+    }
+
     /**
      * Does this body CLAIM a successful capture? Reads the raw posted `status`, so
      * it is untrusted by construction — it may only gate alerting, never money.
@@ -477,20 +478,35 @@ class EurobankReturnController
             parse_str($request->getContent(), $body);
             $rawStatus = filled($body['status'] ?? null) ? (string) $body['status'] : $providerOutcome?->status;
 
+            // Every value below is chosen by whoever POSTed, and the columns are
+            // narrow (varchar 40/8/64, decimal(14,2)). On MariaDB in strict mode an
+            // over-long value makes create() throw, the catch swallows it, and NO
+            // «Log πύλης» row is written — letting anyone who can reach this
+            // unauthenticated endpoint erase their own audit trail. Clamp to the
+            // column widths so the row is always written, truncated at worst.
+            // (SQLite ignores varchar lengths, so only clamping in PHP is testable.)
+            $orderIdValue = $orderId ?? ($intent?->id !== null ? (string) $intent->id : null);
+            $amount = $providerOutcome?->amount;
+            $amount = $amount !== null && abs($amount) < 1.0e10 ? $amount : null;
+
             PaymentGatewayEvent::create([
                 'company_id' => $intent?->company_id,
                 'payment_intent_id' => $intent?->id,
                 'gateway' => 'eurobank',
-                'order_id' => $orderId ?? ($intent?->id !== null ? (string) $intent->id : null),
+                'order_id' => self::clamp($orderIdValue, 64),
                 'outcome' => $outcome,
                 'reason' => $reason,
                 'verified' => (bool) ($providerOutcome?->verified ?? false),
-                'provider_status' => $rawStatus,
-                'transaction_id' => $providerOutcome?->providerTxnId,
-                'amount' => $providerOutcome?->amount,
-                'currency' => $providerOutcome?->currency,
+                'provider_status' => self::clamp($rawStatus, 40),
+                'transaction_id' => self::clamp($providerOutcome?->providerTxnId, 64),
+                'amount' => $amount,
+                'currency' => self::clamp($providerOutcome?->currency, 8),
                 'ip' => $request->ip(),
-                'message' => $providerOutcome?->message,
+                // Clamped for the same reason as the columns above: `message` comes
+                // verbatim from the posted body and, though the column is TEXT, a
+                // large enough value still makes create() throw — and the catch
+                // below would swallow it, leaving NO audit row at all.
+                'message' => self::clamp($providerOutcome?->message, 2000),
                 // Why the gateway ruled the way it did, so «Log πύλης» explains a
                 // refusal on its own instead of sending an operator to a server log.
                 'diagnostics' => $diagnostics ?? ($providerOutcome?->diagnostics ?: null),

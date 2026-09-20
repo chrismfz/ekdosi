@@ -762,4 +762,29 @@ class EurobankReturnControllerTest extends TestCase
         $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
         $this->assertSame('REF-9911', $event->diagnostics['provider_reference']);
     }
+
+    /**
+     * The audit row must survive hostile values. `provider_status`/`currency`/
+     * `transaction_id` are attacker-chosen and the columns are narrow; on MariaDB an
+     * over-long value made create() throw, the catch swallowed it, and NO «Log πύλης»
+     * row was written — letting anyone reach the unauthenticated endpoint and erase
+     * their own audit trail. (SQLite ignores varchar lengths, so this asserts the
+     * PHP-side clamp, which is what actually keeps the row writable.)
+     */
+    public function test_hostile_values_are_clamped_so_the_audit_row_is_always_written(): void
+    {
+        $intent = $this->pendingIntent(100);
+
+        $this->postReturn([
+            'mid' => 'MID123', 'orderid' => (string) $intent->id,
+            'status' => str_repeat('A', 300),
+            'orderAmount' => '100.00', 'currency' => str_repeat('E', 60),
+            'txId' => str_repeat('T', 300), 'digest' => 'whatever',
+        ]);
+
+        $event = PaymentGatewayEvent::query()->where('order_id', (string) $intent->id)->firstOrFail();
+        $this->assertLessThanOrEqual(40, mb_strlen((string) $event->provider_status));
+        $this->assertLessThanOrEqual(8, mb_strlen((string) $event->currency));
+        $this->assertLessThanOrEqual(64, mb_strlen((string) $event->transaction_id));
+    }
 }

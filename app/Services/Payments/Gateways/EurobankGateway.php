@@ -365,18 +365,6 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
         };
     }
 
-    /** The acquirer's transaction id, for the money trail (several field names seen). */
-    /**
-     * The acquirer's TRANSACTION id — the value the settle dedup keys on, so it must
-     * be a per-transaction identifier and nothing else.
-     *
-     * `paymentRef` is deliberately NOT consulted: it is a payment/approval reference
-     * with no documented per-transaction uniqueness, and feeding it to the dedup
-     * would let it collide with an earlier genuine payment and REFUSE a second,
-     * perfectly legitimate capture (money taken, nothing recorded). It is instead
-     * kept verbatim on the event's `diagnostics.provider_reference`, so a return
-     * that carries only a `paymentRef` is still reconcilable against the bank.
-     */
     /**
      * Bound a field-name list before it is logged or persisted. The return endpoint
      * needs no credential, so both the names and how many there are are chosen by
@@ -393,6 +381,17 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
         );
     }
 
+    /**
+     * The acquirer's TRANSACTION id — the value the settle dedup keys on, so it must
+     * be a per-transaction identifier and nothing else.
+     *
+     * `paymentRef` is deliberately NOT consulted: it is a payment/approval reference
+     * with no documented per-transaction uniqueness, and feeding it to the dedup
+     * would let it collide with an earlier genuine payment and REFUSE a second,
+     * perfectly legitimate capture (money taken, nothing recorded). It is instead
+     * kept verbatim on the event's `diagnostics.provider_reference`, so a return
+     * that carries only a `paymentRef` is still reconcilable against the bank.
+     */
     private function providerTxnId(array $fields): ?string
     {
         foreach (['txId', 'transactionId'] as $k) {

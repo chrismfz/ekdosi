@@ -76,6 +76,11 @@
                 <flux:button type="submit" variant="primary" class="w-full">{{ __('portal.payment.continue') }}</flux:button>
             </form>
 
+            {{-- «Χρήση πίστωσης»: money the customer already has with us, pointed at
+                 one of their own documents. No new payment — a re-point, net-zero on
+                 their balance — so it lives beside the pay form rather than inside
+                 it. Shown only when there is credit AND something to settle. --}}
+
             @if ($openInvoices->isNotEmpty())
                 <script>
                     // Progressive enhancement: when the customer picks a target, pre-fill
@@ -92,6 +97,47 @@
                     })();
                 </script>
             @endif
+        @endif
+
+        {{-- Outside the «no payment method» branch on purpose: applying existing
+             credit is a re-point, not a charge, so it needs no gateway at all. --}}
+        @if ($availableCredit > 0.005 && $openInvoices->isNotEmpty())
+            <div class="mt-8 border-t border-zinc-200 pt-6 dark:border-zinc-700">
+                <flux:heading size="sm">{{ __('portal.payment.use_credit') }}</flux:heading>
+                <flux:text class="mt-1 text-sm text-zinc-500">
+                    {{ __('portal.payment.use_credit_hint', ['amount' => Money::eur($availableCredit)]) }}
+                </flux:text>
+
+                <form method="POST" action="{{ route('portal.payment.apply-credit', $customer->id) }}"
+                      class="mt-4 flex flex-col gap-4" data-credit-form>
+                    @csrf
+                    <div>
+                            <flux:text class="text-sm font-medium">{{ __('portal.payment.what') }}</flux:text>
+                            <flux:text class="mt-1 text-xs text-zinc-500">{{ __('portal.payment.use_credit_multi_hint') }}</flux:text>
+                            <div class="mt-2 flex flex-col gap-2">
+                                @foreach ($openInvoices as $inv)
+                                    <label class="flex items-center gap-2 text-sm">
+                                        <input type="checkbox" name="invoice_ids[]" value="{{ $inv->id }}"
+                                               @checked($loop->first)
+                                               class="rounded border-zinc-300 dark:border-zinc-600">
+                                        <span>{{ $inv->invcode }} — {{ Money::eur((float) $inv->open_balance) }}</span>
+                                        @if ($inv->isOffered())
+                                            <flux:badge size="sm" color="amber">{{ __('portal.payment.proforma_badge') }}</flux:badge>
+                                        @endif
+                                    </label>
+                                @endforeach
+                            </div>
+                        </div>
+
+                    {{-- No amount field: the customer has ONE pot and picks documents, so the
+                            allocator spends it in order (capped per document). Asking for a
+                            figure as well only invites a number that will be silently reduced. --}}
+
+                    <flux:button type="submit" variant="filled" class="w-full">
+                        {{ __('portal.payment.use_credit_submit') }}
+                    </flux:button>
+                </form>
+            </div>
         @endif
 
         <flux:text class="mt-6 text-sm">

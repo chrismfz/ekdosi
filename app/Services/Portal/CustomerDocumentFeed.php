@@ -6,6 +6,7 @@ use App\Models\CustomerUser;
 use App\Models\CustomerUserAccess;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -15,9 +16,12 @@ use Illuminate\Database\Eloquent\Builder;
  * ACTIVE grant); the WHMCS «Εκδοθέντα» side can be folded onto the same
  * `documentsFor()` later so the two never drift.
  *
- * Only LIVE documents are ever returned — issued (`local_status=active`) and not
- * AADE-cancelled — the same allow-list as Invoice::isPubliclyViewable(), so the
- * list can never show a document the PDF route would refuse.
+ * Returns what the CUSTOMER may see: issued, non-AADE-cancelled documents PLUS
+ * offered προτιμολόγια (drafts the operator has finalised and put in front of the
+ * customer to settle). Mirrors Invoice::isCustomerVisible(), so the list can never
+ * show a document the portal PDF route would refuse — and deliberately does NOT
+ * widen Invoice::isPubliclyViewable(), which guards the legal-document channels
+ * (signed public PDF, WHMCS proxy, invoice e-mail).
  */
 class CustomerDocumentFeed
 {
@@ -83,7 +87,8 @@ class CustomerDocumentFeed
     }
 
     /**
-     * Live issued invoices for one (company, customer). Newest first, capped.
+     * Customer-visible documents for one (company, customer) — issued invoices and
+     * offered προτιμολόγια. Newest first, capped.
      *
      * @return list<array<string, mixed>>
      */
@@ -100,6 +105,9 @@ class CustomerDocumentFeed
                 'issued_at' => $inv->issued_at?->format('Y-m-d'),
                 'invcode' => $inv->invcode,
                 'type' => $inv->invoiceType?->name,
+                // Load-bearing for the view: a proforma rendered identically to an
+                // issued document would read as a tax document, which it is not.
+                'is_proforma' => $inv->isOffered(),
                 'mydata_state' => $inv->mydata_state,
                 'mydata_mark' => $inv->mydata_mark,
                 'verify_url' => ($inv->mydata_url !== null && $inv->mydata_url !== '') ? $inv->mydata_url : null,
@@ -108,20 +116,23 @@ class CustomerDocumentFeed
     }
 
     /**
-     * The one live-document predicate for a (company, customer): issued
-     * (`local_status=active`) and not AADE-cancelled — the same allow-list as
-     * Invoice::isPubliclyViewable(), in SQL. CompanyScope is dropped (grants are
+     * The one customer-visible predicate for a (company, customer), in SQL:
+     * issued OR offered-proforma, and not AADE-cancelled — the SQL twin of
+     * Invoice::isCustomerVisible(). CompanyScope is dropped (grants are
      * cross-company). Shared by documentsFor() and the truncation check so the
      * filter is defined exactly once.
      */
     private function liveQuery(int $companyId, int $customerId): Builder
     {
-        return Invoice::query()
+        $q = Invoice::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $companyId)
             ->where('customer_id', $customerId)
-            ->where('local_status', 'active')
             ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'));
+
+        // Issued documents PLUS offered προτιμολόγια — the one shared definition
+        // (App\Support\InvoiceScope::customerSettleable).
+        return InvoiceScope::customerSettleable($q);
     }
 
     /**
@@ -131,7 +142,10 @@ class CustomerDocumentFeed
      */
     public function loginCanAccess(CustomerUser $login, Invoice $invoice): bool
     {
-        if (! $invoice->isPubliclyViewable()) {
+        // The PORTAL predicate, not the legal-document one: isPubliclyViewable()
+        // stays the allow-list for the signed public PDF, the WHMCS proxy and the
+        // invoice e-mail, none of which may serve a proforma.
+        if (! $invoice->isCustomerVisible()) {
             return false;
         }
         if ($invoice->customer_id === null) {

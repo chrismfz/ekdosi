@@ -412,7 +412,10 @@ class Customer extends Model
         InvoiceScope::excludeCreditNotes($owed);
         // MON-5: unissued sale drafts aren't receivables — mirror
         // DashboardMetrics::outstandingReceivables() so the two stay reconciled.
-        InvoiceScope::excludeUnissuedDrafts($owed);
+        // …EXCEPT one that already carries a payment (an offered προτιμολόγιο the
+        // customer settled): its payment is counted here, so its charge must be too,
+        // or the balance goes negative by the paid amount.
+        InvoiceScope::excludeUnpaidUnissuedDrafts($owed);
         $owed = InvoiceScope::live($owed, 'invoices.');
 
         // MON-13: correlated credit notes reduce via their ORIGINAL's credited_total,
