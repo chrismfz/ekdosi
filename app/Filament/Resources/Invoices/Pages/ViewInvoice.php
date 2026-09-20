@@ -388,6 +388,11 @@ class ViewInvoice extends ViewRecord
                 ->action(function (Invoice $record) {
                     $record->update([
                         'local_status' => $record->mydata_state === 'VALID' ? 'active' : 'draft',
+                        // Same stale-offer trap as revert_to_draft: without this a
+                        // cancelled-then-revived proforma comes back OFFERED — visible
+                        // and payable in the portal again with no operator decision,
+                        // and locked against the edit the revive was for.
+                        'offered_at' => null,
                         'cancel_reason' => null,
                     ]);
                     Notification::make()->title('Επαναφέρθηκε')->success()->send();
