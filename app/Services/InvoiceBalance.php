@@ -95,7 +95,14 @@ class InvoiceBalance
         // payments it stays the synthetic settled-at-issue default, so the
         // ~6.7k imported invoices (whose legacy payments are on-account) are
         // unchanged.
-        if ($this->isCashTerm($invoice) && ! $this->hasRecordedPayments($invoice, $locking)) {
+        // …and it only applies to an ISSUED document. A draft — in particular an
+        // offered «προτιμολόγιο» — has no issue to be settled at, so synthesising
+        // payment for it would both misreport it as paid (the thing that made a
+        // paid-looking, unpaid proforma so confusing) and make it impossible to
+        // point credit at it: applyCredit() caps on this balance and would see zero.
+        if ($invoice->local_status === 'active'
+            && $this->isCashTerm($invoice)
+            && ! $this->hasRecordedPayments($invoice, $locking)) {
             return new InvoiceBalanceData(
                 gross: $gross, credited: $credited, paid: $owed,
                 owed: $owed, balance: 0.0,

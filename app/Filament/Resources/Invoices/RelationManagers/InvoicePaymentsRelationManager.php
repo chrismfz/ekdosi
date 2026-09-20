@@ -7,6 +7,7 @@ use App\Filament\Support\PaymentReceiptAction;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
+use App\Services\Payments\PaymentAllocator;
 use Filament\Actions\Action;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
@@ -54,6 +55,18 @@ class InvoicePaymentsRelationManager extends RelationManager
     private function balance(): float
     {
         return (float) $this->invoice()->balanceData()->balance;
+    }
+
+    /**
+     * On-account credit available to THIS invoice's customer. Read through the
+     * allocator so the figure here can never disagree with what applyCredit()
+     * will actually let through.
+     */
+    private function availableCredit(): float
+    {
+        $customer = $this->invoice()->customer;
+
+        return $customer === null ? 0.0 : app(PaymentAllocator::class)->availableCredit($customer);
     }
 
     private function paymentMethodOptions(): array
@@ -230,6 +243,55 @@ class InvoicePaymentsRelationManager extends RelationManager
                 // books. Recording the first payment on a cash-term invoice flips
                 // it from synthetic settled-at-issue to real tracking
                 // (InvoiceBalance), netting to zero — no phantom receivable.
+                // «Χρήση πίστωσης» — the customer already has money with us
+                // (an overpayment, an on-account gateway payment, an unapplied
+                // credit note) and it should land on THIS document. Previously this
+                // existed only on the customer's Καρτέλα, which meant leaving the
+                // invoice to find it; the invoice is where an operator actually
+                // notices the need. Same choke-point either way
+                // (PaymentAllocator::applyCredit — a re-point, net-zero on the
+                // customer's total balance, never new money).
+                //
+                // Works on an offered προτιμολόγιο too: that is the whole point of
+                // the flag — credit can settle it BEFORE it becomes a legal document.
+                Action::make('apply_credit')
+                    ->label('Χρήση πίστωσης')
+                    ->icon('heroicon-o-arrow-right-circle')
+                    ->color('info')
+                    ->visible(fn (): bool => $this->balance() > 0.005 && $this->availableCredit() > 0.005)
+                    ->modalHeading('Χρήση διαθέσιμης πίστωσης')
+                    ->modalDescription(fn (): string => 'Διαθέσιμη πίστωση πελάτη: '
+                        .number_format($this->availableCredit(), 2, ',', '.').' € · '
+                        .'Υπόλοιπο παραστατικού: '.number_format($this->balance(), 2, ',', '.').' €.')
+                    ->modalSubmitActionLabel('Εφαρμογή')
+                    ->schema(fn () => [
+                        TextInput::make('amount')
+                            ->label('Ποσό (€)')
+                            ->numeric()->minValue(0.01)->required()
+                            ->default(fn (): string => number_format(
+                                min($this->availableCredit(), $this->balance()), 2, '.', ''
+                            ))
+                            ->helperText('Δεν μπορεί να ξεπεράσει τη διαθέσιμη πίστωση ή το υπόλοιπο.'),
+                    ])
+                    ->action(function (array $data): void {
+                        $customer = $this->invoice()->customer;
+                        if ($customer === null) {
+                            Notification::make()->danger()->title('Το παραστατικό δεν έχει πελάτη')->send();
+
+                            return;
+                        }
+                        try {
+                            $applied = app(PaymentAllocator::class)
+                                ->applyCredit($customer, $this->invoice(), (float) $data['amount']);
+                        } catch (\InvalidArgumentException $e) {
+                            Notification::make()->danger()->title('Δεν έγινε εφαρμογή')->body($e->getMessage())->send();
+
+                            return;
+                        }
+                        Notification::make()->success()->title('Η πίστωση εφαρμόστηκε')
+                            ->body(number_format($applied, 2, ',', '.').' € στο '.$this->invoice()->invcode)->send();
+                    }),
+
                 Action::make('record_payment')
                     ->label('Καταχώριση πληρωμής')
                     ->icon('heroicon-o-banknotes')

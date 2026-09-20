@@ -104,6 +104,47 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
+     * Is this a «προτιμολόγιο» — a draft the operator has finalised and offered to
+     * the customer? Still a draft in every sense that matters (no ΑΑ, no myDATA, not
+     * in any money total); the flag only means «this is the final proposal, the
+     * customer may act on it», which also locks it against further editing.
+     */
+    public function isOffered(): bool
+    {
+        return $this->local_status === 'draft' && $this->offered_at !== null;
+    }
+
+    /**
+     * May the LOGGED-IN CUSTOMER see this document in the portal?
+     *
+     * Deliberately separate from {@see isPubliclyViewable()}, which stays the
+     * allow-list for legal documents and is shared by the signed public PDF route,
+     * the WHMCS PDF proxy, the issued-for-client list and the invoice e-mail.
+     * Widening THAT would push proformas into channels that promise a «παραστατικό
+     * ΑΑΔΕ» — so the portal gets its own, wider predicate instead.
+     *
+     * A proforma shown here must be labelled as one wherever it is rendered: it is
+     * not a tax document and must never be mistaken for one.
+     */
+    public function isCustomerVisible(): bool
+    {
+        return $this->isPubliclyViewable() || $this->isOffered();
+    }
+
+    /**
+     * May the customer settle this document (pay it, or point existing credit at
+     * it)? Both a live issued invoice and an offered proforma qualify — the point
+     * of the proforma is that money can land on it BEFORE it becomes a legal
+     * document, so a service the customer drops never has to be issued and then
+     * cancelled.
+     */
+    public function isCustomerPayable(): bool
+    {
+        return $this->mydata_state !== 'CANCELLED'
+            && ($this->local_status === 'active' || $this->isOffered());
+    }
+
+    /**
      * Audited columns — lifecycle + money figures + the myDATA state mirror, but
      * NOT the money cache (paid_total / credited_total / payment_status), which
      * InvoiceBalance rewrites on every payment recompute. See TracksActivity.
@@ -171,6 +212,7 @@ class Invoice extends Model implements MovableDocument
         'whmcs_pending_id',
         'service_contract_id',
         'local_status',
+        'offered_at',
         'cancel_reason',
         'delivery_date',
         'header_discount_percent',
@@ -236,6 +278,7 @@ class Invoice extends Model implements MovableDocument
     {
         return [
             'issued_at' => 'datetime',
+            'offered_at' => 'datetime',
             // Combined ΤΔΑ (Slice 3a/3b)
             'is_delivery_note' => 'boolean',
             'without_digital_transport_tracking' => 'boolean',

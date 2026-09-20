@@ -90,6 +90,11 @@ Route::middleware([ResolvePortalHost::class, EnsurePortalAuthenticated::class, S
         ->where('customer', '[0-9]+')->name('portal.payment.create');
     Route::post('/user/pay/{customer}', [PortalPaymentController::class, 'store'])
         ->where('customer', '[0-9]+')->middleware('throttle:20,1')->name('portal.payment.store');
+    // «Χρήση πίστωσης» — point money the customer ALREADY has with us at one of
+    // their own documents. Not a new receipt: a re-point, net-zero on their total
+    // balance, so the customer may do it themselves. Grant-scoped + throttled.
+    Route::post('/user/pay/{customer}/apply-credit', [PortalPaymentController::class, 'applyCredit'])
+        ->where('customer', '[0-9]+')->middleware('throttle:20,1')->name('portal.payment.apply-credit');
     // Hosted-gateway bounce page (flow=redirect): rebuilds + auto-submits the
     // SIGNED provider form to the acquirer (B1, Eurobank vPOS). Grant-scoped.
     Route::get('/user/payment/{intent}/redirect', [PortalPaymentController::class, 'redirect'])

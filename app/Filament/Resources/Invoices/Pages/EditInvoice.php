@@ -43,6 +43,20 @@ class EditInvoice extends EditRecord
         // here: only DRAFTS are editable. Finalised (Ενεργό), filed, or
         // cancelled invoices are locked — revert to draft (if unfiled) or
         // cancel + reissue (if filed).
+        // An OFFERED draft (προτιμολόγιο) is locked too: the customer is looking at
+        // it and may already have paid against it, so its figures must not move
+        // under them. «Ανάκληση προσφοράς» reopens it for editing.
+        if ($this->record->isOffered()) {
+            Notification::make()->warning()
+                ->title('Το παραστατικό έχει προσφερθεί στον πελάτη')
+                ->body("Το {$this->record->invcode} είναι προτιμολόγιο και δεν επεξεργάζεται. Κάντε «Ανάκληση προσφοράς» πρώτα.")
+                ->persistent()->send();
+
+            $this->redirect(InvoiceResource::getUrl('view', ['record' => $this->record]));
+
+            return;
+        }
+
         if ($this->record->mydata_state !== null || $this->record->local_status !== 'draft') {
             Notification::make()
                 ->title('Δεν επιτρέπεται η επεξεργασία')
@@ -117,6 +131,15 @@ class EditInvoice extends EditRecord
             ->whereKey($this->record->getKey())
             ->lockForUpdate()
             ->first();
+
+        if ($current?->isOffered()) {
+            Notification::make()->warning()
+                ->title('Το παραστατικό προσφέρθηκε στον πελάτη')
+                ->body("Το {$current?->invcode} έγινε προτιμολόγιο ενώ το επεξεργαζόσασταν. Οι αλλαγές δεν αποθηκεύονται.")
+                ->persistent()->send();
+
+            $this->halt();
+        }
 
         if ($current?->mydata_state !== null || $current?->local_status !== 'draft') {
             Notification::make()

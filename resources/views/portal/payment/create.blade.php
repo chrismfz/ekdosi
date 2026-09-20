@@ -76,6 +76,46 @@
                 <flux:button type="submit" variant="primary" class="w-full">{{ __('portal.payment.continue') }}</flux:button>
             </form>
 
+            {{-- «Χρήση πίστωσης»: money the customer already has with us, pointed at
+                 one of their own documents. No new payment — a re-point, net-zero on
+                 their balance — so it lives beside the pay form rather than inside
+                 it. Shown only when there is credit AND something to settle. --}}
+            @if ($availableCredit > 0.005 && $openInvoices->isNotEmpty())
+                <div class="mt-8 border-t border-zinc-200 pt-6 dark:border-zinc-700">
+                    <flux:heading size="sm">{{ __('portal.payment.use_credit') }}</flux:heading>
+                    <flux:text class="mt-1 text-sm text-zinc-500">
+                        {{ __('portal.payment.use_credit_hint', ['amount' => Money::eur($availableCredit)]) }}
+                    </flux:text>
+
+                    <form method="POST" action="{{ route('portal.payment.apply-credit', $customer->id) }}"
+                          class="mt-4 flex flex-col gap-4">
+                        @csrf
+                        <flux:select name="invoice_id" required label="{{ __('portal.payment.what') }}">
+                            @foreach ($openInvoices as $inv)
+                                <option value="{{ $inv->id }}">
+                                    {{ $inv->invcode }} — {{ Money::eur((float) $inv->open_balance) }}
+                                    @if ($inv->isOffered()) · {{ __('portal.payment.proforma_badge') }} @endif
+                                </option>
+                            @endforeach
+                        </flux:select>
+
+                        <flux:input
+                            name="amount"
+                            type="number"
+                            step="0.01"
+                            min="0.01"
+                            required
+                            label="{{ __('portal.payment.amount_field') }}"
+                            value="{{ number_format(min($availableCredit, (float) $openInvoices->first()->open_balance), 2, '.', '') }}"
+                        />
+
+                        <flux:button type="submit" variant="filled" class="w-full">
+                            {{ __('portal.payment.use_credit_submit') }}
+                        </flux:button>
+                    </form>
+                </div>
+            @endif
+
             @if ($openInvoices->isNotEmpty())
                 <script>
                     // Progressive enhancement: when the customer picks a target, pre-fill

@@ -59,6 +59,10 @@ class InvoiceBalanceTest extends TestCase
             'customer_id' => $this->customer->id,
             'payment_method_id' => $this->credit->id,
             'issued_at' => '2026-05-10 10:00:00',
+            // Issued by default: «settled at issue» only means anything for a
+            // document that HAS been issued (the draft case is covered explicitly
+            // in test_a_cash_term_draft_is_not_settled_at_issue).
+            'local_status' => 'active',
             'net_total' => 100, 'gross_total' => 124,
         ], $attrs));
         if ($state !== null) {
@@ -241,5 +245,40 @@ class InvoiceBalanceTest extends TestCase
         $this->assertSame(PaymentStatus::Credited, $b->status);
         $this->assertSame(124.0, $b->credited);
         $this->assertSame(0.0, $b->owed);
+    }
+
+    /**
+     * A cash-term DRAFT — in particular an offered «προτιμολόγιο» — must NOT be
+     * synthesised as paid: it was never issued, so there is no issue to be settled
+     * at. Reporting it paid both misleads (a proforma the customer has not paid
+     * looks settled) and blocks applyCredit(), which caps on this balance.
+     */
+    public function test_a_cash_term_draft_is_not_settled_at_issue(): void
+    {
+        $draft = $this->invoice([
+            'payment_method_id' => $this->cash->id,
+            'local_status' => 'draft',
+        ]);
+
+        $b = $this->svc()->for($draft);
+
+        $this->assertSame(PaymentStatus::Unpaid, $b->status);
+        $this->assertSame(124.0, $b->balance);
+        $this->assertSame(0.0, $b->paid);
+    }
+
+    /** …and issuing that same draft flips it to the settled-at-issue default. */
+    public function test_issuing_a_cash_term_draft_settles_it(): void
+    {
+        $draft = $this->invoice([
+            'payment_method_id' => $this->cash->id,
+            'local_status' => 'draft',
+        ]);
+        $draft->forceFill(['local_status' => 'active'])->save();
+
+        $b = $this->svc()->for($draft->fresh());
+
+        $this->assertSame(PaymentStatus::Paid, $b->status);
+        $this->assertSame(0.0, $b->balance);
     }
 }

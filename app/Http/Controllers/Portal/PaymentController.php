@@ -9,10 +9,12 @@ use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
 use App\Models\Scopes\CompanyScope;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
+use App\Services\Payments\PaymentAllocator;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Services\Payments\PaymentIntentService;
 use App\Services\Portal\CustomerDocumentFeed;
 use App\Support\InvoiceScope;
+use App\Support\Money;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -53,6 +55,10 @@ class PaymentController extends Controller
             'owed' => $owed,
             'openInvoices' => $openInvoices,
             'preselectedInvoiceId' => $preselected?->id,
+            // Money the customer already has with us (overpayment, unapplied credit
+            // note, on-account gateway payment). Surfaced so it stops being a number
+            // they can see but not use.
+            'availableCredit' => app(PaymentAllocator::class)->availableCredit($model),
         ]);
     }
 
@@ -98,6 +104,45 @@ class PaymentController extends Controller
         }
 
         return redirect()->route('portal.payment.show', $result['intent']->id);
+    }
+
+    /**
+     * «Χρήση πίστωσης»: move on-account credit onto one of the customer's own
+     * documents — an issued invoice or an offered προτιμολόγιο.
+     *
+     * This creates NO money: PaymentAllocator::applyCredit re-points payments the
+     * customer has already made, so their total balance is unchanged and the
+     * operator's confirmation adds nothing. The guards that matter are ownership
+     * (grant-scoped customer, and a target drawn from their own payable set) and
+     * the allocator's own caps (never more than the credit, never more than the
+     * document's balance).
+     */
+    public function applyCredit(Request $request, int $customer): RedirectResponse
+    {
+        $model = $this->resolveCustomer($customer);
+
+        $data = $request->validate([
+            'invoice_id' => ['required', 'integer'],
+            'amount' => ['required', 'numeric', 'min:0.01', 'max:9999999'],
+        ]);
+
+        // Never trust the id: it must be one of THIS customer's payable documents.
+        $invoice = $this->payableInvoices($model)->firstWhere('id', (int) $data['invoice_id']);
+        if ($invoice === null) {
+            abort(Response::HTTP_NOT_FOUND);
+        }
+
+        try {
+            $applied = app(PaymentAllocator::class)->applyCredit($model, $invoice, (float) $data['amount']);
+        } catch (\InvalidArgumentException $e) {
+            return back()->withErrors(['amount' => $e->getMessage()]);
+        }
+
+        return redirect()->route('portal.statement')
+            ->with('status', __('portal.payment.credit_applied', [
+                'amount' => Money::eur($applied),
+                'document' => (string) $invoice->invcode,
+            ]));
     }
 
     /**
@@ -210,7 +255,10 @@ class PaymentController extends Controller
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $customer->company_id)
             ->where('customer_id', $customer->id)
-            ->where('local_status', 'active')
+            // Issued invoices AND offered προτιμολόγια — settling a proforma before
+            // it is issued is the whole point of the flag.
+            ->where(fn ($w) => $w->where('local_status', 'active')
+                ->orWhere(fn ($o) => $o->where('local_status', 'draft')->whereNotNull('offered_at')))
             ->orderBy('issued_at')
             ->orderBy('id');
         InvoiceScope::excludeCreditNotes($q);

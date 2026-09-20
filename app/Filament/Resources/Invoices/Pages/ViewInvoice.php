@@ -183,6 +183,55 @@ class ViewInvoice extends ViewRecord
                 }),
 
             // --- Local lifecycle: Πρόχειρο → Ενεργό → Ακυρωμένο.
+            /*
+             * «Προσφορά στον πελάτη» — turn a draft into a προτιμολόγιο: locked
+             * against further editing, visible in the portal, and payable there
+             * (or settleable from the customer's existing credit).
+             *
+             * It stays a DRAFT: no ΑΑ, no myDATA, outside every money total. That is
+             * the point. Recurring-service renewals are staged as drafts
+             * (StageServiceRenewal); issuing them unilaterally and then cancelling
+             * the ones the customer dropped would produce a stream of ΑΚΥ/πιστωτικά,
+             * which is exactly the pattern that draws AADE attention. Letting the
+             * customer settle the proforma first means those cancellations never
+             * need to exist — the document is issued only once the money is there.
+             */
+            Action::make('offer_to_customer')
+                ->label('Προσφορά στον πελάτη')
+                ->icon('heroicon-o-paper-airplane')
+                ->color('info')
+                ->visible(fn (Invoice $record): bool => $record->local_status === 'draft' && ! $record->isOffered())
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Προσφορά στον πελάτη (προτιμολόγιο)')
+                ->modalDescription('Κλειδώνει για επεξεργασία και γίνεται ορατό στην πύλη, ώστε ο πελάτης να μπορεί να το πληρώσει ή να χρησιμοποιήσει την πίστωσή του. ΔΕΝ εκδίδεται: δεν παίρνει ΑΑ και δεν πάει στο myDATA.')
+                ->action(function (Invoice $record) {
+                    $record->forceFill(['offered_at' => now()])->save();
+
+                    Notification::make()->success()
+                        ->title('Το παραστατικό προσφέρθηκε στον πελάτη')
+                        ->body('Ο πελάτης το βλέπει πλέον στην πύλη και μπορεί να το εξοφλήσει.')
+                        ->send();
+                }),
+
+            // Back to an editable draft. The customer stops seeing it immediately;
+            // any money already settled against it stays attached to the document
+            // (it is the same row), so nothing has to be unwound.
+            Action::make('withdraw_offer')
+                ->label('Ανάκληση προσφοράς')
+                ->icon('heroicon-o-arrow-uturn-left')
+                ->color('gray')
+                ->visible(fn (Invoice $record): bool => $record->isOffered())
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->requiresConfirmation()
+                ->modalHeading('Ανάκληση προσφοράς')
+                ->modalDescription('Επιστρέφει σε επεξεργάσιμο πρόχειρο και παύει να είναι ορατό στον πελάτη. Τυχόν πληρωμές που έχουν ήδη καταχωριστεί παραμένουν πάνω του.')
+                ->action(function (Invoice $record) {
+                    $record->forceFill(['offered_at' => null])->save();
+
+                    Notification::make()->success()->title('Η προσφορά ανακλήθηκε')->send();
+                }),
+
             // Independent of myDATA (the AADE truth). Reviving an
             // AADE-cancelled invoice is blocked (terminal there).
             Action::make('finalize')

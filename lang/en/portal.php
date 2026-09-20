@@ -124,6 +124,13 @@ return [
 
     // Payment: create / redirect / show.
     'payment' => [
+        'available_credit' => 'Credit balance (in your favour)',
+        'use_credit' => 'Use credit',
+        'use_credit_hint' => 'You have :amount in credit. Pick a document to settle it without a new payment.',
+        'use_credit_submit' => 'Settle from credit',
+        'credit_applied' => ':amount applied to :document from your credit.',
+        'proforma_badge' => 'Proforma',
+        'proforma_note' => 'Proforma — not a tax document. The final document is issued once it is settled.',
         'no_method' => 'No payment method is available right now. Please contact us.',
         'what' => 'What are you paying?',
         'whole_balance' => 'Whole balance (:amount)',

@@ -314,7 +314,11 @@ class PaymentIntentService
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $intent->company_id)
             ->where('customer_id', $intent->customer_id)
-            ->where('local_status', 'active')
+            // Same allow-list as the portal picker: an offered προτιμολόγιο is a
+            // valid target, so money captured against one still lands on it at
+            // settle time instead of silently falling back to FIFO/on-account.
+            ->where(fn ($w) => $w->where('local_status', 'active')
+                ->orWhere(fn ($o) => $o->where('local_status', 'draft')->whereNotNull('offered_at')))
             ->whereKey($intent->invoice_id);
         InvoiceScope::excludeCreditNotes($q);
 
