@@ -191,8 +191,7 @@ class ProformaPayableTest extends TestCase
 
         $this->actingAs($this->login, 'portal')
             ->post(route('portal.payment.apply-credit', $this->customer->id), [
-                'invoice_id' => $proforma->id,
-                'amount' => 40.00,
+                'invoice_ids' => [$proforma->id],
             ])
             ->assertRedirect(route('portal.statement'));
 
@@ -218,8 +217,7 @@ class ProformaPayableTest extends TestCase
 
         $this->actingAs($this->login, 'portal')
             ->post(route('portal.payment.apply-credit', $this->customer->id), [
-                'invoice_id' => $hidden->id,
-                'amount' => 40.00,
+                'invoice_ids' => [$hidden->id],
             ])
             ->assertNotFound();
 
@@ -305,7 +303,7 @@ class ProformaPayableTest extends TestCase
 
         $this->actingAs($this->login, 'portal')
             ->post(route('portal.payment.apply-credit', $this->customer->id), [
-                'invoice_id' => $proforma->id, 'amount' => 40.00,
+                'invoice_ids' => [$proforma->id],
             ])->assertRedirect(route('portal.statement'));
 
         $this->assertSame(40.0, (float) Payment::where('invoice_id', $proforma->id)->sum('amount'));
@@ -383,5 +381,88 @@ class ProformaPayableTest extends TestCase
         $this->assertSame(60.0, round((float) app(CustomerLedgerBuilder::class)
             ->build($this->customer->fresh())->stats['balance'], 2));
         $this->assertSame(60.0, round((new DashboardMetrics($this->tenant))->outstandingReceivables(), 2));
+    }
+
+    /**
+     * «Αυτό, εκείνο και το άλλο, πλήρωσέ τα με την πίστωσή μου.» One pot of credit
+     * spent across several documents in one go, in the page's own order, capped per
+     * document — and it stops cleanly when the pot runs out rather than failing.
+     */
+    public function test_credit_settles_several_documents_in_one_go(): void
+    {
+        $a = $this->draft(offered: true, gross: 30.0);
+        $b = $this->draft(offered: true, gross: 50.0);
+        $c = $this->draft(offered: true, gross: 40.0);
+
+        // €100 on account — enough for A and B, only part of C.
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'amount' => 100.00, 'pay_date' => now()->subDay(), 'kind' => 'payment',
+        ]);
+
+        $this->actingAs($this->login, 'portal')
+            ->post(route('portal.payment.apply-credit', $this->customer->id), [
+                'invoice_ids' => [$a->id, $b->id, $c->id],
+            ])->assertRedirect(route('portal.statement'));
+
+        $this->assertSame(0.0, (float) $a->fresh()->balanceData()->balance);
+        $this->assertSame(0.0, (float) $b->fresh()->balanceData()->balance);
+        // C got the remaining €20 of the pot.
+        $this->assertSame(20.0, (float) $c->fresh()->balanceData()->balance);
+        $this->assertSame(0.0, round(app(PaymentAllocator::class)->availableCredit($this->customer->fresh()), 2));
+    }
+
+    /** Picking a document that is not the customer's own is still a flat 404. */
+    public function test_multi_credit_refuses_a_foreign_document(): void
+    {
+        $other = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Άλλος', 'afm' => '090000046',
+        ]);
+        $foreign = Invoice::create([
+            'company_id' => $this->tenant->id, 'invoice_type_id' => $this->type->id,
+            'customer_id' => $other->id, 'invcode' => 'ΠΡΟΣ-ΤΠΥ-X', 'issued_at' => now(),
+            'payment_method_id' => $this->credit->id,
+        ]);
+        $foreign->forceFill(['local_status' => 'draft', 'offered_at' => now(),
+            'net_total' => 50, 'gross_total' => 50])->save();
+
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'amount' => 100.00, 'pay_date' => now()->subDay(), 'kind' => 'payment',
+        ]);
+
+        $this->actingAs($this->login, 'portal')
+            ->post(route('portal.payment.apply-credit', $this->customer->id), [
+                'invoice_ids' => [$foreign->id],
+            ])->assertNotFound();
+
+        $this->assertSame(0, Payment::where('invoice_id', $foreign->id)->count());
+    }
+
+    /**
+     * The pipeline figure behind the «Προτιμολόγια» widget + filter. It exists
+     * because proformas are invisible to «Απαιτήσεις» by design — this is the only
+     * place an operator learns they are out there, and which of them have been paid
+     * (i.e. are waiting to be ISSUED).
+     */
+    public function test_the_proforma_pipeline_splits_paid_from_unpaid(): void
+    {
+        $this->draft(offered: true, gross: 30.0);            // απλήρωτο
+        $this->draft(offered: true, gross: 70.0);            // απλήρωτο
+        $paid = $this->draft(offered: true, gross: 50.0);    // πληρωμένο
+        $this->draft(offered: false, gross: 999.0);          // πρόχειρο, ΟΧΙ προσφερμένο
+
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $paid->id, 'amount' => 50.00,
+            'pay_date' => now(), 'kind' => 'payment',
+        ]);
+
+        $p = (new DashboardMetrics($this->tenant))->proformaPipeline();
+
+        $this->assertSame(2, $p['unpaid_count']);
+        $this->assertSame(100.0, $p['unpaid_gross']);
+        $this->assertSame(1, $p['paid_count']);
+        $this->assertSame(50.0, $p['paid_gross']);
     }
 }

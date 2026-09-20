@@ -124,6 +124,9 @@ return [
 
     // Payment: create / redirect / show.
     'payment' => [
+        'credit_pick_one' => 'Pick at least one document.',
+        'credit_nothing_applied' => 'Nothing was applied — the documents you picked have no open balance.',
+        'use_credit_multi_hint' => 'Pick as many as you like — the credit is applied to each in turn until it runs out.',
         'available_credit' => 'Credit balance (in your favour)',
         'use_credit' => 'Use credit',
         'use_credit_hint' => 'You have :amount in credit. Pick a document to settle it without a new payment.',

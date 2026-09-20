@@ -122,26 +122,68 @@ class PaymentController extends Controller
         $model = $this->resolveCustomer($customer);
 
         $data = $request->validate([
-            'invoice_id' => ['required', 'integer'],
-            'amount' => ['required', 'numeric', 'min:0.01', 'max:9999999'],
+            // Several documents at once («αυτό, εκείνο και το άλλο»): the customer
+            // has one pot of credit and usually wants it gone, not parcelled out by
+            // hand. A single `invoice_id` is still accepted so a «pay this one»
+            // deep-link keeps working.
+            'invoice_ids' => ['nullable', 'array'],
+            'invoice_ids.*' => ['integer'],
+            'invoice_id' => ['nullable', 'integer'],
         ]);
 
-        // Never trust the id: it must be one of THIS customer's payable documents.
-        $invoice = $this->payableInvoices($model)->firstWhere('id', (int) $data['invoice_id']);
-        if ($invoice === null) {
+        $ids = array_map('intval', $data['invoice_ids'] ?? []);
+        if ($ids === [] && filled($data['invoice_id'] ?? null)) {
+            $ids = [(int) $data['invoice_id']];
+        }
+        if ($ids === []) {
+            return back()->withErrors(['invoice_ids' => __('portal.payment.credit_pick_one')]);
+        }
+
+        // Never trust the ids: keep only THIS customer's payable documents, in the
+        // page's own order (oldest first) so the outcome matches what was shown.
+        $targets = $this->payableInvoices($model)
+            ->filter(fn ($inv): bool => in_array((int) $inv->id, $ids, true))
+            ->values();
+        if ($targets->isEmpty()) {
             abort(Response::HTTP_NOT_FOUND);
         }
 
-        try {
-            $applied = app(PaymentAllocator::class)->applyCredit($model, $invoice, (float) $data['amount']);
-        } catch (\InvalidArgumentException $e) {
-            return back()->withErrors(['amount' => $e->getMessage()]);
+        $allocator = app(PaymentAllocator::class);
+        $applied = 0.0;
+        $touched = [];
+
+        foreach ($targets as $invoice) {
+            // Re-read the pot each round: the previous iteration spent some of it.
+            $remaining = $allocator->availableCredit($model);
+            if ($remaining <= 0.005) {
+                break;
+            }
+
+            try {
+                // The allocator caps at min(asked, document balance, credit), so
+                // asking for the whole remaining pot settles as much of this
+                // document as it can and leaves the rest for the next one.
+                $part = $allocator->applyCredit($model, $invoice, $remaining);
+            } catch (\InvalidArgumentException) {
+                // Nothing left to settle on this one (paid in the meantime) — skip it
+                // rather than abandoning the documents the customer also chose.
+                continue;
+            }
+
+            if ($part > 0.005) {
+                $applied = round($applied + $part, 2);
+                $touched[] = (string) $invoice->invcode;
+            }
+        }
+
+        if ($touched === []) {
+            return back()->withErrors(['invoice_ids' => __('portal.payment.credit_nothing_applied')]);
         }
 
         return redirect()->route('portal.statement')
             ->with('status', __('portal.payment.credit_applied', [
                 'amount' => Money::eur($applied),
-                'document' => (string) $invoice->invcode,
+                'document' => implode(', ', $touched),
             ]));
     }
 

@@ -111,49 +111,32 @@
                 <form method="POST" action="{{ route('portal.payment.apply-credit', $customer->id) }}"
                       class="mt-4 flex flex-col gap-4" data-credit-form>
                     @csrf
-                    <flux:select name="invoice_id" required label="{{ __('portal.payment.what') }}">
-                        @foreach ($openInvoices as $inv)
-                            <option value="{{ $inv->id }}" data-balance="{{ number_format((float) $inv->open_balance, 2, '.', '') }}">
-                                {{ $inv->invcode }} — {{ Money::eur((float) $inv->open_balance) }}
-                                @if ($inv->isOffered()) · {{ __('portal.payment.proforma_badge') }} @endif
-                            </option>
-                        @endforeach
-                    </flux:select>
+                    <div>
+                            <flux:text class="text-sm font-medium">{{ __('portal.payment.what') }}</flux:text>
+                            <flux:text class="mt-1 text-xs text-zinc-500">{{ __('portal.payment.use_credit_multi_hint') }}</flux:text>
+                            <div class="mt-2 flex flex-col gap-2">
+                                @foreach ($openInvoices as $inv)
+                                    <label class="flex items-center gap-2 text-sm">
+                                        <input type="checkbox" name="invoice_ids[]" value="{{ $inv->id }}"
+                                               @checked($loop->first)
+                                               class="rounded border-zinc-300 dark:border-zinc-600">
+                                        <span>{{ $inv->invcode }} — {{ Money::eur((float) $inv->open_balance) }}</span>
+                                        @if ($inv->isOffered())
+                                            <flux:badge size="sm" color="amber">{{ __('portal.payment.proforma_badge') }}</flux:badge>
+                                        @endif
+                                    </label>
+                                @endforeach
+                            </div>
+                        </div>
 
-                    <flux:input
-                        name="amount"
-                        type="number"
-                        step="0.01"
-                        min="0.01"
-                        required
-                        label="{{ __('portal.payment.amount_field') }}"
-                        value="{{ number_format(min($availableCredit, (float) $openInvoices->first()->open_balance), 2, '.', '') }}"
-                        data-credit="{{ number_format($availableCredit, 2, '.', '') }}"
-                    />
+                    {{-- No amount field: the customer has ONE pot and picks documents, so the
+                            allocator spends it in order (capped per document). Asking for a
+                            figure as well only invites a number that will be silently reduced. --}}
 
                     <flux:button type="submit" variant="filled" class="w-full">
                         {{ __('portal.payment.use_credit_submit') }}
                     </flux:button>
                 </form>
-                <script>
-                    // Keep the shown amount honest as the customer switches
-                    // document: min(credit, that document's balance). The server
-                    // caps it regardless — this only stops us DISPLAYING a figure
-                    // that would be silently reduced.
-                    (function () {
-                        var form = document.querySelector('[data-credit-form]');
-                        if (! form) return;
-                        var select = form.querySelector('select[name="invoice_id"]');
-                        var amount = form.querySelector('input[name="amount"]');
-                        if (! select || ! amount) return;
-                        select.addEventListener('change', function () {
-                            var opt = select.options[select.selectedIndex];
-                            var balance = parseFloat(opt.getAttribute('data-balance') || '0');
-                            var credit = parseFloat(amount.getAttribute('data-credit') || '0');
-                            amount.value = Math.min(balance, credit).toFixed(2);
-                        });
-                    })();
-                </script>
             </div>
         @endif
 
