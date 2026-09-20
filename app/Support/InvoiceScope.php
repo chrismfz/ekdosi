@@ -142,6 +142,42 @@ class InvoiceScope
     }
 
     /**
+     * The BALANCE-surface variant of {@see excludeUnissuedDrafts()}: drop unissued
+     * sale drafts EXCEPT the ones that already carry money.
+     *
+     * An offered προτιμολόγιο is not a receivable — the service can still be called
+     * off by either side, so nothing is owed yet and it must not inflate «Απαιτήσεις».
+     * But the moment the customer PAYS it, the payment is counted by every balance
+     * surface while the charge was not, which drove the customer's balance and the
+     * tenant receivables NEGATIVE by the paid amount: the portal told the customer
+     * they held credit that availableCredit() then refused to spend. Debit and credit
+     * have to move together.
+     *
+     * This is the SAME money-trail exception the cash-term rule already uses («plus
+     * any cash-term invoice that carries a recorded payment — it then nets to zero
+     * against its payment»), applied to the other kind of not-yet-owed document.
+     *
+     * Use this on BALANCE surfaces only (receivables, Καρτέλα, customer balance).
+     * Revenue/turnover/VAT keep plain excludeUnissuedDrafts(): a paid proforma is
+     * still not issued revenue.
+     */
+    public static function excludeUnpaidUnissuedDrafts($query)
+    {
+        return $query->where(fn ($q) => $q
+            ->where('invoices.local_status', '!=', 'draft')
+            ->orWhereNotNull('invoices.legacy_id')
+            ->orWhereNotNull('invoices.credited_invoice_id')
+            ->orWhereExists(fn ($sub) => $sub->from('invoice_types')
+                ->whereColumn('invoice_types.id', 'invoices.invoice_type_id')
+                ->where('invoice_types.is_credit', true))
+            // …and the money-trail exception: it carries a payment, so the charge
+            // must be counted for that payment to net against something.
+            ->orWhereExists(fn ($sub) => $sub->from('payments')
+                ->whereColumn('payments.invoice_id', 'invoices.id')
+                ->whereNull('payments.deleted_at')));
+    }
+
+    /**
      * The complement of excludeUnissuedDrafts() — ONLY the unissued sale drafts
      * (πρόχειρα / προτιμολόγια): local draft, new-app (`legacy_id` null), NOT a
      * credit note. Feeds the «Πρόχειρα» pipeline figure so operators still see how

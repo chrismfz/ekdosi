@@ -12,6 +12,9 @@ use App\Models\Payment;
 use App\Models\PaymentGatewayConnection;
 use App\Models\PaymentIntent;
 use App\Models\PaymentMethod;
+use App\Services\CustomerLedger\CustomerLedgerBuilder;
+use App\Services\Dashboard\DashboardMetrics;
+use App\Services\Payments\PaymentAllocator;
 use App\Services\Payments\PaymentIntentService;
 use App\Services\Portal\CustomerDocumentFeed;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -325,5 +328,60 @@ class ProformaPayableTest extends TestCase
         ]);
 
         $this->assertTrue($proforma->fresh()->hasRecordedPayments());
+    }
+
+    /**
+     * Debit and credit must move together. An offered προτιμολόγιο is NOT a
+     * receivable while unpaid — the service can still be called off by either side —
+     * so it must stay out of «Απαιτήσεις». But the moment it is PAID, every balance
+     * surface counts the payment, so the charge has to be counted too: otherwise the
+     * customer's balance and the tenant receivables go NEGATIVE by the paid amount,
+     * and the portal shows credit that availableCredit() refuses to spend.
+     *
+     * Same money-trail exception the cash-term rule already uses.
+     */
+    public function test_an_unpaid_proforma_is_not_a_receivable(): void
+    {
+        $this->draft(offered: true, gross: 100.0);
+
+        $this->assertSame(0.0, round((new DashboardMetrics($this->tenant))->outstandingReceivables(), 2));
+        $this->assertSame(0.0, round((float) app(CustomerLedgerBuilder::class)
+            ->build($this->customer->fresh())->stats['balance'], 2));
+    }
+
+    public function test_a_paid_proforma_nets_to_zero_everywhere(): void
+    {
+        $proforma = $this->draft(offered: true, gross: 100.0);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $proforma->id, 'amount' => 100.00,
+            'pay_date' => now(), 'kind' => 'payment',
+        ]);
+
+        $ledger = round((float) app(CustomerLedgerBuilder::class)
+            ->build($this->customer->fresh())->stats['balance'], 2);
+        $dash = round((new DashboardMetrics($this->tenant))->outstandingReceivables(), 2);
+
+        // Not −100 on either side, and the document itself reads settled.
+        $this->assertSame(0.0, $ledger);
+        $this->assertSame(0.0, $dash);
+        $this->assertSame(0.0, (float) $proforma->fresh()->balanceData()->balance);
+        // …and no phantom «credit» the customer cannot spend.
+        $this->assertSame(0.0, round(app(PaymentAllocator::class)->availableCredit($this->customer->fresh()), 2));
+    }
+
+    /** A PARTIALLY paid proforma leaves exactly the unpaid part owed — not the whole. */
+    public function test_a_partly_paid_proforma_owes_only_the_remainder(): void
+    {
+        $proforma = $this->draft(offered: true, gross: 100.0);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $proforma->id, 'amount' => 40.00,
+            'pay_date' => now(), 'kind' => 'payment',
+        ]);
+
+        $this->assertSame(60.0, round((float) app(CustomerLedgerBuilder::class)
+            ->build($this->customer->fresh())->stats['balance'], 2));
+        $this->assertSame(60.0, round((new DashboardMetrics($this->tenant))->outstandingReceivables(), 2));
     }
 }

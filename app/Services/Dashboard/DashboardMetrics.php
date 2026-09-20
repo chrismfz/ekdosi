@@ -142,7 +142,10 @@ class DashboardMetrics
         // MON-5: an unissued sale draft is not a receivable yet (credit-note drafts,
         // which reduce, are kept via the helper's carve-out). Mirror in
         // Customer::scopeWithOutstandingBalance so headline == Σ per-customer.
-        InvoiceScope::excludeUnissuedDrafts($base);
+        // The paid-proforma exception is the same money-trail rule as the cash-term
+        // one above: once it carries a payment the charge must be counted so the two
+        // net to zero instead of showing a negative receivable.
+        InvoiceScope::excludeUnpaidUnissuedDrafts($base);
 
         // Receivable base = payable_total (collectible) per row, gross_total fallback
         // for not-yet-backfilled rows. Revenue/turnover sums elsewhere stay on gross_total.
