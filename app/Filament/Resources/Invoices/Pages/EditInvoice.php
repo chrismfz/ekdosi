@@ -80,7 +80,12 @@ class EditInvoice extends EditRecord
             // sequence — it never consumed a number. The confirmation only guards
             // against an accidental delete.
             DeleteAction::make()
-                ->visible(fn (Invoice $record) => $record->mydata_state === null && $record->local_status === 'draft')
+                // …and not while it holds money: deleting would leave the Payment rows
+                // pointing at a soft-deleted invoice, still reducing the customer's
+                // balance with no document to explain them.
+                ->visible(fn (Invoice $record) => $record->mydata_state === null
+                    && $record->local_status === 'draft'
+                    && ! $record->hasRecordedPayments())
                 ->requiresConfirmation()
                 ->modalHeading('Διαγραφή πρόχειρου παραστατικού')
                 ->modalDescription(fn (Invoice $record) => "Το πρόχειρο {$record->invcode} θα διαγραφεί. "
@@ -136,6 +141,22 @@ class EditInvoice extends EditRecord
             Notification::make()->warning()
                 ->title('Το παραστατικό προσφέρθηκε στον πελάτη')
                 ->body("Το {$current?->invcode} έγινε προτιμολόγιο ενώ το επεξεργαζόσασταν. Οι αλλαγές δεν αποθηκεύονται.")
+                ->persistent()->send();
+
+            $this->halt();
+        }
+
+        // A draft that holds money may not be reassigned to another customer: the
+        // Payment rows keep customer A while the document would become B's, so A's
+        // Καρτέλα would show a payment against B's document. Impossible before the
+        // προτιμολόγιο (drafts could not carry payments), so the draft edit path
+        // never had to defend against it.
+        if ($current !== null
+            && (int) ($this->data['customer_id'] ?? 0) !== (int) $current->customer_id
+            && $current->hasRecordedPayments()) {
+            Notification::make()->danger()
+                ->title('Το παραστατικό κρατά εισπράξεις')
+                ->body("Το {$current->invcode} έχει καταχωρισμένες εισπράξεις, οπότε δεν μπορεί να αλλάξει πελάτη. Αφαίρεσε πρώτα τις εισπράξεις.")
                 ->persistent()->send();
 
             $this->halt();

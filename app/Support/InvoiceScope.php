@@ -39,9 +39,16 @@ class InvoiceScope
         $local = $prefix.'local_status';
         $offered = $prefix.'offered_at';
 
-        return $query->where(fn ($q) => $q
-            ->where($local, 'active')
-            ->orWhere(fn ($o) => $o->where($local, 'draft')->whereNotNull($offered)));
+        return $query
+            // Carried here, not left to the call sites: this helper exists precisely
+            // to stop «one site missed part of the predicate» drift, and its PHP twin
+            // refuses an AADE-cancelled document. A future site using the helper alone
+            // would otherwise let money land on a voided invoice.
+            ->where(fn ($q) => $q->whereNull($prefix.'mydata_state')
+                ->orWhere($prefix.'mydata_state', '!=', 'CANCELLED'))
+            ->where(fn ($q) => $q
+                ->where($local, 'active')
+                ->orWhere(fn ($o) => $o->where($local, 'draft')->whereNotNull($offered)));
     }
 
     public static function live($query, string $prefix = '')

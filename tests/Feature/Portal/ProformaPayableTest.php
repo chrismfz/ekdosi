@@ -279,4 +279,51 @@ class ProformaPayableTest extends TestCase
         $this->assertSame(60.0, (float) Payment::where('invoice_id', $proforma->id)->sum('amount'));
         $this->assertSame(0.0, (float) $proforma->fresh()->balanceData()->balance);
     }
+
+    /**
+     * Applying existing credit is a re-point, not a charge — it needs no gateway.
+     * The block used to sit inside the «no payment method available» else-branch,
+     * so a tenant without an active gateway left the customer looking at credit
+     * they could not touch.
+     */
+    public function test_credit_can_be_applied_even_with_no_active_gateway(): void
+    {
+        PaymentGatewayConnection::where('company_id', $this->tenant->id)->delete();
+        $proforma = $this->draft(offered: true, gross: 40.0);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'amount' => 100.00, 'pay_date' => now()->subDay(), 'kind' => 'payment',
+        ]);
+
+        $this->actingAs($this->login, 'portal')
+            ->get(route('portal.payment.create', $this->customer->id))
+            ->assertOk()
+            ->assertSee(__('portal.payment.use_credit_submit'));
+
+        $this->actingAs($this->login, 'portal')
+            ->post(route('portal.payment.apply-credit', $this->customer->id), [
+                'invoice_id' => $proforma->id, 'amount' => 40.00,
+            ])->assertRedirect(route('portal.statement'));
+
+        $this->assertSame(40.0, (float) Payment::where('invoice_id', $proforma->id)->sum('amount'));
+    }
+
+    /**
+     * A draft that holds money must not be silently reassigned or deleted — both
+     * were impossible before the προτιμολόγιο, so the draft lifecycle never had to
+     * defend against it. The guards key on this predicate.
+     */
+    public function test_a_proforma_holding_money_reports_it(): void
+    {
+        $proforma = $this->draft(offered: true, gross: 40.0);
+        $this->assertFalse($proforma->hasRecordedPayments());
+
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $proforma->id, 'amount' => 40.00,
+            'pay_date' => now(), 'kind' => 'payment',
+        ]);
+
+        $this->assertTrue($proforma->fresh()->hasRecordedPayments());
+    }
 }

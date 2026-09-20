@@ -132,6 +132,40 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
+     * Does this document already hold customer money?
+     *
+     * Before the προτιμολόγιο a draft could never carry payments, so the draft
+     * lifecycle (free editing, delete) assumed there was nothing to protect. A paid
+     * proforma breaks that assumption: reassigning it to another customer would move
+     * A's money onto B's document, and deleting it would leave the Payment rows
+     * pointing at a soft-deleted invoice — money reducing a balance with no document
+     * to explain it.
+     */
+    public function hasRecordedPayments(): bool
+    {
+        return $this->payments()->exists();
+    }
+
+    /**
+     * An UNISSUED SALE draft — the PHP twin of
+     * {@see InvoiceScope::onlyUnissuedDrafts()}: a local draft, new-app
+     * (no `legacy_id`) and not a credit note.
+     *
+     * This is exactly the set the SQL money surfaces drop via excludeUnissuedDrafts().
+     * InvoiceBalance keys its cash-term carve-out on it so the two can never disagree:
+     * a broader rule (every draft) would also catch unfiled credit-note drafts, which
+     * the SQL surfaces DO count — and the cached badge would then report a receivable
+     * that the dashboard and the ledger both say is nothing.
+     */
+    public function isUnissuedSaleDraft(): bool
+    {
+        return $this->local_status === 'draft'
+            && $this->legacy_id === null
+            && $this->credited_invoice_id === null
+            && ! ($this->invoiceType?->is_credit ?? false);
+    }
+
+    /**
      * May the customer settle this document (pay it, or point existing credit at
      * it)? Both a live issued invoice and an offered proforma qualify — the point
      * of the proforma is that money can land on it BEFORE it becomes a legal
@@ -154,6 +188,9 @@ class Invoice extends Model implements MovableDocument
     protected function loggedAttributes(): array
     {
         return [
+            // Offering/withdrawing locks editing, exposes the document in the
+            // portal and makes it payable — «Ιστορικό» must show who did it and when.
+            'offered_at',
             'code', 'customer_id', 'invoice_type_id', 'issued_at', 'local_status',
             'cancel_reason', 'header_discount_percent', 'net_total', 'gross_total',
             'withhold_amount', 'withhold_category', 'payment_method_id',

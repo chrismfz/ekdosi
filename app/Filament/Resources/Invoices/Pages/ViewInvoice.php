@@ -231,7 +231,9 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Ανάκληση προσφοράς')
-                ->modalDescription('Επιστρέφει σε επεξεργάσιμο πρόχειρο και παύει να είναι ορατό στον πελάτη. Τυχόν πληρωμές που έχουν ήδη καταχωριστεί παραμένουν πάνω του.')
+                ->modalDescription(fn (Invoice $record): string => $record->hasRecordedPayments()
+                    ? 'ΠΡΟΣΟΧΗ: το παραστατικό έχει ήδη εισπράξεις. Η ανάκληση θα το ξανακάνει επεξεργάσιμο — ΜΗΝ αλλάξεις πελάτη και μην το διαγράψεις όσο κρατά χρήματα τρίτου. Αφαίρεσε πρώτα τις εισπράξεις αν χρειάζεται.'
+                    : 'Επιστρέφει σε επεξεργάσιμο πρόχειρο και παύει να είναι ορατό στον πελάτη.')
                 ->action(function (Invoice $record) {
                     $record->forceFill(['offered_at' => null])->save();
 

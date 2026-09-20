@@ -281,4 +281,53 @@ class InvoiceBalanceTest extends TestCase
         $this->assertSame(PaymentStatus::Paid, $b->status);
         $this->assertSame(0.0, $b->balance);
     }
+
+    /**
+     * The cash-term carve-out must cover EXACTLY the rows the SQL money surfaces
+     * drop. `excludeUnissuedDrafts()` deliberately KEEPS credit-note drafts (an
+     * unfiled ΠΙΣ already reduces the balance locally), so a carve-out keyed on
+     * «is a draft» would make the cached badge report a receivable that the
+     * dashboard and the ledger both say is nothing — the «τρία διαφορετικά
+     * υπόλοιπα» divergence this money model exists to prevent.
+     */
+    public function test_a_cash_term_credit_note_draft_keeps_its_settled_at_issue_status(): void
+    {
+        $original = $this->invoice(['payment_method_id' => $this->cash->id]);
+        $note = $this->invoice([
+            'payment_method_id' => $this->cash->id,
+            'local_status' => 'draft',
+            'credited_invoice_id' => $original->id,
+        ]);
+
+        $b = $this->svc()->for($note->fresh());
+
+        $this->assertSame(PaymentStatus::Paid, $b->status);
+        $this->assertSame(0.0, $b->balance);
+        $this->assertFalse($note->isUnissuedSaleDraft());
+    }
+
+    /** …while a plain SALE draft is the one the carve-out is for. */
+    public function test_a_cash_term_sale_draft_is_the_carve_out_target(): void
+    {
+        $draft = $this->invoice([
+            'payment_method_id' => $this->cash->id,
+            'local_status' => 'draft',
+        ]);
+
+        $this->assertTrue($draft->isUnissuedSaleDraft());
+        $this->assertSame(PaymentStatus::Unpaid, $this->svc()->for($draft)->status);
+    }
+
+    /** A legacy-imported draft is a real historical document — it keeps its status. */
+    public function test_a_legacy_cash_term_draft_keeps_its_settled_at_issue_status(): void
+    {
+        $legacy = $this->invoice([
+            'payment_method_id' => $this->cash->id,
+            'local_status' => 'draft',
+            'legacy_id' => 4242,
+        ]);
+
+        $this->assertFalse($legacy->isUnissuedSaleDraft());
+        $this->assertSame(PaymentStatus::Paid, $this->svc()->for($legacy->fresh())->status);
+    }
 }

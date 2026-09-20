@@ -80,61 +80,6 @@
                  one of their own documents. No new payment — a re-point, net-zero on
                  their balance — so it lives beside the pay form rather than inside
                  it. Shown only when there is credit AND something to settle. --}}
-            @if ($availableCredit > 0.005 && $openInvoices->isNotEmpty())
-                <div class="mt-8 border-t border-zinc-200 pt-6 dark:border-zinc-700">
-                    <flux:heading size="sm">{{ __('portal.payment.use_credit') }}</flux:heading>
-                    <flux:text class="mt-1 text-sm text-zinc-500">
-                        {{ __('portal.payment.use_credit_hint', ['amount' => Money::eur($availableCredit)]) }}
-                    </flux:text>
-
-                    <form method="POST" action="{{ route('portal.payment.apply-credit', $customer->id) }}"
-                          class="mt-4 flex flex-col gap-4" data-credit-form>
-                        @csrf
-                        <flux:select name="invoice_id" required label="{{ __('portal.payment.what') }}">
-                            @foreach ($openInvoices as $inv)
-                                <option value="{{ $inv->id }}" data-balance="{{ number_format((float) $inv->open_balance, 2, '.', '') }}">
-                                    {{ $inv->invcode }} — {{ Money::eur((float) $inv->open_balance) }}
-                                    @if ($inv->isOffered()) · {{ __('portal.payment.proforma_badge') }} @endif
-                                </option>
-                            @endforeach
-                        </flux:select>
-
-                        <flux:input
-                            name="amount"
-                            type="number"
-                            step="0.01"
-                            min="0.01"
-                            required
-                            label="{{ __('portal.payment.amount_field') }}"
-                            value="{{ number_format(min($availableCredit, (float) $openInvoices->first()->open_balance), 2, '.', '') }}"
-                            data-credit="{{ number_format($availableCredit, 2, '.', '') }}"
-                        />
-
-                        <flux:button type="submit" variant="filled" class="w-full">
-                            {{ __('portal.payment.use_credit_submit') }}
-                        </flux:button>
-                    </form>
-                    <script>
-                        // Keep the shown amount honest as the customer switches
-                        // document: min(credit, that document's balance). The server
-                        // caps it regardless — this only stops us DISPLAYING a figure
-                        // that would be silently reduced.
-                        (function () {
-                            var form = document.querySelector('[data-credit-form]');
-                            if (! form) return;
-                            var select = form.querySelector('select[name="invoice_id"]');
-                            var amount = form.querySelector('input[name="amount"]');
-                            if (! select || ! amount) return;
-                            select.addEventListener('change', function () {
-                                var opt = select.options[select.selectedIndex];
-                                var balance = parseFloat(opt.getAttribute('data-balance') || '0');
-                                var credit = parseFloat(amount.getAttribute('data-credit') || '0');
-                                amount.value = Math.min(balance, credit).toFixed(2);
-                            });
-                        })();
-                    </script>
-                </div>
-            @endif
 
             @if ($openInvoices->isNotEmpty())
                 <script>
@@ -152,6 +97,64 @@
                     })();
                 </script>
             @endif
+        @endif
+
+        {{-- Outside the «no payment method» branch on purpose: applying existing
+             credit is a re-point, not a charge, so it needs no gateway at all. --}}
+        @if ($availableCredit > 0.005 && $openInvoices->isNotEmpty())
+            <div class="mt-8 border-t border-zinc-200 pt-6 dark:border-zinc-700">
+                <flux:heading size="sm">{{ __('portal.payment.use_credit') }}</flux:heading>
+                <flux:text class="mt-1 text-sm text-zinc-500">
+                    {{ __('portal.payment.use_credit_hint', ['amount' => Money::eur($availableCredit)]) }}
+                </flux:text>
+
+                <form method="POST" action="{{ route('portal.payment.apply-credit', $customer->id) }}"
+                      class="mt-4 flex flex-col gap-4" data-credit-form>
+                    @csrf
+                    <flux:select name="invoice_id" required label="{{ __('portal.payment.what') }}">
+                        @foreach ($openInvoices as $inv)
+                            <option value="{{ $inv->id }}" data-balance="{{ number_format((float) $inv->open_balance, 2, '.', '') }}">
+                                {{ $inv->invcode }} — {{ Money::eur((float) $inv->open_balance) }}
+                                @if ($inv->isOffered()) · {{ __('portal.payment.proforma_badge') }} @endif
+                            </option>
+                        @endforeach
+                    </flux:select>
+
+                    <flux:input
+                        name="amount"
+                        type="number"
+                        step="0.01"
+                        min="0.01"
+                        required
+                        label="{{ __('portal.payment.amount_field') }}"
+                        value="{{ number_format(min($availableCredit, (float) $openInvoices->first()->open_balance), 2, '.', '') }}"
+                        data-credit="{{ number_format($availableCredit, 2, '.', '') }}"
+                    />
+
+                    <flux:button type="submit" variant="filled" class="w-full">
+                        {{ __('portal.payment.use_credit_submit') }}
+                    </flux:button>
+                </form>
+                <script>
+                    // Keep the shown amount honest as the customer switches
+                    // document: min(credit, that document's balance). The server
+                    // caps it regardless — this only stops us DISPLAYING a figure
+                    // that would be silently reduced.
+                    (function () {
+                        var form = document.querySelector('[data-credit-form]');
+                        if (! form) return;
+                        var select = form.querySelector('select[name="invoice_id"]');
+                        var amount = form.querySelector('input[name="amount"]');
+                        if (! select || ! amount) return;
+                        select.addEventListener('change', function () {
+                            var opt = select.options[select.selectedIndex];
+                            var balance = parseFloat(opt.getAttribute('data-balance') || '0');
+                            var credit = parseFloat(amount.getAttribute('data-credit') || '0');
+                            amount.value = Math.min(balance, credit).toFixed(2);
+                        });
+                    })();
+                </script>
+            </div>
         @endif
 
         <flux:text class="mt-6 text-sm">

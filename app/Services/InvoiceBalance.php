@@ -101,10 +101,15 @@ class InvoiceBalance
         // paid-looking, unpaid proforma so confusing) and make it impossible to
         // point credit at it: applyCredit() caps on this balance and would see zero.
         //
-        // Deliberately `!== 'draft'` and not `=== 'active'`: a CANCELLED cash-term
-        // invoice keeps its previous synthetic settlement, so voiding a document
-        // cannot conjure a phantom receivable out of it.
-        if ($invoice->local_status !== 'draft'
+        // Keyed on isUnissuedSaleDraft(), NOT on «is a draft»: the carve-out must
+        // cover exactly the rows the SQL money surfaces drop (excludeUnissuedDrafts).
+        // A broader rule also caught unfiled CREDIT-NOTE drafts — which those surfaces
+        // DO count — so the cached badge reported a €X receivable while the dashboard
+        // and the ledger both reported nothing: the «τρία διαφορετικά υπόλοιπα»
+        // divergence this money model exists to prevent. A CANCELLED cash-term invoice
+        // likewise keeps its synthetic settlement, so voiding cannot conjure a
+        // phantom receivable.
+        if (! $invoice->isUnissuedSaleDraft()
             && $this->isCashTerm($invoice)
             && ! $this->hasRecordedPayments($invoice, $locking)) {
             return new InvoiceBalanceData(
