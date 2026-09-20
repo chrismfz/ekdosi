@@ -9,6 +9,7 @@ use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
+use App\Models\Scopes\CompanyScope;
 use App\Observers\InvoiceObserver;
 use App\Services\InvoiceBalance;
 use App\Services\InvoiceBalanceData;
@@ -144,6 +145,21 @@ class Invoice extends Model implements MovableDocument
     public function hasRecordedPayments(): bool
     {
         return $this->payments()->exists();
+    }
+
+    /**
+     * Captures still in flight for THIS document. Withdrawing an offer (or issuing)
+     * re-checks the settle target, so a pending intent would silently fall back to
+     * FIFO and pay something else — the operator should be told before, not after.
+     */
+    public function pendingPaymentIntentsCount(): int
+    {
+        return PaymentIntent::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $this->company_id)
+            ->where('invoice_id', $this->getKey())
+            ->where('status', PaymentIntent::STATUS_PENDING)
+            ->count();
     }
 
     /**

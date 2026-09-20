@@ -80,6 +80,10 @@
                                             @case('refund')
                                                 <flux:badge size="sm" color="amber">{{ __('portal.statement.badge_refund') }}</flux:badge>
                                                 @break
+                                            @case('proforma')
+                                                <flux:badge size="sm" color="amber">{{ __('portal.payment.proforma_badge') }}</flux:badge>
+                                                @break
+
                                             @default
                                                 <flux:badge size="sm" color="zinc">{{ __('portal.common.document') }}</flux:badge>
                                         @endswitch

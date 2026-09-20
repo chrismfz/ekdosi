@@ -258,6 +258,9 @@ class CustomerLedgerBuilder
                 'invoices.payable_total',
                 'invoices.mydata_state',
                 'invoices.mydata_mark',
+                // Needed to badge a kept προτιμολόγιο on the customer's statement.
+                'invoices.local_status',
+                'invoices.offered_at',
                 'invoices.credited_invoice_id',
                 'invoices.created_at',
                 'payment_methods.due_days',
@@ -690,6 +693,10 @@ class CustomerLedgerBuilder
                 'tax_adjustment' => $taxAdjustment,
                 'mydata_state' => $inv->mydata_state,
                 'mydata_mark' => $inv->mydata_mark,
+                // A paid προτιμολόγιο is now kept in the ledger (its payment is
+                // counted, so its charge must be too). It must NOT read as a tax
+                // document: the customer statement badges it from here.
+                'is_proforma' => $inv->local_status === 'draft' && $inv->offered_at !== null,
                 'is_credit_term' => ! $isCreditNote && $this->isTracked($inv, $paidIds),
                 // Display-only «Κατάσταση» hints (they do NOT touch the money math):
                 // whether the document is cash- or credit-term, and whether a real

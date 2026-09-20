@@ -231,9 +231,19 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Ανάκληση προσφοράς')
-                ->modalDescription(fn (Invoice $record): string => $record->hasRecordedPayments()
-                    ? 'ΠΡΟΣΟΧΗ: το παραστατικό έχει ήδη εισπράξεις. Η ανάκληση θα το ξανακάνει επεξεργάσιμο — ΜΗΝ αλλάξεις πελάτη και μην το διαγράψεις όσο κρατά χρήματα τρίτου. Αφαίρεσε πρώτα τις εισπράξεις αν χρειάζεται.'
-                    : 'Επιστρέφει σε επεξεργάσιμο πρόχειρο και παύει να είναι ορατό στον πελάτη.')
+                ->modalDescription(function (Invoice $record): string {
+                    if ($record->hasRecordedPayments()) {
+                        return 'ΠΡΟΣΟΧΗ: το παραστατικό έχει ήδη εισπράξεις. Η ανάκληση θα το ξανακάνει επεξεργάσιμο — ΜΗΝ αλλάξεις πελάτη και μην το διαγράψεις όσο κρατά χρήματα τρίτου.';
+                    }
+                    // A capture already on its way to the acquirer can no longer land
+                    // here: settle() re-checks the target and falls back to FIFO, so
+                    // the money would quietly pay other invoices instead of this one.
+                    if ($record->pendingPaymentIntentsCount() > 0) {
+                        return 'ΠΡΟΣΟΧΗ: υπάρχει πληρωμή σε εξέλιξη για αυτό το παραστατικό. Αν ανακληθεί τώρα, τα χρήματα όταν έρθουν ΔΕΝ θα δεθούν εδώ — θα πάνε σε άλλα ανοιχτά παραστατικά ή στο υπόλοιπο του πελάτη.';
+                    }
+
+                    return 'Επιστρέφει σε επεξεργάσιμο πρόχειρο και παύει να είναι ορατό στον πελάτη.';
+                })
                 ->action(function (Invoice $record) {
                     $record->forceFill(['offered_at' => null])->save();
 

@@ -35,6 +35,21 @@ class ProformaStats extends StatsOverviewWidget
 
     protected ?string $pollingInterval = '60s';
 
+    /**
+     * Memoised per request: canView() and getStats() both need the figure, and it is
+     * a GROUP BY with a correlated EXISTS on a widget that polls every 60 seconds —
+     * no reason to run it twice per render.
+     *
+     * @var array<string, array{unpaid_count:int, unpaid_gross:float, paid_count:int, paid_gross:float}>
+     */
+    private static array $pipelineCache = [];
+
+    private static function pipeline(Company $tenant): array
+    {
+        return self::$pipelineCache[$tenant->getKey()]
+            ??= (new DashboardMetrics($tenant))->proformaPipeline();
+    }
+
     public static function canView(): bool
     {
         $tenant = Filament::getTenant();
@@ -44,7 +59,7 @@ class ProformaStats extends StatsOverviewWidget
 
         // Nothing to say when the tenant has never offered one — don't spend a row
         // of the dashboard on a permanent pair of zeros.
-        $p = (new DashboardMetrics($tenant))->proformaPipeline();
+        $p = self::pipeline($tenant);
 
         return ($p['unpaid_count'] + $p['paid_count']) > 0;
     }
@@ -56,7 +71,7 @@ class ProformaStats extends StatsOverviewWidget
             return [];
         }
 
-        $p = (new DashboardMetrics($tenant))->proformaPipeline();
+        $p = self::pipeline($tenant);
 
         return [
             Stat::make('Απλήρωτα προτιμολόγια', (string) $p['unpaid_count'])
