@@ -28,6 +28,10 @@ class PdfLabels
         // full stop. myDATA is irrelevant for none/ee-peppol/Off tenants, and
         // for GR tenants the not-yet-filed state has its own banner below.
         'banner_draft' => ['ΠΡΟΧΕΙΡΟ — ΔΕΝ ΕΧΕΙ ΕΚΔΟΘΕΙ', 'DRAFT — NOT ISSUED'],
+        'banner_proforma' => [
+            'ΠΡΟΤΙΜΟΛΟΓΙΟ — ΔΕΝ ΑΠΟΤΕΛΕΙ ΦΟΡΟΛΟΓΙΚΟ ΠΑΡΑΣΤΑΤΙΚΟ',
+            'PROFORMA — NOT A TAX DOCUMENT',
+        ],
         'banner_cancelled' => ['ΑΚΥΡΩΘΕΝ ΠΑΡΑΣΤΑΤΙΚΟ — Δεν έχει νόμιμη ισχύ', 'CANCELLED DOCUMENT — Not legally valid'],
         'banner_cancel_pending_mydata' => ['Εκκρεμεί ακύρωση στο myDATA', 'myDATA cancellation pending'],
         'banner_pending_mydata' => ['ΕΚΔΟΘΕΝ — ΕΚΚΡΕΜΕΙ ΥΠΟΒΟΛΗ ΣΤΟ myDATA', 'ISSUED — myDATA SUBMISSION PENDING'],

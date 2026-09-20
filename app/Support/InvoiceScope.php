@@ -2,6 +2,8 @@
 
 namespace App\Support;
 
+use App\Models\Invoice;
+
 /**
  * The single definition of a "live" invoice for money/reporting purposes:
  * NOT cancelled locally AND NOT cancelled at myDATA. Centralised so the
@@ -20,6 +22,28 @@ namespace App\Support;
  */
 class InvoiceScope
 {
+    /**
+     * Documents the CUSTOMER may settle: issued (`local_status=active`) or an
+     * offered «προτιμολόγιο» (a draft the operator finalised and put in front of
+     * them). The SQL twin of {@see Invoice::isCustomerPayable()}.
+     *
+     * THE single definition. It was originally re-typed at each call site, and the
+     * one copy that got missed — PaymentAllocator::allocateToInvoice() — threw on a
+     * proforma, rolling back the whole settle transaction: the bank had taken the
+     * money and we wrote no Payment, no intent transition and no «Log πύλης» row.
+     * Every site that decides «may money land here» now shares this one predicate,
+     * so the next widening cannot miss one.
+     */
+    public static function customerSettleable($query, string $prefix = '')
+    {
+        $local = $prefix.'local_status';
+        $offered = $prefix.'offered_at';
+
+        return $query->where(fn ($q) => $q
+            ->where($local, 'active')
+            ->orWhere(fn ($o) => $o->where($local, 'draft')->whereNotNull($offered)));
+    }
+
     public static function live($query, string $prefix = '')
     {
         $state = $prefix.'mydata_state';

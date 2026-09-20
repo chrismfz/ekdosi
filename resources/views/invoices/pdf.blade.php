@@ -44,18 +44,6 @@
            line-height 1.1 keeps a rare longer name tight if it still wraps. */
         .doc-type    { font-size: 11pt; line-height: 1.1; font-weight: bold; color: #111827; margin: 0; text-transform: uppercase; clear: right; }
         .doc-code    { font-size: 10.5pt; color: #111827; margin: 0.4mm 0; }
-    /* Provisional banner: loud enough that a printed proforma can't pass for an
-       invoice, without disturbing the issued-document layout (it renders only
-       for drafts). */
-    .doc-provisional {
-        margin: 2px 0;
-        padding: 2px 5px;
-        border: 1pt solid #b91c1c;
-        color: #b91c1c;
-        font-weight: bold;
-        font-size: 7.5pt;
-        letter-spacing: .3pt;
-    }
         .doc-date    { font-size: 8.5pt; color: #4b5563; }
 
         /* Two-column meta strip (customer / invoice details) */
@@ -195,7 +183,9 @@
         {{ $L('banner_cancelled') }}@if($bannerState['note'] === 'cancel_pending_mydata')<br><span style="font-size:8.5pt; font-weight:400">{{ $L('banner_cancel_pending_mydata') }}</span>@endif
     </div>
 @elseif($bannerState['kind'] === 'draft')
-    <div class="banner banner-draft">{{ $L('banner_draft') }}</div>
+    {{-- An offered προτιμολόγιο is a draft the CUSTOMER is holding, so it names
+         itself rather than saying «πρόχειρο». Same banner, same bilingual path. --}}
+    <div class="banner banner-draft">{{ $L($invoice->offered_at !== null ? 'banner_proforma' : 'banner_draft') }}</div>
 @elseif($bannerState['kind'] === 'pending_mydata')
     <div class="banner banner-draft">{{ $L('banner_pending_mydata') }}</div>
 @elseif($isCredit)
@@ -242,14 +232,6 @@
             </div>
         @endif
         <p class="doc-type">@gup($invoice->invoiceType?->name ?? $L('doc_generic'))</p>
-        {{-- An un-issued document must never be mistaken for a tax document. The
-             «ΠΡΟΣ-» prefix on the code already marks it, but a customer holding a
-             PDF needs it said outright — proformas are now downloadable from the
-             portal. --}}
-        @if($invoice->local_status === 'draft')
-            <p class="doc-provisional">{{ $invoice->offered_at !== null ? 'ΠΡΟΤΙΜΟΛΟΓΙΟ' : 'ΠΡΟΧΕΙΡΟ' }}
-                — ΔΕΝ ΑΠΟΤΕΛΕΙ ΦΟΡΟΛΟΓΙΚΟ ΠΑΡΑΣΤΑΤΙΚΟ</p>
-        @endif
         <p class="doc-code">{{ $invoice->invcode }}</p>
         <p class="doc-date">
             {{ optional($invoice->issued_at)->format('d/m/Y H:i') }}

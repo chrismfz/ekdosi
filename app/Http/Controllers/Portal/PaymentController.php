@@ -255,12 +255,10 @@ class PaymentController extends Controller
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $customer->company_id)
             ->where('customer_id', $customer->id)
-            // Issued invoices AND offered προτιμολόγια — settling a proforma before
-            // it is issued is the whole point of the flag.
-            ->where(fn ($w) => $w->where('local_status', 'active')
-                ->orWhere(fn ($o) => $o->where('local_status', 'draft')->whereNotNull('offered_at')))
             ->orderBy('issued_at')
             ->orderBy('id');
+        // Issued invoice OR offered προτιμολόγιο — the one shared definition.
+        InvoiceScope::customerSettleable($q);
         InvoiceScope::excludeCreditNotes($q);
 
         return $q->get()

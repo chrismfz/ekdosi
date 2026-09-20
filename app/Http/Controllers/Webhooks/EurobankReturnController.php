@@ -502,7 +502,11 @@ class EurobankReturnController
                 'amount' => $amount,
                 'currency' => self::clamp($providerOutcome?->currency, 8),
                 'ip' => $request->ip(),
-                'message' => $providerOutcome?->message,
+                // Clamped for the same reason as the columns above: `message` comes
+                // verbatim from the posted body and, though the column is TEXT, a
+                // large enough value still makes create() throw — and the catch
+                // below would swallow it, leaving NO audit row at all.
+                'message' => self::clamp($providerOutcome?->message, 2000),
                 // Why the gateway ruled the way it did, so «Log πύλης» explains a
                 // refusal on its own instead of sending an operator to a server log.
                 'diagnostics' => $diagnostics ?? ($providerOutcome?->diagnostics ?: null),

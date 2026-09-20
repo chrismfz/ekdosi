@@ -95,12 +95,16 @@ class InvoiceBalance
         // payments it stays the synthetic settled-at-issue default, so the
         // ~6.7k imported invoices (whose legacy payments are on-account) are
         // unchanged.
-        // …and it only applies to an ISSUED document. A draft — in particular an
-        // offered «προτιμολόγιο» — has no issue to be settled at, so synthesising
-        // payment for it would both misreport it as paid (the thing that made a
+        // …and it does not apply to a DRAFT. A draft — in particular an offered
+        // «προτιμολόγιο» — has no issue to be settled at, so synthesising payment
+        // for it would both misreport it as paid (the thing that made a
         // paid-looking, unpaid proforma so confusing) and make it impossible to
         // point credit at it: applyCredit() caps on this balance and would see zero.
-        if ($invoice->local_status === 'active'
+        //
+        // Deliberately `!== 'draft'` and not `=== 'active'`: a CANCELLED cash-term
+        // invoice keeps its previous synthetic settlement, so voiding a document
+        // cannot conjure a phantom receivable out of it.
+        if ($invoice->local_status !== 'draft'
             && $this->isCashTerm($invoice)
             && ! $this->hasRecordedPayments($invoice, $locking)) {
             return new InvoiceBalanceData(

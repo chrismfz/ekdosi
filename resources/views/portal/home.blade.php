@@ -37,7 +37,10 @@
                                     <td class="font-medium">{{ $doc['invcode'] ?? '—' }}</td>
                                     <td>{{ $doc['type'] ?? '—' }}</td>
                                     <td>
-                                        @if ($doc['mydata_state'] === 'VALID')
+                                        @if ($doc['is_proforma'] ?? false)
+                                            {{-- NOT a tax document: it must never wear the «Εκδόθηκε» badge. --}}
+                                            <flux:badge size="sm" color="amber">{{ __('portal.payment.proforma_badge') }}</flux:badge>
+                                        @elseif ($doc['mydata_state'] === 'VALID')
                                             <flux:badge size="sm" color="green">{{ __('portal.common.on_mydata') }}</flux:badge>
                                         @else
                                             <flux:badge size="sm" color="blue">{{ __('portal.common.issued') }}</flux:badge>
@@ -68,6 +71,9 @@
                             @endforeach
                         </tbody>
                     </table>
+                    @if (collect($group['documents'])->contains(fn ($d) => $d['is_proforma'] ?? false))
+                        <p class="px-4 pt-3 text-xs text-zinc-500 dark:text-zinc-400">{{ __('portal.payment.proforma_note') }}</p>
+                    @endif
                 </div>
                 @if ($group['truncated'])
                     <flux:text class="mt-2 text-xs text-zinc-500">{{ __('portal.home.recent_note', ['count' => count($group['documents'])]) }}</flux:text>

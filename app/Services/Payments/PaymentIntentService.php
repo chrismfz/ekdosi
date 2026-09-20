@@ -84,6 +84,13 @@ class PaymentIntentService
             || (int) $invoice->company_id !== (int) $customer->company_id)) {
             throw new RuntimeException('Το παραστατικό δεν ανήκει στον πελάτη.');
         }
+        // …and it must be something money may land on at all: an issued invoice or
+        // an offered προτιμολόγιο. The PHP twin of InvoiceScope::customerSettleable,
+        // asserted here so an intent can never be opened against a target that
+        // settle() would later refuse — which is how a capture ends up stranded.
+        if ($invoice !== null && ! $invoice->isCustomerPayable()) {
+            throw new RuntimeException('Το παραστατικό δεν δέχεται πληρωμή.');
+        }
 
         $gateway = $this->registry->for($connection->gateway);
         if (! $gateway->capabilities()->chargeable()) {
@@ -314,12 +321,9 @@ class PaymentIntentService
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $intent->company_id)
             ->where('customer_id', $intent->customer_id)
-            // Same allow-list as the portal picker: an offered προτιμολόγιο is a
-            // valid target, so money captured against one still lands on it at
-            // settle time instead of silently falling back to FIFO/on-account.
-            ->where(fn ($w) => $w->where('local_status', 'active')
-                ->orWhere(fn ($o) => $o->where('local_status', 'draft')->whereNotNull('offered_at')))
             ->whereKey($intent->invoice_id);
+        // Issued invoice OR offered προτιμολόγιο — the one shared definition.
+        InvoiceScope::customerSettleable($q);
         InvoiceScope::excludeCreditNotes($q);
 
         return $q->first();

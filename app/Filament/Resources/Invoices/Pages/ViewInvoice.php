@@ -200,7 +200,13 @@ class ViewInvoice extends ViewRecord
                 ->label('Προσφορά στον πελάτη')
                 ->icon('heroicon-o-paper-airplane')
                 ->color('info')
-                ->visible(fn (Invoice $record): bool => $record->local_status === 'draft' && ! $record->isOffered())
+                // Not for a πιστωτικό (you don't ask a customer to settle a credit
+                // note) nor for a customer-less retail slip (nobody to offer it to).
+                ->visible(fn (Invoice $record): bool => $record->local_status === 'draft'
+                    && ! $record->isOffered()
+                    && $record->customer_id !== null
+                    && $record->credited_invoice_id === null
+                    && ! ($record->invoiceType?->is_credit ?? false))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Προσφορά στον πελάτη (προτιμολόγιο)')
@@ -302,7 +308,11 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->action(function (Invoice $record) {
-                    $record->update(['local_status' => 'draft']);
+                    // Clear any stale offer along with the status. Otherwise a
+                    // document that was offered → issued → reverted comes back as an
+                    // OFFERED draft: instantly visible and payable in the portal
+                    // again, and locked against the very edit it was reverted for.
+                    $record->update(['local_status' => 'draft', 'offered_at' => null]);
                     Notification::make()->title('Επαναφορά σε πρόχειρο')->success()->send();
                     $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),

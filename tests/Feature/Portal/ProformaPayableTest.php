@@ -10,7 +10,9 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentGatewayConnection;
+use App\Models\PaymentIntent;
 use App\Models\PaymentMethod;
+use App\Services\Payments\PaymentIntentService;
 use App\Services\Portal\CustomerDocumentFeed;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
@@ -219,5 +221,62 @@ class ProformaPayableTest extends TestCase
             ->assertNotFound();
 
         $this->assertSame(0, Payment::where('invoice_id', $hidden->id)->count());
+    }
+
+    /**
+     * THE settle path — a real payment (not credit) captured against a proforma.
+     *
+     * Regression guard: `payableTarget()` was widened to accept a proforma while
+     * `PaymentAllocator::allocateToInvoice()` still re-resolved the target as
+     * `local_status = active` and THREW. Because settle() runs inside one
+     * DB::transaction and the vPOS controller does not catch, the throw rolled
+     * everything back: the bank had taken the money and we wrote no Payment, no
+     * intent transition and no «Log πύλης» row. Both now share
+     * InvoiceScope::customerSettleable().
+     */
+    public function test_a_payment_captured_against_a_proforma_lands_on_it(): void
+    {
+        $proforma = $this->draft(offered: true, gross: 60.0);
+        $connection = PaymentGatewayConnection::where('company_id', $this->tenant->id)->firstOrFail();
+
+        $result = app(PaymentIntentService::class)->start(
+            customer: $this->customer,
+            connection: $connection,
+            amount: 60.0,
+            login: $this->login,
+            invoice: $proforma,
+        );
+
+        $outcome = app(PaymentIntentService::class)->settle(
+            $result['intent'],
+            settledBy: 'test',
+            transactionId: 'TX-PROFORMA',
+        );
+
+        $this->assertSame(PaymentIntentService::SETTLE_OK, $outcome);
+        $this->assertSame(PaymentIntent::STATUS_SETTLED, $result['intent']->fresh()->status);
+
+        // The money is ON the proforma, not stranded on account.
+        $this->assertSame(60.0, (float) Payment::where('invoice_id', $proforma->id)->sum('amount'));
+        $this->assertSame(0.0, (float) $proforma->fresh()->balanceData()->balance);
+        $this->assertSame(0, Payment::whereNull('invoice_id')
+            ->where('customer_id', $this->customer->id)->count());
+    }
+
+    /** Issuing the settled proforma keeps the payment attached — it is the same row. */
+    public function test_issuing_a_settled_proforma_keeps_its_payment(): void
+    {
+        $proforma = $this->draft(offered: true, gross: 60.0);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $proforma->id, 'amount' => 60.00,
+            'pay_date' => now(), 'kind' => 'payment',
+        ]);
+
+        // «Οριστικοποίηση»: same row, now a legal document.
+        $proforma->forceFill(['local_status' => 'active', 'offered_at' => null])->save();
+
+        $this->assertSame(60.0, (float) Payment::where('invoice_id', $proforma->id)->sum('amount'));
+        $this->assertSame(0.0, (float) $proforma->fresh()->balanceData()->balance);
     }
 }

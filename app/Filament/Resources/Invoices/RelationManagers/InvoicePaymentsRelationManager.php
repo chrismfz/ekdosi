@@ -162,6 +162,28 @@ class InvoicePaymentsRelationManager extends RelationManager
     }
 
     /**
+     * May customer CREDIT be pointed at this document?
+     *
+     * Every guard canRecordPayment() enforces still applies — a πιστωτικό, an
+     * AADE-cancelled document and a customer-less retail slip are no more valid
+     * targets for credit than for a fresh receipt. The ONE relaxation is the
+     * draft rule: an OFFERED προτιμολόγιο is exactly the thing we want credit to
+     * be able to settle before it becomes a legal document. An un-offered draft
+     * stays excluded (MON-5: paying a πρόχειρο understates the balance).
+     */
+    private function canApplyCredit(): bool
+    {
+        $invoice = $this->invoice();
+
+        return $invoice->customer_id !== null
+            && $invoice->credited_invoice_id === null
+            && ! ($invoice->invoiceType?->is_credit ?? false)
+            && $invoice->mydata_state !== 'CANCELLED'
+            && $invoice->local_status !== 'cancelled'
+            && ($invoice->local_status !== 'draft' || $invoice->isOffered());
+    }
+
+    /**
      * Suggested «record payment» amount = what's left to fully record
      * (gross − credited − really-paid). For a fresh cash-term invoice that's
      * the gross (nothing logged yet); for a credit-term invoice it's the
@@ -258,7 +280,9 @@ class InvoicePaymentsRelationManager extends RelationManager
                     ->label('Χρήση πίστωσης')
                     ->icon('heroicon-o-arrow-right-circle')
                     ->color('info')
-                    ->visible(fn (): bool => $this->balance() > 0.005 && $this->availableCredit() > 0.005)
+                    ->visible(fn (): bool => $this->canApplyCredit()
+                        && $this->balance() > 0.005
+                        && $this->availableCredit() > 0.005)
                     ->modalHeading('Χρήση διαθέσιμης πίστωσης')
                     ->modalDescription(fn (): string => 'Διαθέσιμη πίστωση πελάτη: '
                         .number_format($this->availableCredit(), 2, ',', '.').' € · '

@@ -88,11 +88,11 @@
                     </flux:text>
 
                     <form method="POST" action="{{ route('portal.payment.apply-credit', $customer->id) }}"
-                          class="mt-4 flex flex-col gap-4">
+                          class="mt-4 flex flex-col gap-4" data-credit-form>
                         @csrf
                         <flux:select name="invoice_id" required label="{{ __('portal.payment.what') }}">
                             @foreach ($openInvoices as $inv)
-                                <option value="{{ $inv->id }}">
+                                <option value="{{ $inv->id }}" data-balance="{{ number_format((float) $inv->open_balance, 2, '.', '') }}">
                                     {{ $inv->invcode }} — {{ Money::eur((float) $inv->open_balance) }}
                                     @if ($inv->isOffered()) · {{ __('portal.payment.proforma_badge') }} @endif
                                 </option>
@@ -107,12 +107,32 @@
                             required
                             label="{{ __('portal.payment.amount_field') }}"
                             value="{{ number_format(min($availableCredit, (float) $openInvoices->first()->open_balance), 2, '.', '') }}"
+                            data-credit="{{ number_format($availableCredit, 2, '.', '') }}"
                         />
 
                         <flux:button type="submit" variant="filled" class="w-full">
                             {{ __('portal.payment.use_credit_submit') }}
                         </flux:button>
                     </form>
+                    <script>
+                        // Keep the shown amount honest as the customer switches
+                        // document: min(credit, that document's balance). The server
+                        // caps it regardless — this only stops us DISPLAYING a figure
+                        // that would be silently reduced.
+                        (function () {
+                            var form = document.querySelector('[data-credit-form]');
+                            if (! form) return;
+                            var select = form.querySelector('select[name="invoice_id"]');
+                            var amount = form.querySelector('input[name="amount"]');
+                            if (! select || ! amount) return;
+                            select.addEventListener('change', function () {
+                                var opt = select.options[select.selectedIndex];
+                                var balance = parseFloat(opt.getAttribute('data-balance') || '0');
+                                var credit = parseFloat(amount.getAttribute('data-credit') || '0');
+                                amount.value = Math.min(balance, credit).toFixed(2);
+                            });
+                        })();
+                    </script>
                 </div>
             @endif
 

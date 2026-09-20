@@ -6,6 +6,7 @@ use App\Models\CustomerUser;
 use App\Models\CustomerUserAccess;
 use App\Models\Invoice;
 use App\Models\Scopes\CompanyScope;
+use App\Support\InvoiceScope;
 use Illuminate\Database\Eloquent\Builder;
 
 /**
@@ -104,6 +105,9 @@ class CustomerDocumentFeed
                 'issued_at' => $inv->issued_at?->format('Y-m-d'),
                 'invcode' => $inv->invcode,
                 'type' => $inv->invoiceType?->name,
+                // Load-bearing for the view: a proforma rendered identically to an
+                // issued document would read as a tax document, which it is not.
+                'is_proforma' => $inv->isOffered(),
                 'mydata_state' => $inv->mydata_state,
                 'mydata_mark' => $inv->mydata_mark,
                 'verify_url' => ($inv->mydata_url !== null && $inv->mydata_url !== '') ? $inv->mydata_url : null,
@@ -120,17 +124,15 @@ class CustomerDocumentFeed
      */
     private function liveQuery(int $companyId, int $customerId): Builder
     {
-        return Invoice::query()
+        $q = Invoice::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $companyId)
             ->where('customer_id', $customerId)
-            // Issued documents PLUS offered προτιμολόγια: a proforma is what the
-            // customer is being asked to settle, so it has to be visible. It stays a
-            // draft everywhere else (no ΑΑ, no myDATA, outside every money total),
-            // and the views/PDF label it as not-a-tax-document.
-            ->where(fn ($q) => $q->where('local_status', 'active')
-                ->orWhere(fn ($o) => $o->where('local_status', 'draft')->whereNotNull('offered_at')))
             ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'));
+
+        // Issued documents PLUS offered προτιμολόγια — the one shared definition
+        // (App\Support\InvoiceScope::customerSettleable).
+        return InvoiceScope::customerSettleable($q);
     }
 
     /**
