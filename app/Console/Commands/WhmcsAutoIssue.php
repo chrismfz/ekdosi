@@ -308,6 +308,15 @@ class WhmcsAutoIssue extends Command
             return [null, PendingWhmcsInvoice::consolidatedPaymentReason($row->consolidatedPaymentRefs())];
         }
 
+        // A container the operator manually CONSOLIDATED reads as a normal sale to
+        // isConsolidatedPayment() above (its merged payload carries real child lines,
+        // not references), so that guard misses it. But it's the product of a
+        // deliberate «Ενοποίηση» expecting manual review («Δημιουργία Παραστατικού»),
+        // so never auto-file it — hold for the operator. (Was BACKLOG P2-5.)
+        if ($row->hasBeenConsolidated()) {
+            return [null, 'ενοποιημένο συγκεντρωτικό — έκδοση με χειριστή («Δημιουργία Παραστατικού»)'];
+        }
+
         if ($row->third_party_state === PendingWhmcsInvoice::TP_SINGLE) {
             $isReceipt = $row->singleThirdPartyReceipt();
             if ($isReceipt === null) {

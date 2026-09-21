@@ -226,6 +226,57 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertNull($held->fresh()->invoice_id);
     }
 
+    public function test_does_not_auto_issue_a_manually_consolidated_container(): void
+    {
+        // A container the operator manually «ενοποίησε» sits in pending_review with a
+        // merged payload (REAL child lines, not references) → isConsolidatedPayment()
+        // is false, so the existing consolidated-guard misses it. But it carries
+        // ekdosi_consolidated_children and is a deliberate manual-review artefact:
+        // auto-issue must HOLD it for the «Δημιουργία Παραστατικού» step, never file it.
+        $tenant = $this->tenant();
+        $customer = $this->customer($tenant, grumpy: true);
+        $merged = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 47001, 'userid' => 1, 'total' => '124.00', 'taxrate' => '24.000', 'status' => 'Paid',
+                'items' => ['item' => [['description' => 'Hosting 1y', 'amount' => '100.00', 'taxed' => '1']]],
+                'ekdosi_consolidated_children' => [32237, 32231],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $merged->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status, 'held in inbox, not filed');
+        $this->assertNull($fresh->invoice_id);
+    }
+
+    public function test_does_not_auto_issue_an_invoice_with_a_folded_promo_discount(): void
+    {
+        // A WHMCS coupon/promotion (negative line) is folded into a line discount by
+        // the mapper — correct money, but indistinguishable from any other negative
+        // line item, so the unattended path must HOLD it (the manual «Δημιουργία
+        // Παραστατικού» path issues it fine). Guards the auto-file-to-AADE route.
+        $tenant = $this->tenant();
+        $customer = $this->customer($tenant, grumpy: true);
+        $pending = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 48001, 'userid' => 1, 'total' => '287.68',
+                'subtotal' => '232.00', 'tax' => '55.68', 'taxrate' => '24.00', 'status' => 'Paid',
+                'items' => ['item' => [
+                    ['description' => 'Business10 - kyklops.com.gr', 'amount' => '290.00', 'taxed' => '1'],
+                    ['description' => 'Κωδικός Promotion: zombee20 - 20.00%', 'amount' => '-58.00', 'taxed' => '1'],
+                ]],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status, 'held for review, not auto-filed');
+        $this->assertNull($fresh->invoice_id);
+        $this->assertSame(0, Invoice::count());
+    }
+
     public function test_dry_run_files_nothing(): void
     {
         $tenant = $this->tenant();

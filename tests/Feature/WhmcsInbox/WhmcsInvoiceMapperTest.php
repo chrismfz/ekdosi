@@ -502,6 +502,39 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(9.99, $line['gross_price']);
     }
 
+    public function test_folds_a_whmcs_promo_discount_line_into_a_line_discount(): void
+    {
+        // WHMCS coupon/promotion discounts arrive as a SEPARATE negative-amount line
+        // (#32328: Business10 290 + «zombee20 -20%» -58). myDATA rejects a negative
+        // line, so the mapper folds it into the charge as a 20% line discount → one
+        // clean net-232 / VAT-55.68 / gross-287.68 line, no negative_lines surfaced.
+        // subtotal+tax present → NET line amounts detected.
+        $pending = $this->makePending([
+            'invoiceid' => 1099,
+            'date' => '2026-09-21',
+            'subtotal' => '232.00', 'tax' => '55.68', 'taxrate' => '24.00', 'total' => '287.68',
+            'items' => ['item' => [
+                ['description' => 'Business10 - kyklops.com.gr', 'amount' => '290.00', 'taxed' => '1'],
+                ['description' => 'Κωδικός Promotion: zombee20 - 20.00%', 'amount' => '-58.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $mapped = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $this->assertCount(1, $mapped['lines'], 'the promo line is folded, not kept as its own line');
+        $line = $mapped['lines'][0];
+        $this->assertEqualsWithDelta(290.0, $line['price_per_item'], 0.001);
+        $this->assertEqualsWithDelta(20.0, $line['discount'], 0.001);
+        $this->assertEqualsWithDelta(232.0, $line['net_price'], 0.001);
+        $this->assertEqualsWithDelta(287.68, $line['gross_price'], 0.001);
+
+        $this->assertSame([], $mapped['totals']['negative_lines'], 'no negative line survives the fold');
+        $this->assertEqualsWithDelta(232.0, $mapped['totals']['net_total'], 0.001);
+        $this->assertEqualsWithDelta(55.68, $mapped['totals']['vat_total'], 0.001);
+        $this->assertEqualsWithDelta(287.68, $mapped['totals']['gross_total'], 0.001);
+    }
+
     public function test_zero_vat_lines_use_zero_rate_vat_category_when_one_exists(): void
     {
         // Second-pass regression: previously the mapper assigned the

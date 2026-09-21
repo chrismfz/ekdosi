@@ -114,6 +114,9 @@ class WhmcsInvoiceFiler
         // exemption can't let it slip through the unattended path).
         if ($unattended) {
             WhmcsFilingGuard::assertNoUntaxedForUnattendedIssue($mapped, $pending);
+            // A folded coupon/promotion discount is correct money but indistinguishable
+            // from any other negative line item — never auto-file one unreviewed.
+            WhmcsFilingGuard::assertNoFoldedDiscountForUnattendedIssue($mapped, $pending);
         }
         $this->refuseProblematicZeroVatLines($tenant, $mapped, $pending);
         // WH-1/WH-4: non-EUR or negative (promo/credit) lines → HOLD.

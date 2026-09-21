@@ -107,6 +107,21 @@ class WhmcsInvoiceMapper
         $linePayload = $onlyWhmcsItemIds === null
             ? $payload
             : $this->filterPayloadItems($payload, $onlyWhmcsItemIds);
+        // WH-4 / promo: WHMCS coupon/promotion discounts arrive as SEPARATE
+        // negative-amount line items, which myDATA rejects (netValue floored at 0).
+        // Fold each discount into the positive charge lines of the SAME tax
+        // treatment as a line-level discount %, so the παραστατικό carries no
+        // negative line and still reconciles to the WHMCS subtotal. A discount that
+        // can't be absorbed (no matching charge, or it exceeds the charges) is LEFT
+        // negative → the filing guard (assertPayloadFilable) still HOLDS the row.
+        // ONLY on the whole-invoice path: a per-party SPLIT subset skips
+        // assertTotalsReconcile, and detectAmountIncludesTax reads the WHOLE-invoice
+        // breakdown (not the subset), so folding a subset could hide a wrong net/gross
+        // split with no guard to catch it. A split group's negative line stays → held
+        // (its pre-fold behaviour), which the operator resolves by hand.
+        if ($onlyWhmcsItemIds === null) {
+            $linePayload = $this->foldPromoDiscounts($linePayload);
+        }
         $defaultVat = $this->resolveDefaultVatCategory($tenant);
 
         // G3 / payload-authoritative: whether WHMCS line `amount` is gross
@@ -252,6 +267,118 @@ class WhmcsInvoiceMapper
         return $payload;
     }
 
+    /**
+     * WH-4 / promo: fold WHMCS coupon/promotion discount lines (SEPARATE
+     * negative-amount items) into the positive charge lines, so the mapped
+     * παραστατικό carries no negative line (myDATA floors netValue/vatAmount at 0).
+     *
+     * A discount is expressed as a line-level discount % on each charge, computed
+     * PER TAX TREATMENT (taxed 0/1) and distributed proportionally by amount: a
+     * taxed discount reduces the taxable base, an untaxed one the untaxed base —
+     * folding across the two would misstate the VAT split. A charge line so folded
+     * carries `_ekdosi_discount_pct` for buildLines(); the discount line itself is
+     * dropped.
+     *
+     * Conservative — a discount is folded ONLY when its tax group has positive
+     * charges to absorb it AND the discount is strictly less than those charges (a
+     * ≥100% discount would zero/negate the net). Anything left unfolded keeps its
+     * negative line, so assertPayloadFilable still HOLDS the row for a human. No-op
+     * (returns the payload unchanged) for the overwhelmingly common invoice with no
+     * negative line.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array<string, mixed>
+     */
+    private function foldPromoDiscounts(array $payload): array
+    {
+        $items = $payload['items']['item'] ?? [];
+        if (empty($items)) {
+            return $payload;
+        }
+        if (! array_is_list($items)) {
+            $items = [$items];   // WHMCS single-line object shape
+        }
+
+        // Cheap short-circuit: nothing negative → nothing to fold.
+        $hasNegative = false;
+        foreach ($items as $it) {
+            if (is_array($it) && (float) ($it['amount'] ?? 0) < -0.005) {
+                $hasNegative = true;
+                break;
+            }
+        }
+        if (! $hasNegative) {
+            return $payload;
+        }
+
+        // Sum charges + discounts per tax treatment (taxed 0/1).
+        $chargeSum = [];
+        $discountSum = [];
+        foreach ($items as $it) {
+            if (! is_array($it)) {
+                continue;
+            }
+            $amount = (float) ($it['amount'] ?? 0);
+            $key = ((int) ($it['taxed'] ?? 1)) === 0 ? 0 : 1;
+            if ($amount > 0.005) {
+                $chargeSum[$key] = ($chargeSum[$key] ?? 0.0) + $amount;
+            } elseif ($amount < -0.005) {
+                $discountSum[$key] = ($discountSum[$key] ?? 0.0) + abs($amount);
+            }
+        }
+
+        // A group folds only when it has charges to absorb its discount AND the
+        // resulting discount % is a valid, meaningful (0,100) line discount. Guard
+        // BOTH ends: `disc < charge` keeps net > 0, and the round(...,4) < 100 check
+        // rejects a near-total discount that would round to exactly 100% (→ a €0.00
+        // line that files instead of being held). Anything rejected stays negative
+        // → held for the operator.
+        $ratio = [];
+        foreach ($discountSum as $key => $disc) {
+            $charge = $chargeSum[$key] ?? 0.0;
+            if ($charge <= 0.005 || $disc >= $charge - 0.005) {
+                continue;
+            }
+            $pct = round(($disc / $charge) * 100, 4);   // must match the value buildLines applies
+            if ($pct > 0.0 && $pct < 100.0) {
+                $ratio[$key] = $disc / $charge;
+            }
+        }
+        if ($ratio === []) {
+            return $payload;   // no group can safely absorb its discount → leave negatives (held)
+        }
+
+        // Rebuild: annotate each foldable charge with its discount %, drop the
+        // folded discount lines, keep every other item (incl. a non-folding group's
+        // negatives, which stay → held downstream) untouched.
+        $out = [];
+        foreach ($items as $it) {
+            if (! is_array($it)) {
+                $out[] = $it;
+
+                continue;
+            }
+            $amount = (float) ($it['amount'] ?? 0);
+            $key = ((int) ($it['taxed'] ?? 1)) === 0 ? 0 : 1;
+            if (! array_key_exists($key, $ratio)) {
+                $out[] = $it;   // group not folded
+
+                continue;
+            }
+            if ($amount < -0.005) {
+                continue;   // folded discount line — absorbed into the charges
+            }
+            if ($amount > 0.005) {
+                $it['_ekdosi_discount_pct'] = round($ratio[$key] * 100, 4);
+            }
+            $out[] = $it;   // a zero-amount line in a folded group stays as-is
+        }
+
+        $payload['items']['item'] = array_values($out);
+
+        return $payload;
+    }
+
     private function resolveDefaultVatCategory(Company $tenant): VatCategory
     {
         $default = VatCategory::query()
@@ -373,19 +500,21 @@ class WhmcsInvoiceMapper
             // need a per-tenant flag).
             $grossAmount = (float) ($item['amount'] ?? 0.0);
             $taxed = (bool) ((int) ($item['taxed'] ?? 1));   // assume taxable unless explicit 0
+            // WH-4 / promo: a WHMCS coupon/promotion discount was folded into this
+            // charge line as a line-level discount % (foldPromoDiscounts). Clamp to
+            // the [0,100] the InvoiceLine::saving hook enforces; 0 on a normal line.
+            $discountPct = max(0.0, min(100.0, (float) ($item['_ekdosi_discount_pct'] ?? 0.0)));
 
-            // Mirror InvoiceLine::saving rounding order so the
-            // preview gross MATCHES what gets persisted. Hook order:
+            // Mirror InvoiceLine::saving rounding order so the preview gross MATCHES
+            // what gets persisted. Hook order:
             //   net   = round(qty × price × (1 - disc/100), 2)
             //   gross = round(net × (1 + vat/100), 2)
-            // Our qty=1, disc=0 ⇒ net = price (rounded), then gross =
-            // round(net × (1+vat/100), 2). The WHMCS amount is GROSS,
-            // so we back-compute net = round(amount / (1+vat/100), 2)
-            // and THEN re-derive gross from net via the same formula
-            // the saving hook uses. For amounts like €10.00 @ 24% the
-            // previous code stored gross=10.00 but the hook overwrote
-            // to round(8.06×1.24,2) = 9.99 — the preview lied to the
-            // operator by €0.01 per line.
+            // price_per_item is the net-per-unit BEFORE the line discount; the WHMCS
+            // amount is GROSS in tax-inclusive mode, so we back-compute that pre-
+            // discount net = round(amount / (1+vat/100), 2), then apply the discount
+            // and re-derive gross via the same formula the saving hook uses. For
+            // amounts like €10.00 @ 24% storing gross=10.00 would be overwritten by
+            // the hook to round(8.06×1.24,2)=9.99 — the preview would lie by €0.01.
             if (! $taxed) {
                 // Untaxed line: gross == net, no VAT. (For myDATA a 0% line
                 // needs a vat_exemption_category; the filer's
@@ -396,21 +525,22 @@ class WhmcsInvoiceMapper
                 // hasZeroVatLine() returned true and
                 // resolveZeroVatCategory() would have thrown if
                 // none was configured.
-                $lineNet = round($grossAmount, 2);
-                $lineGross = $lineNet;
+                $preDiscNet = round($grossAmount, 2);
                 $linePercent = 0.0;
                 $lineVatCategoryId = $zeroVat->id;
             } else {
                 // G3: gross-inclusive → back out the net; tax-exclusive → the
-                // amount IS the net. Either way re-derive gross from net via
-                // the same formula InvoiceLine::saving uses (preview == saved).
-                $lineNet = $amountIncludesTax
+                // amount IS the net.
+                $preDiscNet = $amountIncludesTax
                     ? round($grossAmount / (1 + ($vatPercent / 100)), 2)
                     : round($grossAmount, 2);
-                $lineGross = round($lineNet * (1 + ($vatPercent / 100)), 2);
                 $linePercent = $vatPercent;
                 $lineVatCategoryId = $defaultVat->id;
             }
+            // Apply the (possibly zero) line discount exactly as InvoiceLine::saving
+            // does, so preview == persisted regardless of taxed/untaxed.
+            $lineNet = round($preDiscNet * (1 - ($discountPct / 100)), 2);
+            $lineGross = round($lineNet * (1 + ($linePercent / 100)), 2);
 
             // Field names mirror the invoice_lines schema:
             //   qty × price_per_item × (1 - discount/100) = net_price
@@ -447,8 +577,8 @@ class WhmcsInvoiceMapper
                 // never reached the παραστατικό/PDF, while price/VAT survived.
                 'product_descr' => $description,
                 'qty' => 1.0,
-                'price_per_item' => $lineNet,           // net per unit (qty=1, so net == unit)
-                'discount' => 0.0,
+                'price_per_item' => $preDiscNet,        // net per unit BEFORE the line discount (qty=1)
+                'discount' => $discountPct,             // folded WHMCS promo/coupon %, else 0
                 'vat_category_id' => $lineVatCategoryId,
                 'vat_percent' => $linePercent,
                 'net_price' => $lineNet,
@@ -610,7 +740,35 @@ class WhmcsInvoiceMapper
             // it via blank_description_charge_lines — held by assertPayloadFilable
             // on ALL paths, not just the totals-reconcile ones.)
             'negative_lines' => $this->negativeLineDescriptions($lines),
+            // WH-4 / promo: descriptions of lines that carry a FOLDED WHMCS
+            // coupon/promotion discount (buildLines set discount > 0 from
+            // foldPromoDiscounts). The unattended auto-issue guard holds these for a
+            // human — the fold can't tell a genuine price discount from any other
+            // negative line item, so a computed discount is never auto-filed to AADE
+            // unreviewed. The manual file/createDraft paths issue them normally.
+            'discounted_lines' => $this->discountedLineDescriptions($lines),
         ];
+    }
+
+    /**
+     * WH-4: descriptions of lines carrying a folded promo/coupon discount
+     * (discount > 0). Only foldPromoDiscounts sets a non-zero line discount here
+     * (native WHMCS lines have none), so this uniquely marks a folded-discount
+     * invoice for the unattended-issue hold.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, string>
+     */
+    private function discountedLineDescriptions(array $lines): array
+    {
+        $out = [];
+        foreach ($lines as $line) {
+            if ((float) ($line['discount'] ?? 0) > 0.005) {
+                $out[] = (string) $line['product_descr'];
+            }
+        }
+
+        return $out;
     }
 
     /**

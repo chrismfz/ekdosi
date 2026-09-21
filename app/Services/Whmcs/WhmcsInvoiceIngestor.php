@@ -179,12 +179,25 @@ class WhmcsInvoiceIngestor
                 }
             }
 
-            if ($existing->isAuditFrozen()) {
-                // status != pending_review - touch updated_at so the
-                // inbox can show "WHMCS pinged us again about this
-                // after we decided on it" as a signal, but DO NOT
-                // overwrite payload / customer_id / match_reason.
-                // The decision-time payload is the audit truth.
+            if ($existing->isAuditFrozen() || $existing->hasBeenConsolidated()) {
+                // Freeze the payload/customer/status against this re-ingest; touch
+                // updated_at so the inbox can show "WHMCS pinged us again about this
+                // after we decided on it" as a signal. Two cases:
+                //
+                //  (1) status != pending_review (isAuditFrozen): the decision-time
+                //      payload is the audit truth (filed → the AADE MARK references
+                //      it; held/rejected → the operator's reason was captured against
+                //      it).
+                //  (2) an already-CONSOLIDATED mass-pay container (hasBeenConsolidated):
+                //      it sits in pending_review with a SYNTHETIC merged payload (the
+                //      children's real lines + ekdosi_consolidated_children). WHMCS
+                //      still reports the source invoice as a raw mass-pay, so refreshing
+                //      would re-detect it as consolidated, overwrite the merge back to
+                //      the reference lines AND flip it to held — undoing the operator's
+                //      «Ενοποίηση» so no issuable draft ever appears. The merged payload
+                //      is the resolved draft-source; the only next step is «Δημιουργία
+                //      Παραστατικού» (the «Ενοποίηση» action is hidden once merged), so
+                //      there is nothing a re-ingest could usefully refresh here.
                 $existing->touch();
 
                 return new IngestionResult(row: $existing, created: false, auditPreserved: true);

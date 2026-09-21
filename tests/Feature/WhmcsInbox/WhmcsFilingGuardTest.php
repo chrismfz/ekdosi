@@ -121,14 +121,67 @@ class WhmcsFilingGuardTest extends TestCase
         $this->assertSame(1, Invoice::count());
     }
 
-    public function test_wh4_negative_promo_line_is_held(): void
+    public function test_wh4_promo_discount_line_is_folded_into_a_line_discount_and_files(): void
     {
-        // The WHMCS total (104) is internally consistent with the two lines so
-        // it's the NEGATIVE line — not a totals gap — that trips the guard.
+        // The reported #32328 shape: a taxed service + a taxed WHMCS promotion
+        // (negative-amount) line. myDATA rejects a negative line, so the mapper now
+        // FOLDS the promo into the charge as a line-level discount % (58/290 = 20%)
+        // → one clean line net 232 / VAT 55.68 / gross 287.68 (== WHMCS
+        // subtotal/tax/total), instead of holding the row. subtotal+tax present →
+        // the mapper detects NET line amounts.
+        $pending = $this->makePending([
+            ['description' => 'Business10 - kyklops.com.gr', 'amount' => '290.00', 'taxed' => '1'],
+            ['description' => 'Κωδικός Promotion: zombee20 - 20.00%', 'amount' => '-58.00', 'taxed' => '1'],
+        ], total: '287.68', payloadExtra: ['subtotal' => '232.00', 'tax' => '55.68', 'taxrate' => '24.00']);
+
+        $this->file($pending);
+
+        $this->assertSame(1, Invoice::count());
+        $invoice = Invoice::first();
+        $this->assertSame(1, $invoice->lines()->count(), 'the negative promo line was folded, not kept');
+        $line = $invoice->lines()->first();
+        $this->assertEqualsWithDelta(20.0, (float) $line->discount, 0.001, 'promo became a 20% line discount');
+        $this->assertEqualsWithDelta(290.00, (float) $line->price_per_item, 0.001, 'pre-discount net per unit');
+        $this->assertEqualsWithDelta(232.00, (float) $line->net_price, 0.001);
+        $this->assertEqualsWithDelta(287.68, (float) $line->gross_price, 0.001);
+    }
+
+    public function test_wh4_a_discount_with_no_matching_taxable_charge_is_still_held(): void
+    {
+        // Safe-fold boundary: the discount (taxed=0) has no positive charge in its
+        // OWN tax group to absorb it — the charge is taxed=1. Folding across tax
+        // treatments would misstate the VAT split, so it is NOT folded; the negative
+        // line stays and assertPayloadFilable HOLDS the row for the operator.
         $pending = $this->makePending([
             ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
-            ['description' => 'Promo credit', 'amount' => '-20.00', 'taxed' => '1'],
+            ['description' => 'Promo credit', 'amount' => '-20.00', 'taxed' => '0'],
         ], total: '104.00');
+
+        $this->assertHeldWith($pending, 'αρνητικό ποσό');
+    }
+
+    public function test_wh4_a_promo_not_below_its_charge_is_not_folded_and_is_held(): void
+    {
+        // Boundary: a taxed promo whose magnitude is ≥ the charge in its OWN tax
+        // group can't fold to a valid net > 0, so it is NOT folded — the negative
+        // line stays and assertPayloadFilable HOLDS the row (never a ≤0-value line).
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '100.00', 'taxed' => '1'],
+            ['description' => 'Κωδικός Promotion: 100% off', 'amount' => '-100.00', 'taxed' => '1'],
+        ], total: '0.00');
+
+        $this->assertHeldWith($pending, 'αρνητικό ποσό');
+    }
+
+    public function test_wh4_a_near_total_discount_rounding_to_100pct_is_held(): void
+    {
+        // P2-4 boundary: a discount that rounds to exactly 100% (19999.99/20000 =
+        // 99.99995 → 100.0000) would fold to a €0.00 line. foldPromoDiscounts rejects
+        // a pct that rounds to ≥100, so the negative line stays and the row is HELD.
+        $pending = $this->makePending([
+            ['description' => 'Big service', 'amount' => '20000.00', 'taxed' => '1'],
+            ['description' => 'Κωδικός Promotion: near-total', 'amount' => '-19999.99', 'taxed' => '1'],
+        ], total: '0.01');
 
         $this->assertHeldWith($pending, 'αρνητικό ποσό');
     }
