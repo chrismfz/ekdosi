@@ -87,7 +87,11 @@
                                             @default
                                                 <flux:badge size="sm" color="zinc">{{ __('portal.common.document') }}</flux:badge>
                                         @endswitch
-                                        <span class="ml-1">{{ $row['label'] }}</span>
+                                        @if (! empty($row['invoice_id']))
+                                            <flux:link class="ml-1" href="{{ route('portal.document.show', $row['invoice_id']) }}">{{ $row['label'] }}</flux:link>
+                                        @else
+                                            <span class="ml-1">{{ $row['label'] }}</span>
+                                        @endif
                                     </td>
                                     <td class="text-right whitespace-nowrap">{{ $row['debit'] > 0 ? Money::eur($row['debit']) : '—' }}</td>
                                     <td class="text-right whitespace-nowrap">{{ $row['credit'] > 0 ? Money::eur($row['credit']) : '—' }}</td>
