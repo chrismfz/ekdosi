@@ -1361,6 +1361,12 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Portal receipt: το έμβασμα group-by-reference predicate διπλασιάζεται (P2, review 2026-09-21).**
+  Το `ReceiptShowController` ξαναχτίζει το group με `reference == … AND kind != 'refund' AND amount > 0`
+  (same company/customer), καθρεφτίζοντας με σχόλιο τον κανόνα ομαδοποίησης του `CustomerLedgerBuilder::computeLedger`
+  (#377 amount>0 skip + refund exclusion). Αν αλλάξει ο κανόνας στον builder (π.χ. key και σε pay_date), το σύνολο/
+  μέλη της απόδειξης θα αποκλίνουν σιωπηλά από τη γραμμή της καρτέλας. Fix = ένας κοινός grouping helper· αφημένο
+  εκτός scope (ο κανόνας είναι σταθερός, δεν αξίζει abstraction τώρα — «no premature abstraction»).
 - **WHMCS plugin: `Controller::logActivity()` περνά το admin id ως WHMCS *client* id (P2, review 2026-09-17).**
   Το `logActivity($msg, $user->id)` (όπου `$user` = CurrentUser) βάζει το staff id στη θέση του client-userid
   παραμέτρου του WHMCS `logActivity`. Σε admin addon context το `CurrentUser::user()` συνήθως είναι null → περνά 0

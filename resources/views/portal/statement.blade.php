@@ -89,6 +89,8 @@
                                         @endswitch
                                         @if (! empty($row['invoice_id']))
                                             <flux:link class="ml-1" href="{{ route('portal.document.show', $row['invoice_id']) }}">{{ $row['label'] }}</flux:link>
+                                        @elseif (! empty($row['payment_id']))
+                                            <flux:link class="ml-1" href="{{ route('portal.receipt.show', $row['payment_id']) }}">{{ $row['label'] }}</flux:link>
                                         @else
                                             <span class="ml-1">{{ $row['label'] }}</span>
                                         @endif
@@ -101,6 +103,29 @@
                         </tbody>
                     </table>
                 </div>
+
+                {{-- Reconciling totals footer (mini λογιστική καρτέλα, like the operator side):
+                     Χρεώσεις − Πιστωτικά − Πληρωμές = Υπόλοιπο. Cash-term charges that never
+                     moved the balance are NOT summed here (see note below). --}}
+                <div class="mt-4 grid grid-cols-2 gap-3 md:grid-cols-4">
+                    <div class="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                        <flux:text class="text-xs text-zinc-500">{{ __('portal.statement.total_charges') }}</flux:text>
+                        <div class="mt-1 font-semibold">{{ Money::eur($st['total_charges']) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                        <flux:text class="text-xs text-zinc-500">{{ __('portal.statement.total_credit_notes') }}</flux:text>
+                        <div class="mt-1 font-semibold">{{ Money::eur($st['total_credit_notes']) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                        <flux:text class="text-xs text-zinc-500">{{ __('portal.statement.total_payments') }}</flux:text>
+                        <div class="mt-1 font-semibold text-green-600 dark:text-green-400">{{ Money::eur($st['total_payments']) }}</div>
+                    </div>
+                    <div class="rounded-xl border border-zinc-200 p-3 dark:border-zinc-700">
+                        <flux:text class="text-xs text-zinc-500">{{ __('portal.common.balance') }}</flux:text>
+                        <div class="mt-1 font-semibold {{ $st['balance'] > 0.005 ? 'text-red-600 dark:text-red-400' : '' }}">{{ Money::eur($st['balance']) }}</div>
+                    </div>
+                </div>
+
                 <flux:text class="mt-2 text-xs text-zinc-500">
                     {{ __('portal.statement.balance_note') }}
                 </flux:text>

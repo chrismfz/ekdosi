@@ -1018,6 +1018,16 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   το ίδιο `CustomerDocumentFeed` boundary όπως το PDF route (κάθε linked-doc link ξανα-ελέγχεται· non-visible
   γραμμές καρτέλας δεν linkάρουν → κανένα dead 404). Το επίσημο **PDF** παραμένει το νόμιμο artifact. Δίγλωσσο
   (`portal.document.*`).
+- **Άτυπη απόδειξη πληρωμής/είσπραξης (HTML reference):** οι γραμμές πληρωμών/εισπράξεων/επιστροφών/εμβασμάτων
+  στην «Η καρτέλα μου» είναι **links** → `/user/receipt/{id}` (`ReceiptShowController`,
+  `resources/views/portal/receipt.blade.php`): **από πού ήρθε** (κανάλι μέσω `Payment::channelLabel` seam →
+  δίγλωσσα keys: Ηλεκτρονική πύλη · Eurobank / Χειροκίνητα), τρόπος, λογαριασμός, κωδικός συναλλαγής, αναφορά,
+  αιτιολογία, και **ποια παραστατικά εξόφλησε** (με links, re-gated customer-visible). Ένα ομαδοποιημένο έμβασμα
+  ξανα-ανοίγει από την αναφορά του (`CustomerLedgerBuilder` group row → `payment_ids`)· προβάλλονται μόνο τα
+  **κοινά** στοιχεία του group. Fail-closed με το ίδιο grant boundary· ΟΧΙ φορολογικό παραστατικό.
+- **Σύνολα καρτέλας (footer):** η «Η καρτέλα μου» κλείνει με γραμμή συνόλων (Σύνολο χρεώσεων στο υπόλοιπο /
+  Πιστωτικά / Σύνολο πληρωμών / Υπόλοιπο) από το ίδιο `CustomerLedgerBuilder::stats` με το admin — τα τοις
+  μετρητοίς δεν προσμετρώνται (ίδια συμφωνία Χρεώσεις − Πιστωτικά − Πληρωμές = Υπόλοιπο).
 - **Επόμενα slices:** self-register (**tier-2 claim** — ΑΦΜ+email match → email verify → grant πάντα από
   operator· ποτέ open signup) + auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους» +
   κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».

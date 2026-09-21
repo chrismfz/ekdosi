@@ -161,6 +161,21 @@ class CustomerDocumentFeed
     }
 
     /**
+     * May this login act on this (company, customer) at all? The grant boundary
+     * without a document — used by the receipt view (a Payment is grant-scoped by
+     * its customer, not by a customer-visible predicate). Fail-closed: an active
+     * grant must match, and its customer must still exist (not soft-deleted).
+     */
+    public function loginCanAccessCustomer(CustomerUser $login, int $companyId, int $customerId): bool
+    {
+        return $login->activeAccessGrants()
+            ->where('company_id', $companyId)
+            ->where('customer_id', $customerId)
+            ->whereHas('customer')
+            ->exists();
+    }
+
+    /**
      * May this login see (and download) THIS invoice? The PDF route's
      * fail-closed authorization: the document must be live AND reachable through
      * an active grant matching its (company, customer).

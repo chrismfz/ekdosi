@@ -78,6 +78,9 @@ return [
         'balance_note' => 'The balance covers credit-term documents; cash sales are settled on issue.',
         'see_my_documents' => 'View my documents',
         'empty' => 'There is no statement available for your account yet.',
+        'total_charges' => 'Total charges (in balance)',
+        'total_credit_notes' => 'Credit notes',
+        'total_payments' => 'Total payments',
     ],
 
     // "My details" — account + password.
@@ -214,6 +217,29 @@ return [
         'method' => 'Method',
         'no_links' => 'No linked documents.',
         'back_to_documents' => 'Back to documents',
+    ],
+
+    // Receipt — an informal view of a payment / collection / remittance.
+    'receipt' => [
+        'kind_payment' => 'Payment',
+        'kind_collection' => 'Collection',
+        'kind_remittance' => 'Remittance',
+        'kind_refund' => 'Refund',
+        'channel' => 'Channel / source',
+        'channel_manual' => 'Manual',
+        'channel_portal' => 'Online portal',
+        'channel_mixed' => 'Multiple channels',
+        'method' => 'Payment method',
+        'bank_account' => 'Bank account',
+        'transaction_id' => 'Transaction id',
+        'reference' => 'Reference',
+        'notes' => 'Reason',
+        'received_by' => 'Received by',
+        'from_customer' => 'From',
+        'settles' => 'Settles',
+        'on_account' => 'Credit / prepayment',
+        'back_to_statement' => 'Back to statement',
+        'informal_note' => 'Informal view of a transaction — not a tax document.',
     ],
 
 ];

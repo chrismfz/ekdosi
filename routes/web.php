@@ -9,6 +9,7 @@ use App\Http\Controllers\Portal\LoginController as PortalLoginController;
 use App\Http\Controllers\Portal\PasswordResetController as PortalPasswordResetController;
 use App\Http\Controllers\Portal\PaymentController as PortalPaymentController;
 use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
+use App\Http\Controllers\Portal\ReceiptShowController as PortalReceiptShowController;
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\Portal\TicketController as PortalTicketController;
 use App\Http\Controllers\PublicInvoicePdfController;
@@ -112,6 +113,12 @@ Route::middleware([ResolvePortalHost::class, EnsurePortalAuthenticated::class, S
     Route::get('/user/document/{invoice}', PortalDocumentShowController::class)
         ->where('invoice', '[0-9]+')
         ->name('portal.document.show');
+    // Read-only «informal receipt» view of a payment/refund/έμβασμα (channel, method,
+    // transaction, αιτιολογία, settled invoices) — the money-side twin of the document
+    // view, linked from the payment rows on «Η καρτέλα μου». Grant-scoped + fail-closed.
+    Route::get('/user/receipt/{payment}', PortalReceiptShowController::class)
+        ->where('payment', '[0-9]+')
+        ->name('portal.receipt.show');
     // Official PDF of one of the customer's own documents (grant-scoped, streamed).
     // Throttled: each hit is a heavy DomPDF render (raises memory_limit/time_limit),
     // so cap the rate to keep a tight loop (or a hijacked session) from exhausting
