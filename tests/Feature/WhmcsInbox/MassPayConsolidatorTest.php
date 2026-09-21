@@ -309,6 +309,38 @@ class MassPayConsolidatorTest extends TestCase
         $this->assertCount(3, $massPay->fresh()->massPayChildren);
     }
 
+    public function test_a_reingest_of_the_masspay_does_not_revert_a_consolidated_container(): void
+    {
+        // Regression (reported bug): after «Ενοποίηση» the container sits in
+        // pending_review with a SYNTHETIC merged payload. WHMCS still reports the
+        // SOURCE invoice as a raw mass-pay, so the scheduled whmcs:fetch-pending
+        // (and the paid webhook) re-ingest it. Before the fix the ingestor
+        // re-detected it as a mass-pay, overwrote the merge back to the reference
+        // lines AND flipped the row to held — silently undoing the consolidation,
+        // so no issuable draft ever appeared («βγήκε προσχέδιο αλλά πουθενά»).
+        $massPay = $this->massPayRow();
+        $rawMassPayPayload = $massPay->payload;   // the reference-line container, as WHMCS keeps reporting it
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro', '437.00'),
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Domain', '19.00'),
+        ]);
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $massPay->fresh()->status);
+
+        // A WHMCS re-poll: the same invoice id comes back with its raw mass-pay payload.
+        $result = app(WhmcsInvoiceIngestor::class)->ingest($this->tenant, $rawMassPayPayload);
+
+        $fresh = $massPay->fresh();
+        // The consolidation SURVIVES the re-ingest: still issuable, still merged, still linked.
+        $this->assertTrue($result->auditPreserved, 'the re-ingest preserved the merge instead of reverting it');
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status, 'not reverted to held');
+        $this->assertSame('647.70', $fresh->payload['total'], 'merged breakdown intact');
+        $this->assertEqualsCanonicalizing([32280, 32263, 32256], $fresh->payload['ekdosi_consolidated_children']);
+        $this->assertFalse($fresh->isConsolidatedPayment(), 'stored payload keeps the real child lines, not references');
+    }
+
     public function test_explode_stages_each_child_as_its_own_row_and_resolves_the_masspay(): void
     {
         $massPay = $this->massPayRow();

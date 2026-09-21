@@ -131,6 +131,22 @@ from `[Unreleased]`; `--major` explicit for milestones).
   φραγμοί είναι η ιδιοκτησία (grant-scoped) και τα caps του allocator.
 
 ### Fixed
+- **WHMCS «Ενοποίηση σε ένα» (mass-pay consolidate): η ενοποίηση αναιρούνταν σιωπηλά στο επόμενο
+  re-poll — «βγήκε προσχέδιο αλλά πουθενά».** Το `consolidate()` ξαναγράφει τον mass-pay container σε
+  `pending_review` με ένα **synthetic merged payload** (οι πραγματικές γραμμές των τέκνων +
+  `ekdosi_consolidated_children`) ώστε ο χειριστής να εκδώσει ΕΝΑ παραστατικό. Όμως το WHMCS συνεχίζει να
+  αναφέρει το πηγαίο τιμολόγιο ως σκέτο συγκεντρωτικό (γραμμές-αναφορές), οπότε το προγραμματισμένο
+  `whmcs:fetch-pending` (και το paid webhook) το ξανα-ingest-άρει. Αφού ένα `pending_review` row **δεν**
+  ήταν audit-frozen, ο `WhmcsInvoiceIngestor` το ξαναανίχνευε ως mass-pay, **ξαναέγραφε το payload πίσω στις
+  γραμμές-αναφορές ΚΑΙ το γύριζε σε `held`** — αναιρώντας την «Ενοποίηση». Τα τέκνα έμεναν `resolved`
+  (tombstones), οπότε ο container έδειχνε ξανά «Ενοποίηση σε ένα» και ο χειριστής δεν έβγαζε ποτέ εκδόσιμο
+  προσχέδιο. **Fix:** ένας ήδη-ενοποιημένος container (φέρει `ekdosi_consolidated_children`,
+  `PendingWhmcsInvoice::hasBeenConsolidated()`) πλέον θεωρείται frozen στο re-ingest — ο ingestor απλώς
+  κάνει `touch`, δεν αγγίζει payload/status. Το manual re-consolidate action γράφει το merge απευθείας
+  (όχι μέσω ingest), οπότε ένα σκόπιμο ξανα-ενοποίησε δεν μπλοκάρεται. (Ήταν καταγεγραμμένο ως P2-5 στο
+  `docs/BACKLOG.md`· η σοβαρότητα υπο-εκτιμήθηκε — ήταν P1 revert, όχι μόνο auto-issue bypass.) Επίσης το
+  success μήνυμα δεν λέει πια «σε ένα προσχέδιο» (ο χειριστής έψαχνε draft στα «Παραστατικά») αλλά δείχνει
+  στο «Εισερχόμενα» → «Προς έλεγχο» → «Δημιουργία Παραστατικού».
 - **`invoices:recompute-balances --company=SLUG` δεν έκανε ΤΙΠΟΤΑ.** Το option δεχόταν μόνο company
   **id**, ενώ το `CLAUDE.md` το τεκμηριώνει με slug (`--company=myip`) — άρα η τεκμηριωμένη εντολή
   απαντούσε «Recomputed 0» και σιωπηλά δεν πείραζε τίποτα. Το χειρότερο δυνατό αποτέλεσμα για ένα

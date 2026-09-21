@@ -1200,12 +1200,15 @@ assertion). Ό,τι απέμεινε:
   re-fetch, και το reconstructed breakdown χάνεται στη διαγραφή (`ekdosi_masspay_source` κρατά μόνο items+total).
   Fix: σε cancel του ενοποιημένου → re-open/allow re-stage των tombstones· κάνε το consolidated pending row
   **μη-διαγράψιμο** (route to reject). Θέλει lifecycle σχεδιασμό — χαμηλή πιθανότητα στη συνήθη ροή.
-- **Auto-issue bypass (P2-5, judgment call):** μετά το merge `isConsolidatedPayment()` → false, οπότε ο
-  consolidated-guard του `WhmcsAutoIssue::chooseType` δεν το κρατά· σε tenant που έχει armed
-  `whmcs_auto_issue_immediate` ΚΑΙ ο πελάτης είναι `needs_immediate_invoice`, το ενοποιημένο **μπορεί** να
-  αυτο-φιλαριστεί χωρίς το manual review. **Τα χρήματα είναι σωστά** (ισχύουν όλα τα file-guards) και είναι
-  συνεπές με το ρητό opt-in του tenant στο auto-issue — γι' αυτό αφήνεται. Αν θέλουμε «manual issue μετά το
-  consolidate», ο guard είναι one-liner: κράτα rows που φέρουν `ekdosi_consolidated_children` στο payload.
+- **~~Re-ingest revert (ήταν «Auto-issue bypass P2-5»)~~ — FIXED 2026-09-21.** Το review το είχε δει μόνο ως
+  auto-issue bypass, αλλά η πραγματική δαγκωνιά ήταν **P1**: μετά το merge `isConsolidatedPayment()` → false,
+  όμως το προγραμματισμένο `whmcs:fetch-pending` (+ paid webhook) ξανα-ingest-άρει το πηγαίο mass-pay, κι
+  επειδή το `pending_review` row δεν ήταν audit-frozen ο `WhmcsInvoiceIngestor` **ξαναέγραφε το payload στις
+  γραμμές-αναφορές και το γύριζε σε `held`** — αναιρώντας σιωπηλά την «Ενοποίηση» (ο χειριστής δεν έβγαζε
+  ποτέ εκδόσιμο προσχέδιο· reported bug). **Fix:** `PendingWhmcsInvoice::hasBeenConsolidated()` (payload φέρει
+  `ekdosi_consolidated_children`) → ο ingestor το θεωρεί frozen στο re-ingest (touch only). Ίδιος marker
+  κόβει και το auto-issue bypass (ένας ενοποιημένος container δεν είναι πια «σκέτος» για το auto-issue path).
+  Regression test: `MassPayConsolidatorTest::test_a_reingest_of_the_masspay_does_not_revert_a_consolidated_container`.
 - **Reduced-rate flatten (P2-4, μη-reachable):** το ενοποιημένο stampάρει ΕΝΑ `taxrate` (το **max** child rate —
   βλ. round-2 review FINDING A: ήταν `child[0]` και ένα exempt-first τέκνο flatten-άριζε το rate σε 0· τώρα max),
   κι ο mapper το εφαρμόζει σε κάθε taxed γραμμή — μείξη 24%+13% θα έβγαζε λάθος per-rate ΦΠΑ (το 13% → 24%).

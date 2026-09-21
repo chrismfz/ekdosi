@@ -590,6 +590,29 @@ class PendingWhmcsInvoice extends Model
         return self::detectConsolidatedRefs($this->payload ?? []) !== null;
     }
 
+    /**
+     * Has this row ALREADY been «ενοποιημένο» from a WHMCS mass-pay «container»
+     * into a single merged draft-source? MassPayConsolidator::consolidate rewrites
+     * the container's payload to the union of the same-party children's REAL service
+     * lines and stamps `ekdosi_consolidated_children` (the source child ids). The row
+     * then sits in pending_review so the operator issues ONE παραστατικό.
+     *
+     * The marker matters at RE-INGEST: WHMCS still reports the SOURCE invoice as a
+     * raw mass-pay (reference lines), so the scheduled whmcs:fetch-pending (and the
+     * paid webhook) re-ingest it. Without this signal the ingestor would re-detect it
+     * as a mass-pay, overwrite the merged payload back to the reference lines AND flip
+     * the row to held — silently REVERTING the operator's consolidation (no issuable
+     * draft ever appears). isConsolidatedPayment() can't catch this: on the STORED
+     * merged payload it's already false (real lines, not references). See
+     * WhmcsInvoiceIngestor::ingest().
+     */
+    public function hasBeenConsolidated(): bool
+    {
+        $children = $this->payload['ekdosi_consolidated_children'] ?? null;
+
+        return is_array($children) && $children !== [];
+    }
+
     /** @return array<int, int> the source WHMCS invoice ids ([] if not consolidated / unparseable). */
     public function consolidatedPaymentRefs(): array
     {
