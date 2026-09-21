@@ -67,6 +67,16 @@ from `[Unreleased]`; `--major` explicit for milestones).
   consent screen, που ονομάζει το client.
 
 ### Added
+- **«Σημειώσεις πελάτη» (joplin-junior): αφιερωμένη σελίδα + κουμπί στην Καρτέλα.** Οι εσωτερικές
+  σημειώσεις έβγαιναν από το «χωμένο» tab της Επεξεργασίας σε δική τους roomy σελίδα
+  (`/customers/{id}/notes`), προσβάσιμη με κουμπί **«Σημειώσεις (N)»** στην Καρτέλα (πριν το
+  «Περισσότερα») και στο header της Επεξεργασίας. Το ίδιο πολυμορφικό `Note` store, μεγαλωμένο
+  **additively** (όχι νέο module): **τίτλος** (σαρώσιμη λίστα), **είδος** (Γενική / Τεχνικό δελτίο
+  για configs/IPs/TeamViewer-AnyDesk), **ετικέτες ανά σημείωση** (το υπάρχον tenant-scoped vocabulary),
+  **αναζήτηση** σε τίτλο+σώμα, και **Markdown render με code blocks** (monospace, οριζόντιο scroll —
+  ένα RouterOS export/IP table κρατά τη μορφή του) σε light/dark. Το render είναι **ασφαλές** (raw HTML
+  escaped, χωρίς `javascript:` links — DOC-8). `body` → MEDIUMTEXT (MySQL/MariaDB) για μεγάλα exports.
+  Οι imported («από backup») σημειώσεις μένουν read-only· writes tenant/owner/author-stamped.
 - **Ορατότητα προτιμολογίων: widget «Προτιμολόγια» + φίλτρο στη λίστα.** Τα προσφερμένα
   προτιμολόγια είναι σκόπιμα αόρατα στις «Απαιτήσεις» (απλήρωτο = δεν οφείλεται τίποτα), οπότε χωρίς
   αυτό δεν υπήρχε τρόπος να δεις ότι υπάρχουν 2-3-10 εκεί έξω. Δύο μεγέθη, με διαφορετική ερώτηση το

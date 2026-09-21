@@ -364,6 +364,12 @@
 - **Επαφές πελάτη** (per-customer): named πρόσωπα (λογιστήριο/τεχνικός/υπεύθυνος) με
   email/τηλέφωνο/ρόλο, μία κύρια ανά πελάτη — τροφοδοτούν την αποστολή Καρτέλας.
 - **Tags** (tenant-scoped) + favourites σε customers/products.
+- **Σημειώσεις πελάτη (εσωτερικές) — αφιερωμένη σελίδα «joplin-junior»**: κουμπί «Σημειώσεις (N)» στην
+  Καρτέλα (και στο header της Επεξεργασίας) → roomy σελίδα με **τίτλο**, **είδος** (Γενική / Τεχνικό
+  δελτίο), **ετικέτες ανά σημείωση**, **αναζήτηση** (τίτλος+σώμα) και **Markdown με code blocks**
+  (monospace + οριζόντιο scroll — για RouterOS export, IP/hostname/printer πίνακες, TeamViewer/AnyDesk
+  ids). Ένα πολυμορφικό `Note` store (κοινό με το tab «Σημειώσεις (εσωτερικές)»), ποτέ σε PDF/ΑΑΔΕ,
+  render ασφαλές (escaped HTML), imported/backup read-only.
 - **Στήλες δραστηριότητας στη λίστα** (`Customer::scopeWithInvoiceStats`, SQL grouped sub-select →
   sortable χωρίς per-row PHP): **«Αρ. Παρ/ων»** (πλήθος εκδομένων παραστατικών — LIVE, χωρίς
   πρόχειρα/πιστωτικά· ορατή, τα «0» γκριζάρουν → sort εντοπίζει «νεκρούς» & busy), **«Τζίρος»**

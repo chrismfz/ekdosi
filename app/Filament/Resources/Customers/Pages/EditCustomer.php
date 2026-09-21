@@ -57,6 +57,14 @@ class EditCustomer extends EditRecord
                 ->color('primary')
                 ->url(fn (Customer $record) => CustomerResource::getUrl('ledger', ['record' => $record])),
 
+            // «Σημειώσεις» — the roomy, searchable notes surface (also reachable
+            // from the Καρτέλα). Complements the «Σημειώσεις (εσωτερικές)» tab below.
+            Action::make('open_notes')
+                ->label('Σημειώσεις')
+                ->icon('heroicon-o-document-text')
+                ->color('gray')
+                ->url(fn (Customer $record) => CustomerResource::getUrl('notes', ['record' => $record])),
+
             // PR #28: WHMCS linking action. Visible only when the
             // tenant has WHMCS configured — otherwise it'd offer
             // nothing useful. Two flows:

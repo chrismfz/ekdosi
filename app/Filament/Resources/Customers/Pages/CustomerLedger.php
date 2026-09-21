@@ -1071,6 +1071,16 @@ class CustomerLedger extends Page implements HasTable
                 ->icon('heroicon-o-arrow-down-tray')
                 ->button(),
 
+            // «Σημειώσεις» — the roomy, searchable, tag-filterable home for this
+            // customer's internal notes (short logs AND technical dossiers). The
+            // count rides on the internalNotes already eager-loaded in mount(), so
+            // the label needs no extra query.
+            Action::make('notes')
+                ->label(fn (): string => 'Σημειώσεις'.(($n = $this->record->internalNotes->count()) > 0 ? " ($n)" : ''))
+                ->icon('heroicon-o-document-text')
+                ->color('gray')
+                ->url(fn (): string => CustomerResource::getUrl('notes', ['record' => $this->record])),
+
             // Secondary / occasional actions — out of the main row.
             ActionGroup::make([
                 Action::make('crosscheck_aade')

@@ -55,6 +55,25 @@ class TagControls
             ->helperText('Ελεύθερες ετικέτες (π.χ. συχνός, χονδρική, VIP). Φτιάξε νέα με «+».');
     }
 
+    /**
+     * The «Ετικέτες» multi-select for a surface with NO model bound to the form
+     * (e.g. a page-level create/edit modal that persists the record itself). Same
+     * vocabulary + inline-create as field(), but it works on plain option ids: the
+     * caller reads `$data['tags']` and syncs the pivot by hand after saving the
+     * record. Returns tag ids as its value.
+     */
+    public static function plainField(): Select
+    {
+        return Select::make('tags')
+            ->label('Ετικέτες')
+            ->multiple()
+            ->searchable()
+            ->options(fn (): array => static::tagOptions())
+            ->createOptionForm(static::createForm())
+            ->createOptionUsing(fn (array $data): int => static::createTag($data))
+            ->helperText('Ελεύθερες ετικέτες (π.χ. RouterOS, VPN, VIP). Φτιάξε νέα με «+».');
+    }
+
     /** Multi-select filter — keeps working with dozens of tags (unlike tabs). */
     public static function filter(): SelectFilter
     {

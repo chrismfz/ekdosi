@@ -2,6 +2,7 @@
 
 namespace App\Filament\RelationManagers;
 
+use App\Filament\Support\Tags\TagControls;
 use App\Models\Note;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
@@ -9,7 +10,9 @@ use Filament\Actions\DeleteAction;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
+use Filament\Forms\Components\TextInput;
 use Filament\Forms\Components\Toggle;
 use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
@@ -47,15 +50,27 @@ class InternalNotesRelationManager extends RelationManager
     {
         return $schema
             ->components([
-                Textarea::make('body')
-                    ->label('Σημείωση')
-                    ->required()
-                    ->rows(3)
-                    ->helperText('Εσωτερική — δεν εκτυπώνεται στο παραστατικό και δεν αποστέλλεται στην ΑΑΔΕ.')
+                TextInput::make('title')
+                    ->label('Τίτλος')
+                    ->maxLength(255)
                     ->columnSpanFull(),
+
+                Select::make('kind')
+                    ->label('Είδος')
+                    ->options(Note::kindOptions())
+                    ->default(Note::KIND_GENERAL)
+                    ->required()
+                    ->native(false),
 
                 Toggle::make('is_pinned')
                     ->label('Καρφιτσωμένη (εμφανίζεται πρώτη)'),
+
+                Textarea::make('body')
+                    ->label('Κείμενο')
+                    ->required()
+                    ->rows(8)
+                    ->helperText('Εσωτερική — δεν εκτυπώνεται και δεν αποστέλλεται στην ΑΑΔΕ. Υποστηρίζει Markdown (π.χ. ``` για configs/IP). Για μεγαλύτερη επιφάνεια, ετικέτες και αναζήτηση: κουμπί «Σημειώσεις» στην Καρτέλα.')
+                    ->columnSpanFull(),
             ]);
     }
 
@@ -70,11 +85,21 @@ class InternalNotesRelationManager extends RelationManager
                     ->falseIcon('')
                     ->alignCenter(),
 
-                TextColumn::make('body')
-                    ->label('Σημείωση')
+                TextColumn::make('title')
+                    ->label('Τίτλος')
+                    ->state(fn (Note $record): string => $record->displayTitle())
+                    ->weight('medium')
                     ->wrap()
-                    ->limit(200)
-                    ->searchable(),
+                    ->description(fn (Note $record): ?string => filled($record->title) ? $record->plainExcerpt(120) : null)
+                    ->searchable(['title', 'body']),
+
+                TextColumn::make('kind')
+                    ->label('Είδος')
+                    ->badge()
+                    ->color(fn (Note $record): string => $record->kind === Note::KIND_TECHNICAL ? 'info' : 'gray')
+                    ->formatStateUsing(fn (Note $record): string => $record->kindLabel()),
+
+                TagControls::column(),
 
                 TextColumn::make('source')
                     ->label('Πηγή')

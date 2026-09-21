@@ -7,6 +7,7 @@ use App\Filament\RelationManagers\AttachmentsRelationManager;
 use App\Filament\RelationManagers\InternalNotesRelationManager;
 use App\Filament\Resources\Customers\Pages\CreateCustomer;
 use App\Filament\Resources\Customers\Pages\CustomerLedger;
+use App\Filament\Resources\Customers\Pages\CustomerNotes;
 use App\Filament\Resources\Customers\Pages\EditCustomer;
 use App\Filament\Resources\Customers\Pages\ListCustomers;
 use App\Filament\Resources\Customers\RelationManagers\ContactsRelationManager;
@@ -120,6 +121,7 @@ class CustomerResource extends Resource
             'create' => CreateCustomer::route('/create'),
             'edit' => EditCustomer::route('/{record}/edit'),
             'ledger' => CustomerLedger::route('/{record}/ledger'),
+            'notes' => CustomerNotes::route('/{record}/notes'),
         ];
     }
 }
