@@ -859,6 +859,12 @@ class CustomerLedgerBuilder
                 'mydata_mark' => null,
                 'is_credit_term' => false,
                 'is_receipt_group' => true,
+                // The underlying Payment ids of this έμβασμα/είσπραξη group. Additive:
+                // the operator ledger ignores it (its row url still reads the null
+                // payment_id + the «Κατανομή» modal); the portal reads payment_ids[0]
+                // to link the row to the receipt view (which re-expands the group by
+                // reference). Never a leak — the portal re-checks the grant per request.
+                'payment_ids' => array_map(static fn ($p): int => (int) $p->id, $group),
                 'allocations' => $allocations,
             ];
         }

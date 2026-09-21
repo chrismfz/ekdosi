@@ -67,6 +67,12 @@ class CustomerLedgerFeed
                 'owed' => max($balance, 0.0),
                 'credit' => max(-$balance, 0.0),
                 'oldest_unpaid_days' => $result->stats['oldest_unpaid_days'],
+                // Reconciling totals for the statement footer — the SAME figures the
+                // operator Καρτέλα shows (charges − credit notes − payments = balance),
+                // so a cash-term charge that never moved the balance isn't summed in.
+                'total_charges' => (float) $result->stats['charges'],
+                'total_credit_notes' => (float) $result->stats['credit_notes'],
+                'total_payments' => (float) $result->stats['payments'],
                 // Chronological (old→new) — «Η καρτέλα μου» reads like a statement,
                 // consistent with the operator table + the CSV/PDF export.
                 'rows' => $this->projectRows($result->chronologicalLedger(), $visibleIds),
@@ -97,6 +103,13 @@ class CustomerLedgerFeed
             // The doc-show route re-checks the grant, so exposing the id is safe.
             'invoice_id' => (($e['type'] ?? null) === 'invoice' && isset($e['invoice_id']) && isset($visibleIds[(int) $e['invoice_id']]))
                 ? (int) $e['invoice_id']
+                : null,
+            // A payment/refund/έμβασμα row links to its informal-receipt view. Single
+            // rows carry payment_id; a grouped έμβασμα carries payment_ids[] (the
+            // representative re-expands the group by reference on the receipt page).
+            // The receipt route re-checks the grant, so exposing the id is safe.
+            'payment_id' => in_array($e['type'] ?? null, ['payment', 'refund'], true)
+                ? ($e['payment_id'] ?? ($e['payment_ids'][0] ?? null))
                 : null,
             'debit' => round((float) $e['debit'], 2),
             'credit' => round((float) $e['credit'], 2),
