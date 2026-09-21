@@ -33,6 +33,7 @@ class CustomerLedgerFeed
      * @return list<array{
      *     company_id:int, customer_id:int, company:string, customer:string, afm:?string, role:string,
      *     balance:float, credit:float, owed:float, oldest_unpaid_days:?int,
+     *     total_charges:float, total_credit_notes:float, total_payments:float,
      *     rows:list<array<string,mixed>>
      * }>
      */

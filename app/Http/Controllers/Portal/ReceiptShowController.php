@@ -47,6 +47,10 @@ class ReceiptShowController extends Controller
 
         if ($model === null
             || $model->customer_id === null
+            // A zero/negative-amount payment is a legacy ETL artifact the ledger
+            // deliberately drops (#377) — it never appears as a statement link, so a
+            // deep link to one is 404, not a bogus €0 receipt.
+            || (float) $model->amount <= 0
             || ! $feed->loginCanAccessCustomer($login, (int) $model->company_id, (int) $model->customer_id)) {
             abort(Response::HTTP_NOT_FOUND);
         }
@@ -134,15 +138,18 @@ class ReceiptShowController extends Controller
             return $distinct->count() === 1 ? $distinct->first() : null;
         };
 
-        // Channel as a translatable key + (brand) gateway name; 'mixed' when members
-        // came through different channels.
-        $channelToken = fn (Payment $p): string => $p->payment_intent_id === null
-            ? 'manual|'
-            : 'portal|'.(string) ($p->paymentIntent?->gateway ?? '');
-        $tokens = $group->map($channelToken)->unique();
+        // Channel as a translatable key + (brand) gateway name, from the SAME shared
+        // Payment::channelParts() the operator label uses; 'mixed' when members came
+        // through different channels.
+        $tokens = $group->map(function (Payment $p): string {
+            $c = $p->channelParts();
+
+            return $c['key'].'|'.(string) ($c['gateway'] ?? '');
+        })->unique();
         if ($tokens->count() === 1) {
-            [$channelKey, $gateway] = explode('|', (string) $tokens->first(), 2);
-            $gatewayName = $gateway !== '' ? $gateways->label($gateway) : null;
+            $parts = $group->first()->channelParts();
+            $channelKey = $parts['key'];
+            $gatewayName = $parts['gateway'] !== null ? $gateways->label($parts['gateway']) : null;
         } else {
             $channelKey = 'mixed';
             $gatewayName = null;

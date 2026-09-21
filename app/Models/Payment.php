@@ -112,22 +112,40 @@ class Payment extends Model
     }
 
     /**
-     * The provenance/channel label (single source for the «Κανάλι» columns + the
-     * receipt): «Πύλη · Eurobank» when the payment was settled from a portal gateway
-     * intent, «Πύλη» if the intent is gone, else «Χειροκίνητα». Resolves the gateway
-     * display name through the registry (a stale/removed key falls back to the key).
+     * The channel/provenance as a language-neutral token — the SINGLE source both
+     * the operator «Κανάλι» label (channelLabel, Greek) and the bilingual portal
+     * receipt derive from, so they can never drift:
+     *   ['key' => 'manual'|'portal', 'gateway' => <raw gateway key>|null]
+     *
+     * @return array{key: string, gateway: ?string}
+     */
+    public function channelParts(): array
+    {
+        if ($this->payment_intent_id === null) {
+            return ['key' => 'manual', 'gateway' => null];
+        }
+        $gateway = (string) ($this->paymentIntent?->gateway ?? '');
+
+        return ['key' => 'portal', 'gateway' => $gateway !== '' ? $gateway : null];
+    }
+
+    /**
+     * The provenance/channel label for the operator panel (Greek): «Πύλη · Eurobank»
+     * when settled from a portal gateway intent, «Πύλη» if the intent is gone, else
+     * «Χειροκίνητα». Built from channelParts() (the shared source); resolves the
+     * gateway display name through the registry (a stale/removed key falls back to it).
      */
     public function channelLabel(): string
     {
-        if ($this->payment_intent_id === null) {
+        $parts = $this->channelParts();
+        if ($parts['key'] === 'manual') {
             return 'Χειροκίνητα';
         }
-        $gateway = (string) $this->paymentIntent?->gateway;
-        if ($gateway === '') {
+        if ($parts['gateway'] === null) {
             return 'Πύλη';
         }
 
-        return 'Πύλη · '.app(PaymentGatewayRegistry::class)->label($gateway);
+        return 'Πύλη · '.app(PaymentGatewayRegistry::class)->label($parts['gateway']);
     }
 
     public function company(): BelongsTo

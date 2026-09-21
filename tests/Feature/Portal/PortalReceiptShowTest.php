@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Tests\TestCase;
 
@@ -127,6 +128,24 @@ class PortalReceiptShowTest extends TestCase
         $this->grant($login, $mine);   // granted to Mine, NOT Other
 
         $this->actingAs($login, 'portal')->get("/user/receipt/{$otherPay->id}")->assertStatus(404);
+    }
+
+    public function test_receipt_404_for_a_zero_amount_legacy_payment(): void
+    {
+        // Raw-insert bypasses the model's positive-amount guard, reproducing the #377
+        // legacy artifact the ledger drops — the receipt page must 404 on it too.
+        $t = $this->company();
+        $cust = Customer::create(['company_id' => $t->id, 'name' => 'Mine', 'afm' => '1']);
+        $id = DB::table('payments')->insertGetId([
+            'company_id' => $t->id, 'customer_id' => $cust->id, 'invoice_id' => null,
+            'kind' => 'payment', 'amount' => 0, 'pay_date' => now(),
+            'created_at' => now(), 'updated_at' => now(),
+        ]);
+
+        $login = $this->login();
+        $this->grant($login, $cust);
+
+        $this->actingAs($login, 'portal')->get("/user/receipt/{$id}")->assertStatus(404);
     }
 
     public function test_receipt_requires_portal_auth(): void
