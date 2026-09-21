@@ -116,6 +116,27 @@ class CustomerDocumentFeed
     }
 
     /**
+     * The set of invoice ids a (company, customer) may open online — the SAME
+     * predicate as documentsFor()/loginCanAccess(), as a fast [id => true] lookup.
+     * «Η καρτέλα μου» links a ledger row to its online view ONLY when its invoice
+     * is in this set, so a broader ledger row (a legacy or credit-note DRAFT that
+     * never became customer-visible) never renders a dead, 404-ing link.
+     *
+     * @return array<int, true>
+     */
+    public function visibleDocumentIdSet(int $companyId, int $customerId): array
+    {
+        return array_fill_keys(
+            $this->liveQuery($companyId, $customerId)
+                ->limit(self::MAX_ROWS)
+                ->pluck('id')
+                ->map(fn ($id): int => (int) $id)
+                ->all(),
+            true,
+        );
+    }
+
+    /**
      * The one customer-visible predicate for a (company, customer), in SQL:
      * issued OR offered-proforma, and not AADE-cancelled — the SQL twin of
      * Invoice::isCustomerVisible(). CompanyScope is dropped (grants are

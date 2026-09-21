@@ -45,6 +45,15 @@ class CustomerLedgerFeed
             // massages money, it only SPLITS the balance into owed vs credit.
             $balance = (float) $result->stats['balance'];
 
+            // Which of this customer's documents are openable online — so a ledger
+            // row links to its view ONLY when the doc-show route would allow it (the
+            // ledger admits some rows, e.g. legacy/credit-note drafts, that are not
+            // customer-visible; linking those would 404).
+            $visibleIds = $this->boundary->visibleDocumentIdSet(
+                (int) $grant->company_id,
+                (int) $grant->customer_id,
+            );
+
             $out[] = [
                 'company_id' => (int) $grant->company_id,
                 'customer_id' => (int) $grant->customer_id,
@@ -60,7 +69,7 @@ class CustomerLedgerFeed
                 'oldest_unpaid_days' => $result->stats['oldest_unpaid_days'],
                 // Chronological (old→new) — «Η καρτέλα μου» reads like a statement,
                 // consistent with the operator table + the CSV/PDF export.
-                'rows' => $this->projectRows($result->chronologicalLedger()),
+                'rows' => $this->projectRows($result->chronologicalLedger(), $visibleIds),
             ];
         }
 
@@ -73,14 +82,22 @@ class CustomerLedgerFeed
      * fields (payment ids, allocation drill-downs, mydata state).
      *
      * @param  list<array<string,mixed>>  $ledger
+     * @param  array<int,true>  $visibleIds  invoice ids openable online (link gate)
      * @return list<array<string,mixed>>
      */
-    private function projectRows(array $ledger): array
+    private function projectRows(array $ledger, array $visibleIds): array
     {
         return array_map(fn (array $e): array => [
             'date' => $e['date'],
             'label' => $this->label($e),
             'kind' => $this->kind($e),
+            // Only a real document row (invoice / credit note / proforma) links to
+            // its online view — payment/refund rows have no document page — AND only
+            // when that document is actually customer-visible (else the link 404s).
+            // The doc-show route re-checks the grant, so exposing the id is safe.
+            'invoice_id' => (($e['type'] ?? null) === 'invoice' && isset($e['invoice_id']) && isset($visibleIds[(int) $e['invoice_id']]))
+                ? (int) $e['invoice_id']
+                : null,
             'debit' => round((float) $e['debit'], 2),
             'credit' => round((float) $e['credit'], 2),
             'running_balance' => round((float) $e['running_balance'], 2),

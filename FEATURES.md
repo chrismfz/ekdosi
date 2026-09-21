@@ -1010,6 +1010,14 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   ανά (εταιρία, πελάτη) στο `/user/statement`. `CustomerLedgerFeed` πάνω στο **ίδιο** `CustomerLedgerBuilder`
   με τον operator (ποτέ ξαναϋπολογισμός → ίδιοι αριθμοί) + ίδιο grant boundary. Αρνητικό υπόλοιπο = «πιστωτικό
   υπόλοιπο» (seat για prepaid credit). Το «πλήρωσε» έρχεται με τον gateway πυλώνα.
+- **Online προβολή παραστατικού (HTML reference):** το όνομα του παραστατικού σε «Τα παραστατικά μου» ΚΑΙ στις
+  γραμμές παραστατικών της «Η καρτέλα μου» είναι **link** → `/user/document/{id}` (`DocumentShowController`,
+  `resources/views/portal/document.blade.php`): read-only σελίδα με εκδότη/λήπτη, γραμμές, σύνολα (καθαρή/ΦΠΑ/
+  παρακράτηση/σύνολο/πληρωτέο), ΜΑΡΚ + «Επαλήθευση», κατάσταση πληρωμής/υπόλοιπο, και **συνδεδεμένα παραστατικά**
+  (πιστωτικό↔αρχικό, εισπράξεις/πληρωμές) — seat για το μελλοντικό link Υπηρεσία↔Παραστατικό. **Fail-closed** με
+  το ίδιο `CustomerDocumentFeed` boundary όπως το PDF route (κάθε linked-doc link ξανα-ελέγχεται· non-visible
+  γραμμές καρτέλας δεν linkάρουν → κανένα dead 404). Το επίσημο **PDF** παραμένει το νόμιμο artifact. Δίγλωσσο
+  (`portal.document.*`).
 - **Επόμενα slices:** self-register (**tier-2 claim** — ΑΦΜ+email match → email verify → grant πάντα από
   operator· ποτέ open signup) + auto-provision reseller-grants από τη δρομολόγηση «Παραστατικά σε τρίτους» +
   κοινό `CustomerDocumentFeed` και στο WHMCS «Εκδοθέντα».

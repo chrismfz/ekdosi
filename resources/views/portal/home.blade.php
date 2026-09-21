@@ -34,7 +34,9 @@
                             @foreach ($group['documents'] as $doc)
                                 <tr class="[&>td]:px-4 [&>td]:py-2.5">
                                     <td class="whitespace-nowrap">{{ $doc['issued_at'] ?? '—' }}</td>
-                                    <td class="font-medium">{{ $doc['invcode'] ?? '—' }}</td>
+                                    <td class="font-medium">
+                                        <flux:link href="{{ route('portal.document.show', $doc['id']) }}">{{ $doc['invcode'] ?? '—' }}</flux:link>
+                                    </td>
                                     <td>{{ $doc['type'] ?? '—' }}</td>
                                     <td>
                                         @if ($doc['is_proforma'] ?? false)

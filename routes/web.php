@@ -3,6 +3,7 @@
 use App\Http\Controllers\CompanyBackupDownloadController;
 use App\Http\Controllers\ExpenseDocumentDownloadController;
 use App\Http\Controllers\Portal\DocumentPdfController as PortalDocumentPdfController;
+use App\Http\Controllers\Portal\DocumentShowController as PortalDocumentShowController;
 use App\Http\Controllers\Portal\HomeController as PortalHomeController;
 use App\Http\Controllers\Portal\LoginController as PortalLoginController;
 use App\Http\Controllers\Portal\PasswordResetController as PortalPasswordResetController;
@@ -101,6 +102,16 @@ Route::middleware([ResolvePortalHost::class, EnsurePortalAuthenticated::class, S
         ->where('intent', '[0-9]+')->name('portal.payment.redirect');
     Route::get('/user/payment/{intent}', [PortalPaymentController::class, 'show'])
         ->where('intent', '[0-9]+')->name('portal.payment.show');
+    // Read-only HTML «online προβολή» of one of the customer's own documents —
+    // a reference view (like the WHMCS client area), grant-scoped + fail-closed via
+    // the SAME CustomerDocumentFeed boundary as the PDF route. Linked from the
+    // document name in «Τα παραστατικά μου» and «Η καρτέλα μου»; shows the linked
+    // documents (πιστωτικό↔αρχικό, εισπράξεις). The official PDF below stays the
+    // legal artifact — this page never replaces it. A plain GET (no heavy render),
+    // so no extra throttle beyond the auth group.
+    Route::get('/user/document/{invoice}', PortalDocumentShowController::class)
+        ->where('invoice', '[0-9]+')
+        ->name('portal.document.show');
     // Official PDF of one of the customer's own documents (grant-scoped, streamed).
     // Throttled: each hit is a heavy DomPDF render (raises memory_limit/time_limit),
     // so cap the rate to keep a tight loop (or a hijacked session) from exhausting
