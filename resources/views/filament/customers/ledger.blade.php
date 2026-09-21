@@ -99,15 +99,25 @@
                 @foreach ($shownNotes as $note)
                     <div class="flex items-start gap-2 text-sm">
                         @if ($note->is_pinned)
-                            <x-filament::icon icon="heroicon-s-bookmark" class="h-4 w-4 mt-0.5 text-amber-500" />
+                            <x-filament::icon icon="heroicon-s-bookmark" class="h-4 w-4 mt-0.5 shrink-0 text-amber-500" />
                         @endif
-                        <div class="space-y-0.5">
-                            <div class="whitespace-pre-line">{{ $note->body }}</div>
-                            <div class="text-xs fi-color-gray flex items-center gap-1">
+                        <div class="space-y-0.5 min-w-0">
+                            <div class="flex flex-wrap items-center gap-1">
+                                <span class="font-medium">{{ $note->displayTitle() }}</span>
+                                @if ($note->kind === \App\Models\Note::KIND_TECHNICAL)
+                                    <x-filament::badge color="info" size="sm">{{ $note->kindLabel() }}</x-filament::badge>
+                                @endif
                                 @if ($note->sourceLabel())
                                     <x-filament::badge color="gray" size="sm">{{ $note->sourceLabel() }}</x-filament::badge>
                                 @endif
-                                <span>{{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->created_at?->format('d/m/Y H:i') }}</span>
+                            </div>
+                            {{-- Short body excerpt for titled notes (an untitled note's
+                                 displayTitle IS already its first line, so no double). --}}
+                            @if (filled($note->title))
+                                <div class="text-xs fi-color-gray">{{ \Illuminate\Support\Str::limit(strip_tags($note->body), 100) }}</div>
+                            @endif
+                            <div class="text-xs fi-color-gray">
+                                {{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->updated_at?->format('d/m/Y H:i') }}
                             </div>
                         </div>
                     </div>
@@ -117,7 +127,9 @@
                 @if ($internalNotes->count() > $shownNotes->count())
                     +{{ $internalNotes->count() - $shownNotes->count() }} ακόμη ·
                 @endif
-                Διαχείριση: από την «Επεξεργασία» του πελάτη → καρτέλα «Σημειώσεις (εσωτερικές)».
+                <x-filament::link :href="\App\Filament\Resources\Customers\CustomerResource::getUrl('notes', ['record' => $cust])" size="sm">
+                    Άνοιγμα σημειώσεων
+                </x-filament::link>
             </div>
         </x-filament::section>
     @endif
