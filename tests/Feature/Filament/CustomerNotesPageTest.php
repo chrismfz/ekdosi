@@ -10,7 +10,9 @@ use App\Models\Note;
 use App\Models\Tag;
 use App\Models\User;
 use Filament\Facades\Filament;
+use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use PHPUnit\Framework\Attributes\Test;
@@ -148,7 +150,7 @@ class CustomerNotesPageTest extends TestCase
         // Two layers protect the boundary: the Select's options-validation rejects
         // an off-list id, and persistNote() re-filters to tenant-owned tags. Either
         // way the foreign tag is NEVER written to the pivot.
-        $this->assertSame(0, \Illuminate\Support\Facades\DB::table('taggables')->where('tag_id', $foreignTag->id)->count());
+        $this->assertSame(0, DB::table('taggables')->where('tag_id', $foreignTag->id)->count());
     }
 
     #[Test]
@@ -198,5 +200,47 @@ class CustomerNotesPageTest extends TestCase
 
         $this->assertSame('Ρητός τίτλος', $titled->displayTitle());
         $this->assertSame('Πρώτη γραμμή', $untitled->displayTitle());
+    }
+
+    #[Test]
+    public function display_title_skips_code_fence_for_untitled_technical_note(): void
+    {
+        // The primary use case: an untitled note that starts with a ``` config
+        // block must show the first real line, never a bare «```».
+        $c = $this->customer();
+        $note = $this->note($c, ['body' => "```\n/ip address print\n```"]);
+
+        $this->assertSame('/ip address print', $note->displayTitle());
+    }
+
+    #[Test]
+    public function plain_excerpt_strips_markdown_noise_without_dropping_config_fragments(): void
+    {
+        $c = $this->customer();
+        $note = $this->note($c, ['body' => "# Δίκτυο\n```\nset x <value>\n```"]);
+
+        $excerpt = $note->plainExcerpt(100);
+
+        $this->assertStringNotContainsString('#', $excerpt);
+        $this->assertStringNotContainsString('```', $excerpt);
+        // strip_tags would have eaten «<value>»; plainExcerpt keeps it.
+        $this->assertStringContainsString('set x <value>', $excerpt);
+    }
+
+    #[Test]
+    public function it_is_not_found_for_a_customer_of_another_tenant(): void
+    {
+        // Tenant boundary: with tenant A active, another tenant's customer is out
+        // of reach — the ambient CompanyScope filters it out of mount()'s lookup
+        // (ModelNotFoundException → 404), before any note query runs. The explicit
+        // company_id check in mount() is a second layer behind it.
+        $other = Company::create([
+            'name' => 'B', 'slug' => 'cn-x-'.uniqid(),
+            'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+        $foreign = Customer::create(['company_id' => $other->id, 'name' => 'Ξένος']);
+
+        $this->expectException(ModelNotFoundException::class);
+        Livewire::test(CustomerNotes::class, ['record' => $foreign->id]);
     }
 }

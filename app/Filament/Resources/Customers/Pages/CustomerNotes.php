@@ -177,7 +177,10 @@ class CustomerNotes extends Page implements HasTable
                 DeleteAction::make()
                     ->visible(fn (Note $record): bool => ! $record->isImported() && $this->canManageNotes()),
             ])
-            ->paginated([12, 24, 48, 'all'])
+            // Bounded page sizes on purpose (no «all»): each card re-parses its
+            // markdown body per render, so an unbounded page on a customer with
+            // hundreds of notes would run hundreds of conversions per keystroke.
+            ->paginated([12, 24, 48])
             ->defaultPaginationPageOption(12)
             ->emptyStateHeading('Καμία σημείωση ακόμη')
             ->emptyStateDescription('Κράτα εδώ ό,τι χρειάζεται η υποστήριξη του πελάτη: IPs, servers/workstations, εκτυπωτές, TeamViewer/AnyDesk, RouterOS export…')

@@ -20,7 +20,6 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Str;
 
 /**
  * Σημειώσεις (εσωτερικές) — reusable polymorphic operator-only notes tab.
@@ -91,7 +90,7 @@ class InternalNotesRelationManager extends RelationManager
                     ->state(fn (Note $record): string => $record->displayTitle())
                     ->weight('medium')
                     ->wrap()
-                    ->description(fn (Note $record): ?string => filled($record->title) ? Str::limit(strip_tags($record->body), 120) : null)
+                    ->description(fn (Note $record): ?string => filled($record->title) ? $record->plainExcerpt(120) : null)
                     ->searchable(['title', 'body']),
 
                 TextColumn::make('kind')

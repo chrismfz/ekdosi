@@ -112,12 +112,14 @@
                                 @endif
                             </div>
                             {{-- Short body excerpt for titled notes (an untitled note's
-                                 displayTitle IS already its first line, so no double). --}}
+                                 displayTitle IS already its first line, so no double).
+                                 plainExcerpt strips markdown noise; {{ }} escapes it. --}}
                             @if (filled($note->title))
-                                <div class="text-xs fi-color-gray">{{ \Illuminate\Support\Str::limit(strip_tags($note->body), 100) }}</div>
+                                <div class="text-xs fi-color-gray">{{ $note->plainExcerpt(100) }}</div>
                             @endif
                             <div class="text-xs fi-color-gray">
-                                {{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->updated_at?->format('d/m/Y H:i') }}
+                                {{-- created_at matches the relation's ordering (latest first). --}}
+                                {{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->created_at?->format('d/m/Y H:i') }}
                             </div>
                         </div>
                     </div>

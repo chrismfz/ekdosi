@@ -89,8 +89,11 @@ class Note extends Model
     }
 
     /**
-     * The best short label for this note in a list: its title, or a trimmed
-     * first line of the body when title-less (older/imported notes).
+     * The best short label for this note in a list: its title, or the first
+     * MEANINGFUL body line when title-less (older/imported notes). «Meaningful»
+     * skips blank lines and code-fence markers and strips leading markdown
+     * markers — so a technical note that starts with a ``` config block shows
+     * the first real config line, not a bare «```».
      */
     public function displayTitle(): string
     {
@@ -98,9 +101,51 @@ class Note extends Model
             return $this->title;
         }
 
-        $firstLine = trim(strtok((string) $this->body, "\n") ?: '');
+        $firstLine = $this->bodyFirstMeaningfulLine();
 
         return $firstLine !== '' ? Str::limit($firstLine, 80) : '(χωρίς τίτλο)';
+    }
+
+    /**
+     * A single-line PLAIN-TEXT snippet of the body for previews/lists: drops
+     * code-fence markers + leading markdown markers and collapses whitespace, so
+     * a markdown-authored note reads cleanly in a preview (no «#»/«```» noise).
+     * NOT HTML — callers render it through {{ }} (escaped); never strip_tags,
+     * which would eat a «set x <value>» config fragment.
+     */
+    public function plainExcerpt(int $limit = 100): string
+    {
+        return Str::limit($this->bodyPlainText(), $limit);
+    }
+
+    /** First non-blank, non-fence body line, leading markdown markers stripped. */
+    private function bodyFirstMeaningfulLine(): string
+    {
+        foreach (preg_split('/\R/', (string) $this->body) ?: [] as $line) {
+            $trimmed = trim($line);
+            if ($trimmed === '' || str_starts_with($trimmed, '```')) {
+                continue;
+            }
+
+            return ltrim($trimmed, "#>*-+ \t");
+        }
+
+        return '';
+    }
+
+    /** The whole body as collapsed plain text (fences + leading markers removed). */
+    private function bodyPlainText(): string
+    {
+        $kept = [];
+        foreach (preg_split('/\R/', (string) $this->body) ?: [] as $line) {
+            $trimmed = trim($line);
+            if ($trimmed === '' || str_starts_with($trimmed, '```')) {
+                continue;
+            }
+            $kept[] = ltrim($trimmed, "#>*-+ \t");
+        }
+
+        return trim(preg_replace('/\s+/', ' ', implode(' ', $kept)) ?? '');
     }
 
     /**
