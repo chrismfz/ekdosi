@@ -114,7 +114,14 @@ class WhmcsInvoiceMapper
         // negative line and still reconciles to the WHMCS subtotal. A discount that
         // can't be absorbed (no matching charge, or it exceeds the charges) is LEFT
         // negative → the filing guard (assertPayloadFilable) still HOLDS the row.
-        $linePayload = $this->foldPromoDiscounts($linePayload);
+        // ONLY on the whole-invoice path: a per-party SPLIT subset skips
+        // assertTotalsReconcile, and detectAmountIncludesTax reads the WHOLE-invoice
+        // breakdown (not the subset), so folding a subset could hide a wrong net/gross
+        // split with no guard to catch it. A split group's negative line stays → held
+        // (its pre-fold behaviour), which the operator resolves by hand.
+        if ($onlyWhmcsItemIds === null) {
+            $linePayload = $this->foldPromoDiscounts($linePayload);
+        }
         $defaultVat = $this->resolveDefaultVatCategory($tenant);
 
         // G3 / payload-authoritative: whether WHMCS line `amount` is gross
@@ -321,11 +328,19 @@ class WhmcsInvoiceMapper
         }
 
         // A group folds only when it has charges to absorb its discount AND the
-        // discount is strictly below those charges (else the net would be ≤ 0).
+        // resulting discount % is a valid, meaningful (0,100) line discount. Guard
+        // BOTH ends: `disc < charge` keeps net > 0, and the round(...,4) < 100 check
+        // rejects a near-total discount that would round to exactly 100% (→ a €0.00
+        // line that files instead of being held). Anything rejected stays negative
+        // → held for the operator.
         $ratio = [];
         foreach ($discountSum as $key => $disc) {
             $charge = $chargeSum[$key] ?? 0.0;
-            if ($charge > 0.005 && $disc < $charge - 0.005) {
+            if ($charge <= 0.005 || $disc >= $charge - 0.005) {
+                continue;
+            }
+            $pct = round(($disc / $charge) * 100, 4);   // must match the value buildLines applies
+            if ($pct > 0.0 && $pct < 100.0) {
                 $ratio[$key] = $disc / $charge;
             }
         }
@@ -725,7 +740,35 @@ class WhmcsInvoiceMapper
             // it via blank_description_charge_lines — held by assertPayloadFilable
             // on ALL paths, not just the totals-reconcile ones.)
             'negative_lines' => $this->negativeLineDescriptions($lines),
+            // WH-4 / promo: descriptions of lines that carry a FOLDED WHMCS
+            // coupon/promotion discount (buildLines set discount > 0 from
+            // foldPromoDiscounts). The unattended auto-issue guard holds these for a
+            // human — the fold can't tell a genuine price discount from any other
+            // negative line item, so a computed discount is never auto-filed to AADE
+            // unreviewed. The manual file/createDraft paths issue them normally.
+            'discounted_lines' => $this->discountedLineDescriptions($lines),
         ];
+    }
+
+    /**
+     * WH-4: descriptions of lines carrying a folded promo/coupon discount
+     * (discount > 0). Only foldPromoDiscounts sets a non-zero line discount here
+     * (native WHMCS lines have none), so this uniquely marks a folded-discount
+     * invoice for the unattended-issue hold.
+     *
+     * @param  array<int, array<string, mixed>>  $lines
+     * @return array<int, string>
+     */
+    private function discountedLineDescriptions(array $lines): array
+    {
+        $out = [];
+        foreach ($lines as $line) {
+            if ((float) ($line['discount'] ?? 0) > 0.005) {
+                $out[] = (string) $line['product_descr'];
+            }
+        }
+
+        return $out;
     }
 
     /**

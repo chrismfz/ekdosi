@@ -250,6 +250,33 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertNull($fresh->invoice_id);
     }
 
+    public function test_does_not_auto_issue_an_invoice_with_a_folded_promo_discount(): void
+    {
+        // A WHMCS coupon/promotion (negative line) is folded into a line discount by
+        // the mapper — correct money, but indistinguishable from any other negative
+        // line item, so the unattended path must HOLD it (the manual «Δημιουργία
+        // Παραστατικού» path issues it fine). Guards the auto-file-to-AADE route.
+        $tenant = $this->tenant();
+        $customer = $this->customer($tenant, grumpy: true);
+        $pending = $this->pending($tenant, $customer, [
+            'payload' => [
+                'invoiceid' => 48001, 'userid' => 1, 'total' => '287.68',
+                'subtotal' => '232.00', 'tax' => '55.68', 'taxrate' => '24.00', 'status' => 'Paid',
+                'items' => ['item' => [
+                    ['description' => 'Business10 - kyklops.com.gr', 'amount' => '290.00', 'taxed' => '1'],
+                    ['description' => 'Κωδικός Promotion: zombee20 - 20.00%', 'amount' => '-58.00', 'taxed' => '1'],
+                ]],
+            ],
+        ]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $fresh = $pending->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $fresh->status, 'held for review, not auto-filed');
+        $this->assertNull($fresh->invoice_id);
+        $this->assertSame(0, Invoice::count());
+    }
+
     public function test_dry_run_files_nothing(): void
     {
         $tenant = $this->tenant();

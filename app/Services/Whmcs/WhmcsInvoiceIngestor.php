@@ -194,9 +194,10 @@ class WhmcsInvoiceIngestor
                 //      still reports the source invoice as a raw mass-pay, so refreshing
                 //      would re-detect it as consolidated, overwrite the merge back to
                 //      the reference lines AND flip it to held — undoing the operator's
-                //      «Ενοποίηση» so no issuable draft ever appears. The manual
-                //      re-consolidate action writes the merge directly (not via this
-                //      path), so freezing here doesn't block a deliberate redo.
+                //      «Ενοποίηση» so no issuable draft ever appears. The merged payload
+                //      is the resolved draft-source; the only next step is «Δημιουργία
+                //      Παραστατικού» (the «Ενοποίηση» action is hidden once merged), so
+                //      there is nothing a re-ingest could usefully refresh here.
                 $existing->touch();
 
                 return new IngestionResult(row: $existing, created: false, auditPreserved: true);

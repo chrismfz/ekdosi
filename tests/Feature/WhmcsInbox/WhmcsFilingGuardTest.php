@@ -160,6 +160,32 @@ class WhmcsFilingGuardTest extends TestCase
         $this->assertHeldWith($pending, 'αρνητικό ποσό');
     }
 
+    public function test_wh4_a_promo_not_below_its_charge_is_not_folded_and_is_held(): void
+    {
+        // Boundary: a taxed promo whose magnitude is ≥ the charge in its OWN tax
+        // group can't fold to a valid net > 0, so it is NOT folded — the negative
+        // line stays and assertPayloadFilable HOLDS the row (never a ≤0-value line).
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '100.00', 'taxed' => '1'],
+            ['description' => 'Κωδικός Promotion: 100% off', 'amount' => '-100.00', 'taxed' => '1'],
+        ], total: '0.00');
+
+        $this->assertHeldWith($pending, 'αρνητικό ποσό');
+    }
+
+    public function test_wh4_a_near_total_discount_rounding_to_100pct_is_held(): void
+    {
+        // P2-4 boundary: a discount that rounds to exactly 100% (19999.99/20000 =
+        // 99.99995 → 100.0000) would fold to a €0.00 line. foldPromoDiscounts rejects
+        // a pct that rounds to ≥100, so the negative line stays and the row is HELD.
+        $pending = $this->makePending([
+            ['description' => 'Big service', 'amount' => '20000.00', 'taxed' => '1'],
+            ['description' => 'Κωδικός Promotion: near-total', 'amount' => '-19999.99', 'taxed' => '1'],
+        ], total: '0.01');
+
+        $this->assertHeldWith($pending, 'αρνητικό ποσό');
+    }
+
     public function test_wh2_taxrate_mismatch_is_held_even_when_gross_reconciles(): void
     {
         // Tax-INCLUSIVE WHMCS invoice at 13%: the mapper reproduces the €113

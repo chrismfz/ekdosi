@@ -1221,8 +1221,23 @@ assertion). Ό,τι απέμεινε:
 - **Test gaps (deferred):** cancel/delete-after-consolidate lifecycle test (δεμένο με P2-2)· explode third-party
   routing (το explode test χρησιμοποιεί ένα userid)· tax-inclusive tenant test (δεμένο με το explode fail-safe·
   μη-reachable σήμερα)· concurrency test για το tombstone clobber (row-lock tests = MariaDB-only ανά CLAUDE.md).
+- **Consolidated-freeze permanence (P2-3, accept):** ο re-ingest freeze του `hasBeenConsolidated()` είναι μόνιμος —
+  αν ο πελάτης μετά **επιστρέψει/ακυρώσει** το mass-pay στο WHMCS, ο frozen container μένει issuable με το stale
+  merged payload (καμία προειδοποίηση). Ίδια συμπεριφορά με ΚΑΘΕ acted-upon row (held/rejected/filed είναι κι αυτά
+  frozen snapshots) — το inbox model είναι snapshot-at-decision ούτως ή άλλως, οπότε δεν είναι regression. Δεμένο
+  με το lifecycle P2-2 (cancel/refund → re-open). Χαμηλή πιθανότητα (ο χειριστής το βλέπει στο WHMCS).
 
-### Immediate-invoice bell auto-resolve — surviving P2s (από το review, 2026-09-15)
+### WHMCS coupon/promotion discount fold — surviving P2s (από το review, 2026-09-21)
+Το fold μιας αρνητικής promo/coupon γραμμής σε line-level `discount %` (`WhmcsInvoiceMapper::foldPromoDiscounts`)
+πέρασε **χωρίς reachable P0/P1**. Θωρακίσεις που μπήκαν: per-tax-group fold (ποτέ cross-treatment), reject ≥100%
+(no €0 line), skip στο split subset (assertTotalsReconcile δεν τρέχει εκεί), unattended-issue hold για ό,τι
+folded (indistinguishable από manual credit). Ό,τι απέμεινε:
+- **Per-line attribution σε multi-line invoice με coupon (P2-1, accept):** το WHMCS GetInvoice **δεν** λέει σε ποια
+  γραμμή εφαρμόστηκε το coupon (είναι standalone line item χωρίς relid σε προϊόν), οπότε η έκπτωση μοιράζεται
+  **αναλογικά** σε όλες τις θετικές γραμμές του tax group. Σε invoice με 2+ γραμμές όπου το coupon αφορούσε ΜΙΑ,
+  το per-line `net`/`mydata_income_class`/«Έσοδα ανά κατηγορία» αποκλίνει (το σύνολο & το single-rate ΦΠΑ μένουν
+  **σωστά**). Proportional = η μόνη υπερασπίσιμη κατανομή με τα δεδομένα WHMCS· πριν το fix τέτοιο invoice ήταν
+  held (δεν έβγαινε καθόλου). Άσε — μη-reachable για single-line coupons (το κοινό #32328).
 Το feature (`ImmediateInvoiceBell` + observer + `whmcs:resolve-immediate-bells`) πέρασε **χωρίς P0/P1** — tenant-safe
 (tag = kind+company+whmcs_id, ποτέ cross-clear), lifecycle-safe (resolve μέσα στο ίδιο tx, αγγίζει μόνο `read_at`).
 Ό,τι απέμεινε (accept-as-is):

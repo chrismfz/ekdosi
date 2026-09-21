@@ -201,4 +201,34 @@ final class WhmcsFilingGuard
             .'σωστό συντελεστή (gross-edit για να μείνει ίδιο το τελικό) και έκδωσέ το χειροκίνητα.'
         );
     }
+
+    /**
+     * UNATTENDED-ONLY: refuse to auto-issue a WHMCS invoice whose mapping carries a
+     * FOLDED coupon/promotion discount (WhmcsInvoiceMapper turned a negative WHMCS
+     * line into a line-level discount %). The fold produces the correct money, but
+     * it cannot distinguish a genuine price discount from any other negative line
+     * item (a manual credit / goodwill adjustment), so before this the negative line
+     * was HELD for review. Keep that safety on the auto-file-to-AADE path: hold the
+     * row so a human confirms the discount once. Deliberately NOT called on the
+     * manual file / createDraft paths — an operator issuing it IS the review. WHOLE-
+     * invoice; the split path doesn't fold at all.
+     *
+     * @param  array<string, mixed>  $mapped  WhmcsInvoiceMapper::map() output
+     */
+    public static function assertNoFoldedDiscountForUnattendedIssue(array $mapped, PendingWhmcsInvoice $pending): void
+    {
+        $discounted = $mapped['totals']['discounted_lines'] ?? [];
+        if ($discounted === []) {
+            return;
+        }
+
+        $sample = implode('», «', array_slice($discounted, 0, 3));
+        $more = count($discounted) > 3 ? ' (+'.(count($discounted) - 3).' ακόμα)' : '';
+        throw new LogicException(
+            'Το WHMCS #'.$pending->whmcs_invoice_id.' έχει έκπτωση coupon/promotion που ενσωματώθηκε '
+            .'σε γραμμή («'.$sample.'»'.$more.'). Η άμεση τιμολόγηση ΔΕΝ εκδίδει αυτόματα παραστατικό '
+            .'με ενσωματωμένη έκπτωση — δημιούργησε προσχέδιο, επιβεβαίωσε την έκπτωση και έκδωσέ το '
+            .'χειροκίνητα.'
+        );
+    }
 }
