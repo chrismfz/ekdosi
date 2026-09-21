@@ -122,13 +122,17 @@ class CustomerDocumentFeed
      * is in this set, so a broader ledger row (a legacy or credit-note DRAFT that
      * never became customer-visible) never renders a dead, 404-ing link.
      *
+     * NOT capped (unlike documentsFor's display table): the ledger itself is
+     * uncapped, and every customer-visible row on it must link deterministically —
+     * a newest-500 window would leave the oldest openable rows as dead text. This
+     * pulls ids only, always a subset of what the ledger builder already loads.
+     *
      * @return array<int, true>
      */
     public function visibleDocumentIdSet(int $companyId, int $customerId): array
     {
         return array_fill_keys(
             $this->liveQuery($companyId, $customerId)
-                ->limit(self::MAX_ROWS)
                 ->pluck('id')
                 ->map(fn ($id): int => (int) $id)
                 ->all(),

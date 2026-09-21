@@ -7,7 +7,10 @@
     $gross = (float) $invoice->gross_total;
     $vat = round($gross - $net, 2);
     $withhold = (float) ($invoice->withhold_amount ?? 0);
-    $payable = (float) ($invoice->payable_total ?? $gross);
+    // The authoritative collectible (gross − withholding/deductions + fees), same
+    // as the legal PDF — never the raw gross, so a not-yet-recomputed row still
+    // shows the right «Πληρωτέο».
+    $payable = (float) $invoice->payableTotal();
     $discount = (float) ($invoice->header_discount_percent ?? 0);
     $hasLinks = $original !== null || $creditNotes->isNotEmpty() || $invoice->payments->isNotEmpty();
 @endphp
@@ -93,10 +96,10 @@
                         <tr class="[&>td]:px-4 [&>td]:py-2.5">
                             <td>{{ $line->product_descr ?? '—' }}</td>
                             <td class="text-right whitespace-nowrap">
-                                {{ rtrim(rtrim(number_format((float) $line->qty, 3), '0'), '.') }}{{ $line->metric_unit ? ' '.$line->metric_unit : '' }}
+                                {{ rtrim(rtrim(number_format((float) $line->qty, 3, ',', '.'), '0'), ',') }}{{ $line->metric_unit ? ' '.$line->metric_unit : '' }}
                             </td>
                             <td class="text-right whitespace-nowrap">{{ Money::eur((float) $line->price_per_item) }}</td>
-                            <td class="text-right whitespace-nowrap">{{ rtrim(rtrim(number_format((float) $line->vat_percent, 2), '0'), '.') }}%</td>
+                            <td class="text-right whitespace-nowrap">{{ rtrim(rtrim(number_format((float) $line->vat_percent, 2, ',', '.'), '0'), ',') }}%</td>
                             <td class="text-right whitespace-nowrap">{{ Money::eur((float) $line->net_price) }}</td>
                         </tr>
                     @endforeach
@@ -111,7 +114,7 @@
             @if ($discount > 0)
                 <div class="flex justify-between">
                     <dt class="text-zinc-500">{{ __('portal.document.discount') }}</dt>
-                    <dd>{{ rtrim(rtrim(number_format($discount, 2), '0'), '.') }}%</dd>
+                    <dd>{{ rtrim(rtrim(number_format($discount, 2, ',', '.'), '0'), ',') }}%</dd>
                 </div>
             @endif
             <div class="flex justify-between">

@@ -70,11 +70,11 @@ class PortalDocumentShowTest extends TestCase
         return $inv;
     }
 
-    private function line(Invoice $inv, string $descr): InvoiceLine
+    private function line(Invoice $inv, string $descr, float $qty = 1): InvoiceLine
     {
         return InvoiceLine::create([
             'company_id' => $inv->company_id, 'invoice_id' => $inv->id,
-            'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24,
+            'qty' => $qty, 'price_per_item' => 100, 'vat_percent' => 24,
             'net_price' => 100, 'gross_price' => 124, 'product_descr' => $descr,
         ]);
     }
@@ -85,7 +85,7 @@ class PortalDocumentShowTest extends TestCase
         $it = $this->type($t);
         $cust = Customer::create(['company_id' => $t->id, 'name' => 'Mine', 'afm' => '090000045']);
         $inv = $this->invoice($t, $it, $cust, 'ΤΠΥ6665', 6665, 'active', 'VALID');
-        $this->line($inv, 'Υπηρεσία υποστήριξης');
+        $this->line($inv, 'Υπηρεσία υποστήριξης', 2.5);
 
         $login = $this->login();
         $this->grant($login, $cust);
@@ -94,7 +94,9 @@ class PortalDocumentShowTest extends TestCase
             ->assertOk()
             ->assertSee('ΤΠΥ6665')
             ->assertSee('Υπηρεσία υποστήριξης')
-            ->assertSee('Τιμολόγιο παροχής');
+            ->assertSee('Τιμολόγιο παροχής')
+            // Greek decimal separator for qty (consistent with Money::eur), not «2.5».
+            ->assertSee('2,5');
     }
 
     public function test_show_404_for_a_non_granted_document(): void
