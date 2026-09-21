@@ -470,11 +470,18 @@ class CustomerLedger extends Page implements HasTable
                     ->modalHeading(fn (array $record): string => 'Κατανομή είσπραξης — '.($record['reference'] ?? ''))
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Κλείσιμο')
-                    ->modalContent(fn (array $record) => view('filament.customers.receipt-allocations-modal', [
-                        'allocations' => $record['allocations'] ?? [],
-                        'total' => (float) ($record['credit'] ?? 0),
-                        'fmtMoney' => fn ($v): string => $this->fmtMoney($v),
-                    ])),
+                    ->modalContent(function (array $record) {
+                        $info = $this->receiptChannelInfo($record['payment_ids'] ?? []);
+
+                        return view('filament.customers.receipt-allocations-modal', [
+                            'allocations' => $record['allocations'] ?? [],
+                            'total' => (float) ($record['credit'] ?? 0),
+                            'channel' => $info['channel'],
+                            'transactionId' => $info['transaction_id'],
+                            'method' => $info['method'],
+                            'fmtMoney' => fn ($v): string => $this->fmtMoney($v),
+                        ]);
+                    }),
             ])
             ->recordUrl(fn (array $record): ?string => $this->ledgerRowUrl($record))
             // Χρονολογικά (παλιά→νέα) εξ ορισμού — διαβάζεται σαν λογιστική καρτέλα:
@@ -592,6 +599,55 @@ class CustomerLedger extends Page implements HasTable
     private function fmtMoney(mixed $value): string
     {
         return Money::eur($value);
+    }
+
+    /**
+     * «Από πού ήρθε» για μια ομαδοποιημένη είσπραξη — φορτώνεται LAZY όταν ανοίγει
+     * το modal «Κατανομή» (από τα `payment_ids` της group-γραμμής), ώστε ο builder
+     * να μένει lean και να μη γίνεται καμία επιπλέον query στη λίστα. Δείχνει μόνο
+     * τα ΚΟΙΝΑ στοιχεία του group (κανάλι μέσω του κοινού `Payment::channelLabel`
+     * seam, τρόπος, κωδικός συναλλαγής)· ένα πεδίο που διαφέρει ανά μέλος μένει
+     * null (→ κρύβεται), εκτός του καναλιού που γίνεται «Πολλαπλά κανάλια».
+     * Scoped στον τρέχοντα πελάτη/εταιρία — ποτέ cross-tenant read.
+     *
+     * @param  array<int, int>  $paymentIds
+     * @return array{channel: ?string, transaction_id: ?string, method: ?string}
+     */
+    private function receiptChannelInfo(array $paymentIds): array
+    {
+        $ids = array_values(array_filter(array_map('intval', $paymentIds)));
+        if ($ids === []) {
+            return ['channel' => null, 'transaction_id' => null, 'method' => null];
+        }
+
+        $payments = Payment::query()
+            ->where('company_id', $this->record->company_id)
+            ->where('customer_id', $this->record->getKey())
+            ->whereKey($ids)
+            ->with(['paymentMethod', 'paymentIntent'])
+            ->get();
+
+        if ($payments->isEmpty()) {
+            return ['channel' => null, 'transaction_id' => null, 'method' => null];
+        }
+
+        // A field shown only when ALL members share it (else null → hidden), so a
+        // summed receipt never attributes one member's txn/method to the whole.
+        $shared = function (callable $accessor) use ($payments): ?string {
+            $distinct = $payments->map($accessor)
+                ->map(fn ($v): ?string => filled($v) ? (string) $v : null)
+                ->unique()->values();
+
+            return $distinct->count() === 1 ? $distinct->first() : null;
+        };
+
+        $channels = $payments->map(fn (Payment $p): string => $p->channelLabel())->unique();
+
+        return [
+            'channel' => $channels->count() === 1 ? $channels->first() : 'Πολλαπλά κανάλια',
+            'transaction_id' => $shared(fn (Payment $p) => $p->transaction_id),
+            'method' => $shared(fn (Payment $p) => $p->paymentMethod?->description),
+        ];
     }
 
     private ?float $availableCreditCache = null;
