@@ -2,10 +2,12 @@
 
 use App\Http\Middleware\EnsureInstalled;
 use App\Http\Middleware\SecurityHeaders;
+use App\Http\Middleware\TrustProxies;
 use App\Support\ErrorAlerts\ExceptionNotifier;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
+use Illuminate\Http\Middleware\TrustProxies as BaseTrustProxies;
 use Illuminate\Support\Facades\Route;
 
 return Application::configure(basePath: dirname(__DIR__))
@@ -32,32 +34,22 @@ return Application::configure(basePath: dirname(__DIR__))
         },
     )
     ->withMiddleware(function (Middleware $middleware): void {
-        // First global middleware: on a pristine host route everything into the
-        // web installer BEFORE the session/cookie stack runs (no APP_KEY yet);
-        // once installed it's an inert pass-through.
-        $middleware->prepend(EnsureInstalled::class);
+        // On a pristine host route everything into the web installer BEFORE the
+        // session/cookie stack runs (that lives in the `web` group — no APP_KEY
+        // yet); once installed it's an inert pass-through. Appended, not
+        // prepended: its redirects must see the forwarded scheme that
+        // TrustProxies (framework global stack) establishes.
+        $middleware->append(EnsureInstalled::class);
 
         // Safe security response headers on every response (nosniff, Referrer-
         // Policy, X-Frame-Options SAMEORIGIN). No CSP/HSTS here on purpose —
         // see App\Http\Middleware\SecurityHeaders.
         $middleware->append(SecurityHeaders::class);
 
-        // Trust the reverse proxy / edge (CFM, nginx, a CDN) so request()->ip()
-        // — and therefore the auth/security log + last-login IP — captures the
-        // REAL client IP from X-Forwarded-For, not the proxy's. This is what
-        // makes «να δούμε έστω το IP» actually show the attacker behind an edge.
-        //
-        // Default (TRUSTED_PROXIES unset) trusts NOBODY: direct-served hosts are
-        // unaffected, and X-Forwarded-For can't be spoofed into the log. Set it
-        // to the edge IP(s)/CIDR (comma-separated) — or '*' ONLY when the app is
-        // never reachable except through a trusted proxy (otherwise any client
-        // could forge its logged IP).
-        $trustedProxies = env('TRUSTED_PROXIES');
-        if (filled($trustedProxies)) {
-            $middleware->trustProxies(
-                at: $trustedProxies === '*' ? '*' : array_map('trim', explode(',', $trustedProxies)),
-            );
-        }
+        // Trusted proxies (default: this box only — the CFM edge / a local nginx).
+        // Read from config/trustedproxy.php per request: an env() call here
+        // would run before .env is loaded and be ignored.
+        $middleware->replace(BaseTrustProxies::class, TrustProxies::class);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // OPS-3: email the ops recipients when the app reports an unhandled
