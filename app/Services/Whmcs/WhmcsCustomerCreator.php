@@ -122,6 +122,140 @@ class WhmcsCustomerCreator
     }
 
     /**
+     * Third-party variant: create/find the ekdosi Customer for a RESOLVED
+     * third-party contact — a resolve.php contact array (company_name, gr_vatno,
+     * vies_vatno, tax_office, address1/2, city, postal_code, country, description,
+     * email, telephone) — with the SAME AADE-first-then-WHMCS-fallback and
+     * ΑΦΜ-idempotency as createForPending().
+     *
+     * Unlike ContactCustomerResolver (which materialises a contact using ONLY the
+     * reseller-typed WHMCS fields, offline), this enriches from GSIS so a
+     * manually-imported third party gets the same authoritative επωνυμία / ΔΟΥ /
+     * address / δραστηριότητα as the primary. The contact's own email/phone are
+     * kept (GSIS doesn't expose them). Does NOT stamp whmcs_client_id (a third
+     * party is not the WHMCS client) nor the γκρινιάρης flag (that's the primary's).
+     *
+     * $referredByCustomerId records provenance — the ekdosi Customer of the WHMCS
+     * reseller/agency that brought this third party — the SAME «συστήθηκε από»
+     * link a converted lead carries (Customer.referred_by_customer_id). Null when
+     * the reseller isn't an ekdosi customer. Set on create; gap-filled on an
+     * existing party (never overwritten, never a self-reference).
+     *
+     * @param  array<string, mixed>  $contact
+     */
+    public function createFromContact(
+        Company $tenant,
+        array $contact,
+        ?int $referredByCustomerId = null,
+    ): WhmcsCustomerCreateResult {
+        $afm = Afm::uniqueKey((string) ($contact['gr_vatno'] ?? ''));
+        if ($afm === null) {
+            return new WhmcsCustomerCreateResult(null, false, 'no_afm');
+        }
+
+        $existing = Customer::afmOwnerQuery($tenant->id, $afm)->first();
+        if ($existing !== null) {
+            if ($existing->trashed()) {
+                return new WhmcsCustomerCreateResult($existing, false, 'deleted_owner');
+            }
+            // Find-and-enrich: backfill the reseller-supplied email/phone + the
+            // provenance link when the existing party is missing them — NEVER
+            // overwriting existing data. GSIS carries no email/phone, so the
+            // reseller-entered ones are the only source, and the third party often
+            // needs to receive the document too.
+            $this->backfillContactGaps($existing, $contact, $referredByCustomerId);
+
+            return new WhmcsCustomerCreateResult($existing, false, 'existing');
+        }
+
+        $record = null;
+        $source = 'whmcs';
+        try {
+            $record = app(AadeRegistryLookup::class, ['tenant' => $tenant])->findByAfm($afm);
+            $source = 'aade';
+        } catch (AadeAfmNotFound|AadeUnreachable|AadeCredentialsInvalid $e) {
+            Log::info('WHMCS create third-party customer: GSIS lookup failed — using contact data.', [
+                'company_id' => $tenant->id,
+                'afm' => $afm,
+                'reason' => $e->getMessage(),
+            ]);
+        }
+
+        $activity = $record?->primaryActivity();
+        $decode = static fn ($v): ?string => is_string($v)
+            ? (trim(html_entity_decode($v, ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: null)
+            : null;
+
+        try {
+            $customer = Customer::create([
+                'company_id' => $tenant->id,
+                'afm' => $afm,
+                'name' => self::firstFilled($record?->name, $decode($contact['company_name'] ?? null), 'ΑΦΜ '.$afm),
+                'vat_vies' => self::firstFilled($decode($contact['vies_vatno'] ?? null)),
+                'tax_office' => self::firstFilled($record?->doy, $decode($contact['tax_office'] ?? null)),
+                'address1' => self::firstFilled($record?->address, $decode($contact['address1'] ?? null)),
+                'address2' => self::firstFilled($decode($contact['address2'] ?? null)),
+                'city' => self::firstFilled($record?->city, $decode($contact['city'] ?? null)),
+                'postcode' => self::firstFilled($record?->postcode, $decode($contact['postal_code'] ?? null)),
+                'country' => self::firstFilled($decode($contact['country'] ?? null), 'GR'),
+                'occupation' => self::firstFilled($activity['description'] ?? null, $decode($contact['description'] ?? null)),
+                'email' => self::firstFilled($decode($contact['email'] ?? null)),
+                'phone1' => self::firstFilled($decode($contact['telephone'] ?? null)),
+                'referred_by_customer_id' => $referredByCustomerId,
+                'is_active' => true,
+            ]);
+        } catch (UniqueConstraintViolationException) {
+            $winner = Customer::afmOwnerQuery($tenant->id, $afm)->first();
+            if ($winner === null) {
+                throw new RuntimeException('Ο πελάτης με ΑΦΜ '.$afm.' δημιουργήθηκε ταυτόχρονα από άλλον χειριστή — ξαναπροσπάθησε.');
+            }
+            if (! $winner->trashed()) {
+                $this->backfillContactGaps($winner, $contact, $referredByCustomerId);
+            }
+
+            return new WhmcsCustomerCreateResult(
+                $winner, false, $winner->trashed() ? 'deleted_owner' : 'existing'
+            );
+        }
+
+        return new WhmcsCustomerCreateResult($customer, true, $source);
+    }
+
+    /**
+     * Gap-fill a LIVE existing customer with reseller-supplied contact channels
+     * (email/phone) and the provenance link, WITHOUT ever overwriting a value the
+     * customer already has, and never as a self-reference. No-op when nothing is
+     * missing (no needless write / activity-log noise).
+     *
+     * @param  array<string, mixed>  $contact
+     */
+    private function backfillContactGaps(Customer $customer, array $contact, ?int $referredByCustomerId): void
+    {
+        $decode = static fn ($v): ?string => is_string($v)
+            ? (trim(html_entity_decode($v, ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: null)
+            : null;
+
+        $fill = [];
+        $email = $decode($contact['email'] ?? null);
+        if (blank($customer->email) && filled($email)) {
+            $fill['email'] = $email;
+        }
+        $phone = $decode($contact['telephone'] ?? null);
+        if (blank($customer->phone1) && filled($phone)) {
+            $fill['phone1'] = $phone;
+        }
+        if ($referredByCustomerId !== null
+            && $referredByCustomerId !== $customer->getKey()
+            && blank($customer->referred_by_customer_id)) {
+            $fill['referred_by_customer_id'] = $referredByCustomerId;
+        }
+
+        if ($fill !== []) {
+            $customer->forceFill($fill)->save();
+        }
+    }
+
+    /**
      * The ΑΦΜ already has an owner (found up-front, or the winner of a create
      * race — same outcome either way): a trashed owner is reported, never
      * linked; a live one gets the operator-confirmed WHMCS link if missing

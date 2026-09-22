@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\WhmcsInbox\Tables;
 
+use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\PickerOptions;
 use App\Models\Company;
@@ -345,6 +346,7 @@ class WhmcsInboxTable
                     self::openInvoiceAction(),
                     self::retryWritebackAction(),
                     self::createCustomerAction(),
+                    self::importThirdPartiesAction(),
                     self::reResolveThirdPartyAction(),
                     self::holdAction(),
                     self::reStageAction(),
@@ -635,7 +637,12 @@ class WhmcsInboxTable
      * (ownLinesAreReceipt); routed lines take the route's explicit is_receipt and
      * go to the contact.
      *
-     * @return list<array{line:string,who:string,afm:string,receipt:bool,routed:bool}>
+     * Each row also carries `ekdosi_url` — the link to the beneficiary's existing
+     * ekdosi καρτέλα (Customer::afmOwnerQuery by ΑΦΜ), or null when that party has
+     * no ekdosi customer yet (routed third party → offer «Εισαγωγή»; own party →
+     * the linked customer). Lets the popup show «υπάρχει → link» vs «δεν υπάρχει».
+     *
+     * @return list<array{line:string,who:string,afm:string,receipt:bool,routed:bool,ekdosi_url:?string}>
      */
     private static function routingRows(PendingWhmcsInvoice $r): array
     {
@@ -649,21 +656,98 @@ class WhmcsInboxTable
         $ownName = $r->customer?->name ?? $r->whmcsClientName() ?? 'Πελάτης WHMCS';
         $ownAfm = $r->customer?->afm ?? $r->whmcsAfm();
 
+        // Resolve an ΑΦΜ → existing ekdosi καρτέλα URL once per distinct ΑΦΜ.
+        $tenantId = (int) $r->company_id;
+        $urlByAfm = [];
+        $ledgerUrl = static function (?string $afm) use ($tenantId, &$urlByAfm): ?string {
+            $key = Afm::uniqueKey($afm);
+            if ($key === null) {
+                return null;
+            }
+            if (! array_key_exists($key, $urlByAfm)) {
+                $owner = Customer::afmOwnerQuery($tenantId, $key)->first();
+                // getUrl needs a booted panel/route context; degrade to no-link
+                // (rather than 500) if it's ever called outside one.
+                try {
+                    $urlByAfm[$key] = ($owner !== null && ! $owner->trashed())
+                        ? CustomerResource::getUrl('ledger', ['record' => $owner->getKey()])
+                        : null;
+                } catch (Throwable) {
+                    $urlByAfm[$key] = null;
+                }
+            }
+
+            return $urlByAfm[$key];
+        };
+
         $out = [];
         foreach ($lines as $l) {
             if (! is_array($l)) {
                 continue; // defensive: a malformed (scalar) line entry
             }
             $routed = ! empty($l['routed']) && ! empty($l['contact']);
+            $afm = $routed ? (string) ($l['contact']['gr_vatno'] ?? '') : (string) ($ownAfm ?? '');
             $out[] = [
                 'line' => $decode((string) ($l['description'] ?? '—')),
                 'who' => $routed
                     ? $decode((string) ($l['contact']['company_name'] ?? 'Τρίτος'))
                     : $decode($ownName).' (ίδιος)',
-                'afm' => $routed ? (string) ($l['contact']['gr_vatno'] ?? '') : (string) ($ownAfm ?? ''),
+                'afm' => $afm,
                 'receipt' => $routed ? (bool) ($l['is_receipt'] ?? false) : $ownReceipt,
                 'routed' => $routed,
+                'ekdosi_url' => $ledgerUrl($afm),
             ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Distinct routed third-party CONTACT arrays (the full resolve.php contact,
+     * for materialising a Customer), deduped by contact id.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function routedContacts(PendingWhmcsInvoice $r): array
+    {
+        $lines = $r->third_party_resolution['lines'] ?? [];
+        if (! is_array($lines)) {
+            return [];
+        }
+        $byId = [];
+        foreach ($lines as $line) {
+            if (! is_array($line) || empty($line['routed']) || empty($line['contact']) || ! is_array($line['contact'])) {
+                continue;
+            }
+            $c = $line['contact'];
+            $byId[(int) ($c['id'] ?? 0)] = $c;
+        }
+
+        return array_values($byId);
+    }
+
+    /**
+     * Routed beneficiaries with NO live ekdosi customer yet — the ones the
+     * «Εισαγωγή» action would create. A contact with no ΑΦΜ counts too (it needs
+     * operator attention; the import reports it as un-creatable).
+     *
+     * @return list<array<string, mixed>>
+     */
+    private static function missingThirdPartyBeneficiaries(PendingWhmcsInvoice $r): array
+    {
+        $tenantId = (int) $r->company_id;
+        $out = [];
+        foreach (self::routedContacts($r) as $c) {
+            $afm = Afm::uniqueKey($c['gr_vatno'] ?? null);
+            if ($afm === null) {
+                $out[] = $c;
+
+                continue;
+            }
+            $owner = Customer::afmOwnerQuery($tenantId, $afm)->first();
+            if ($owner === null || $owner->trashed()) {
+                $out[] = $c;
+            }
         }
 
         return $out;
@@ -677,6 +761,7 @@ class WhmcsInboxTable
             ->modalContent(fn (PendingWhmcsInvoice $r) => view('filament.whmcs-inbox.third-party-routing', [
                 'rows' => self::routingRows($r),
                 'isMulti' => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI,
+                'missingCount' => count(self::missingThirdPartyBeneficiaries($r)),
             ]))
             ->modalSubmitAction(false)
             ->modalCancelActionLabel('Κλείσιμο')
@@ -1503,6 +1588,116 @@ class WhmcsInboxTable
      * (see WhmcsInvoiceIngestor::reResolveThirdParty). Visible only when the
      * feature is enabled for the tenant.
      */
+    /**
+     * «Εισαγωγή τρίτων» — materialise (or link) the ekdosi Customer for each
+     * routed third-party beneficiary, AADE-enriched (WhmcsCustomerCreator::
+     * createFromContact), idempotent by ΑΦΜ. Carries the reseller as «συστήθηκε
+     * από» (referred_by_customer_id, like a converted lead) and keeps the
+     * reseller-supplied third-party email. Visible only when ≥1 beneficiary is
+     * missing from ekdosi. For a single-party row it also links the pending row to
+     * the created customer so «Δημιουργία Παραστατικού» bills the right party.
+     */
+    private static function importThirdPartiesAction(): Action
+    {
+        return Action::make('import_third_parties')
+            ->label('Εισαγωγή τρίτων (ΑΑΔΕ)')
+            ->icon('heroicon-o-user-plus')
+            ->color('success')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => in_array($r->third_party_state, [PendingWhmcsInvoice::TP_SINGLE, PendingWhmcsInvoice::TP_MULTI], true)
+                && ! in_array($r->status, [PendingWhmcsInvoice::STATUS_FILED], true)
+                && self::missingThirdPartyBeneficiaries($r) !== [])
+            ->requiresConfirmation()
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Εισαγωγή δικαιούχων τρίτων — WHMCS #'.$r->whmcs_invoice_id)
+            ->modalDescription('Δημιουργεί (ή συνδέει) τον ekdosi πελάτη για κάθε δικαιούχο-τρίτο. Στοιχεία από ΑΑΔΕ (GSIS) όταν το ΑΦΜ είναι έγκυρο· αλλιώς από όσα δήλωσε ο πελάτης στο WHMCS. Κρατά το email του τρίτου (αν δόθηκε) και σημειώνει ποιος reseller τον έφερε. Idempotent — χωρίς διπλότυπα.')
+            ->modalSubmitActionLabel('Εισαγωγή')
+            ->action(function (PendingWhmcsInvoice $r) {
+                $tenant = Filament::getTenant();
+                $creator = app(WhmcsCustomerCreator::class);
+                $referredBy = self::resellerCustomerId($tenant, $r);
+
+                $created = 0;
+                $linked = 0;
+                $noAfm = 0;
+                $deleted = 0;
+                $firstCustomerId = null;
+                foreach (self::routedContacts($r) as $c) {
+                    try {
+                        $res = $creator->createFromContact($tenant, $c, $referredBy);
+                    } catch (Throwable $e) {
+                        Notification::make()->title('Σφάλμα εισαγωγής: '.($c['company_name'] ?? '—'))
+                            ->body($e->getMessage())->danger()->persistent()->send();
+
+                        continue;
+                    }
+                    if ($res->customer === null) {   // no ΑΦΜ → can't create a tax-valid party
+                        $noAfm++;
+
+                        continue;
+                    }
+                    if ($res->source === 'deleted_owner') {
+                        $deleted++;
+                        Notification::make()->title('ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης: '.$res->customer->name)
+                            ->body('Επανέφερέ τον από τη λίστα πελατών (φίλτρο «Διαγραμμένα») και ξαναπροσπάθησε.')
+                            ->danger()->persistent()->send();
+
+                        continue;
+                    }
+                    $res->created ? $created++ : $linked++;
+                    $firstCustomerId ??= $res->customer->id;
+                }
+
+                // Single-party: link the row so «Δημιουργία Παραστατικού» bills the
+                // third party (not the reseller). Only when currently unlinked.
+                if ($r->third_party_state === PendingWhmcsInvoice::TP_SINGLE
+                    && $firstCustomerId !== null
+                    && $r->customer_id === null) {
+                    $r->update([
+                        'customer_id' => $firstCustomerId,
+                        'match_reason' => PendingWhmcsInvoice::REASON_AFM,
+                    ]);
+                }
+
+                $bits = [];
+                if ($created > 0) {
+                    $bits[] = $created.' δημιουργήθηκαν';
+                }
+                if ($linked > 0) {
+                    $bits[] = $linked.' υπήρχαν ήδη (ενημερώθηκαν κενά)';
+                }
+                if ($noAfm > 0) {
+                    $bits[] = $noAfm.' χωρίς ΑΦΜ (παραλείφθηκαν)';
+                }
+                if ($deleted > 0) {
+                    $bits[] = $deleted.' διαγραμμένοι (δες παραπάνω)';
+                }
+                Notification::make()->title('Εισαγωγή τρίτων')
+                    ->body($bits === [] ? 'Τίποτα να εισαχθεί.' : implode(' · ', $bits))
+                    ->{($created > 0 || $linked > 0) ? 'success' : 'warning'}()->send();
+            });
+    }
+
+    /** The ekdosi Customer id of the WHMCS reseller/agency on this row (provenance), or null. */
+    private static function resellerCustomerId(Company $tenant, PendingWhmcsInvoice $r): ?int
+    {
+        if ($r->whmcs_userid) {
+            $byLink = Customer::query()->where('company_id', $tenant->id)
+                ->where('whmcs_client_id', $r->whmcs_userid)->first();
+            if ($byLink !== null && ! $byLink->trashed()) {
+                return (int) $byLink->getKey();
+            }
+        }
+        $afm = Afm::uniqueKey($r->whmcsAfm());
+        if ($afm !== null) {
+            $byAfm = Customer::afmOwnerQuery($tenant->id, $afm)->first();
+            if ($byAfm !== null && ! $byAfm->trashed()) {
+                return (int) $byAfm->getKey();
+            }
+        }
+
+        return null;
+    }
+
     private static function reResolveThirdPartyAction(): Action
     {
         return Action::make('re_resolve_third_party')
