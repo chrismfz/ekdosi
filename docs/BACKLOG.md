@@ -1528,6 +1528,40 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   cache-vs-live divergence που θέλαμε να αποφύγουμε. Σωστή λύση αν χρειαστεί: ένα aggregate που διπλώνει
   paid/credited ανά πελάτη (όπως το `Customer::withOutstandingBalance`) και live-confirm μόνο στα λίγα
   υποψήφια. Καρφωμένη συμπεριφορά: `CustomerLedgerReceiptGuardTest`.
+- **`PaymentAllocator` overpay-under-contention: true proof = MariaDB-only (deferred).** Το check-then-write
+  overpay race στο `allocate()`/`allocateToInvoice()` **διορθώθηκε** (2026-09-22, per-PK `lockForUpdate()` +
+  locking balance read· βλ. CHANGELOG «Fixed»). Το portable μισό είναι καρφωμένο (`PaymentAllocatorTest` —
+  cap/on-account + nested-under-outer-read), **αλλά** αυτό το nested-read test είναι στην πράξη ισοδύναμο σε
+  sqlite: χωρίς `FOR UPDATE`/row-MVCC δεν διακρίνει το locked από το unlocked path (ένα revert του locking
+  το κρατά πράσινο). Η αληθινή lost-update-under-contention απόδειξη θέλει πραγματικά MariaDB row locks +
+  forked processes, όπως τα InvoiceNumberer/InvoiceBalance probes. Deferred με το ίδιο σκεπτικό: το
+  write-path είναι πλέον σωστό ΚΑΙ δεν μπορώ να τρέξω/επαληθεύσω MariaDB εδώ (CI = sqlite), οπότε ένα
+  ανεπαλήθευτο forked command θα ρίσκαρε broken prover. Πρότυπο όταν χρειαστεί: το υπαρκτό
+  `app/Console/Commands/TestInvoiceNumberingConcurrent.php` → ξεχωριστό MariaDB-only artisan command.
+  Surviving P2s από το 2ο (post-fix) review του PR #619, με ρητή διάθεση:
+  - **Test-gap:** δεν καλύπτεται portable το `$invoice === null` skip branch (candidate που έφυγε από το
+    eligible set ανάμεσα σε list-read και PK-lock) ούτε το true lost-update — ίδιος MariaDB-only bucket· το
+    branch είναι trivial (`continue` → το ποσό πάει on-account). Το happy-path του νέου per-PK path καλύπτεται
+    ήδη (κάθε `allocate()` περνά πλέον από αυτό).
+  - **Redundant subquery lock — DECLINED (με λόγο):** το per-PK re-lock (`openInvoicesQuery()->whereKey()`)
+    κουβαλά ακόμη το `excludeCreditNotes` `whereNotExists(invoice_types)` κάτω από `FOR UPDATE` (ένα live
+    τιμολόγιο δεν γίνεται credit note, άρα είναι αμυντικά περιττό). ΔΕΝ το απλοποιώ: το να χτίζω το re-lock
+    από το **ίδιο** `openInvoicesQuery` κρατά το shared-predicate invariant (list-read == re-lock target set —
+    ακριβώς γιατί το review βρήκε το target-set preservation SAFE). Ο περιττός subquery είναι αβλαβής
+    (PK-equality lock → κανένα gap· `invoice_types` = μικρό, σπάνια-εγγραφόμενο lookup).
+  - **Pre-existing (awareness):** το `allocate()`/`openInvoicesQuery` ΔΕΝ κάνει `withoutGlobalScope(CompanyScope)`
+    όπως το `allocateToInvoice()`· αν ποτέ κληθεί υπό **mismatched** ambient tenant context, το explicit
+    `where('company_id', …)` AND το scope `company_id=<ambient>` δίνει κενό set → όλο το ποσό παρκάρει σιωπηλά
+    on-account. Προϋπάρχον (και στο `6e8ea7f` και στο original)· στην πράξη το `allocate()` τρέχει υπό σωστό
+    tenant ή σε CLI (scope no-op). Καταγραφή για επίγνωση.
+- **Pre-existing latent deadlock surface: `applyCredit()` ↔ `allocate()` lock-ordering inversion (P3, τεκμηριωμένο).**
+  Το `applyCredit()` κλειδώνει πρώτα το on-account pool (`whereNull('invoice_id')->lockForUpdate()`, gap locks)
+  και μετά το invoice row (μέσω του re-point observer recompute)· το `allocate()` κλειδώνει πρώτα invoice rows
+  και στο τέλος **INSERT-άρει** ένα on-account (`invoice_id NULL`) payment → κλασική αντιστροφή σειράς. **Δεν
+  εισήχθη** από το overpay fix (2026-09-22 review το επιβεβαίωσε: προϋπήρχε — το `allocate()` έπαιρνε το
+  invoice PK lock μέσω του observer πριν το NULL insert και πριν το fix). Χαμηλή πιθανότητα (σύντομα tx, στενό
+  παράθυρο)· σωστό κλείσιμο αν ποτέ χτυπήσει 1213: ενιαία σειρά κλειδώματος (invoice row → on-account pool)
+  και στα δύο μονοπάτια, ή advisory lock ανά (company_id, customer_id) για τα customer-level money writes.
 - **Το blob `einvoice_provider_config` δεν καταγράφει ΣΕ ΠΟΙΟΝ πάροχο ανήκει (P2, residual).** Είναι επίπεδο
   (`base_url`, `token`, …) και ο ιδιοκτήτης συνάγεται από το `companies.einvoice_provider_key` — που όμως
   ΜΗΔΕΝΙΖΕΤΑΙ όταν ο tenant παρκάρει σε κανάλι myDATA («Καθόλου»), ενώ το blob κρατιέται σκόπιμα. Έτσι στη

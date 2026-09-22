@@ -183,6 +183,20 @@ from `[Unreleased]`; `--major` explicit for milestones).
   φραγμοί είναι η ιδιοκτησία (grant-scoped) και τα caps του allocator.
 
 ### Fixed
+- **`PaymentAllocator`: δύο ταυτόχρονες εισπράξεις στο ίδιο τιμολόγιο μπορούσαν να το υπερ-πληρώσουν
+  (overpay race).** Και το `allocate()` (FIFO) και το `allocateToInvoice()` (targeted) διάβαζαν το
+  υπόλοιπο του τιμολογίου με **plain read** και μετά έγραφαν — δύο concurrent εισπράξεις (π.χ. δύο
+  gateway settles, ή ένα settle μαζί με μια χειροκίνητη είσπραξη) διάβαζαν και οι δύο το ίδιο pre-write
+  υπόλοιπο, καπάριζαν και οι δύο σε αυτό και έγραφαν — οδηγώντας το τιμολόγιο σε αρνητικό υπόλοιπο αντί
+  να παρκάρουν το δεύτερο ρέστο on-account. **Fix:** κάθε candidate/target invoice row κλειδώνεται **ανά
+  PRIMARY KEY** (`whereKey(...)->lockForUpdate()` — single-row lock, **χωρίς** gap lock, ώστε να μη μπλοκάρει
+  ταυτόχρονο INSERT νέου τιμολογίου του ίδιου πελάτη· ίδιο μοτίβο με `recompute()`/`allocateToInvoice()`) και
+  το υπόλοιπο διαβάζεται ως **locking/current read** (`InvoiceBalance::for($inv, true)`) μέσα στο ίδιο
+  transaction — έτσι οι δύο εισπράξεις σειριοποιούν το check-then-write. Καμία αλλαγή στη single-threaded
+  συμπεριφορά (cap-at-balance + on-account remainder αμετάβλητα)· το `allocateManual()` (χωρίς cap — overpay
+  by design) και το `applyCredit()` (ήδη σειριοποιημένο πίσω από το on-account pool lock) δεν αγγίζονται. Η
+  αληθινή απόδειξη υπό contention είναι MariaDB-only (deferred, όπως τα InvoiceNumberer/InvoiceBalance probes)·
+  το portable μισό καλύπτεται με cap/on-account + nested-under-outer-read tests.
 - **WHMCS εισερχόμενα με coupon/promotion: η αρνητική γραμμή έκπτωσης κρατούσε το τιμολόγιο (η ΑΑΔΕ
   απορρίπτει αρνητική αξία γραμμής).** Το WHMCS στέλνει μια promotion/coupon έκπτωση ως **ξεχωριστή
   γραμμή με αρνητικό ποσό** (π.χ. #32328: «Business10 - kyklops.com.gr» 290,00 € + «Κωδικός Promotion:

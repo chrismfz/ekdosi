@@ -12,6 +12,7 @@ use App\Services\InvoiceBalance;
 use App\Services\Payments\PaymentAllocator;
 use Carbon\Carbon;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -111,5 +112,55 @@ class PaymentAllocatorTest extends TestCase
         $this->assertDatabaseHas('payments', [
             'reference' => $res->reference, 'invoice_id' => null, 'customer_id' => $this->customer->id,
         ]);
+    }
+
+    public function test_allocate_to_invoice_targets_the_chosen_caps_at_its_balance_and_parks_remainder(): void
+    {
+        // Pay €800 onto the NEWER B (€500) — a targeted receipt, not FIFO: B is
+        // settled (capped at its own €500), the €300 overpayment is parked
+        // on-account, and the older A (€1000) is NOT touched.
+        $res = app(PaymentAllocator::class)->allocateToInvoice($this->customer, $this->b, 800, now());
+
+        $this->assertSame(0.0, $this->balance($this->b), 'chosen invoice settled (capped at €500)');
+        $this->assertSame(1000.0, $this->balance($this->a), 'the oldest was NOT touched (targeted, not FIFO)');
+        $this->assertSame(500.0, $res->allocatedToInvoices(), 'only the invoice balance landed on it');
+        $this->assertSame(300.0, $res->onAccount, '€300 overpayment parked on-account');
+    }
+
+    /**
+     * The lock fix reads each invoice balance as a LOCKING/current read (FOR
+     * UPDATE) inside the allocation transaction, so two concurrent receipts on the
+     * same invoice serialise their check-then-write instead of both capping at the
+     * same pre-write balance and overpaying. On sqlite (no FOR UPDATE / row MVCC)
+     * this proves the portable half — the locking code path computes the SAME
+     * correct allocation even when nested under an OUTER transaction that already
+     * read `payments` first (the REPEATABLE-READ snapshot hazard, cf. MON-3 in
+     * InvoiceBalanceTest). The true lost-update-under-contention proof is
+     * MariaDB-only (deferred, like the InvoiceNumberer / InvoiceBalance probes).
+     */
+    public function test_locking_allocation_is_correct_when_nested_under_an_outer_read(): void
+    {
+        // FIFO allocate(): €1200 over €1500 → A full, B €300 owed — unchanged by
+        // the locking read, even after an outer read pins the payments snapshot.
+        $fifo = DB::transaction(function () {
+            DB::table('payments')->count(); // establish the outer read view FIRST
+
+            return app(PaymentAllocator::class)->allocate($this->customer, 1200, now());
+        });
+        $this->assertSame(0.0, $this->balance($this->a));
+        $this->assertSame(300.0, $this->balance($this->b));
+        $this->assertSame(0.0, $fifo->onAccount);
+        $this->assertSame(1200.0, $fifo->allocatedToInvoices());
+
+        // Invoice-targeted allocateToInvoice(): pay the remaining €300 of B under
+        // the same nested-read hazard → B settled, nothing over-applied.
+        $targeted = DB::transaction(function () {
+            DB::table('payments')->count();
+
+            return app(PaymentAllocator::class)->allocateToInvoice($this->customer, $this->b, 300, now());
+        });
+        $this->assertSame(0.0, $this->balance($this->b), 'B settled, not overpaid');
+        $this->assertSame(300.0, $targeted->allocatedToInvoices());
+        $this->assertSame(0.0, $targeted->onAccount);
     }
 }
