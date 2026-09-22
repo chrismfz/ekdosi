@@ -13,8 +13,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 Ο κανόνας της σειράς: **η προτεραιότητα ενός finding δεν είναι ιδιότητά του — είναι finding × αυτή η επιχείρηση ×
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
-1. **Delivery notes (ΔΑ)** — inbound inbox **4b**, μετά πλήρη **9.1 / 9.2**.
-2. **Migration / money tooling:** Generic CSV importer → Bank-statement import → Dunning ladder → Cashflow /
+1. **Delivery notes (ΔΑ)** — πλήρη **9.1 / 9.2** (το inbound inbox 4b είναι ήδη χτισμένο).
+2. **Migration / money tooling:** Dunning ladder → Bank-statement import → CSV εξόδων (αν χρειαστεί) → Cashflow /
    recurring-expenses (accountant-gated).
 3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
    Portal transactional surfaces (largely greenfield).
@@ -48,8 +48,9 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   λογιστή: ποια foreign δηλώνονται ήδη. Λείπουν μόνο recurring-templates + cashflow widget + anti-double-count.
 
 ### 🚚 Delivery notes (Ψηφιακό ΔΑ)
-- **Inbound «Εισερχόμενα Διακίνησης» (4b)** — inbox Resource + Reject/Refresh/Acknowledge πάνω στο υπάρχον
-  direct-myDATA path (core + two-party sandbox ✅). Το 4c (qrUrl Confirm-outcome) μένει DEFERRED.
+- **Inbound «Εισερχόμενα Διακίνησης»** — 4a+4b ✅ ΧΤΙΣΜΕΝΑ (#540/#566: fetch + Απόρριψη/Έλεγχος/Παραλήφθηκε).
+  Μένουν: sandbox rehearsal μιας πραγματικής απόρριψης (nexon⇄myip) · **4c** (qrUrl Confirm-outcome) DEFERRED
+  μέχρι να παραλάβει tenant ψηφιακά παρακολουθούμενη διακίνηση.
 - **Πλήρη 9.1 / 9.2** — 9.1 (συσχετιζόμενο) θέλει correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών)·
   9.2 (συγκεντρωτικό) μοντέλο σύνοψης κινήσεων. Σήμερα κρυμμένα + μπλοκαρισμένα (MYD-012) — ξεμπλόκαρε με
   προσθήκη στο `Codes::SUPPORTED_DELIVERY_TYPES` όταν χτιστεί το μοντέλο.
@@ -57,9 +58,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   → κρύψ' το από τη ροή του εκδότη (punch-list, TIER-1 delivery).
 
 ### 📥 Import / onboarding
-- **Generic CSV importer (προϊόντα / πελάτες / supplier έξοδα)** — έχουμε CSV *export* (`CsvEntityExporter`), λείπει
-  το *import*: column-map + dry-run preview + tenant-scope (+ supplier CSV → `source=import`). Το μεγαλύτερο win
-  για μεταφορά καταλόγου/πελατολογίου.
+- **CSV εξόδων** — το CSV import πελατών/προϊόντων/προμηθευτών ✅ υπάρχει· τα έξοδα έμειναν έξω σκόπιμα (τα GR
+  έρχονται από myDATA· έξοδα εκτός myDATA = κίνδυνος διπλομέτρησης). Μαζί με το «Ταμειακή εικόνα» αν χρειαστεί.
 - **Setup profiles + curated tax-presets ανά κλάδο** (λιανική / εστίαση / ξενοδοχείο / υπηρεσίες) — bundle σε ένα
   κλικ: invoice types + default ΦΠΑ + «πρότυπα τελών» + payment methods + withholding/Ψηφιακό Τέλος presets
   (+ %-ανά-προϊόν, όχι μόνο €/τεμ). Πάνω στο υπάρχον seeding.
