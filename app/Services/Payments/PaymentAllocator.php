@@ -53,13 +53,20 @@ class PaymentAllocator
             // can never disagree with this write path). Cash-term & already-paid
             // invoices have balance 0 → skipped below. A draft's amount flows to
             // the on-account remainder instead.
-            $open = $this->openInvoicesQuery($customer)->get();
+            // Lock the candidate invoice rows (FIFO order → consistent lock order,
+            // no deadlock) and read each balance as a LOCKING/current read below, so
+            // two concurrent receipts touching the same invoices serialize their
+            // check-then-write. Without it both read the same pre-write balance, both
+            // cap at it and both write — overpaying the invoice instead of parking the
+            // remainder on-account (the per-invoice cap invariant this method exists
+            // to hold). Mirrors recompute()'s lockForUpdate + locking payment read.
+            $open = $this->openInvoicesQuery($customer)->lockForUpdate()->get();
 
             foreach ($open as $invoice) {
                 if ($remaining <= 0.005) {
                     break;
                 }
-                $balance = round((float) $invoice->balanceData()->balance, 2);
+                $balance = round((float) app(InvoiceBalance::class)->for($invoice, true)->balance, 2);
                 if ($balance <= 0.005) {
                     continue;
                 }
@@ -190,7 +197,13 @@ class PaymentAllocator
                 ->whereKey($invoice->id);
             InvoiceScope::customerSettleable($target);
             InvoiceScope::excludeCreditNotes($target);
-            $target = $target->first();
+            // Lock the target row and read its balance as a LOCKING/current read
+            // below, so two concurrent settles of the SAME invoice serialize their
+            // check-then-write. Without it both read the same pre-write balance,
+            // both cap at it and both write — overpaying the invoice instead of
+            // parking the second remainder on-account (the per-invoice cap this
+            // method exists to hold). Mirrors allocate() and recompute().
+            $target = $target->lockForUpdate()->first();
 
             if ($target === null) {
                 throw new InvalidArgumentException('Μη έγκυρο τιμολόγιο για πληρωμή (#'.$invoice->id.').');
@@ -199,7 +212,7 @@ class PaymentAllocator
             $allocations = [];
             $remaining = $amount;
 
-            $balance = round((float) $target->balanceData()->balance, 2);
+            $balance = round((float) app(InvoiceBalance::class)->for($target, true)->balance, 2);
             $toInvoice = round(min($balance, $remaining), 2);
             if ($toInvoice > 0.005) {
                 Payment::create([

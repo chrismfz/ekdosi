@@ -1528,6 +1528,14 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   cache-vs-live divergence που θέλαμε να αποφύγουμε. Σωστή λύση αν χρειαστεί: ένα aggregate που διπλώνει
   paid/credited ανά πελάτη (όπως το `Customer::withOutstandingBalance`) και live-confirm μόνο στα λίγα
   υποψήφια. Καρφωμένη συμπεριφορά: `CustomerLedgerReceiptGuardTest`.
+- **`PaymentAllocator` overpay-under-contention: true proof = MariaDB-only (deferred).** Το check-then-write
+  overpay race στο `allocate()`/`allocateToInvoice()` **διορθώθηκε** (2026-09-22, `lockForUpdate()` + locking
+  balance read· βλ. CHANGELOG «Fixed»). Το portable μισό είναι καρφωμένο (`PaymentAllocatorTest` —
+  nested-under-outer-read + cap/on-account), αλλά η αληθινή lost-update-under-contention απόδειξη θέλει
+  πραγματικά MariaDB row locks + forked processes (sqlite δεν έχει `FOR UPDATE`/row-MVCC), όπως τα
+  InvoiceNumberer/InvoiceBalance probes. Deferred με το ίδιο σκεπτικό: το write-path είναι πλέον σωστό·
+  ένα forked hammer (πρότυπο: `test:invoice-numbering-concurrent`) μένει ως ξεχωριστό MariaDB-only artisan
+  command αν ποτέ θελήσουμε live contention coverage.
 - **Το blob `einvoice_provider_config` δεν καταγράφει ΣΕ ΠΟΙΟΝ πάροχο ανήκει (P2, residual).** Είναι επίπεδο
   (`base_url`, `token`, …) και ο ιδιοκτήτης συνάγεται από το `companies.einvoice_provider_key` — που όμως
   ΜΗΔΕΝΙΖΕΤΑΙ όταν ο tenant παρκάρει σε κανάλι myDATA («Καθόλου»), ενώ το blob κρατιέται σκόπιμα. Έτσι στη
