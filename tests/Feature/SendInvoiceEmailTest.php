@@ -301,13 +301,15 @@ class SendInvoiceEmailTest extends TestCase
     {
         $invoice = $this->makeFiledInvoice();
 
-        // Simulate attempt 1: handle() ran, wrote a 'failed' row with
-        // the transient last-attempt error.
+        // Simulate attempt 1: handle() ran, wrote a 'failed' row with the
+        // transient last-attempt error, carrying THIS dispatch's send_key
+        // (every row handle() writes carries it).
         InvoiceMailLog::create([
             'company_id' => $invoice->company_id,
             'invoice_id' => $invoice->id,
             'recipient' => 'cust@example.com',
             'trigger' => 'auto',
+            'send_key' => 'test-failed-key-0001',
             'status' => 'failed',
             'error_message' => 'SMTP timeout',
             'queued_at' => now(),
@@ -316,9 +318,11 @@ class SendInvoiceEmailTest extends TestCase
         ]);
 
         // Simulate the queue worker calling failed() with a FRESHLY
-        // CONSTRUCTED job (the deserialization path doesn't restore
-        // any properties handle() set — only constructor args).
+        // CONSTRUCTED job whose send_key was restored by deserialization
+        // (send_key is a constructor-set public property, so it survives —
+        // unlike anything handle() mutates).
         $freshJob = new SendInvoiceEmail($invoice, trigger: 'auto');
+        $freshJob->sendKey = 'test-failed-key-0001';
         $freshJob->failed(new \RuntimeException('SMTP timeout'));
 
         $log = InvoiceMailLog::where('invoice_id', $invoice->id)
@@ -330,6 +334,41 @@ class SendInvoiceEmailTest extends TestCase
         $this->assertStringContainsString('SMTP timeout', $log->error_message);
     }
 
+    public function test_failed_hook_does_not_cross_attribute_two_manual_sends_of_one_invoice(): void
+    {
+        // #7 made this reachable: the operator resends to the customer AND sends
+        // to the referrer for the same invoice — both trigger='manual', same
+        // user. Each dispatch has its OWN send_key, so a terminal failure of one
+        // must NOT stamp the other's row. (Keying failed() on send_key is what
+        // guarantees this; the old invoice+trigger+user heuristic collided.)
+        $invoice = $this->makeFiledInvoice();
+        $user = User::factory()->create();
+
+        $rowCustomer = InvoiceMailLog::create([
+            'company_id' => $invoice->company_id, 'invoice_id' => $invoice->id,
+            'recipient' => 'cust@example.com', 'trigger' => 'manual',
+            'send_key' => 'key-to-customer', 'status' => 'failed',
+            'error_message' => 'SMTP timeout (customer)', 'queued_at' => now(),
+            'failed_at' => now(), 'triggered_by_user_id' => $user->id,
+        ]);
+        $rowReferrer = InvoiceMailLog::create([
+            'company_id' => $invoice->company_id, 'invoice_id' => $invoice->id,
+            'recipient' => 'reseller@partner.gr', 'trigger' => 'manual',
+            'send_key' => 'key-to-referrer', 'status' => 'failed',
+            'error_message' => 'SMTP timeout (referrer)', 'queued_at' => now(),
+            'failed_at' => now(), 'triggered_by_user_id' => $user->id,
+        ]);
+
+        // Only the customer dispatch exhausts its retries.
+        $job = new SendInvoiceEmail($invoice, trigger: 'manual', triggeredByUserId: $user->id);
+        $job->sendKey = 'key-to-customer';
+        $job->failed(new \RuntimeException('final customer error'));
+
+        // The customer row got the "gave up" stamp; the referrer row is untouched.
+        $this->assertStringContainsString('Gave up after', $rowCustomer->fresh()->error_message);
+        $this->assertSame('SMTP timeout (referrer)', $rowReferrer->fresh()->error_message);
+    }
+
     public function test_failed_hook_does_not_overwrite_sent_rows(): void
     {
         $invoice = $this->makeFiledInvoice();
@@ -339,13 +378,17 @@ class SendInvoiceEmailTest extends TestCase
             'invoice_id' => $invoice->id,
             'recipient' => 'cust@example.com',
             'trigger' => 'auto',
+            'send_key' => 'test-sent-key-0001',
             'status' => 'sent',
             'queued_at' => now(),
             'sent_at' => now(),
         ]);
 
-        (new SendInvoiceEmail($invoice, trigger: 'auto'))
-            ->failed(new \RuntimeException('Late failure'));
+        // Same send_key as the 'sent' row → the guard is genuinely exercised
+        // (the row IS found, then skipped because it's 'sent').
+        $job = new SendInvoiceEmail($invoice, trigger: 'auto');
+        $job->sendKey = 'test-sent-key-0001';
+        $job->failed(new \RuntimeException('Late failure'));
 
         $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
         $this->assertSame('sent', $log->status);

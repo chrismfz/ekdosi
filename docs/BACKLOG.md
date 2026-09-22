@@ -1227,6 +1227,21 @@ assertion). Ό,τι απέμεινε:
   frozen snapshots) — το inbox model είναι snapshot-at-decision ούτως ή άλλως, οπότε δεν είναι regression. Δεμένο
   με το lifecycle P2-2 (cancel/refund → re-open). Χαμηλή πιθανότητα (ο χειριστής το βλέπει στο WHMCS).
 
+### Χειροκίνητη «Αποστολή σε συστήσαντα/άλλον» (#7) — surviving P2s (από το review, 2026-09-22)
+Το manual copy του εκδοθέντος PDF στον reseller/συστήσαντα (ή custom email) πέρασε **χωρίς reachable P0/P1** —
+ο adversarial reviewer επιβεβαίωσε ότι το CC λογιστή του πελάτη κόβεται στο **πραγματικό** μήνυμα (όχι μόνο στο log
+row), μέσω ενός `$isOverride` predicate + `InvoiceIssuedMail::$suppressCustomerCc` (το CC χτίζεται μόνο στο
+`envelope()`). Το `failed()` πλέον reconcile-άρει με **`send_key`** (root-cause fix — δεν cross-attribute-άρει δύο
+manual αποστολές του ίδιου invoice). Ό,τι απέμεινε (accept-as-is):
+- **`can('view')` gate για αποστολή σε αυθαίρετο external email (P2, accept):** το «Αποστολή σε συστήσαντα/άλλον»
+  γατεύεται όπως το `resend_email` (`can('view')`), αλλά στέλνει το PDF και σε **τυχαία** διεύθυνση που πληκτρολογεί
+  ο operator — ένα σκαλί πάνω από το «resend στον πελάτη». **Δεν** δίνει νέα δυνατότητα (operator με `view` ήδη
+  κατεβάζει & προωθεί το PDF χειροκίνητα), οπότε δεν είναι leak· ένα αποκλειστικό permission θα ήταν defence-in-depth
+  αν ποτέ θελήσουμε αυστηρότερο διαχωρισμό. Άσε.
+- **Trim vs `->email()` validation order (P2/nit):** το `->email()` επικυρώνει το raw πεδίο ενώ το action κάνει
+  `trim()` μετά· paste με leading/trailing whitespace μπορεί να χτυπήσει validation error πριν βοηθήσει το trim
+  (cosmetic UX — ο operator το διορθώνει). Optional: `->dehydrateStateUsing(fn ($s) => trim((string) $s))` στο input.
+
 ### WHMCS coupon/promotion discount fold — surviving P2s (από το review, 2026-09-21)
 Το fold μιας αρνητικής promo/coupon γραμμής σε line-level `discount %` (`WhmcsInvoiceMapper::foldPromoDiscounts`)
 πέρασε **χωρίς reachable P0/P1**. Θωρακίσεις που μπήκαν: per-tax-group fold (ποτέ cross-treatment), reject ≥100%

@@ -265,14 +265,17 @@ class SendInvoiceEmail implements ShouldQueue
      * (verified at vendor/laravel/framework/.../CallQueuedHandler.php
      * → unserialize(...) before invoking failed). Properties mutated
      * by handle() — like a captured log row id — are GONE by the time
-     * failed() runs. So we look up the row by stable identifiers
-     * available on the deserialized instance: invoice_id +
-     * triggered_by_user_id, taking the most-recent. This is correct
-     * because handle() creates exactly one row per attempt, all rows
-     * for this invoice + trigger share a logical sequence, and we
-     * want to reconcile the most recent regardless of its current
-     * state (the catch block in handle() already wrote 'failed' with
-     * the transient error; we overwrite with "gave up").
+     * failed() runs. So we look up the row by the ONE stable per-dispatch
+     * identifier that IS restored on the deserialized instance: send_key
+     * (set in the constructor — not handle() — and serialized with the
+     * job, same value across every retry of THIS dispatch; see OPS-12).
+     * Every row handle() writes carries this send_key, so keying on it
+     * reconciles exactly THIS dispatch's row — never a sibling dispatch's
+     * (e.g. the operator resending to the customer AND to the referrer
+     * for the same invoice both run trigger='manual' with the same user,
+     * so the older invoice+trigger+user heuristic could stamp the wrong
+     * row). We take the most-recent match (a retry past a 'failed' row
+     * creates a fresh row with the same send_key).
      *
      * Does NOT help the kill-9 / DI-threw scenarios — those skip
      * Laravel's failure pipeline entirely. Orphaned 'queued' or
@@ -282,12 +285,7 @@ class SendInvoiceEmail implements ShouldQueue
     public function failed(Throwable $e): void
     {
         $latest = InvoiceMailLog::query()
-            ->where('invoice_id', $this->invoice->getKey())
-            ->where('trigger', $this->trigger)
-            // Match on user attribution too — distinguishes a manual
-            // re-send by operator B from an auto-dispatch attempt
-            // running concurrently for the same invoice.
-            ->where('triggered_by_user_id', $this->triggeredByUserId)
+            ->where('send_key', $this->sendKey)
             ->orderByDesc('id')
             ->first();
 
