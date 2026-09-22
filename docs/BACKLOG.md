@@ -1242,6 +1242,14 @@ manual αποστολές του ίδιου invoice). Ό,τι απέμεινε (
   `trim()` μετά· paste με leading/trailing whitespace μπορεί να χτυπήσει validation error πριν βοηθήσει το trim
   (cosmetic UX — ο operator το διορθώνει). Optional: `->dehydrateStateUsing(fn ($s) => trim((string) $s))` στο input.
 
+**Update (2026-09-22): ενοποιήθηκε στο ένα κουμπί.** Μετά από operator feedback, το χωριστό «Αποστολή σε
+συστήσαντα/άλλον» **αφαιρέθηκε**· το custom-email μπήκε ως προαιρετικό πεδίο πάνω στο `resend_email` (μετονομασμένο
+«Αποστολή PDF με email»): κενό → πελάτης, γεμάτο → targeted αντίγραφο. Το email του συστήσαντα προβάλλεται πλέον ως
+**hint** στο modal. Οι δύο P2 από πάνω ισχύουν πλέον για το `resend_email`. Νέο surviving P2:
+- **helperText lazy-loads `customer.referredBy` (P2 perf, αμελητέο):** το closure του `to_override` helperText διαβάζει
+  `$record->customer?->referredBy?->email` σε κάθε render του modal → 1 extra SELECT όταν ανοίγει/ανανεώνεται το modal
+  (single-record admin surface, όχι list N+1). Eager-load `customer.referredBy` στο ViewInvoice αν ποτέ ενοχλήσει· άσε.
+
 ### WHMCS coupon/promotion discount fold — surviving P2s (από το review, 2026-09-21)
 Το fold μιας αρνητικής promo/coupon γραμμής σε line-level `discount %` (`WhmcsInvoiceMapper::foldPromoDiscounts`)
 πέρασε **χωρίς reachable P0/P1**. Θωρακίσεις που μπήκαν: per-tax-group fold (ποτέ cross-treatment), reject ≥100%
@@ -1394,6 +1402,11 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Καρτέλα inline note edit: το panel δείχνει τα πρώτα 8 (is_pinned, created_at desc) — P2 UX (review 2026-09-22).**
+  Μετά από inline «Επεξεργασία» το panel ξαναφορτώνει το ίδιο top-8 window· αν μια επεξεργασία άλλαζε τη
+  σειρά (π.χ. ξεκαρφίτσωμα) η σημείωση μπορεί να μη «ανέβει» όπως στη σελίδα Σημειώσεων (που δείχνει
+  updated_at). Non-issue σήμερα: κουμπιά edit υπάρχουν ΜΟΝΟ στα εμφανιζόμενα, οπότε επεξεργάζεσαι πάντα
+  ορατή σημείωση. Αν ενοχλήσει: order το panel by `updated_at` (πρόσεξε ripple στο `internalNotes`).
 - **Portal receipt: το έμβασμα group-by-reference predicate διπλασιάζεται (P2, review 2026-09-21).**
   Το `ReceiptShowController` ξαναχτίζει το group με `reference == … AND kind != 'refund' AND amount > 0`
   (same company/customer), καθρεφτίζοντας με σχόλιο τον κανόνα ομαδοποίησης του `CustomerLedgerBuilder::computeLedger`

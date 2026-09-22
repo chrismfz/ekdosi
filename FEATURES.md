@@ -89,10 +89,13 @@
   προσπάθεια καταγράφεται (`invoice_mail_log`: παραλήπτης/θέμα/κατάσταση/χρόνοι/ποιος). Ιστορικό
   **per-invoice** (ViewInvoice), **per-customer** (tab «Ιστορικό email»), και **γενικό tenant-wide**
   (`InvoiceMailLogResource`, read-only, φίλτρα). Idempotent (OPS-12 `send_key` — όχι διπλό email σε
-  retry)· markdown-safe body (DOC-8). Πέρα από το «Αποστολή PDF στον πελάτη», χειροκίνητη **«Αποστολή
-  σε συστήσαντα/άλλον»** στέλνει αντίγραφο στον reseller που σύστησε τον πελάτη
-  (`referred_by_customer_id`) ή σε custom email — ίδια μηχανή, recipient override (targeted αντίγραφο:
-  χωρίς το CC λογιστή, με το audit BCC), ορατό μόνο όταν υπάρχει συστήσας με email.
+  retry)· markdown-safe body (DOC-8). Το «**Αποστολή PDF με email**» έχει **προαιρετικό πεδίο
+  παραλήπτη**: κενό → στον πελάτη (κανονική ροή, με το CC δευτερεύοντος email του)· συμπληρωμένο →
+  στοχευμένο αντίγραφο σε **custom διεύθυνση** (π.χ. λογιστή), μόνο σε αυτόν, χωρίς CC στον πελάτη —
+  διαθέσιμο σε **κάθε** εκδοθέν παραστατικό (ακόμη κι όταν ο πελάτης δεν έχει email — τότε το πεδίο
+  απαιτείται). Αν ο πελάτης έχει συστήσαντα (`referred_by_customer_id`, ο reseller που τον σύστησε),
+  το email του **προβάλλεται ως hint** στο modal ώστε να σταλεί και εκεί. Μέσω της μηχανής recipient
+  override (targeted αντίγραφο: με το audit BCC· ο παραλήπτης καταγράφεται στο log).
 - **«Υπόλοιπο πελάτη» στο PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») — Προηγούμενο + αυτό το παραστατικό
   = Νέο υπόλοιπο, **snapshot τη στιγμή έκδοσης** (`invoices.customer_balance_snapshot`,
   σταθερό σε reprint)· opt-in ανά εταιρεία (`show_customer_balance_on_pdf`) με override ανά
@@ -383,7 +386,10 @@
   δελτίο), **ετικέτες ανά σημείωση**, **αναζήτηση** (τίτλος+σώμα) και **Markdown με code blocks**
   (monospace + οριζόντιο scroll — για RouterOS export, IP/hostname/printer πίνακες, TeamViewer/AnyDesk
   ids). Ένα πολυμορφικό `Note` store (κοινό με το tab «Σημειώσεις (εσωτερικές)»), ποτέ σε PDF/ΑΑΔΕ,
-  render ασφαλές (escaped HTML), imported/backup read-only.
+  render ασφαλές (escaped HTML), imported/backup read-only. **Στην ίδια την Καρτέλα** η section
+  «Σημειώσεις (εσωτερικές)» δίνει ανά σημείωση **«Άνοιγμα»** (modal με το πλήρες κείμενο, όχι μόνο excerpt)
+  και **«Επεξεργασία»** inline (κοινό note-form/write-path με τη σελίδα — `ManagesCustomerNotes`· κρυφό σε
+  imported/χωρίς δικαίωμα· ο δείκτης σημείωσης επικυρώνεται tenant/customer-scoped).
 - **Στήλες δραστηριότητας στη λίστα** (`Customer::scopeWithInvoiceStats`, SQL grouped sub-select →
   sortable χωρίς per-row PHP): **«Αρ. Παρ/ων»** (πλήθος εκδομένων παραστατικών — LIVE, χωρίς
   πρόχειρα/πιστωτικά· ορατή, τα «0» γκριζάρουν → sort εντοπίζει «νεκρούς» & busy), **«Τζίρος»**

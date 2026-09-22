@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Customers\Pages;
 use App\Enums\PaymentStatus;
 use App\Exceptions\Aade\AadeRegistryException;
 use App\Filament\Concerns\HandlesAadeRegistryExceptions;
+use App\Filament\Resources\Customers\Concerns\ManagesCustomerNotes;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Resources\Payments\PaymentResource;
@@ -39,6 +40,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\View;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -80,6 +82,7 @@ class CustomerLedger extends Page implements HasTable
 {
     use HandlesAadeRegistryExceptions;
     use InteractsWithTable;
+    use ManagesCustomerNotes;
 
     protected static string $resource = CustomerResource::class;
 
@@ -1190,6 +1193,67 @@ class CustomerLedger extends Page implements HasTable
                 ->color('gray')
                 ->button(),
         ];
+    }
+
+    /* ============ Inline internal-note open/edit (Καρτέλα panel) ============ */
+
+    /**
+     * «Άνοιγμα» — read ONE internal note whole, in a modal, straight from the
+     * Καρτέλα «Σημειώσεις (εσωτερικές)» panel (which otherwise shows only a short
+     * excerpt). Read-only; the full markdown body is rendered via the same
+     * `note-view` blade the «Σημειώσεις» page uses. The note id arrives as a
+     * mounted-action argument (client-supplied) → resolved tenant/customer-scoped,
+     * so it can never open another customer's or tenant's note.
+     */
+    public function viewNoteAction(): Action
+    {
+        return Action::make('viewNote')
+            ->modalHeading(fn (array $arguments): string => $this->requireCustomerNote($arguments['note'] ?? null)->displayTitle())
+            // Render the full note through a schema View component (not modalContent)
+            // so it rides the same mounted-action-schema path the edit modal uses.
+            ->schema(fn (array $arguments): array => [
+                View::make('filament.customers.note-view')
+                    ->viewData(['note' => $this->requireCustomerNote($arguments['note'] ?? null)]),
+            ])
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Κλείσιμο');
+    }
+
+    /**
+     * «Επεξεργασία» — edit ONE internal note inline on the Καρτέλα, via the SAME
+     * note form + write path the «Σημειώσεις» page uses ({@see ManagesCustomerNotes}),
+     * so there is one form and one persist for both surfaces. Imported («backup»)
+     * notes are read-only (the next import would revert an edit) and editing needs
+     * Customer update rights — both re-checked here, not just hidden in the UI
+     * (mountAction does NOT re-run the Blade's visibility guard).
+     */
+    public function editNoteAction(): Action
+    {
+        return Action::make('editNote')
+            ->modalHeading('Επεξεργασία σημείωσης')
+            ->modalWidth('5xl')
+            ->fillForm(function (array $arguments): array {
+                $note = $this->requireCustomerNote($arguments['note'] ?? null);
+                abort_if($note->isImported(), 403);
+                abort_unless($this->canManageNotes(), 403);
+
+                return $this->noteFormData($note);
+            })
+            ->schema($this->noteFormSchema())
+            ->modalSubmitActionLabel('Αποθήκευση')
+            ->action(function (array $arguments, array $data): void {
+                $note = $this->requireCustomerNote($arguments['note'] ?? null);
+                abort_if($note->isImported(), 403);
+
+                $this->persistNote($note, $data);
+
+                // The Καρτέλα panel reads $this->record->internalNotes (eager-loaded
+                // on mount) — refresh it so the edited title/excerpt shows on the
+                // same Livewire round-trip, without a full-page redirect.
+                $this->record->load(['internalNotes.author']);
+
+                Notification::make()->title('Η σημείωση αποθηκεύτηκε')->success()->send();
+            });
     }
 
     /**

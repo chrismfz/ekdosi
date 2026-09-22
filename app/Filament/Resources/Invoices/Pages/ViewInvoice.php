@@ -1161,22 +1161,51 @@ class ViewInvoice extends ViewRecord
             // require the auto-email toggle (manual is opt-in by
             // clicking).
             Action::make('resend_email')
-                ->label('Αποστολή PDF στον πελάτη')
+                ->label('Αποστολή PDF με email')
                 ->icon('heroicon-o-envelope')
                 ->color('gray')
                 // DOC-6: only an ISSUED, non-cancelled document may be emailed —
                 // the mail body asserts «…που εκδόθηκε…» (that it was issued), so
                 // sending a draft or a cancelled invoice would state a falsehood.
-                // Same fail-closed predicate as the public PDF route.
-                ->visible(fn (Invoice $record) => $record->customer?->email !== null
-                    && $record->customer?->email !== ''
-                    && $record->isPubliclyViewable())
+                // Same fail-closed predicate as the public PDF route. Visible on ANY
+                // issued invoice (even one whose customer has no email on file): the
+                // modal below lets the operator type a recipient, so a custom copy
+                // (π.χ. σε λογιστή) is always reachable — the customer email is just
+                // the default when the field is left blank.
+                ->visible(fn (Invoice $record) => $record->isPubliclyViewable())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
-                ->requiresConfirmation()
-                ->modalHeading('Send invoice PDF to the customer')
-                ->modalDescription(fn (Invoice $record) => 'Queues a mail with the current PDF attached. To: '.($record->customer?->email ?? '—').'. BCC: tenant audit list (if configured). See the Send history section below for the lifecycle.')
-                ->modalSubmitActionLabel('Queue email')
-                ->action(function (Invoice $record) {
+                ->modalHeading('Αποστολή παραστατικού με email')
+                ->modalDescription('Στέλνει το PDF του εκδοθέντος παραστατικού. Άφησε το πεδίο κενό για αποστολή στον πελάτη· συμπλήρωσε άλλη διεύθυνση (π.χ. λογιστή) για στοχευμένο αντίγραφο. BCC: λίστα ελέγχου του tenant (αν έχει οριστεί). Δες το «Ιστορικό αποστολών» πιο κάτω για την κατάσταση.')
+                ->schema([
+                    TextInput::make('to_override')
+                        ->label('Αποστολή σε άλλο email (προαιρετικό)')
+                        ->email()
+                        // Empty → the customer (the normal path, keeping their secondary_email
+                        // CC). Filled → a targeted copy ONLY to this address (no customer CC;
+                        // the SendInvoiceEmail toOverride machinery handles both). When the
+                        // customer has NO email on file there is no default recipient, so a
+                        // typed address is required — otherwise the send would just log «no
+                        // email» and do nothing.
+                        ->placeholder(fn (Invoice $record) => $record->customer?->email ?: 'π.χ. logistis@example.gr')
+                        ->required(fn (Invoice $record) => blank($record->customer?->email))
+                        ->helperText(function (Invoice $record) {
+                            $parts = [];
+                            $parts[] = filled($record->customer?->email)
+                                ? 'Κενό → στον πελάτη ('.$record->customer->email.'). Συμπληρωμένο → μόνο σε αυτή τη διεύθυνση (χωρίς CC στον πελάτη).'
+                                : 'Ο πελάτης δεν έχει καταχωρημένο email — συμπλήρωσε διεύθυνση παραλήπτη.';
+                            // Surface the referrer (reseller/συστήσας) here so the operator can
+                            // send the copy there without hunting for the address — this folds in
+                            // the old standalone «Αποστολή σε συστήσαντα/άλλον» shortcut.
+                            if (filled($record->customer?->referredBy?->email)) {
+                                $ref = $record->customer->referredBy;
+                                $parts[] = 'Συστήθηκε από: '.($ref->name ?: 'πελάτης').' — '.$ref->email;
+                            }
+
+                            return implode(' ', $parts);
+                        }),
+                ])
+                ->modalSubmitActionLabel('Αποστολή')
+                ->action(function (Invoice $record, array $data) {
                     // Defence-in-depth: the invoice could have been cancelled
                     // between page render and click (visible() is not re-checked
                     // on submit). Never email a non-issued document.
@@ -1189,68 +1218,22 @@ class ViewInvoice extends ViewRecord
                         return;
                     }
 
+                    // Blank/whitespace → null → the customer path (SendInvoiceEmail
+                    // treats a blank override as "no override" too, so this is
+                    // belt-and-braces). A real value → targeted copy.
+                    $override = trim((string) ($data['to_override'] ?? ''));
+
                     SendInvoiceEmail::dispatch(
                         $record,
                         trigger: 'manual',
                         triggeredByUserId: auth()->id(),
+                        toOverride: $override !== '' ? $override : null,
                     );
                     Notification::make()
-                        ->title('Email queued')
-                        ->body('The mail is in the queue; check the Send history section in a moment for status.')
-                        ->success()->send();
-                }),
-
-            // #7: manual copy to the reseller/συστήσαντα (or a one-off address).
-            // For a WHMCS third-party or a converted lead the customer carries
-            // `referred_by_customer_id` («ήρθε από …»); this lets the operator send
-            // the issued PDF THERE too — under manual control, pre-filled with the
-            // referrer's email but editable (custom recipient). Visible only when a
-            // referrer exists (and the doc is issued), so it doesn't clutter plain
-            // invoices. Uses the same SendInvoiceEmail machinery via a recipient
-            // override (targeted copy; audit-logged in «Ιστορικό αποστολών»).
-            Action::make('send_to_referrer')
-                ->label('Αποστολή σε συστήσαντα/άλλον')
-                ->icon('heroicon-o-user-plus')
-                ->color('gray')
-                ->visible(fn (Invoice $record) => $record->isPubliclyViewable()
-                    && filled($record->customer?->referredBy?->email))
-                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
-                ->modalHeading('Αποστολή παραστατικού σε άλλον παραλήπτη')
-                ->modalDescription(fn (Invoice $record) => 'Στέλνει το PDF του εκδοθέντος παραστατικού σε άλλον παραλήπτη (π.χ. τον reseller/συστήσαντα). Προσυμπληρωμένο με το email του συστήσαντα — άλλαξέ το αν θέλεις.')
-                ->schema([
-                    TextInput::make('email')
-                        ->label('Email παραλήπτη')
-                        ->email()
-                        ->required()
-                        ->default(fn (Invoice $record) => $record->customer?->referredBy?->email)
-                        ->helperText(fn (Invoice $record) => filled($record->customer?->referredBy?->name)
-                            ? 'Συστήθηκε από: '.$record->customer->referredBy->name
-                            : null),
-                ])
-                ->modalSubmitActionLabel('Αποστολή')
-                ->action(function (Invoice $record, array $data) {
-                    if (! $record->isPubliclyViewable()) {
-                        Notification::make()->title('Δεν στάλθηκε')
-                            ->body('Μόνο εκδοθέντα (ενεργά, μη ακυρωμένα) παραστατικά αποστέλλονται.')
-                            ->warning()->send();
-
-                        return;
-                    }
-                    $to = trim((string) ($data['email'] ?? ''));
-                    if ($to === '') {
-                        Notification::make()->title('Δεν στάλθηκε')->body('Λείπει το email παραλήπτη.')->warning()->send();
-
-                        return;
-                    }
-
-                    SendInvoiceEmail::dispatch(
-                        $record,
-                        trigger: 'manual',
-                        triggeredByUserId: auth()->id(),
-                        toOverride: $to,
-                    );
-                    Notification::make()->title('Το email μπήκε στην ουρά')
-                        ->body('Παραλήπτης: '.$to.'. Δες το «Ιστορικό αποστολών» για την κατάσταση.')
+                        ->title('Το email μπήκε στην ουρά')
+                        ->body($override !== ''
+                            ? 'Παραλήπτης: '.$override.'. Δες το «Ιστορικό αποστολών» για την κατάσταση.'
+                            : 'Παραλήπτης: ο πελάτης ('.($record->customer?->email ?: '—').'). Δες το «Ιστορικό αποστολών» για την κατάσταση.')
                         ->success()->send();
                 }),
 
