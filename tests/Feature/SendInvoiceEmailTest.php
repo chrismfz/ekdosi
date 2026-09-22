@@ -169,6 +169,61 @@ class SendInvoiceEmailTest extends TestCase
         $this->assertSame($user->id, $log->triggered_by_user_id);
     }
 
+    public function test_override_recipient_sends_to_that_address_and_skips_customer_cc(): void
+    {
+        // #7: a manual copy to the reseller/συστήσαντα (or a typed one-off address).
+        // The mail goes ONLY to the override, the customer's secondary_email CC is
+        // dropped (targeted copy), but the tenant audit BCC still applies. The log
+        // row records the override address as the recipient.
+        $invoice = $this->makeFiledInvoice();
+
+        (new SendInvoiceEmail(
+            $invoice,
+            trigger: 'manual',
+            triggeredByUserId: null,
+            toOverride: 'reseller@partner.gr',
+        ))->handle(
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
+        );
+
+        Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
+            return $mail->hasTo('reseller@partner.gr')
+                && ! $mail->hasTo('cust@example.com')
+                && ! $mail->hasCc('accountant@example.com')   // customer CC skipped
+                && $mail->hasBcc('audit@acme.gr');            // audit BCC still applied
+        });
+
+        $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
+        $this->assertSame('sent', $log->status);
+        $this->assertSame('reseller@partner.gr', $log->recipient);
+        $this->assertNull($log->cc_list);
+        $this->assertSame(['audit@acme.gr', 'ops@acme.gr'], $log->bcc_list);
+    }
+
+    public function test_blank_override_falls_back_to_customer_email(): void
+    {
+        // A whitespace-only / empty override must NOT swallow the send — it falls
+        // back to the customer's own email (and the CC is restored).
+        $invoice = $this->makeFiledInvoice();
+
+        (new SendInvoiceEmail($invoice, trigger: 'manual', toOverride: '   '))->handle(
+            app(InvoicePdfRenderer::class),
+            app(TenantMailerFactory::class),
+            app(MailTemplateRenderer::class),
+        );
+
+        Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
+            return $mail->hasTo('cust@example.com')
+                && $mail->hasCc('accountant@example.com');
+        });
+
+        $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
+        $this->assertSame('cust@example.com', $log->recipient);
+        $this->assertSame(['accountant@example.com'], $log->cc_list);
+    }
+
     public function test_empty_bcc_list_produces_no_bcc_header(): void
     {
         $this->tenant->update(['invoice_audit_bcc' => null]);

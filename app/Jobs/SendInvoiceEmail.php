@@ -70,6 +70,14 @@ class SendInvoiceEmail implements ShouldQueue
         public Invoice $invoice,
         public string $trigger = 'auto',
         public ?int $triggeredByUserId = null,
+        /**
+         * Optional recipient override — a MANUAL copy to someone other than the
+         * invoice's customer (e.g. the reseller/συστήσαντα, or a one-off address the
+         * operator types). Null → the normal path (invoice->customer->email). When
+         * set, the customer's secondary_email CC is skipped (this is a targeted
+         * copy); the tenant audit BCC still applies.
+         */
+        public ?string $toOverride = null,
     ) {
         $this->sendKey = (string) Str::uuid();
     }
@@ -93,7 +101,16 @@ class SendInvoiceEmail implements ShouldQueue
         }
 
         $tenant = $invoice->company;
-        $email = trim((string) ($invoice->customer?->email ?? ''));
+        // Recipient: an explicit override (manual copy to the reseller/συστήσαντα or
+        // a typed address) wins; a blank/whitespace override falls back to the
+        // invoice's customer email — i.e. the normal path. $isOverride is the single
+        // predicate both the recipient AND the CC gate below read, so a blank
+        // override behaves exactly like no override (customer email + its CC).
+        $override = $this->toOverride !== null ? trim($this->toOverride) : '';
+        $isOverride = $override !== '';
+        $email = $isOverride
+            ? $override
+            : trim((string) ($invoice->customer?->email ?? ''));
 
         // OPS-12: best-effort idempotency. If a PRIOR attempt of this same
         // dispatch (same send_key) is either a clean 'sent' or a 'sending' left
@@ -178,7 +195,9 @@ class SendInvoiceEmail implements ShouldQueue
             'company_id'           => $invoice->company_id,
             'invoice_id'           => $invoice->id,
             'recipient'            => $email ?: '(no customer email)',
-            'cc_list'              => $invoice->customer?->secondary_email
+            // A targeted override copy goes ONLY to the override address (don't CC
+            // the customer's secondary email); the normal path keeps the CC.
+            'cc_list'              => (! $isOverride && $invoice->customer?->secondary_email)
                 ? [$invoice->customer->secondary_email]
                 : null,
             'bcc_list'             => $tenant?->auditBccList() ?: null,
@@ -215,7 +234,7 @@ class SendInvoiceEmail implements ShouldQueue
                 // (non-custom) invoice body + subject + MARK section render in that
                 // language (MailTemplateRenderer); a tenant's CUSTOM template stays in
                 // its own language. The PDF stays frozen (a separate slice).
-                ->send((new InvoiceIssuedMail($invoice, $pdfBytes))->locale(CustomerLanguage::forDocumentMail($invoice)));
+                ->send((new InvoiceIssuedMail($invoice, $pdfBytes, suppressCustomerCc: $isOverride))->locale(CustomerLanguage::forDocumentMail($invoice)));
 
             $log->update([
                 'status'  => 'sent',
