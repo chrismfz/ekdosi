@@ -714,22 +714,30 @@ class WhmcsInboxTable
         if (! is_array($lines)) {
             return [];
         }
-        $byId = [];
+        $byKey = [];
         foreach ($lines as $line) {
             if (! is_array($line) || empty($line['routed']) || empty($line['contact']) || ! is_array($line['contact'])) {
                 continue;
             }
             $c = $line['contact'];
-            $byId[(int) ($c['id'] ?? 0)] = $c;
+            $id = (int) ($c['id'] ?? 0);
+            // Dedup by contact id when present; otherwise by ΑΦΜ+name so two distinct
+            // id-less contacts (a malformed/legacy payload) don't collapse into one.
+            $key = $id > 0
+                ? 'id:'.$id
+                : 'k:'.(string) ($c['gr_vatno'] ?? '').'|'.(string) ($c['company_name'] ?? '');
+            $byKey[$key] = $c;
         }
 
-        return array_values($byId);
+        return array_values($byKey);
     }
 
     /**
-     * Routed beneficiaries with NO live ekdosi customer yet — the ones the
-     * «Εισαγωγή» action would create. A contact with no ΑΦΜ counts too (it needs
-     * operator attention; the import reports it as un-creatable).
+     * Routed beneficiaries that HAVE an ΑΦΜ but no live ekdosi customer yet — the
+     * importable-missing ones («Εισαγωγή τρίτων» + the popup's «N δικαιούχοι δεν
+     * υπάρχουν» banner). A contact with NO ΑΦΜ is deliberately excluded: it can't be
+     * materialised into a tax-valid party, so counting it would leave the banner
+     * stuck forever (it's an ingest-time hold, not an import target).
      *
      * @return list<array<string, mixed>>
      */
@@ -740,8 +748,10 @@ class WhmcsInboxTable
         foreach (self::routedContacts($r) as $c) {
             $afm = Afm::uniqueKey($c['gr_vatno'] ?? null);
             if ($afm === null) {
-                $out[] = $c;
-
+                // No ΑΦΜ → createFromContact can't materialise a tax-valid party, so
+                // it's not «importable-missing»: counting it would keep the banner +
+                // action stuck forever. (Such a contact is an ingest-time hold, not
+                // an import target.)
                 continue;
             }
             $owner = Customer::afmOwnerQuery($tenantId, $afm)->first();
@@ -1604,9 +1614,13 @@ class WhmcsInboxTable
             ->icon('heroicon-o-user-plus')
             ->color('success')
             ->authorize('update')
+            // Cheap visibility (no DB): any third-party, non-filed row with routed
+            // contacts. The per-contact «does an ekdosi customer already exist?»
+            // check is DB-heavy, so it runs INSIDE the action (once, on click), not
+            // here on every table render — avoids an N+1 across the inbox list.
             ->visible(fn (PendingWhmcsInvoice $r) => in_array($r->third_party_state, [PendingWhmcsInvoice::TP_SINGLE, PendingWhmcsInvoice::TP_MULTI], true)
                 && ! in_array($r->status, [PendingWhmcsInvoice::STATUS_FILED], true)
-                && self::missingThirdPartyBeneficiaries($r) !== [])
+                && self::routedContacts($r) !== [])
             ->requiresConfirmation()
             ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Εισαγωγή δικαιούχων τρίτων — WHMCS #'.$r->whmcs_invoice_id)
             ->modalDescription('Δημιουργεί (ή συνδέει) τον ekdosi πελάτη για κάθε δικαιούχο-τρίτο. Στοιχεία από ΑΑΔΕ (GSIS) όταν το ΑΦΜ είναι έγκυρο· αλλιώς από όσα δήλωσε ο πελάτης στο WHMCS. Κρατά το email του τρίτου (αν δόθηκε) και σημειώνει ποιος reseller τον έφερε. Idempotent — χωρίς διπλότυπα.')

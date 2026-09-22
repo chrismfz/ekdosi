@@ -186,6 +186,14 @@ class WhmcsCustomerCreator
             ? (trim(html_entity_decode($v, ENT_QUOTES | ENT_HTML5, 'UTF-8')) ?: null)
             : null;
 
+        // Cap `occupation` to the column width: the GSIS path is capped by
+        // primaryActivity(), but the reseller-typed contact `description` fallback is
+        // free text — an un-capped blob overflows VARCHAR(120) (SQLSTATE[22001]).
+        $occupation = self::firstFilled($activity['description'] ?? null, $decode($contact['description'] ?? null));
+        if ($occupation !== null) {
+            $occupation = mb_substr($occupation, 0, AadeRegistryRecord::OCCUPATION_MAX_LENGTH);
+        }
+
         try {
             $customer = Customer::create([
                 'company_id' => $tenant->id,
@@ -198,7 +206,7 @@ class WhmcsCustomerCreator
                 'city' => self::firstFilled($record?->city, $decode($contact['city'] ?? null)),
                 'postcode' => self::firstFilled($record?->postcode, $decode($contact['postal_code'] ?? null)),
                 'country' => self::firstFilled($decode($contact['country'] ?? null), 'GR'),
-                'occupation' => self::firstFilled($activity['description'] ?? null, $decode($contact['description'] ?? null)),
+                'occupation' => $occupation,
                 'email' => self::firstFilled($decode($contact['email'] ?? null)),
                 'phone1' => self::firstFilled($decode($contact['telephone'] ?? null)),
                 'referred_by_customer_id' => $referredByCustomerId,

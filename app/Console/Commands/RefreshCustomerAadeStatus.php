@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Exceptions\Aade\AadeAfmNotFound;
 use App\Exceptions\Aade\AadeCredentialsInvalid;
 use App\Exceptions\Aade\AadeRegistryException;
+use App\Exceptions\Aade\AadeUnreachable;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
@@ -17,8 +18,8 @@ use Illuminate\Console\Command;
  * so a closed-business counterpart surfaces on the καρτέλα/λίστα badge WITHOUT an
  * operator opening the on-demand «Διασταύρωση» modal.
  *
- *   php artisan customers:refresh-aade-status [--tenant=SLUG] [--limit=200]
- *       [--stale-days=30] [--force] [--throttle-ms=200]
+ *   php artisan customers:refresh-aade-status [--tenant=SLUG] [--limit=50]
+ *       [--stale-days=90] [--force] [--throttle-ms=500]
  *
  * BOUNDED + gentle by design (GSIS has rate limits): only GR tenants with GSIS
  * credentials, only customers with a Greek ΑΦΜ identity, only the never-checked or
@@ -117,8 +118,18 @@ class RefreshCustomerAadeStatus extends Command
                     $this->warn("Tenant {$tenant->slug}: GSIS credentials invalid — {$e->getMessage()}. Skipping tenant.");
                     $errors++;
                     break;
+                } catch (AadeUnreachable $e) {
+                    // GSIS unreachable OR daily quota exhausted (both surface as
+                    // AadeUnreachable) → every further call this run would fail too AND
+                    // keep hammering an already-blocked account. STOP this tenant now
+                    // (respect the quota / avoid a ban); the next scheduled run resumes
+                    // from the stalest rows.
+                    $this->warn("Tenant {$tenant->slug}: GSIS unreachable/quota — {$e->getMessage()}. Stopping tenant.");
+                    $errors++;
+                    break;
                 } catch (AadeRegistryException $e) {
-                    // Unreachable / transient parse error — skip this customer, keep going.
+                    // Any other registry error (e.g. a one-off parse failure) — skip
+                    // this customer, keep going.
                     $errors++;
                 }
 

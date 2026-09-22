@@ -10,6 +10,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
+## [0.52.1] — 2026-09-22
+### Fixed
+- **Per-client διαγραφή επαφής: scoped στον πελάτη (defence-in-depth).** Το `contactDelete` από τη
+  σελίδα ενός πελάτη χρησιμοποιεί πλέον `deleteContactForUser($userid, $id)` (αντί για το unscoped
+  `deleteContactById`), ώστε ένα stale/tampered id να μην μπορεί να σβήσει (και cascade τις δρομολογήσεις)
+  επαφή **άλλου** πελάτη. Η σελίδα «Ορφανά» (διαγραμμένος πελάτης) συνεχίζει να διαγράφει by id.
+
 ## [0.52.0] — 2026-09-22
 ### Added
 - **Admin διαχείριση επαφών τρίτων (CRUD).** Στη σελίδα ενός πελάτη («Προτιμήσεις τρίτων» → Προβολή) ο

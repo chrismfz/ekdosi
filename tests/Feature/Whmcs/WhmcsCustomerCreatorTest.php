@@ -196,6 +196,21 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertSame($reseller->id, $existing->referred_by_customer_id); // gap-filled
     }
 
+    public function test_create_from_contact_caps_a_long_occupation(): void
+    {
+        // GSIS unavailable → occupation falls back to the reseller-typed contact
+        // `description`, which is free text and must be capped to the column width.
+        $t = $this->tenant();
+        $this->mockGsis(null, new AadeAfmNotFound('x'));
+
+        app(WhmcsCustomerCreator::class)
+            ->createFromContact($t, $this->contact('999999998', ['description' => str_repeat('Δ', 200)]));
+
+        $c = Customer::where('company_id', $t->id)->first();
+        $this->assertNotNull($c);
+        $this->assertLessThanOrEqual(120, mb_strlen((string) $c->occupation));
+    }
+
     public function test_create_from_contact_never_overwrites_an_existing_email(): void
     {
         $t = $this->tenant();

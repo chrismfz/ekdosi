@@ -4,6 +4,7 @@ namespace Tests\Feature\Customers;
 
 use App\DTOs\AadeRegistryRecord;
 use App\Exceptions\Aade\AadeAfmNotFound;
+use App\Exceptions\Aade\AadeUnreachable;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Services\AadeRegistryLookup;
@@ -113,7 +114,7 @@ class RefreshCustomerAadeStatusTest extends TestCase
         // The mock would flip it to inactive IF re-checked.
         $this->mockGsis(['090000045' => $this->record('090000045', false, 'ΑΝΕΝΕΡΓΟΣ')]);
 
-        // Default stale-days=30 → a just-checked customer is skipped (stays active).
+        // Default stale-days=90 → a just-checked customer is skipped (stays active).
         $this->artisan('customers:refresh-aade-status --throttle-ms=0')->assertExitCode(0);
         $fresh->refresh();
         $this->assertTrue($fresh->aade_active, 'recently-checked row is not re-checked');
@@ -122,6 +123,23 @@ class RefreshCustomerAadeStatusTest extends TestCase
         $this->artisan('customers:refresh-aade-status --force --throttle-ms=0')->assertExitCode(0);
         $fresh->refresh();
         $this->assertFalse($fresh->aade_active, '--force re-checks even fresh rows');
+    }
+
+    public function test_stops_the_tenant_on_gsis_unreachable_or_quota(): void
+    {
+        // GSIS unreachable / daily-quota-exhausted must ABORT the tenant, not keep
+        // hammering an already-blocked account. Two customers, but findByAfm is
+        // expected exactly ONCE (the run breaks after the first fault).
+        $t = $this->tenant();
+        Customer::create(['company_id' => $t->id, 'name' => 'A', 'afm' => '090000045']);
+        Customer::create(['company_id' => $t->id, 'name' => 'B', 'afm' => '094277965']);
+
+        $mock = Mockery::mock(AadeRegistryLookup::class);
+        $mock->shouldReceive('findByAfm')->once()->andThrow(new AadeUnreachable('quota exceeded'));
+        $this->app->bind(AadeRegistryLookup::class, fn () => $mock);
+
+        // exit 7 = at least one error; Mockery ->once() verifies we stopped after the first.
+        $this->artisan('customers:refresh-aade-status --throttle-ms=0')->assertExitCode(7);
     }
 
     public function test_unknown_tenant_slug_exits_6(): void

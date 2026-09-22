@@ -1427,13 +1427,19 @@ EOF;
         }
         $id = (int) ($_POST['id'] ?? 0);
         $userid = (int) ($_POST['userid'] ?? 0);
-        $ok = $id > 0 && ThirdPartyStore::deleteContactById($id);
+        $fromOrphans = ($_POST['from'] ?? '') === 'orphans';
+        // Per-client page: SCOPE the delete to this client (defence-in-depth — a
+        // stale/tampered id can't cascade-delete another client's contact). The
+        // orphan page's client no longer exists, so there it deletes by id.
+        $ok = $id > 0 && ($fromOrphans || $userid <= 0
+            ? ThirdPartyStore::deleteContactById($id)
+            : ThirdPartyStore::deleteContactForUser($userid, $id));
         $this->logActivity('EkdosiBridge: admin deleted third-party contact #'.$id
             .' (cascaded routes)'.($ok ? '' : ' (FAILED)'));
         $flash = $this->alert($ok ? 'success' : 'warning',
             $ok ? 'Η επαφή διαγράφηκε (μαζί με τις δρομολογήσεις της).' : 'Η επαφή δεν βρέθηκε.');
 
-        if (($_POST['from'] ?? '') === 'orphans') {
+        if ($fromOrphans) {
             return $this->orphansPage($link, $flash);
         }
 
