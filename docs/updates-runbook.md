@@ -240,16 +240,22 @@ actually recover». For a restore when the **APP_KEY is lost**, see
 - **Pin prod to tags.** `update.sh <branch>` checks out the local branch, which
   may lag `origin` after a fetch; tags are immutable and always correct. Deploy
   tags on prod; use branches only on the dev VM.
-- `update.sh` refuses to run with **uncommitted tracked changes**: never hand-edit
-  code on prod; fix on dev, tag, deploy. **Untracked** files only produce a warning
-  (they used to be a hard stop, and a generated `app/Policies/*Policy.php` from
-  `shield:generate` then deadlocked every later deploy — `git stash` does not clear
-  untracked files). Note the checkout is `--force`, so an untracked file whose path
-  the target ref ships as a tracked file gets replaced by the release's version; the
-  pre-flight names those separately and **copies them to
-  `storage/app/deploy-untracked/<timestamp>/`** first (and aborts if that copy fails),
-  so the deploy never stops and nothing is destroyed unseen. Delete those copies once
-  you've checked them.
+- `update.sh` **and `rollback.sh`** (and the in-app «Επαναφορά») refuse to run with
+  **uncommitted tracked changes**: never hand-edit code on prod; fix on dev, tag,
+  deploy. **Untracked** files never block (they used to be a hard stop, and a
+  generated `app/Policies/*Policy.php` from `shield:generate` then deadlocked every
+  later deploy — `git stash` does not clear untracked files). Note the checkout is
+  `--force`, so it destroys anything on disk git doesn't track here — untracked
+  **or gitignored** — that collides with a path the target ref tracks (the same
+  path, a folder where the ref has a file, or a file/symlink where it has a folder). The
+  pre-flight names those and **copies them to `storage/app/deploy-untracked/<timestamp>/`**
+  first (and aborts if a copy fails) — only once every refuse-check has passed,
+  just before maintenance, so a refused deploy leaves no copies behind. It also
+  refuses up front when the target changes an environment-edited skip-worktree or
+  assume-unchanged file (cPanel's `public/.htaccess`) — that checkout would otherwise die mid-deploy with
+  the site down; the message says how to clear the flag. `rollback.sh` also refuses
+  an unknown ref up front. All of this runs before maintenance mode: an abort
+  changes nothing. Delete those copies once you've checked them.
 - **On failure, `update.sh`/`rollback.sh` STAY in maintenance mode** on purpose
   (a half-applied update must not be served). They print the rollback command;
   bring the app back with `php artisan up` only once it's healthy.

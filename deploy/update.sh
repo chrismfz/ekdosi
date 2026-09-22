@@ -11,9 +11,13 @@
 # current HEAD) is refused unless ALLOW_DOWNGRADE=1.
 #
 # What it does, in order (safe + idempotent):
-#   1. pre-flight: no uncommitted TRACKED changes (untracked files only warn;
-#      any the release ships as tracked are copied to storage/app/deploy-untracked/)
+#   1. pre-flight: no uncommitted TRACKED changes
 #   2. fetch tags/commits
+#   2b. refuse-checks (ΑΦΜ duplicates, downgrade, a checkout git's own dry run
+#       says would fail — e.g. an environment-edited skip-worktree/assume-unchanged
+#       file the release changes) — THEN report untracked files
+#       (never a stop) and copy aside everything the checkout would destroy that
+#       git can't give back → storage/app/deploy-untracked/
 #   3. DB snapshot (rollback point)  →  storage/app/db-snapshots/
 #   4. maintenance mode ON
 #   5. checkout the target ref
@@ -128,13 +132,14 @@ start_queue_worker() {
 # Mark such files skip-worktree so git ignores the environment's edits: the
 # pre-flight sees a clean tree AND the force-checkout leaves the block in place.
 # Idempotent, and a no-op on hosts where nothing external touches the file.
-# ⚠ HARD PRE-STEP: while skip-worktree is set, a release that CHANGES one of these
-# files in the repo will NOT apply here — worse, the force-checkout below then
-# HARD-ERRORS ("Entry '<file>' not uptodate. Cannot merge.", exit 128) and, since
-# we're already in maintenance mode, the deploy ABORTS with the site DOWN. So if a
-# release touches one of these files, clear the flag ON THE SERVER *before*
-# deploying: git update-index --no-skip-worktree <file>  (this step re-sets it
-# after). In practice public/.htaccess is Laravel boilerplate we ~never change.
+# ⚠ HARD PRE-STEP: while skip-worktree is set AND the environment has edited the
+# file, a release that CHANGES it makes the force-checkout HARD-ERROR ("Entry
+# '<file>' not uptodate. Cannot merge.", exit 128) — which would abort mid-deploy
+# with the site DOWN. The pre-flight below now detects that case and REFUSES up
+# front (nothing changed), saying what to do: clear the flag ON THE SERVER —
+# git update-index --no-skip-worktree <file> && git checkout -- <file> — deploy,
+# then re-apply the environment's edit (this step re-sets the flag next time).
+# In practice public/.htaccess is Laravel boilerplate we ~never change.
 ENV_MANAGED_FILES=(public/.htaccess)
 for _envfile in "${ENV_MANAGED_FILES[@]}"; do
   if git ls-files --error-unmatch "$_envfile" >/dev/null 2>&1; then
@@ -181,59 +186,6 @@ TARGET_SHA="$(git rev-parse --verify "${TARGET_REF}^{commit}" 2>/dev/null)" \
   || { fail "Unknown ref: $REF"; exit 1; }
 echo "Current: $CURRENT   →   Target: $REF ($(git rev-parse --short "$TARGET_SHA"))"
 
-# --- untracked files: report + protect, never refuse -------------------------
-# They USED to be a hard stop, and that deadlocked the box: `shield:generate`
-# (step 10) writes a policy file for any resource that ships without one, so one
-# deploy left an untracked artefact behind and EVERY later deploy refused — with
-# no way out from inside the script (`git stash` does not touch untracked files,
-# and the operator is told not to edit code on prod). So we report them instead.
-# The checkout below is `--force`, so an untracked file whose path IS tracked in
-# the target ref gets REPLACED by the release's version (exactly what should
-# happen to a generated stub). Those we name separately AND copy aside first, so
-# the deploy never stops and nothing is ever destroyed unseen.
-# NUL-separated + quotePath=off: git C-quotes non-ASCII paths by default
-# («Πελάτες.md» → "\316\240…"), which would break the cat-file probe below on a
-# Greek filename — exactly the kind we have.
-# Read via a temp file, NOT process substitution `< <(...)`: CloudLinux CageFS
-# does not expose /dev/fd, so `< <(…)` dies with «/dev/fd/63: No such file or
-# directory». A real file works everywhere and preserves the NUL separation.
-_untracked=()
-_untracked_list="$(mktemp)"
-git -c core.quotePath=false ls-files --others --exclude-standard -z > "$_untracked_list"
-while IFS= read -r -d '' f; do
-  _untracked+=("$f")
-done < "$_untracked_list"
-rm -f "$_untracked_list"
-
-if [[ ${#_untracked[@]} -gt 0 ]]; then
-  _clobbered=()
-  for f in "${_untracked[@]}"; do
-    if git cat-file -e "${TARGET_SHA}:${f}" 2>/dev/null; then
-      _clobbered+=("$f")
-    fi
-  done
-
-  warn "Untracked files present — this deploy leaves them alone:"
-  printf '    %s\n' "${_untracked[@]}"
-
-  if [[ ${#_clobbered[@]} -gt 0 ]]; then
-    # These the checkout WILL replace (it is `--force`). For a generated artefact
-    # that is exactly right, and it must not stop the deploy — that rigidity is
-    # what deadlocked prod. But we never destroy an operator's file blind: copy
-    # them aside FIRST, and abort if the copy fails.
-    _backup="storage/app/deploy-untracked/$(date -u +%Y%m%d-%H%M%S)"
-    warn "…except these, which $REF ships as tracked files — the checkout REPLACES them:"
-    printf '    %s\n' "${_clobbered[@]}"
-    for f in "${_clobbered[@]}"; do
-      if ! mkdir -p "$_backup/$(dirname "$f")" || ! cp -p "$f" "$_backup/$f"; then
-        fail "Could not back up '$f' to $_backup — refusing to overwrite it. Nothing was deployed."
-        exit 1
-      fi
-    done
-    ok "Copies kept in $_backup/ (delete them once you've checked)."
-  fi
-fi
-
 # --- early data pre-flight (read-only, NO downtime) -------------------------
 # The cheap checks run on the CURRENT checkout, before maintenance mode and
 # before we touch the worker: a data problem should cost the operator nothing
@@ -271,6 +223,126 @@ if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
     exit 1
   fi
   log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
+fi
+
+# --- safety: would the forced checkout FAIL? ---------------------------------
+# Ask git itself: a dry run of the same reset refuses when the index/worktree
+# state would make the real one fail — notably a skip-worktree (the
+# ENV_MANAGED_FILES above) or assume-unchanged file the environment edited (git
+# decides by stat, not content), which the checkout then cannot overwrite («Entry
+# … not uptodate. Cannot merge.», exit 128) AFTER maintenance ON: the HARD
+# PRE-STEP described there. Refuse now instead, while nothing has changed. (It
+# can't foresee filesystem-level failures — permissions, disk, hooks.) It does NOT
+# refuse the untracked/ignored collisions below (the checkout overwrites those —
+# hence the copies). Same check as rollback.sh and SelfUpdate. LC_ALL=C: the hint
+# below matches git's English message.
+# NUL lists are read via a temp file, NOT process substitution `< <(...)`:
+# CloudLinux CageFS does not expose /dev/fd, so `< <(…)` dies with «/dev/fd/63:
+# No such file or directory». A real file works everywhere and keeps the NULs.
+_list="$(mktemp)"
+if ! LC_ALL=C git read-tree -n -u --reset "$TARGET_SHA" >/dev/null 2>"$_list"; then
+  fail "The checkout of $REF would fail — refusing before maintenance. Nothing was deployed."
+  sed 's/^/    /' "$_list" >&2
+  _flagged="$(sed -n "s/^.*Entry '\\(.*\\)' not uptodate.*\$/\\1/p" "$_list")"
+  if [[ -n "$_flagged" ]]; then
+    while IFS= read -r _f; do
+      echo "  $_f was edited here while flagged skip-worktree/assume-unchanged. Keep a copy, then:" >&2
+      echo "    git update-index --no-skip-worktree --no-assume-unchanged '$_f' && git checkout -- '$_f'" >&2
+    done <<< "$_flagged"
+    echo "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)." >&2
+  fi
+  rm -f "$_list"
+  exit 1
+fi
+
+# --- untracked files: report + protect, never refuse -------------------------
+# Runs HERE — after every refuse-check above (ΑΦΜ pre-flight, downgrade guard,
+# skip-worktree) and before maintenance — so a deploy those checks abort leaves no
+# copies behind (and never prints «Copies kept…» for a deploy that didn't happen),
+# while a failed copy still aborts with the app up and nothing changed. Same order
+# as the in-app updater (SelfUpdate: protect → maintenance ON).
+# They USED to be a hard stop, and that deadlocked the box: `shield:generate`
+# (step 10) writes a policy file for any resource that ships without one, so one
+# deploy left an untracked artefact behind and EVERY later deploy refused — with
+# no way out from inside the script (`git stash` does not touch untracked files,
+# and the operator is told not to edit code on prod). So we report them instead.
+# `-z` output is verbatim — no C-quoting of Greek filenames («Πελάτες.md»).
+_untracked=()
+git ls-files --others --exclude-standard -z > "$_list"
+while IFS= read -r -d '' f; do
+  _untracked+=("$f")
+done < "$_list"
+if [[ ${#_untracked[@]} -gt 0 ]]; then
+  warn "Untracked files present — this deploy leaves them alone (unless listed below):"
+  printf '    %s\n' "${_untracked[@]}"
+fi
+
+# The checkout below is `--force`, so it destroys — without a trace — anything on
+# disk that isn't in the index (untracked OR gitignored) and collides with a path
+# the release tracks: the exact path (a generated stub getting the release's
+# version is exactly right), a directory where the release has a file (deleted
+# with all its contents), or a file where the release has a directory. That must
+# not stop the deploy — that rigidity is what deadlocked prod — but we never
+# destroy an operator's file blind: copy them aside FIRST, and abort if a copy
+# fails. Same algorithm as rollback.sh and SelfUpdate.
+declare -A _in_index=() _risk_seen=()
+_at_risk=()
+git ls-files -z > "$_list"
+while IFS= read -r -d '' p; do _in_index["$p"]=1; done < "$_list"
+_risk() {
+  if [[ -z "${_in_index[$1]:-}" && -z "${_risk_seen[$1]:-}" ]]; then
+    _risk_seen["$1"]=1
+    _at_risk+=("$1")
+  fi
+}
+git ls-tree -r --name-only -z "$TARGET_SHA" > "$_list"
+_sub="$(mktemp)"
+while IFS= read -r -d '' p; do
+  if [[ -n "${_in_index[$p]:-}" ]]; then
+    continue   # tracked here too: git holds both versions
+  fi
+  # A symlink or a file standing where it has a directory: git replaces THAT
+  # entry and never looks past it — so it is what's at risk, not $p reached
+  # through it (a symlinked dir's contents live elsewhere and survive). The
+  # shallowest such ancestor is the one git meets.
+  _blocked=""
+  a="$p"
+  while [[ "$a" == */* ]]; do
+    a="${a%/*}"
+    if [[ -L "$a" || -f "$a" ]]; then _blocked="$a"; fi
+  done
+  if [[ -n "$_blocked" ]]; then
+    _risk "$_blocked"
+    continue
+  fi
+  if [[ -L "$p" || -f "$p" ]]; then
+    _risk "$p"
+  elif [[ -d "$p" ]]; then
+    # a directory where it has a file: git deletes it, contents and all (links
+    # and regular files only — `find` doesn't follow links, and a FIFO/socket
+    # carries nothing to keep)
+    if ! find "./$p" \( -type f -o -type l \) -print0 > "$_sub"; then
+      fail "Can't read everything inside '$p/' ($REF has a file there, so it would all be deleted unseen) — refusing. Nothing was deployed."
+      rm -f "$_list" "$_sub"
+      exit 1
+    fi
+    while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
+  fi
+done < "$_list"
+rm -f "$_list" "$_sub"
+
+if [[ ${#_at_risk[@]} -gt 0 ]]; then
+  _backup="storage/app/deploy-untracked/$(date -u +%Y%m%d-%H%M%S)"
+  warn "These (untracked or gitignored) sit where $REF ships a file or directory — the checkout REPLACES or REMOVES them:"
+  printf '    %s\n' "${_at_risk[@]}"
+  for f in "${_at_risk[@]}"; do
+    if ! mkdir -p -- "$_backup/$(dirname -- "$f")" || ! cp -pP -- "$f" "$_backup/$f"; then
+      rm -rf -- "$_backup"   # a refused run leaves no copies behind
+      fail "Could not back up '$f' — refusing to overwrite it. Nothing was deployed."
+      exit 1
+    fi
+  done
+  ok "Copies kept in $_backup/ (delete them once you've checked)."
 fi
 
 # --- maintenance window -----------------------------------------------------

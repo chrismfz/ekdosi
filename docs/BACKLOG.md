@@ -1346,14 +1346,46 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 
 ## 🧹 Deploy/rollback + leads-calendar links — P2 από το review (untracked-deadlock PR)
 Δεν μπλοκάρουν τίποτα· καταγραφή για να μη χαθούν.
-- **Το rollback path δεν έχει τις νέες εγγυήσεις.** `SelfUpdate::runRollback()` και
-  `deploy/rollback.sh` κάνουν `git checkout --force` ΧΩΡΙΣ ούτε τον έλεγχο tracked-dirty ούτε το
-  `protectUntracked()` — άρα ένα untracked αρχείο που το target ref το έχει tracked αντικαθίσταται
-  χωρίς αντίγραφο. Ίδιο μοτίβο με το update path· μικρό port.
-- **Ο φάκελος αντιγράφων γράφεται πριν τους μεταγενέστερους ελέγχους.** Στο `update.sh` το
-  copy-aside τρέχει πριν το downgrade-guard και το ΑΦΜ pre-flight, οπότε ένα deploy που ματαιώνεται
-  εκεί αφήνει πίσω ένα `storage/app/deploy-untracked/<ts>/` ανά προσπάθεια (και τυπώνει «Copies
-  kept…» για deploy που δεν έγινε). Είτε μετακίνηση μετά τους ελέγχους, είτε retention/καθάρισμα.
+- ~~**Το rollback path δεν έχει τις νέες εγγυήσεις.**~~ **FIXED (2026-09-22)** — `runRollback()` +
+  `rollback.sh` έχουν πλέον ref-resolve + tracked-dirty (`--untracked-files=no`) + copy-aside, όλα πριν το
+  maintenance (βλ. CHANGELOG «Fixed», `DeployPreflightGuardsTest`).
+- ~~**Ο φάκελος αντιγράφων γράφεται πριν τους μεταγενέστερους ελέγχους.**~~ **FIXED (2026-09-22)** — στο
+  `update.sh` το copy-aside μετακινήθηκε μετά το ΑΦΜ pre-flight + downgrade guard (ακριβώς πριν το
+  maintenance). **Residual (P3):** αν μετά την αντιγραφή αποτύχει το `down` / το queue drain / το snapshot
+  (clean abort), ο φάκελος αντιγράφων μένει και το «Copies kept…» έχει ήδη τυπωθεί — προϋποθέτει ΚΑΙ
+  clobberable untracked αρχείο ΚΑΙ τέτοια αποτυχία· ίδιο στο in-app `runPhp()`/`runRollback()`
+  (protect → maintenance). Αβλαβές (μόνο δίσκος, το μήνυμα λέει «delete them once you've checked»). Λύση αν
+  ενοχλήσει: retention/καθάρισμα του `storage/app/deploy-untracked/` (π.χ. μαζί με το `--keep` των snapshots).
+  Διαθέσεις από το review του ίδιου PR (fixed: gitignored + φάκελος↔αρχείο συγκρούσεις, skip-worktree άρνηση
+  up front — βλ. CHANGELOG):
+  - **Override για dirty tracked tree στο rollback — DECLINED.** Άρνηση όπως στο update path: dirty *tracked*
+    tree σημαίνει ότι κάποιος έγραψε κώδικα στον server (άρα έχει shell)· το `git stash` ΕΙΝΑΙ το override και
+    κρατά την αλλαγή ανακτήσιμη, ενώ ένα force-flag θα την πετούσε σιωπηλά. Το μήνυμα λέει πλέον τι να κάνει.
+  - **Κοινό sourced script για τα pre-flight των `update.sh`/`rollback.sh` — DECLINED (P2).** Τα δύο scripts
+    μένουν self-contained (ίδιο μοτίβο με το ήδη διπλό queue-drain block). Το drift φυλάσσεται αντ' αυτού από
+    το `DeployPreflightGuardsTest`, που περνά **και τα δύο** από τα ίδια σενάρια (fix στο ένα μόνο → κόκκινο
+    το άλλο). Αν το pre-flight μεγαλώσει κι άλλο, εξαγωγή σε `deploy/lib/`.
+  - **Το index διαβάζεται δύο φορές (`ls-files -v` για τα flags + `ls-files` για το at-risk) — DECLINED (P2).**
+    ~2k paths, αμελητέο κόστος· τα δύο ξεχωριστά περάσματα κρατούν κάθε έλεγχο αυτοτελή και ευανάγνωστο.
+  - **Μη αναγνώσιμο at-risk αρχείο (π.χ. root-owned, mode 000) → άρνηση — DECLINED (by design).** Το
+    checkout θα το έσβηνε (αρκεί write στον φάκελο)· το «ποτέ δεν καταστρέφουμε αρχείο που δεν μπορέσαμε να
+    αντιγράψουμε» είναι ο πυρήνας του guard (ίδιος κανόνας με πριν για τα untracked). Γίνεται πριν το
+    maintenance — τίποτα δεν αλλάζει· ο χειριστής διορθώνει τα permissions και ξανατρέχει.
+  - **Round 3:** ο χειροποίητος κανόνας «θα αποτύχει το checkout;» αντικαταστάθηκε από το dry run του git
+    (`read-tree -n -u --reset`) — fixed (stat-vs-content P1, tracked symlink false refusal, 3 αντίγραφα
+    λογικής → 1 κλήση). **Assume-unchanged αρχείο τροποποιημένο + target που το αφήνει ίδιο → το checkout
+    το επαναφέρει σιωπηλά — DECLINED (P2).** Κανείς σε αυτό το workflow δεν βάζει assume-unchanged (το
+    `update.sh` βάζει σκόπιμα skip-worktree, που ΚΡΑΤΑ την τροποποίηση)· είναι η τεκμηριωμένη συμπεριφορά του
+    git για assume-unchanged, όχι κάτι που εισάγαμε. Αν χρειαστεί: αντιμετώπιση ενός edited `h` ως dirty tree.
+  - **Τελικό review (κανένα P0/P1) — P2 που μένουν:** (α) το dry run δεν προβλέπει filesystem αποτυχίες
+    (δικαιώματα — π.χ. in-app ως PHP user που δεν κατέχει όλα τα tracked αρχεία — δίσκο, hooks)· ένα τέτοιο
+    checkout αποτυγχάνει μισό μετά το maintenance (προϋπήρχε). (β) Παράθυρο dry run → checkout (drain +
+    snapshot): αν το περιβάλλον ξαναγγίξει το flagged αρχείο ενδιάμεσα, exit 128 στο checkout — φθηνό fix:
+    ξανά dry run αμέσως πριν το checkout + clean `up`/exit. (γ) Αμφίσημο όνομα (tag ΚΑΙ local branch ίδιο
+    όνομα): οι guards ελέγχουν το `TARGET_SHA`, το checkout κάνει `"$REF"` → fix: `checkout --detach
+    $TARGET_SHA` στο tag/sha path (αγγίζει το ίδιο το deploy checkout — ξεχωριστή αλλαγή). (δ) Το git σταματά
+    στο πρώτο «not uptodate», άρα ονομάζεται ένα αρχείο ανά run. Fixed στο ίδιο round: `LC_ALL=C`, hint μόνο
+    όταν το git ονόμασε αρχείο, quoted paths, stderr στο `update.sh`, ακριβέστερη διατύπωση.
 - **Το tab του link είναι χοντρότερη κοπή από τον αριθμό δίπλα του** (ημερολόγιο leads): το
   `overdueBeforeGrid()` μετράει μόνο τα ΠΡΙΝ το πλέγμα αλλά ανοίγει ΟΛΑ τα ληξιπρόθεσμα, και το
   `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η

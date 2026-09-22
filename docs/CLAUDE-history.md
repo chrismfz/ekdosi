@@ -2323,3 +2323,32 @@ that taught it — kept here for the «why», not auto-loaded.
   added in round 4. Under the current rule it would have shipped at round 5 with the same
   substantive outcome. The over-correction was the ΑΦΜ unique-constraint PR (#394: ~10 rounds
   for what was 1–2 real fixes, «χανόμαστε») — hence the per-priority round caps.
+
+## Deploy/rollback pre-flight guards (2026-09-22)
+The rollback paths (`deploy/rollback.sh`, in-app «Επαναφορά» = `SelfUpdate::runRollback()`) had none of
+the update path's guards; porting them surfaced that the shared «protect untracked» probe itself was
+too narrow. Verified behaviour of `git checkout --force <ref>` (git 2.43, scratch repos):
+- It **destroys without a trace** anything on disk NOT in the index that collides with a path `<ref>`
+  tracks: an untracked **or gitignored** file at that exact path; a **directory** where `<ref>` has a
+  file (deleted with its contents); a **file or symlink** where `<ref>` has a directory (git replaces
+  that entry and never looks past it — a symlinked dir's contents live elsewhere and survive). The old
+  probe (`ls-files --others --exclude-standard` + `cat-file -e <ref>:<path>`) saw only the first
+  case minus ignored files. Rolling BACK is the likely trigger (past a commit that made a file
+  per-box/ignored). The at-risk set is now computed from `ls-tree -r <ref>` minus `ls-files`,
+  shallowest blocking ancestor first — same algorithm in all three implementations.
+- A **flagged** file (skip-worktree `S`/`s`, assume-unchanged `h`) — git ignores edits to both, so
+  `status` stays clean: *edited* + `<ref>` changes (or deletes) it → `exit 128 «not uptodate. Cannot
+  merge.»` (atomic, but in the scripts it lands after `artisan down`); *missing* or *untouched* → fine.
+  Git decides «untouched» by **stat, not content** — two review rounds each found a case a hand-rolled
+  rule got wrong (content vs missing, then identical bytes with a new mtime). So the pre-flight no
+  longer predicts: it asks git. `git read-tree -n -u --reset <ref>` is a dry run of the same reset —
+  it refused exactly when `checkout --force` failed in all 22 index/worktree scenarios tried (flag × edited / touched /
+  new inode / missing / untouched × target changes / leaves / deletes, plus every untracked-collision
+  kind, which it does NOT refuse), and leaves index, worktree and HEAD untouched. It cannot foresee
+  filesystem-level failures (permissions, disk, hooks) — see BACKLOG.
+- **Ordering rule:** every refuse-check → then the copies → then maintenance. A refused run (or a
+  copy failing midway) leaves no copies; an abort changes nothing.
+- Tests run the real scripts in a throwaway repo with a stub `php` that fails `artisan down`, and the
+  in-app paths with `base_path()` pointed at that repo (no `artisan` there → `down` fails) — each run
+  stops right after the pre-flight. All four entry points share the scenarios (drift guard, since the
+  scripts stay self-contained). Mutation-checked against main and each review round's version.
