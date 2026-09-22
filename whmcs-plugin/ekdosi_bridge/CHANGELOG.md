@@ -10,7 +10,13 @@ Format: [Keep a Changelog](https://keepachangelog.com/), versions track the
 
 ## [Unreleased]
 
-## [0.51.0] — 2026-09-17
+## [0.51.1] — 2026-09-22
+### Fixed
+- **Admin «Δρομολόγηση»: το «— Στο όνομά του —» απέτυχε πάντα** με «Αποτυχία: η επαφή δεν ανήκει σε αυτόν
+  τον πελάτη». Το admin route action περνούσε `contactid=0` κατευθείαν στο `setRouteForUser()`, που έχει
+  guard `contactForUser($userid, 0) === null` → επέστρεφε πάντα false, οπότε ήταν **αδύνατο** να γυρίσεις μια
+  υπηρεσία πίσω στον ίδιο τον πελάτη (clear routing) από το admin. Πλέον `contactid=0` → `clearRouteForUser()`
+  (χωρίς contact-ownership check), ακριβώς όπως ήδη έκανε η client v2 σελίδα (`Client\Controller::route`).
 ### Added
 - **Σελίδα «Προτιμήσεις τρίτων» — polish + UX.** Η λίστα πελατών (72 γραμμές) απέκτησε:
   **instant search** (επωνυμία / #id / domain, client-side), **ταξινόμηση κατά δραστηριότητα**

@@ -1214,20 +1214,36 @@ EOF;
                 $this->alert('warning', 'Η υπηρεσία δεν ανήκει σε αυτόν τον πελάτη — δεν αποθηκεύτηκε.'));
         }
 
-        $ok = ThirdPartyStore::setRouteForUser(
-            $userid,
-            $serviceId,
-            $serviceType,
-            (int) ($_POST['contactid'] ?? 0),
-            ! empty($_POST['is_receipt']),
-        );
+        // «— Στο όνομά του —» (contactid 0) means CLEAR the route (bill the client
+        // themselves), NOT "route to contact #0". clearRouteForUser has no
+        // contact-ownership check and always succeeds — mirrors the client v2 page
+        // (Client\Controller::route). Passing 0 to setRouteForUser instead hit its
+        // contactForUser($userid, 0) === null guard and ALWAYS failed with the
+        // misleading «η επαφή δεν ανήκει σε αυτόν τον πελάτη» — the reported bug that
+        // made "bill the client themselves" impossible from the admin side.
+        $contactId = (int) ($_POST['contactid'] ?? 0);
+        if ($contactId === 0) {
+            ThirdPartyStore::clearRouteForUser($userid, $serviceId, $serviceType);
+            $ok = true;
+        } else {
+            $ok = ThirdPartyStore::setRouteForUser(
+                $userid,
+                $serviceId,
+                $serviceType,
+                $contactId,
+                ! empty($_POST['is_receipt']),
+            );
+        }
 
-        $this->logActivity('EkdosiBridge: admin re-routed service '
-            .(int) ($_POST['serviceid'] ?? 0).' for client #'.$userid
-            .' → contact '.(int) ($_POST['contactid'] ?? 0).($ok ? '' : ' (FAILED)'));
+        $this->logActivity('EkdosiBridge: admin re-routed service '.$serviceId
+            .' for client #'.$userid
+            .($contactId === 0 ? ' → στο όνομά του (cleared)' : ' → contact '.$contactId)
+            .($ok ? '' : ' (FAILED)'));
 
         $flash = $ok
-            ? $this->alert('success', 'Η δρομολόγηση αποθηκεύτηκε — ισχύει από το επόμενο τιμολόγιο.')
+            ? $this->alert('success', $contactId === 0
+                ? 'Η υπηρεσία εκδίδεται πλέον στο όνομα του πελάτη — ισχύει από το επόμενο τιμολόγιο.'
+                : 'Η δρομολόγηση αποθηκεύτηκε — ισχύει από το επόμενο τιμολόγιο.')
             : $this->alert('warning', 'Αποτυχία: η επαφή δεν ανήκει σε αυτόν τον πελάτη.');
 
         return $this->prefsClient($link, $userid, $flash);
