@@ -57,6 +57,18 @@ class WhmcsIncomeMapping extends Page
         // Pre-load the saved group choices so a fetch shows them selected and an
         // unfetched visit still remembers what was mapped (both the §8.6 class and
         // the ekdosi revenue-report category).
+        $this->hydrateSavedChoices();
+    }
+
+    /**
+     * (Re)load choice + categoryChoice from the persisted rows. Called on mount AND
+     * after save() so the form always reflects DB truth — otherwise a group unmapped
+     * this session keeps its (now orphaned) categoryChoice in Livewire state, and a
+     * later save would re-warn «κατηγορία δεν αποθηκεύτηκε» for a group the operator
+     * already cleared.
+     */
+    private function hydrateSavedChoices(): void
+    {
         $rows = WhmcsIncomeMap::query()
             ->where('company_id', $this->tenant()->getKey())
             ->where('scope', WhmcsIncomeMap::SCOPE_GROUP)
@@ -162,8 +174,15 @@ class WhmcsIncomeMapping extends Page
             $labelByGid[(int) $g['gid']] = $g['name'];
         }
 
+        // Built lazily on the first discard only (the common save has none).
+        $categoryOptions = null;
+
         $set = 0;
         $cleared = 0;
+        // Groups where the operator picked a «Κατηγορία ekdosi» but left §8.6 empty:
+        // that category selection is silently discarded (a row can't exist without a
+        // §8.6 class — income_class_category is NOT NULL), so we collect + warn.
+        $discarded = [];
         foreach ($this->choice as $gid => $category) {
             $gid = (int) $gid;
             if ($gid <= 0) {
@@ -186,19 +205,64 @@ class WhmcsIncomeMapping extends Page
                 );
                 $set++;
             } else {
-                // Empty / invalid → remove any existing mapping (unmap the group).
-                $deleted = WhmcsIncomeMap::query()
+                // Empty / invalid §8.6 → the group will be unmapped. If a «Κατηγορία
+                // ekdosi» was ALSO chosen, that choice can't be saved on its own (no
+                // row without a §8.6 class) → flag it, UNLESS it merely equals the
+                // category already saved (the prehydrated leftover of a deliberate
+                // unmap — warning there would be noise). Read the saved category only
+                // when a category is chosen, so the common «nothing set» group still
+                // costs just the delete below (no extra SELECT).
+                $rawCat = $this->categoryChoice[(string) $gid] ?? '';
+                $chosenCatId = ctype_digit((string) $rawCat) ? (int) $rawCat : null;
+                if ($chosenCatId !== null) {
+                    // NB: cast — MariaDB returns int columns as strings under the
+                    // default emulated prepares, so a strict `!==` against the int
+                    // chosenCatId would false-positive on an unchanged category.
+                    $savedCatId = WhmcsIncomeMap::query()
+                        ->where('company_id', $companyId)
+                        ->where('scope', WhmcsIncomeMap::SCOPE_GROUP)
+                        ->where('whmcs_key', $gid)
+                        ->value('product_category_id');
+                    $savedCatId = $savedCatId === null ? null : (int) $savedCatId;
+                    if ($chosenCatId !== $savedCatId) {
+                        $categoryOptions ??= $this->categoryOptions();
+                        $discarded[] = '«'.($labelByGid[$gid] ?? ('#'.$gid)).'» → '
+                            .($categoryOptions[(string) $rawCat] ?? ('#'.$rawCat));
+                    }
+                }
+
+                $cleared += WhmcsIncomeMap::query()
                     ->where('company_id', $companyId)
                     ->where('scope', WhmcsIncomeMap::SCOPE_GROUP)
                     ->where('whmcs_key', $gid)
                     ->delete();
-                $cleared += $deleted;
             }
         }
 
-        Notification::make()
-            ->title("Αποθηκεύτηκαν {$set} αντιστοιχίσεις".($cleared > 0 ? " ({$cleared} καθαρίστηκαν)" : ''))
-            ->success()->send();
+        // ONE notification: when a category was discarded, the persistent warning is
+        // THE signal (a green «saved» toast beside it would imply everything worked,
+        // hiding the partial drop) — it folds in what DID save; otherwise the plain
+        // success toast.
+        if ($discarded !== []) {
+            $savedNote = ($set > 0 || $cleared > 0)
+                ? ' Αποθηκεύτηκαν κανονικά '.$set.($cleared > 0 ? ", καθαρίστηκαν {$cleared}" : '').'.'
+                : '';
+            Notification::make()
+                ->title(count($discarded).' ομάδα/ες: η «Κατηγορία ekdosi» δεν αποθηκεύτηκε')
+                ->body('Όρισες κατηγορία εσόδων χωρίς αντίστοιχη §8.6 — δεν αποθηκεύεται χωρίς τη §8.6. Όρισε και τη §8.6 για: '.implode(' · ', $discarded).'.'.$savedNote)
+                ->warning()
+                ->persistent()
+                ->send();
+        } else {
+            Notification::make()
+                ->title("Αποθηκεύτηκαν {$set} αντιστοιχίσεις".($cleared > 0 ? " ({$cleared} καθαρίστηκαν)" : ''))
+                ->success()->send();
+        }
+
+        // Re-sync the form to persisted state: a group unmapped this save leaves no
+        // row, so its orphaned categoryChoice would otherwise re-trigger the warning
+        // on the next save. (Runs AFTER the discard scan, which needs the pre-save state.)
+        $this->hydrateSavedChoices();
     }
 
     public static function getNavigationLabel(): string

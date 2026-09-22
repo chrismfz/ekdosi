@@ -31,4 +31,9 @@ final class HealthKeys
     {
         return "ops.health.mydata_reconcile.{$companyId}";
     }
+
+    public static function deliveryInbound(int $companyId): string
+    {
+        return "ops.health.delivery_inbound.{$companyId}";
+    }
 }

@@ -6,6 +6,8 @@ use App\Console\Commands\DeliveryFetchInbound;
 use App\Models\Company;
 use App\Services\Delivery\InboundDeliveryFetcher;
 use App\Services\Delivery\InboundFetchResult;
+use App\Support\OperatorHealth\HealthRecorder;
+use App\Support\OperatorHealth\OperatorHealthReport;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -73,6 +75,101 @@ class DeliveryFetchInboundCommandTest extends TestCase
             fn ($message, $context = []) => str_contains((string) $message, 'delivery:fetch-inbound')
                 && ($context['company'] ?? null) === $tenant->slug
         );
+    }
+
+    public function test_persistent_fetch_failure_escalates_to_error_and_flags_ops_health(): void
+    {
+        $tenant = $this->makeReadableTenant();
+
+        Log::spy();
+
+        // The Nth consecutive failure (bad/expired creds, not a blip) must escalate
+        // from warning to error AND make ops:health flag the tenant — the silent
+        // multi-day staging stop this hardening closes.
+        // Run the SCHEDULED sweep (no --tenant): only that advances the health streak.
+        // RefreshDatabase leaves this as the single myData-readable tenant. Run ONE
+        // past the threshold to prove the error escalation fires only at the crossing.
+        $threshold = HealthRecorder::DELIVERY_INBOUND_PERSISTENT_FAILURES;
+        for ($i = 0; $i < $threshold + 1; $i++) {
+            $command = $this->throwingCommand();
+            $exit = $command->run(new ArrayInput([]), new BufferedOutput);
+            $this->assertSame(0, $exit, 'a read-only poll never fails the run, even when persistent');
+        }
+
+        // Error is logged EXACTLY ONCE (at the crossing), not on every later run —
+        // ops:health carries the ongoing signal, so a log-alerter doesn't re-page.
+        Log::shouldHaveReceived('error')->once()->withArgs(
+            fn ($message, $context = []) => str_contains((string) $message, 'delivery:fetch-inbound')
+                && str_contains((string) $message, 'in a row')
+                && ($context['company'] ?? null) === $tenant->slug
+                && ($context['consecutive_failures'] ?? 0) === $threshold
+        );
+
+        $report = app(OperatorHealthReport::class)->build();
+        $row = collect($report['delivery_inbound'])->firstWhere('tenant', $tenant->slug);
+        $this->assertNotNull($row, 'the tenant appears in the delivery-inbound health section');
+        $this->assertTrue($row['persistent'], 'N consecutive failures mark the tenant persistent');
+        $this->assertSame($threshold + 1, $row['consecutive_failures']);
+
+        $severity = $report['severity'];
+        $this->assertNotSame('critical', $severity['level'], 'read-only staging is a warning, never critical');
+        $this->assertStringContainsString($tenant->slug, implode(' ', $severity['warnings']));
+    }
+
+    public function test_config_guard_is_quiet_and_does_not_record_a_failure(): void
+    {
+        $tenant = $this->makeReadableTenant();
+
+        Log::spy();
+
+        // A RuntimeException from the fetcher = the config guard (mode off / missing
+        // creds): an expected state, not an error. It must NOT log error/warning and
+        // NOT record a failure (such a tenant drops out of myDataReadable on its own).
+        $guard = new class extends DeliveryFetchInbound
+        {
+            protected function fetcherFor(Company $tenant): InboundDeliveryFetcher
+            {
+                return new class($tenant) extends InboundDeliveryFetcher
+                {
+                    public function fetch(?Carbon $from = null, ?Carbon $to = null, bool $dryRun = false): InboundFetchResult
+                    {
+                        throw new \RuntimeException('Delivery inbound is off for this tenant.');
+                    }
+                };
+            }
+        };
+        $guard->setLaravel($this->app);
+        $exit = $guard->run(new ArrayInput([]), new BufferedOutput);
+        $this->assertSame(0, $exit);
+
+        Log::shouldNotHaveReceived('error');
+        Log::shouldNotHaveReceived('warning');
+
+        $row = collect(app(OperatorHealthReport::class)->build()['delivery_inbound'])->firstWhere('tenant', $tenant->slug);
+        $this->assertNotNull($row);
+        $this->assertFalse($row['persistent'], 'a config-guard skip never marks the tenant persistent');
+        $this->assertSame(0, $row['consecutive_failures']);
+    }
+
+    /** A DeliveryFetchInbound whose fetcher always raises a transient AADE error. */
+    private function throwingCommand(): DeliveryFetchInbound
+    {
+        $command = new class extends DeliveryFetchInbound
+        {
+            protected function fetcherFor(Company $tenant): InboundDeliveryFetcher
+            {
+                return new class($tenant) extends InboundDeliveryFetcher
+                {
+                    public function fetch(?Carbon $from = null, ?Carbon $to = null, bool $dryRun = false): InboundFetchResult
+                    {
+                        throw new MyDataConnectionException;
+                    }
+                };
+            }
+        };
+        $command->setLaravel($this->app);
+
+        return $command;
     }
 
     private function makeReadableTenant(): Company

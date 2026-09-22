@@ -96,7 +96,7 @@ _(Κενό. Το πρώην #1 «Ηλεκτρονική τιμολόγηση» �
 **#1a — i18n (bilingual customer-facing) — το κοντινό unlock:**
 - [x] **Slice 0 (S) — SHIPPED:** `App\Support\CustomerLanguage` resolver (forUi/forCustomer/forDocumentMail) + `customers.language` **+** `companies.default_language` (+ φόρμες, audited) + `SetPortalLocale` middleware + `SendInvoiceEmail`/`SendQuoteEmail` `->locale()`. **PDF αμετάβλητο** (frozen μέσω `PdfLabels`)· η προτίμηση πελάτη φτάνει στο PDF με το «stamp-at-issue» παρακάτω. Λεπτομέρειες → CHANGELOG/FEATURES.
   - [ ] P2 (Octane): το `SetPortalLocale` κάνει `setLocale` χωρίς reset — υπό Octane μπορεί να «διαρρεύσει» σε επόμενο non-portal request στον ίδιο worker (σε FPM μη-θέμα· inert τώρα αφού δεν υπάρχουν μεταφρασμένα strings). Global locale-reset όταν/αν πάμε Octane.
-  - [ ] P2: `companies.default_language` μόνο στο super-admin `CompanyResource` — πρόσθεσέ το και στο self-service `CompanySettings` (whitelist) για company_admin.
+  - [x] P2 ✅ SHIPPED (2026-09-22): `companies.default_language` προστέθηκε στο whitelist του self-service `CompanySettings` (company_admin το ρυθμίζει· business identity, όχι credential).
   - [ ] P2 (perf, αμελητέο): `forCustomer` κάνει lazy-load `$customer->company` ανά email· θα μπορούσε να επαναχρησιμοποιεί το ήδη φορτωμένο `$invoice->company` (ίδιος tenant). 1 query/email — άσε το μέχρι να ενοχλήσει σε batch.
 - [x] **Portal i18n (M) — SHIPPED:** `lang/{el,en}/portal.php` (parity) + 12 blades `portal/*` + `portal-layout` + flash μηνύματα (profile/tickets) → `__('portal.*')`· per-user locale (ίδια URLs)· el verbatim (tests πράσινα)· en-render test. Λεπτομέρειες → CHANGELOG/FEATURES.
   - [x] **guest σελίδες (login/forgot/reset) locale — ΚΛΕΙΣΤΟ από #1c-A:** στο custom host παίρνουν γλώσσα από τον tenant (`CustomerLanguage::forHost`). Στο κοινό default host μένουν app-default (el) — δεν υπάρχει tenant να διαλέξει (OK). Τα guest flash μηνύματα (`PasswordResetController`) μένουν el (guest context).
@@ -131,7 +131,7 @@ _(Το transport half tracked και παρακάτω: «TIER 4 — PEPPOL Phase
 - [ ] Backfill ιστορικών WHMCS γραμμών (description→package→group→category)· πριν = «Αταξινόμητα»
 - [ ] Bulk-assign κατηγορίας/tags στη λίστα ειδών + φίλτρο
 - [ ] Ίδιο για **έξοδα** (report + dashboard widget)· bonus: MRR/churn ανά κατηγορία
-- [ ] P2: WHMCS-map — «Κατηγορία ekdosi» χωρίς §8.6 → η γραμμή χάνεται (coupling)· per-row validation notice
+- [x] P2 ✅ SHIPPED (2026-09-22): WHMCS-map — «Κατηγορία ekdosi» χωρίς §8.6 πλέον εμφανίζει **warning notice** στο «Αποθήκευση» (ονομάζει ομάδες+κατηγορίες που δεν αποθηκεύτηκαν, αντί σιωπηλής απόρριψης). Το NOT NULL coupling μένει· η πλήρης αποσύνδεση (category-only rows) είναι μεγαλύτερη αλλαγή, δεν έγινε.
 - [ ] P2: `RevenueByCategory` — footer round ±1λεπτό vs γραμμές· name fallback `description_short?:description?:#id`·
   CSV «100,00» όταν total≤0· `header_discount_percent≥100` guard (τώρα σιωπηλά ≤0 έσοδα)
 
@@ -1444,6 +1444,13 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   poll, αλλά τα inbound ΔΑ (νομικά σχετικά «goods received») μπορούν να σταματήσουν σιωπηλά να στέηζονται για μέρες σε
   επίμονο config error. Optional hardening αν χρειαστεί: μέτρημα consecutive-failures και page σε N-στη-σειρά (ο guard για
   mode-off/missing-creds μένει ξεχωριστός — `RuntimeException`, δεν είναι σφάλμα).
+  **✅ SHIPPED (2026-09-22):** consecutive-failure μέτρημα ανά tenant (`HealthRecorder::recordDeliveryInboundFetch`)· μετά από
+  N στη σειρά (`DELIVERY_INBOUND_PERSISTENT_FAILURES=4`, ~24ω) → error log (ΜΙΑ φορά, στο crossing) + «persistent» row στο
+  `ops:health` (νέα ενότητα «Delivery inbound», warning-level). Μόνο το scheduled sweep (χωρίς `--tenant`, όχι dry-run)
+  προωθεί το streak. Transient blip μένει σιωπηλό· ο guard mode-off/creds μένει ξεχωριστός.
+  - [ ] P2 (deferred, review 2026-09-22): το «Delivery inbound» section ΔΕΝ δείχνει staleness (σκόπιμα — το cron/queue
+    heartbeat καλύπτει scheduler-down, και ένα fixed-but-idle tenant καθαρίζει στο επόμενο 6ωρο run). Αν ποτέ χρειαστεί
+    να ξεχωρίζει «still broken» από «δεν τρέχει πια», πρόσθεσε checked_at freshness όπως whmcs/mydata.
 - **`MailTemplateRenderer::autolink()`: το trailing `)` δεν βγαίνει από το link (P2, ίδιο review — declined).** Ο strip
   αφαιρεί μόνο `.,!?`, όχι `)`, οπότε operator free-text σαν `(δείτε https://…/x)` παράγει link με `)` μέσα. **Declined:** το
   `)` μπορεί να είναι νόμιμο μέρος ενός URL (θα έσπαγε σωστά URLs), και το πραγματικό `{verify_url}` κάθεται μόνο του στη
@@ -1540,6 +1547,7 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   shape, on the filing hot path (`GrProviderSubmitter::warnIfLowProviderQuota`). Fix = `index(['company_id',
   'provider_key','id'])`. Deferred deliberately: current mark volumes are small and the PR that surfaced it was a
   two-line dashboard tweak — not the place for a migration. Raised in the PR #518 review (round 3).
+  **✅ SHIPPED (2026-09-22):** migration `add_provider_quota_index_to_mydata_marks` → `index(company_id, provider_key, id)`.
 - **EurobankReturnController parses the raw body twice (P2, micro).** `__invoke` parse_str's the body for the
   orderid; `record()` parse_str's it again for the raw provider status. Tiny (small body), and keeping `record()`
   self-contained is arguably cleaner than threading `$fields` through `reject()` → `record()`. Fold into a single
@@ -1945,7 +1953,9 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
     `RunFirebirdImport` διαβάζει μόνο σε αποτυχία. Ο χειριστής βλέπει την ΑΠΟΦΑΣΗ (το `afm_keep` στη
     σελίδα της εισαγωγής) αλλά όχι ΠΟΙΕΣ γραμμές πάρκαραν — θέλει `php artisan customers:afm-duplicates`.
     Σωστή λύση: badge «χωρίς ταυτότητα ΑΦΜ» + φίλτρο στη λίστα πελατών (panel-native), όχι άλλη στήλη
-    στο `firebird_import_runs`.
+    στο `firebird_import_runs`. **✅ SHIPPED (2026-09-22):** badge «Χωρίς ταυτότητα ΑΦΜ» (κενό σε κανονικές
+    γραμμές) + TernaryFilter `afm_key_parked` στη λίστα πελατών. (Το keeper-selection μέσα από τη φόρμα
+    εισαγωγής μένει ανοιχτό — bulk/UI item παραπάνω.)
   - **Το ΑΦΜ probe διαβάζει έως 50.000 γραμμές CUSTOMER μέσα σε σύγχρονο Livewire request** _(P2,
     3ος γύρος review)._ Το `AFM_PROBE_MAX_ROWS` φράζει το πλήθος, όχι τον χρόνο μεταφοράς σε αργό WAN
     (≈3 MB στο μέγιστο· οι πραγματικοί tenants είναι μερικές χιλιάδες). Αν ποτέ κολλήσει: μέτρησε

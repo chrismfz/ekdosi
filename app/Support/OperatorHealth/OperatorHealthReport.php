@@ -70,6 +70,7 @@ class OperatorHealthReport
             'mail' => $this->mail(),
             'whmcs' => $this->whmcs(),
             'mydata' => $this->mydata(),
+            'delivery_inbound' => $this->deliveryInbound(),
             'security' => $this->security(),
             'disk' => $this->disk(),
         ];
@@ -429,6 +430,43 @@ class OperatorHealthReport
                     'enabled' => $enabled,
                     'stale' => $this->sweepIsStale($checkedAt, $enabled),
                     'latest_mydata_mark_at' => $latestMark?->created_at?->toIso8601String(),
+                ];
+            })
+            ->all(), []);
+    }
+
+    /**
+     * delivery:fetch-inbound per-tenant health. The poll is read-only and silences
+     * transient failures on purpose, so a SINGLE failure is never surfaced here —
+     * only a run of consecutive failures (bad/expired creds, a multi-day outage) is
+     * marked 'persistent', which is what the severity evaluator warns on.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function deliveryInbound(): array
+    {
+        // NB: unlike whmcs()/mydata() this section does NOT surface staleness. A
+        // read-only poll that stopped running means the scheduler/worker is down —
+        // already covered by the cron + queue heartbeats — and the feature is
+        // deliberately quiet on anything short of a PERSISTENT run of real failures,
+        // so a stale/enabled signal here would only double-report or add noise.
+        return $this->safeValue(fn () => Company::myDataReadable()
+            ->sortBy('slug')
+            ->values()
+            ->map(function (Company $tenant): array {
+                $cached = $this->cacheGet(HealthKeys::deliveryInbound((int) $tenant->id), []);
+                $consecutive = (int) ($cached['consecutive_failures'] ?? 0);
+
+                return [
+                    'tenant' => $tenant->slug,
+                    'status' => $cached['status'] ?? 'missing',
+                    'consecutive_failures' => $consecutive,
+                    'persistent' => ($cached['status'] ?? null) === 'failed'
+                        && $consecutive >= HealthRecorder::DELIVERY_INBOUND_PERSISTENT_FAILURES,
+                    'last_error' => $cached['last_error'] ?? null,
+                    'last_success_at' => $cached['last_success_at'] ?? null,
+                    'last_failure_at' => $cached['last_failure_at'] ?? null,
+                    'checked_at' => $cached['checked_at'] ?? null,
                 ];
             })
             ->all(), []);

@@ -166,6 +166,30 @@ class CustomersOutstandingFilterTest extends TestCase
             ->assertCanNotSeeTableRecords([$debtor]);
     }
 
+    public function test_parked_filter_isolates_afm_less_imported_rows(): void
+    {
+        // A genuine ETL «υποκατάστημα» collision: two rows share an ΑΦΜ, so the
+        // second (imported parked) keeps afm_key null + afm_key_parked true while
+        // the first holds the identity. The filter must surface only the parked one.
+        $kept = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Κύριος', 'afm' => '801280908', 'is_active' => true]);
+
+        // afm_key_parked is NOT mass-assignable (the ETL sets it via the model, not
+        // form input), so set it directly before save; deriveAfmKey then keeps it
+        // parked because the kept row still holds the identity.
+        $parked = new Customer(['company_id' => $this->tenant->id, 'name' => 'Υποκατάστημα', 'afm' => '801280908', 'is_active' => true]);
+        $parked->afm_key_parked = true;
+        $parked->save();
+
+        $this->assertTrue($parked->refresh()->afm_key_parked, 'the twin stays parked while the ΑΦΜ still collides');
+        $this->assertFalse($kept->refresh()->afm_key_parked);
+
+        Livewire::test(ListCustomers::class)
+            ->loadTable()
+            ->filterTable('afm_key_parked', true)
+            ->assertCanSeeTableRecords([$parked])
+            ->assertCanNotSeeTableRecords([$kept]);
+    }
+
     public function test_balance_column_is_sortable_without_sql_error(): void
     {
         $this->debtor();
