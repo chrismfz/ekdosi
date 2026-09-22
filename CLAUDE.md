@@ -75,9 +75,8 @@ cutover.
 > the `ekdosi.fbk` gbak and the archived WHMCS plugins now live **only in an offline backup** — its
 > job (understanding the legacy math + one-time ETL) is done. References below to `FAddInvoice.cpp`
 > etc. describe *where the ported logic came from*, not in-repo files. **NOTE:** deleting the folder
-> does NOT purge it from git history — the secrets are still in old commits until a history rewrite,
-> and the exposed credentials must be ROTATED regardless (`docs/BACKLOG.md` → Security/ops «Legacy
-> secrets στο git history»).
+> does NOT purge it from git history on its own — **done (2026-09): the exposed credentials were
+> rotated and the git history was cleaned.**
 
 ## Architectural decisions (do not re-litigate without reason)
 - **Multi-tenant, not per-DB.** Superset: can deploy per-DB later; reverse can't.

@@ -278,14 +278,17 @@ contract (they're `terminal` / `request_to_pay` capabilities).
 
 ---
 
-## 10. Eurobank vPOS — sandbox verification runbook
+## 10. Eurobank vPOS — return verification runbook
 
-Ανοιχτό: επιβεβαίωση `RETURN_FIELD_ORDER`, echo του `currency`, `txId` (όχι μόνο `paymentRef`) και μοναδικότητα
-`txId` ανά merchant (αν μείνει ασαφής → N-day window στο `transactionAlreadySettled()`). Item στο `docs/BACKLOG.md`
-(Payments).
+**Επαληθεύτηκε σε production** (myip, `payment_intents` #5, 2026-09-20 03:02, €1.00): το return πέρασε την
+canonical επαλήθευση digest (#607 — άγνωστο πεδίο ή λάθος σειρά θα το είχαν απορρίψει), έφερε `currency`
+(υποχρεωτικό pin, #608) και `txId` 12ψήφιο (`320281706477` — από `txId`/`transactionId`, όχι `paymentRef`).
+Η μοναδικότητα `txId` θεωρείται δεδομένη (αύξων μετρητής: `320255868967` στις 09-06 → `320281706477` στις 09-20)·
+αν ποτέ φανεί ψευδές `duplicate_transaction` → N-day window στο `transactionAlreadySettled()`.
+Το runbook παρακάτω μένει για διάγνωση αν αλλάξει κάτι στο πρωτόκολλο της τράπεζας.
 
-**RUNBOOK — μία sandbox χρέωση απαντά και στα τρία.** Κάνε μία πληρωμή από την πύλη
-(`/user/pay/{customer}`) με `testmode` ενεργό.
+**RUNBOOK — μία χρέωση απαντά και στα τρία.** Κάνε μία πληρωμή από την πύλη
+(`/user/pay/{customer}`) — sandbox (`testmode`) ή μια μικρή πραγματική.
 
 **Από το panel (χωρίς SSH):** «Log πύλης» → «Λεπτομέρειες» στη γραμμή της συναλλαγής. Δείχνει τη
 σειρά πεδίων της τράπεζας δίπλα σε αυτή που περιμέναμε, μαρκάρει ό,τι δεν αναγνωρίσαμε, και σε

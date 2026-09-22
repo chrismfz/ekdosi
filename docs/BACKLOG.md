@@ -13,8 +13,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 Ο κανόνας της σειράς: **η προτεραιότητα ενός finding δεν είναι ιδιότητά του — είναι finding × αυτή η επιχείρηση ×
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
-1. **Τώρα (δικά τους PRs):** `TRUSTED_PROXIES` + `trustHosts()` hardening (→ Security/ops) · Eurobank vPOS sandbox
-   επιβεβαίωση — θέλει τον owner (→ Payments).
+1. **Τώρα (δικό του PR):** `TRUSTED_PROXIES` + `trustHosts()` hardening (→ Security/ops).
 2. **Delivery notes (ΔΑ)** — inbound inbox **4b**, μετά πλήρη **9.1 / 9.2**.
 3. **Migration / money tooling:** Generic CSV importer → Bank-statement import → Dunning ladder → Cashflow /
    recurring-expenses (accountant-gated).
@@ -30,9 +29,6 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 ## 🗺️ Roadmap
 
 ### 🔐 Security / ops
-- **Legacy secrets στο git history** — τα `.dfm`/`.cfg` του παλιού `/legacy/` (αφαιρέθηκε 2026-09-06) είχαν
-  hardcoded DB/SMTP/CS-Cart passwords· μένουν στα παλιά commits. **Rotation των exposed credentials** (αν δεν έχει
-  γίνει) + προαιρετικά history rewrite (`git filter-repo`). Θέλει τον owner.
 - **`TRUSTED_PROXIES` + Host pinning (planned as its own PR).** Το `bootstrap/app.php` διαβάζει `env()` μέσα στο
   `withMiddleware` → αγνοείται όταν είναι set μόνο στο `.env` (verified). Fix = `config/trustedproxy.php` + keyword
   `local` (loopback + `SERVER_ADDR`) + trust μόνο `X-Forwarded-For/Proto/Port`· μαζί με `trustHosts()` (το Host header
@@ -40,10 +36,6 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   webhooks) που αλλιώς κλειδώνουν στο edge IP πίσω από CDN.
 
 ### 💳 Payments / money
-- **Eurobank vPOS — επιβεβαίωση σε ΜΙΑ sandbox συναλλαγή (θέλει τον owner).** Επιβεβαίωσε `RETURN_FIELD_ORDER`,
-  echo του `currency`, `txId` (όχι μόνο `paymentRef`) και μοναδικότητα `txId` ανά merchant (diagnostics στο «Log
-  πύλης»)· αν η μοναδικότητα μείνει ασαφής → N-day window στο `transactionAlreadySettled()`. Runbook →
-  `docs/payment-gateways-design.md`.
 - **POS-1(c) — πραγματική POS διασύνδεση (ν.5073/2023).** Σύλληψη `ProvidersSignature` + `tid` + `transactionId` από το
   Cardlink/Eurobank vPOS return → πέρασμα σε `InvoSignDocument`/`AadeInvoiceDocument` ώστε να φιλάρει το type-7.
   Μέχρι τότε card/vPOS/PayPal → §8.12 **1**, 3, 6 ή 8.
@@ -176,6 +168,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Gapless-at-send ΑΑ:** `release()` μόνο τον αριθμό που κράτησε ΑΥΤΟ το submit· gapless μόνο υπό serial issuance (ok στα ~70 docs/μήνα).
 
 **Money / payments / portal**
+- **Eurobank vPOS return = επαληθευμένο σε production** (myip, intent #5, 2026-09-20: canonical digest ✓, `currency` ✓, 12ψήφιο `txId` ✓)· η μοναδικότητα `txId` θεωρείται δεδομένη (αύξων μετρητής Cardlink) → αν ποτέ εμφανιστεί ψευδές `duplicate_transaction`, N-day window στο `transactionAlreadySettled()`.
 - **Payment intents: το expiry ΠΟΤΕ δεν μπλοκάρει settle** (money > tidiness)· expiry = housekeeping/badge μόνο.
 - **B1 declined:** κανένα auto-cancel intent σε FAILED/CANCELLED return (retry-CAPTURE στο ίδιο orderid) · δύο `connectionFor()` loaders σκόπιμα (portal refuses inactive, return `withTrashed`).
 - **Gateway config keys μοιράζονται ένα `statePath('config')`** → namespace (`config.eurobank.testmode`) ΠΡΙΝ το B2 PayPal/Stripe.
@@ -186,6 +179,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Octane readiness:** `SetPortalLocale` χωρίς locale reset + `View::share('portalCompany')` worker-global → θα διέρρεαν μεταξύ requests/tenants· fix πριν πάμε Octane (FPM = non-issue).
 
 **Security / tenancy / secrets**
+- **Legacy secrets (`/legacy/` .dfm/.cfg) — κλειστό:** τα credentials άλλαξαν και το git history καθαρίστηκε (2026-09).
 - **Strict tenant scope (null→throw) — deferred:** audit 0 leaks σε ~54 entry points· το no-op default είναι load-bearing (`CLAUDE.md`).
 - **Secrets μένουν super_admin**· `CompanySettings` = SAFE whitelisted subset — μην μεταφέρεις credentials μαζικά στον company_admin.
 - **Declined:** tenant-slug existence oracle (404 vs 401) στο `issued-doc-pdf` — συνεπές με τα sibling webhooks, τα slugs δεν είναι μυστικά.
