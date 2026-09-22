@@ -75,8 +75,8 @@ cutover.
 > the `ekdosi.fbk` gbak and the archived WHMCS plugins now live **only in an offline backup** — its
 > job (understanding the legacy math + one-time ETL) is done. References below to `FAddInvoice.cpp`
 > etc. describe *where the ported logic came from*, not in-repo files. **NOTE:** deleting the folder
-> does NOT purge it from git history — the secrets are still in old commits until a history rewrite,
-> and the exposed credentials must be ROTATED regardless (see the security note in `docs/BACKLOG.md`).
+> does NOT purge it from git history on its own — **done (2026-09): the exposed credentials were
+> rotated and the git history was cleaned.**
 
 ## Architectural decisions (do not re-litigate without reason)
 - **Multi-tenant, not per-DB.** Superset: can deploy per-DB later; reverse can't.
@@ -130,7 +130,7 @@ cutover.
     route group they inherit `ResolvePortalHost`+`SetPortalLocale` automatically; a customer-facing
     route **outside** that group must add those middlewares. So a future Cart / registration page /
     new παραστατικό ships bilingual **from day one** — add its strings to `lang/`, never inline Greek.
-  Full model: `docs/BACKLOG.md #1a/#1c`, `PLAN.md §6.5`.
+  Full model: `PLAN.md §6.5`.
 - **VAT seeding = mainland only.** `MyDataLookupSeeder` seeds 24/13/6 (+ one reasoned 0%); the
   island 17/9/4 and ν.5057 rates are deliberately not seeded (all tenants mainland) — the codes
   still live in `Codes::VAT_CATEGORY_RATES`, add by hand if ever needed.
@@ -157,12 +157,14 @@ Every change ends with a **whole-PR adversarial review** (`/code-review`, high e
   P0/P1 findings»**, NOT «zero findings» — an adversarial reviewer always finds *something*.
 - **Triage + cap the rounds per priority:** **P0** (data loss / legal-document / tenant-leak /
   money wrong) → fix, up to **3** rounds; **P1** (real bug an operator hits) → fix, up to **2**;
-  **P2** (edge case, cleanup, perf on data we don't have, docs) → **1** round, then **surviving
-  P2s go to `docs/BACKLOG.md` explicitly** — never silently dropped. Don't spend a P0-loop on a P2.
+  **P2** (edge case, cleanup, perf on data we don't have, docs) → **1** round, then a surviving P2
+  goes to `docs/BACKLOG.md` **only if it's costly to rediscover** (a real design gap, a legal/money
+  trap, needs the owner/an external party). Small ones stay in the commit message / PR body — if one
+  bites later we find it with logs, repro, MCP. Keep the backlog lean. Don't spend a P0-loop on a P2.
 - **"I fixed the findings" ≠ "the review passed."** Say which commit was reviewed, how many
   findings came back, and whether the post-fix state was re-checked.
-- **Every finding gets an explicit disposition** — fixed, or consciously deferred with a reason in
-  `docs/BACKLOG.md`. Declining (with the reason at the call site) is legitimate, not a dodge.
+- **Every finding gets an explicit disposition** — fixed, deferred (reason in the commit/PR; costly
+  ones in `docs/BACKLOG.md`), or declined with the reason at the call site — legitimate, not a dodge.
 - **Sanity-check a fix against real values** (a cheap `php -r` probe beats a plausible diff) and
   **run the full suite before every commit** (it catches regressions the reviewer didn't see).
 - **Don't let a fix widen into a new regression — check BOTH directions**, and **fix at the ROOT,
@@ -357,8 +359,8 @@ WHMCS-side plugin. Full feature list `FEATURES.md §11`; third-party design
   reimplementation, not a risky port.
 
 ## Known latent items + key tenant-safety behaviors
-Open items → `docs/BACKLOG.md` (tech-debt section); the «why» → `docs/CLAUDE-history.md`. The
-behaviors below are how the system actually works:
+Open items → `docs/BACKLOG.md` (roadmap; decided-don't-reopen → «Guardrails»); the «why» →
+`docs/CLAUDE-history.md`. The behaviors below are how the system actually works:
 - **Global `BelongsToCompany`/`CompanyScope` (no-op mode).** Tenant-owned models carry a
   `CompanyScope` driven by the ambient `CompanyContext` singleton (Filament sets it on `TenantSet`),
   so raw `Invoice::where(...)` in the panel auto-filters. **No-op when no context** (CLI/queue) →
@@ -368,8 +370,8 @@ behaviors below are how the system actually works:
   sweep → `->withoutGlobalScope(CompanyScope::class)` to DECLARE the intent. A full audit (2026-06-11)
   found **0 live leaks** across ~54 entry points, so the no-op default is load-bearing AND correct.
   Strict null→throw stays deferred — naive flip breaks ~18 safe explicit-where paths, and an
-  execution-time tripwire false-positives on relation/eager-load FK queries (full note:
-  `docs/BACKLOG.md` tech-debt «Strict tenant scope»).
+  execution-time tripwire false-positives on relation/eager-load FK queries (guardrail in
+  `docs/BACKLOG.md`; full original note: `git show 631078d:docs/BACKLOG.md` «Strict tenant scope»).
 - **Activity log** (`TracksActivity` on Invoice/Customer/Payment): `logOnly(loggedAttributes())` —
   business columns only, NEVER the money/myDATA CACHE columns; `logOnlyDirty()` +
   `dontLogEmptyChanges()`. v5 stores the diff in **`attribute_changes`** (not `properties`); causer
@@ -382,8 +384,9 @@ behaviors below are how the system actually works:
   mass-assign); credential/infra knobs stay on the super_admin-only CompanyResource. New page perm →
   `shield:generate` + re-provision post-deploy.
 - **GuardedDeleteAction** ✅ blocks deleting an in-use lookup (single-record, withTrashed-aware);
-  bulk/force-delete still unguarded → BACKLOG. `TenantScopedUnique` = non-issue (DB has the
-  `unique(company_id,…)` constraints).
+  **customers**' permanent delete is guarded in the model (`Customer::hardDeleteBlockers()`, every
+  path) + the bulk «Οριστική διαγραφή» skips in-use rows; other resources' bulk/force-delete
+  unguarded. `TenantScopedUnique` = non-issue (DB has the `unique(company_id,…)` constraints).
 - **Gotchas:** ETL re-run re-applies legacy values to a soft-deleted row (deleted_at stays —
   force-delete to truly drop). Row-lock tests (`InvoiceNumberer`, `InvoiceBalance::recompute`) are
   MariaDB-only (can't run on sqlite/CI).

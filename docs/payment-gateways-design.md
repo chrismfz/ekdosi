@@ -275,3 +275,45 @@ contract (they're `terminal` / `request_to_pay` capabilities).
 - Per-tenant single vs many connections per gateway (a company with two Stripe
   accounts?) — the row model already allows many; UI decides when it's real.
 - Prepaid credit: cap / expiry / refundability policy (operator decision).
+
+---
+
+## 10. Eurobank vPOS — return verification runbook
+
+**Επαληθεύτηκε σε production** (myip, `payment_intents` #5, 2026-09-20 03:02, €1.00): το return πέρασε την
+canonical επαλήθευση digest (#607 — άγνωστο πεδίο ή λάθος σειρά θα το είχαν απορρίψει), έφερε `currency`
+(υποχρεωτικό pin, #608) και `txId` 12ψήφιο (`320281706477` — από `txId`/`transactionId`, όχι `paymentRef`).
+Η μοναδικότητα `txId` θεωρείται δεδομένη (αύξων μετρητής: `320255868967` στις 09-06 → `320281706477` στις 09-20)·
+αν ποτέ φανεί ψευδές `duplicate_transaction` → N-day window στο `transactionAlreadySettled()`.
+Το runbook παρακάτω μένει για διάγνωση αν αλλάξει κάτι στο πρωτόκολλο της τράπεζας.
+
+**RUNBOOK — μία χρέωση απαντά και στα τρία.** Κάνε μία πληρωμή από την πύλη
+(`/user/pay/{customer}`) — sandbox (`testmode`) ή μια μικρή πραγματική.
+
+**Από το panel (χωρίς SSH):** «Log πύλης» → «Λεπτομέρειες» στη γραμμή της συναλλαγής. Δείχνει τη
+σειρά πεδίων της τράπεζας δίπλα σε αυτή που περιμέναμε, μαρκάρει ό,τι δεν αναγνωρίσαμε, και σε
+αποτυχία υπογραφής λέει αν φταίει η σειρά ή το shared secret. Το φίλτρο «Διάγνωση» απομονώνει τα
+πρωτοκολλικά προβλήματα.
+
+**Από το shell** (ίδια πληροφορία):
+```bash
+grep -E 'eurobank\.return\.(fields|unknown_fields|digest_mismatch)' storage/logs/laravel.log | tail -5
+```
+Διάβασέ το έτσι:
+- **Μόνο `eurobank.return.fields` + το intent έγινε settled** → όλα σωστά. Σύγκρινε το `posted_order`
+  με το `RETURN_FIELD_ORDER`· αν ταυτίζονται, το gate έκλεισε. Τσέκαρε ότι στη λίστα υπάρχουν
+  **`currency`** (είναι υποχρεωτικό) και **`txId`** (αν λείπει και υπάρχει μόνο `paymentRef`, βλ. πιο
+  κάτω).
+- **`unknown_fields`** → το log ονομάζει ακριβώς το πεδίο που λείπει από τη λίστα· πρόσθεσέ το στο
+  `RETURN_FIELD_ORDER` στη θέση που δείχνει το `posted_order`.
+- **`digest_mismatch` με `received_order_matches: true`** → το shared secret είναι **σωστό**, μόνο η
+  σειρά μας είναι λάθος. Αντέγραψε το `posted_order` αυτούσιο στο `RETURN_FIELD_ORDER`.
+- **`digest_mismatch` με `received_order_matches: false`** → δεν είναι θέμα σειράς· κοίτα πρώτα το
+  shared secret της σύνδεσης.
+
+Το `eurobank.return.fields` γράφεται σε **κάθε** return — επιτυχία, αποτυχία, ακόμη και όταν το
+`orderid` δεν αντιστοιχεί σε intent — και περιέχει **μόνο ονόματα πεδίων, ποτέ τιμές**.
+**Ιστορικό:** τα δύο πειράματα της 2026-09-06 (`payment_intents` #1/#2, co=4) ΔΕΝ είναι ανακτήσιμα —
+το «Log πύλης» δεν υπήρχε ακόμα, το `laravel.log` έχει rotate-αριστεί και τα nginx logs ξεκινούν
+2026-09-10. Ό,τι επιβιώνει: το return επαληθεύτηκε (`settled_by=webhook:eurobank`) και έφερε
+transaction id `320255868967` (12ψήφιος — μορφή `txId` της Cardlink).

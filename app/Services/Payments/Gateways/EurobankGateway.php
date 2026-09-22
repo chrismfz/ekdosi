@@ -81,18 +81,18 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
      * donate bytes; `orderAmount` is likewise boxed in between `status` and
      * `currency`.
      *
-     * ⚠ UNVALIDATED AGAINST A LIVE RETURN. This list is derived from the vPOS
-     * request fields + the documented response shape; no captured production return
-     * has been checked against it. If the acquirer posts a field we don't list (an
-     * `authCode`, an `eci`/`xid`, an echoed `lang`) or omits one, verification fails
-     * and EVERY capture is refused — the bank charges the customer and ekdosi
-     * records nothing.
+     * Validated against a live production return (myip, payment intent #5,
+     * 2026-09-20): it settled through this canonical rebuild with `currency` and a
+     * `txId` present. Derived from the vPOS request fields + the documented response
+     * shape; if the acquirer ever starts posting a field we don't list (an
+     * `authCode`, an `eci`/`xid`, an echoed `lang`), verification fails and EVERY
+     * capture is refused — the bank charges the customer and ekdosi records nothing.
      *
      * It is FAIL-CLOSED and LOUD on purpose: a mismatch logs the posted key order
      * (`eurobank.return.digest_mismatch` / `eurobank.return.unknown_fields`), writes
      * a «Log πύλης» row, and rings the operators' bell (see
-     * EurobankReturnController::reject()). Confirm this list against ONE real
-     * sandbox capture before going live — the log line hands you the exact order.
+     * EurobankReturnController::reject()). The log line hands you the exact order —
+     * runbook in docs/payment-gateways-design.md §10.
      */
     private const RETURN_FIELD_ORDER = [
         'version', 'mid', 'orderid', 'status', 'orderAmount', 'currency',
@@ -230,9 +230,8 @@ class EurobankGateway implements HasSecretConfig, HostedRedirectGateway, Payment
         parse_str($request->getContent(), $fields);
 
         // Record the acquirer's actual field NAMES + order on EVERY return, success
-        // or failure. RETURN_FIELD_ORDER is derived from documentation, not from a
-        // captured production return, and this is the line that settles the question
-        // from the first real transaction instead of only when something breaks.
+        // or failure, so protocol drift shows up from the first affected transaction
+        // instead of only when something breaks.
         // Keys only — never the values, which carry the customer's order data.
         // Computed ONCE, before anything reads it — every branch below reports it.
         $posted = array_diff_key($fields, array_flip(self::DIGEST_EXCLUDED));

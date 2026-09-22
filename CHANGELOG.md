@@ -464,6 +464,11 @@ from `[Unreleased]`; `--major` explicit for milestones).
   χαλάει τη στοίχιση. Ώστε ο χειριστής να βλέπει «τι στέλνω / αν έχω λάθος» με μια ματιά.
 
 ### Changed
+- **Docs: `docs/BACKLOG.md` κλαδεύτηκε 2280→212 γραμμές** — έμειναν μόνο το roadmap, τα guardrails («αποφασισμένα,
+  μην τα ξανανοίξεις») και το docs index· done/μικρά items αφαιρέθηκαν (η παλιά έκδοση: `git show 631078d:docs/BACKLOG.md`).
+  Νέος κανόνας στο `CLAUDE.md`: στο backlog πάνε μόνο P2 «ακριβά στην επανανακάλυψη»· τα μικρά μένουν στο commit/PR.
+  Το Eurobank runbook μεταφέρθηκε στο `docs/payment-gateways-design.md §10`· το vPOS return καταγράφεται ως
+  **επαληθευμένο σε production** (myip, intent #5, 2026-09-20). Κλειστό και το legacy-secrets (rotation + καθαρό history).
 - **Αντιστοίχιση WHMCS → κατηγορία εσόδων: προειδοποίηση αντί για σιωπηλή απόρριψη.** Αν ο χειριστής όριζε
   «Κατηγορία ekdosi» αλλά άφηνε τη §8.6 κενή, η επιλογή κατηγορίας **χανόταν σιωπηλά** (δεν υπάρχει γραμμή
   χωρίς §8.6 — `income_class_category` NOT NULL) και οι γραμμές της ομάδας ανέβαιναν στα «Αταξινόμητα». Πλέον
