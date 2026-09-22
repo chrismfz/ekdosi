@@ -13,6 +13,7 @@ use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Spatie\Permission\PermissionRegistrar;
 
@@ -23,7 +24,7 @@ use Spatie\Permission\PermissionRegistrar;
  */
 final class ReminderRunner
 {
-    /** A row stuck in «sending» this long was interrupted mid-send. */
+    /** A row stuck in «sending» (or «queued») this long was interrupted / lost. */
     private const STALE_SENDING_MINUTES = 30;
 
     public function __construct(private readonly ReminderPlanner $planner) {}
@@ -52,8 +53,17 @@ final class ReminderRunner
         }
 
         $auto = $settings->mode === ReminderSettings::MODE_AUTO;
+        // A document with a reminder mid-send waits for tomorrow — it can't be
+        // superseded in flight, and the customer must not get two at once.
+        $inFlight = InvoiceReminder::query()->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $company->getKey())
+            ->where('status', InvoiceReminder::STATUS_SENDING)
+            ->pluck('invoice_id')->flip();
         $created = 0;
         foreach ($planned as $p) {
+            if ($inFlight->has($p['invoice']->getKey())) {
+                continue;
+            }
             try {
                 $row = InvoiceReminder::create([
                     'company_id' => $company->getKey(),
@@ -112,6 +122,17 @@ final class ReminderRunner
             }
         }
 
+        // Queued long ago but never picked up (a lost job, a restored bundle): hand
+        // it to the sender again — the claim makes an extra dispatch harmless.
+        $stale = $rows()->where('status', InvoiceReminder::STATUS_QUEUED)
+            ->where('updated_at', '<', now()->subMinutes(self::STALE_SENDING_MINUTES))
+            ->pluck('id');
+        foreach ($stale as $id) {
+            if ($rows()->whereKey($id)->where('status', InvoiceReminder::STATUS_QUEUED)->update(['updated_at' => now()]) > 0) {
+                SendInvoiceReminder::dispatch($id);
+            }
+        }
+
         return $cancelled;
     }
 
@@ -130,20 +151,27 @@ final class ReminderRunner
             ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_FAILED])
             ->update([
                 'status' => InvoiceReminder::STATUS_CANCELLED,
-                'auto_stage' => null,
                 'reason' => 'Αντικαταστάθηκε από «'.(InvoiceReminder::STAGE_LABELS[$row->stage] ?? $row->stage).'».',
                 'updated_at' => now(),
             ]);
     }
 
-    /** Cancel only if still waiting (an operator may have sent it meanwhile). */
+    /**
+     * Cancel only if still waiting (an operator may have sent it meanwhile); the
+     * stage is released only if it was never attempted (see InvoiceReminder).
+     */
     private function cancel(InvoiceReminder $row, string $reason): bool
     {
         return InvoiceReminder::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->whereKey($row->getKey())
             ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED])
-            ->update(['status' => InvoiceReminder::STATUS_CANCELLED, 'auto_stage' => null, 'reason' => $reason, 'updated_at' => now()]) > 0;
+            ->update([
+                'status' => InvoiceReminder::STATUS_CANCELLED,
+                'auto_stage' => DB::raw('CASE WHEN attempts = 0 THEN NULL ELSE auto_stage END'),
+                'reason' => $reason,
+                'updated_at' => now(),
+            ]) > 0;
     }
 
     private function notifyOperators(Company $company, int $count): void

@@ -15,11 +15,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *   awaiting_approval → skipped    (operator «Παράλειψη»)
  *   awaiting_approval | queued → cancelled   (paid / opted out / superseded before it went)
  *
- * A failed reminder can be sent again from the «Υπενθυμίσεις» page. A CANCELLED
- * row releases its `auto_stage` (set to NULL; `stage` keeps the label), so the
- * stage can be planned again if the document qualifies again (reminders back on,
- * an email added, a payment reversed) — only what went out, or was deliberately
- * skipped, counts as «done».
+ * A failed reminder can be sent again from the «Υπενθυμίσεις» page. A row
+ * CANCELLED before any send attempt (`attempts` = 0) releases its `auto_stage`
+ * (NULL; `stage` keeps the label), so the stage can be planned again if the
+ * document qualifies again (reminders back on, an email added, a payment
+ * reversed). A row that was ever attempted keeps it — it may have arrived, and
+ * the customer must never get the same stage twice. A superseded row keeps it
+ * too (the later stage outranks it anyway).
  */
 class InvoiceReminder extends Model
 {
@@ -78,7 +80,7 @@ class InvoiceReminder extends Model
     protected $fillable = [
         'company_id', 'invoice_id', 'customer_id', 'stage', 'auto_stage', 'document_kind',
         'due_date', 'days_overdue', 'balance', 'status', 'reason', 'recipient', 'subject',
-        'error_message', 'trigger', 'triggered_by_user_id', 'sent_at',
+        'error_message', 'trigger', 'triggered_by_user_id', 'sent_at', 'attempts',
     ];
 
     protected function casts(): array
@@ -86,6 +88,7 @@ class InvoiceReminder extends Model
         return [
             'due_date' => 'date',
             'days_overdue' => 'integer',
+            'attempts' => 'integer',
             'balance' => 'decimal:2',
             'sent_at' => 'datetime',
         ];

@@ -54,10 +54,14 @@ final class ReminderSettings
         );
     }
 
-    /** The operator writes the overrides in the tenant's language (el unless it is English-first). */
+    /**
+     * The language the operator writes the overrides in: the tenant's email
+     * language — bilingual collapses to English, as it does for every customer
+     * email (CustomerLanguage::forDocumentMail).
+     */
     public static function templateLocaleOf(Company $company): string
     {
-        return $company->default_language === 'en' ? 'en' : 'el';
+        return in_array($company->default_language, ['en', 'both'], true) ? 'en' : 'el';
     }
 
     /**

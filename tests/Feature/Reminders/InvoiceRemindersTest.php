@@ -103,6 +103,7 @@ class InvoiceRemindersTest extends TestCase
         $this->assertNull(ReminderPlanner::stageFor($stages, 5, ['first']), 'already had the 1st');
         $this->assertSame('final', ReminderPlanner::stageFor($stages, 25, []), 'after downtime: only the highest reached, not all three');
         $this->assertNull(ReminderPlanner::stageFor($stages, 12, ['final']), 'never step back to the 2nd');
+        $this->assertNull(ReminderPlanner::stageFor(['first' => 3, 'second' => 10], 25, ['final']), 'a final that went out still outranks the 2nd after «final» is switched off');
     }
 
     public function test_only_our_unpaid_credit_term_invoices_and_offered_proformas_are_planned(): void
@@ -343,6 +344,53 @@ class InvoiceRemindersTest extends TestCase
         $this->assertSame(1, InvoiceReminder::where('invoice_id', $later->id)->count());
     }
 
+    public function test_a_possibly_delivered_stage_is_never_planned_again(): void
+    {
+        $inv = $this->invoice(34);
+        // The worker died mid-send: tidy turned it into «failed — check if it arrived».
+        $row = InvoiceReminder::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id, 'customer_id' => $this->customer->id,
+            'stage' => 'first', 'auto_stage' => 'first', 'document_kind' => 'invoice', 'balance' => 124,
+            'status' => InvoiceReminder::STATUS_FAILED, 'trigger' => 'auto', 'attempts' => 1,
+        ]);
+        $payment = Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $inv->id,
+            'kind' => 'payment', 'amount' => 124, 'pay_date' => now()]);
+        app(ReminderSender::class)->send($row->id);   // «Ξανά αποστολή» → paid → cancelled
+        $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $row->fresh()->status);
+        $this->assertSame('first', $row->fresh()->auto_stage, 'an attempted stage keeps its slot');
+
+        $payment->delete();   // the payment was a mistake
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+
+        $this->assertSame(1, InvoiceReminder::where('invoice_id', $inv->id)->count(), 'the 1st is not planned a second time');
+        Mail::assertNothingSent();
+    }
+
+    public function test_a_queued_reminder_whose_job_was_lost_is_handed_to_the_sender_again(): void
+    {
+        $inv = $this->invoice(34);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        $row = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+        InvoiceReminder::whereKey($row->id)->update(['status' => InvoiceReminder::STATUS_QUEUED, 'updated_at' => now()->subHours(2)]);
+
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+
+        $this->assertSame(InvoiceReminder::STATUS_SENT, $row->fresh()->status);
+        Mail::assertSentCount(1);
+    }
+
+    public function test_no_new_stage_is_recorded_while_one_is_mid_send(): void
+    {
+        $inv = $this->invoice(34);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        InvoiceReminder::where('invoice_id', $inv->id)->update(['status' => InvoiceReminder::STATUS_SENDING, 'updated_at' => now()]);
+
+        $r = app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today()->addDays(7));
+
+        $this->assertSame(0, $r['created'], 'the 2nd waits for tomorrow');
+        $this->assertSame(1, InvoiceReminder::where('invoice_id', $inv->id)->count());
+    }
+
     public function test_auto_mode_sends_straight_away(): void
     {
         $this->tenant->update(['reminders_mode' => 'auto']);
@@ -439,6 +487,10 @@ class InvoiceRemindersTest extends TestCase
         $english = app(ReminderMessage::class)->build($inv, 'first', $due, 4, 124.0, ReminderSettings::for($this->tenant->fresh()), 'en');
         $this->assertStringNotContainsString('Οφειλή', $english['subject'], 'a Greek override never reaches an English-language customer');
         $this->assertStringContainsString($inv->invcode, $english['subject']);
+
+        // A bilingual tenant writes for its email language — English, as every customer email collapses to.
+        $this->tenant->update(['default_language' => 'both']);
+        $this->assertSame('en', ReminderSettings::templateLocaleOf($this->tenant->fresh()));
     }
 
     public function test_the_pay_link_goes_only_to_customers_who_can_use_the_portal(): void

@@ -258,7 +258,11 @@ final class ReminderPlanner
         }
 
         // A later stage already went out (settings changed since) — don't step back.
-        $order = array_keys($stages);
+        // The FIXED ladder order, not just the configured stages: a stage switched
+        // off after it went out still outranks the ones below it (same order the
+        // send-time check uses — they must agree, or a row is planned then refused
+        // every day).
+        $order = InvoiceReminder::AUTO_STAGES;
         foreach ($done as $sent) {
             $sentAt = array_search($sent, $order, true);
             if ($sentAt !== false && $sentAt > array_search($reached, $order, true)) {

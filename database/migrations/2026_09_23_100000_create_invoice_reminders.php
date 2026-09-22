@@ -51,6 +51,9 @@ return new class extends Migration
             $table->string('subject', 500)->nullable();
             $table->text('error_message')->nullable();
             $table->string('trigger', 10)->default('auto');   // auto | manual
+            // Send attempts (claims). >0 = it may have reached the customer, so a
+            // later cancel keeps its auto_stage (never re-planned → never twice).
+            $table->unsignedSmallInteger('attempts')->default(0);
             $table->foreignId('triggered_by_user_id')->nullable()->constrained('users')->nullOnDelete();
             $table->timestamp('sent_at')->nullable();
             $table->timestamps();

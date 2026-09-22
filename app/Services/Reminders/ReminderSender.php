@@ -11,6 +11,7 @@ use App\Services\InvoicePdfRenderer;
 use App\Services\TenantMailerFactory;
 use App\Support\CustomerLanguage;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
@@ -36,7 +37,7 @@ final class ReminderSender
 
         $claimed = $rows()
             ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_FAILED])
-            ->update(['status' => InvoiceReminder::STATUS_SENDING, 'error_message' => null, 'updated_at' => now()]);
+            ->update(['status' => InvoiceReminder::STATUS_SENDING, 'error_message' => null, 'attempts' => DB::raw('attempts + 1'), 'updated_at' => now()]);
 
         $row = $rows()->first();
         if ($claimed === 0 || $row === null) {
@@ -51,7 +52,9 @@ final class ReminderSender
 
         $settings = ReminderSettings::for($invoice?->company ?? $row->company);
         if (($blocker = $this->planner->rowBlocker($row, $invoice, $settings)) !== null) {
-            return $this->finish($row, InvoiceReminder::STATUS_CANCELLED, reason: $blocker, extra: ['auto_stage' => null]);
+            // This claim sent nothing; release the stage only if no EARLIER attempt
+            // could have reached the customer.
+            return $this->finish($row, InvoiceReminder::STATUS_CANCELLED, reason: $blocker, extra: $row->attempts <= 1 ? ['auto_stage' => null] : []);
         }
 
         $recipient = (string) $invoice->customer->email;
