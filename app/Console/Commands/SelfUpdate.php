@@ -181,12 +181,14 @@ class SelfUpdate extends Command
             $this->gitFetch($run);
         });
 
-        // Needs the ref FETCHED (to know what it ships) and must run BEFORE
+        // Both need the ref FETCHED (to know what it ships) and must run BEFORE
         // maintenance, so an abort never strands the app down with no shell:
-        // refuse a checkout that would die on an environment-edited skip-worktree
-        // file, then copy aside anything the checkout would destroy.
+        // refuse a checkout that would die on an environment-edited flagged file,
+        // then copy aside anything the checkout would destroy.
+        $this->step($run, 'guard', 'Έλεγχος αρχείων περιβάλλοντος (skip-worktree)', function () use ($target) {
+            $this->assertSkipWorktreeSafe($target, $target);
+        });
         $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $target) {
-            $this->assertSkipWorktreeSafe($target);
             $this->protectUntracked($run, $target);
         });
 
@@ -328,8 +330,10 @@ class SelfUpdate extends Command
             throw new \RuntimeException('Άγνωστο target ref για την επαναφορά: '.$target);
         }
         $this->assertCleanTrackedTree('επαναφοράς');
+        $this->step($run, 'guard', 'Έλεγχος αρχείων περιβάλλοντος (skip-worktree)', function () use ($sha, $target) {
+            $this->assertSkipWorktreeSafe($sha, $target);
+        });
         $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $sha) {
-            $this->assertSkipWorktreeSafe($sha);
             $this->protectUntracked($run, $sha);
         });
 
@@ -487,22 +491,28 @@ class SelfUpdate extends Command
     }
 
     /**
-     * A skip-worktree file the host's environment edited (cPanel's MultiPHP
-     * rewrites public/.htaccess; deploy/update.sh flags it) makes `checkout
-     * --force` of a ref that CHANGES that file die with «Entry … not uptodate.
+     * A skip-worktree (S/s) or assume-unchanged (h) file — git ignores edits to
+     * both, so `status` stays clean — that the host's environment edited (cPanel's
+     * MultiPHP rewrites public/.htaccess; deploy/update.sh flags it) makes
+     * `checkout --force` of a ref that CHANGES it die with «Entry … not uptodate.
      * Cannot merge.» — after maintenance is already ON. Refuse up front instead,
-     * saying how to clear it. A flagged file nobody touched, or one the target
-     * leaves as it is, checks out fine. Same check as the two deploy scripts.
+     * saying how to clear it. A flagged file that is missing (the checkout just
+     * restores it), untouched, or left as it is by the target checks out fine.
+     * Same check as the two deploy scripts. $label = the ref the operator picked.
      */
-    private function assertSkipWorktreeSafe(string $target): void
+    private function assertSkipWorktreeSafe(string $target, string $label): void
     {
         foreach ($this->nulList(['git', 'ls-files', '-v', '-z']) as $entry) {
-            if (! preg_match('/^[Ss] (.+)$/s', $entry, $m)) {
-                continue;   // not skip-worktree
+            if (! preg_match('/^[Shs] (.+)$/s', $entry, $m)) {
+                continue;   // not flagged
             }
             $path = $m[1];
+            $abs = base_path($path);
+            if (! file_exists($abs) && ! is_link($abs)) {
+                continue;   // missing on disk — the checkout just restores it
+            }
             $indexed = trim($this->capture(['git', 'rev-parse', ':'.$path], base_path()));
-            if (is_file(base_path($path)) && trim($this->capture(['git', 'hash-object', '--', $path], base_path())) === $indexed) {
+            if (is_file($abs) && trim($this->capture(['git', 'hash-object', '--', $path], base_path())) === $indexed) {
                 continue;   // flagged but untouched — the checkout updates it normally
             }
             try {
@@ -515,9 +525,9 @@ class SelfUpdate extends Command
             }
 
             throw new \RuntimeException(
-                "Το {$target} αλλάζει το «{$path}», που το περιβάλλον του server έχει τροποποιήσει (skip-worktree) — "
+                "Το {$label} αλλάζει το «{$path}», που το περιβάλλον του server έχει τροποποιήσει (skip-worktree / assume-unchanged) — "
                 .'το checkout θα αποτύγχανε με την εφαρμογή ήδη σε maintenance. Δεν άλλαξε τίποτα. '
-                ."Στον server: κράτα αντίγραφο του αρχείου, `git update-index --no-skip-worktree {$path} && git checkout -- {$path}`, "
+                ."Στον server: κράτα αντίγραφο του αρχείου, `git update-index --no-skip-worktree --no-assume-unchanged {$path} && git checkout -- {$path}`, "
                 .'ξανά, και μετά επανέφερε την τροποποίηση του περιβάλλοντος (cPanel: ξανα-αποθήκευση του PHP handler).'
             );
         }
@@ -527,9 +537,10 @@ class SelfUpdate extends Command
      * `checkout --force` destroys, without a trace, anything on disk that git does
      * NOT track here — untracked OR gitignored — that collides with a path the
      * target ref tracks: the exact path, a directory standing where the target has
-     * a file (deleted with all its contents), or a file standing where the target
-     * has a directory. Copy all of those aside first (the panel operator has no
-     * shell to recover one), and abort rather than overwrite blind if a copy fails.
+     * a file (deleted with all its contents), or a file/symlink standing where the
+     * target has a directory. Copy all of those aside first (the panel operator has
+     * no shell to recover one), and abort rather than overwrite blind if a copy
+     * fails — removing the partial copies, so a refused run leaves none behind.
      * A generated artefact being replaced is exactly what should happen — the copy
      * just makes it visible. Two git calls whatever the tree size. Used by BOTH the
      * update and the rollback path; same algorithm as deploy/update.sh + rollback.sh.
@@ -549,19 +560,33 @@ class SelfUpdate extends Command
             if (isset($inIndex[$path])) {
                 continue;   // tracked here too: git holds both versions
             }
+            // A symlink or a file standing where the target has a directory: git
+            // replaces THAT entry and never looks past it — so it is what's at
+            // risk, not $path reached through it (a symlinked dir's contents live
+            // elsewhere and survive). The shallowest such ancestor is the one git meets.
+            $blocked = null;
+            for ($dir = dirname($path); $dir !== '.'; $dir = dirname($dir)) {
+                if (is_link($root.'/'.$dir) || is_file($root.'/'.$dir)) {
+                    $blocked = $dir;   // keep walking up: the shallowest wins
+                }
+            }
+            if ($blocked !== null) {
+                $flag($blocked);
+
+                continue;
+            }
             $abs = $root.'/'.$path;
             if (is_link($abs) || is_file($abs)) {
                 $flag($path);
             } elseif (is_dir($abs)) {
+                // A directory where the target has a file: git deletes it, contents
+                // and all. Links + regular files only (the walk never follows links):
+                // a FIFO/socket carries nothing to keep, and copying a FIFO blocks.
                 $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($abs, \FilesystemIterator::SKIP_DOTS));
                 foreach ($files as $file) {
-                    $flag(substr($file->getPathname(), strlen($root) + 1));
-                }
-            }
-            for ($dir = dirname($path); $dir !== '.'; $dir = dirname($dir)) {
-                $absDir = $root.'/'.$dir;
-                if (is_link($absDir) || (file_exists($absDir) && ! is_dir($absDir))) {
-                    $flag($dir);
+                    if ($file->isLink() || $file->isFile()) {
+                        $flag(substr($file->getPathname(), strlen($root) + 1));
+                    }
                 }
             }
         }
@@ -574,10 +599,17 @@ class SelfUpdate extends Command
         foreach (array_keys($atRisk) as $path) {
             $from = $root.'/'.$path;
             $to = $backup.'/'.$path;
-            File::ensureDirectoryExists(dirname($to));
-            $copied = is_link($from) ? @symlink((string) readlink($from), $to) : File::copy($from, $to);
+            try {
+                // @: Laravel turns a copy()/mkdir() warning into an exception, which
+                // would skip the cleanup below — treat any failure the same way.
+                File::ensureDirectoryExists(dirname($to));
+                $copied = is_link($from) ? @symlink((string) readlink($from), $to) : @copy($from, $to);
+            } catch (Throwable) {
+                $copied = false;
+            }
 
             if (! $copied) {
+                File::deleteDirectory($backup);   // a refused run leaves no copies behind
                 throw new \RuntimeException("Δεν μπόρεσα να κρατήσω αντίγραφο του '{$path}' στο {$backup} — ματαίωση πριν αντικατασταθεί.");
             }
 

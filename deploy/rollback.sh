@@ -100,16 +100,21 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   exit 1
 fi
 
-# Skip-worktree files the environment edited (the list above): if $REF changes one,
-# the forced checkout dies («Entry … not uptodate. Cannot merge.», exit 128) — with
-# the site already down. Refuse now instead. Same check as update.sh. (NUL lists
+# Flagged files — skip-worktree (the list above) or assume-unchanged: git ignores
+# edits to both, so the check above stays clean — that the environment edited: if
+# $REF changes one, the forced checkout dies («Entry … not uptodate. Cannot
+# merge.», exit 128) with the site already down. Refuse now instead; a missing,
+# untouched or unchanged-by-$REF file is fine. Same check as update.sh. (NUL lists
 # are read via temp files: CloudLinux CageFS has no /dev/fd, so process
 # substitution dies there.)
 _list="$(mktemp)"
 git ls-files -v -z > "$_list"
 while IFS= read -r -d '' _entry; do
-  [[ "$_entry" == [Ss]\ * ]] || continue
+  [[ "$_entry" == [Shs]\ * ]] || continue   # S/s = skip-worktree, h = assume-unchanged
   _f="${_entry:2}"
+  if [[ ! -e "$_f" && ! -L "$_f" ]]; then
+    continue   # missing on disk — the checkout just restores it
+  fi
   _indexed="$(git rev-parse ":$_f")"
   if [[ -f "$_f" && "$(git hash-object -- "$_f")" == "$_indexed" ]]; then
     continue   # flagged but untouched — the checkout updates it normally
@@ -117,8 +122,8 @@ while IFS= read -r -d '' _entry; do
   if [[ "$(git rev-parse --verify --quiet "${TARGET_SHA}:${_f}" || true)" == "$_indexed" ]]; then
     continue   # $REF leaves it as it is
   fi
-  echo "✗ $REF changes $_f, which this host's environment has edited (skip-worktree) — the checkout would fail with the site already down. Nothing was changed." >&2
-  echo "  Keep a copy of it, then: git update-index --no-skip-worktree $_f && git checkout -- $_f" >&2
+  echo "✗ $REF changes $_f, which this host's environment has edited (skip-worktree / assume-unchanged) — the checkout would fail with the site already down. Nothing was changed." >&2
+  echo "  Keep a copy of it, then: git update-index --no-skip-worktree --no-assume-unchanged $_f && git checkout -- $_f" >&2
   echo "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)." >&2
   rm -f "$_list"
   exit 1
@@ -145,17 +150,29 @@ while IFS= read -r -d '' p; do
   if [[ -n "${_in_index[$p]:-}" ]]; then
     continue   # tracked here too: git holds both versions
   fi
-  if [[ -L "$p" || -f "$p" ]]; then
-    _risk "$p"
-  elif [[ -d "$p" ]]; then
-    find "./$p" \( -type f -o -type l \) -print0 > "$_sub"
-    while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
-  fi
+  # A symlink or a file standing where it has a directory: git replaces THAT
+  # entry and never looks past it — so it is what's at risk, not $p reached
+  # through it (a symlinked dir's contents live elsewhere and survive). The
+  # shallowest such ancestor is the one git meets.
+  _blocked=""
   a="$p"
   while [[ "$a" == */* ]]; do
     a="${a%/*}"
-    if [[ -L "$a" ]] || { [[ -e "$a" ]] && [[ ! -d "$a" ]]; }; then _risk "$a"; fi
+    if [[ -L "$a" || -f "$a" ]]; then _blocked="$a"; fi
   done
+  if [[ -n "$_blocked" ]]; then
+    _risk "$_blocked"
+    continue
+  fi
+  if [[ -L "$p" || -f "$p" ]]; then
+    _risk "$p"
+  elif [[ -d "$p" ]]; then
+    # a directory where it has a file: git deletes it, contents and all (links
+    # and regular files only — `find` doesn't follow links, and a FIFO/socket
+    # carries nothing to keep)
+    find "./$p" \( -type f -o -type l \) -print0 > "$_sub"
+    while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
+  fi
 done < "$_list"
 rm -f "$_list" "$_sub"
 
@@ -163,7 +180,8 @@ if [[ ${#_at_risk[@]} -gt 0 ]]; then
   _backup="storage/app/deploy-untracked/$(date -u +%Y%m%d-%H%M%S)"
   for f in "${_at_risk[@]}"; do
     if ! mkdir -p -- "$_backup/$(dirname -- "$f")" || ! cp -pP -- "$f" "$_backup/$f"; then
-      echo "✗ Could not back up '$f' to $_backup — refusing to overwrite it. Nothing was changed." >&2
+      rm -rf -- "$_backup"   # a refused run leaves no copies behind
+      echo "✗ Could not back up '$f' — refusing to overwrite it. Nothing was changed." >&2
       exit 1
     fi
     echo "  copied aside: $f → $_backup/$f"

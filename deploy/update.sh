@@ -224,19 +224,24 @@ if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
   log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
 fi
 
-# --- safety: an environment-edited skip-worktree file the release changes ----
-# (the ENV_MANAGED_FILES above). The forced checkout would die on it («Entry …
-# not uptodate. Cannot merge.», exit 128) AFTER maintenance ON — the HARD
-# PRE-STEP described there. Refuse now instead, while nothing has changed. A
-# flagged file nobody touched, or one the release leaves as it is, is fine.
+# --- safety: an environment-edited flagged file the release changes ---------
+# Skip-worktree (the ENV_MANAGED_FILES above) or assume-unchanged: git ignores
+# edits to both, so the pre-flight above stays clean — but the forced checkout
+# dies on them («Entry … not uptodate. Cannot merge.», exit 128) AFTER
+# maintenance ON: the HARD PRE-STEP described there. Refuse now instead, while
+# nothing has changed. A flagged file that is missing (the checkout restores
+# it), untouched, or left as it is by the release, is fine.
 # NUL lists are read via a temp file, NOT process substitution `< <(...)`:
 # CloudLinux CageFS does not expose /dev/fd, so `< <(…)` dies with «/dev/fd/63:
 # No such file or directory». A real file works everywhere and keeps the NULs.
 _list="$(mktemp)"
 git ls-files -v -z > "$_list"
 while IFS= read -r -d '' _entry; do
-  [[ "$_entry" == [Ss]\ * ]] || continue
+  [[ "$_entry" == [Shs]\ * ]] || continue   # S/s = skip-worktree, h = assume-unchanged
   _f="${_entry:2}"
+  if [[ ! -e "$_f" && ! -L "$_f" ]]; then
+    continue   # missing on disk — the checkout just restores it
+  fi
   _indexed="$(git rev-parse ":$_f")"
   if [[ -f "$_f" && "$(git hash-object -- "$_f")" == "$_indexed" ]]; then
     continue   # flagged but untouched — the checkout updates it normally
@@ -244,8 +249,8 @@ while IFS= read -r -d '' _entry; do
   if [[ "$(git rev-parse --verify --quiet "${TARGET_SHA}:${_f}" || true)" == "$_indexed" ]]; then
     continue   # the release leaves it as it is
   fi
-  fail "$REF changes $_f, which this host's environment has edited (skip-worktree) — the checkout would fail with the site already down. Nothing was deployed."
-  echo  "  Keep a copy of it, then: git update-index --no-skip-worktree $_f && git checkout -- $_f"
+  fail "$REF changes $_f, which this host's environment has edited (skip-worktree / assume-unchanged) — the checkout would fail with the site already down. Nothing was deployed."
+  echo  "  Keep a copy of it, then: git update-index --no-skip-worktree --no-assume-unchanged $_f && git checkout -- $_f"
   echo  "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)."
   rm -f "$_list"
   exit 1
@@ -297,17 +302,29 @@ while IFS= read -r -d '' p; do
   if [[ -n "${_in_index[$p]:-}" ]]; then
     continue   # tracked here too: git holds both versions
   fi
-  if [[ -L "$p" || -f "$p" ]]; then
-    _risk "$p"
-  elif [[ -d "$p" ]]; then
-    find "./$p" \( -type f -o -type l \) -print0 > "$_sub"
-    while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
-  fi
+  # A symlink or a file standing where it has a directory: git replaces THAT
+  # entry and never looks past it — so it is what's at risk, not $p reached
+  # through it (a symlinked dir's contents live elsewhere and survive). The
+  # shallowest such ancestor is the one git meets.
+  _blocked=""
   a="$p"
   while [[ "$a" == */* ]]; do
     a="${a%/*}"
-    if [[ -L "$a" ]] || { [[ -e "$a" ]] && [[ ! -d "$a" ]]; }; then _risk "$a"; fi
+    if [[ -L "$a" || -f "$a" ]]; then _blocked="$a"; fi
   done
+  if [[ -n "$_blocked" ]]; then
+    _risk "$_blocked"
+    continue
+  fi
+  if [[ -L "$p" || -f "$p" ]]; then
+    _risk "$p"
+  elif [[ -d "$p" ]]; then
+    # a directory where it has a file: git deletes it, contents and all (links
+    # and regular files only — `find` doesn't follow links, and a FIFO/socket
+    # carries nothing to keep)
+    find "./$p" \( -type f -o -type l \) -print0 > "$_sub"
+    while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
+  fi
 done < "$_list"
 rm -f "$_list" "$_sub"
 
@@ -317,7 +334,8 @@ if [[ ${#_at_risk[@]} -gt 0 ]]; then
   printf '    %s\n' "${_at_risk[@]}"
   for f in "${_at_risk[@]}"; do
     if ! mkdir -p -- "$_backup/$(dirname -- "$f")" || ! cp -pP -- "$f" "$_backup/$f"; then
-      fail "Could not back up '$f' to $_backup — refusing to overwrite it. Nothing was deployed."
+      rm -rf -- "$_backup"   # a refused run leaves no copies behind
+      fail "Could not back up '$f' — refusing to overwrite it. Nothing was deployed."
       exit 1
     fi
   done

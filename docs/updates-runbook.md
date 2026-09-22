@@ -247,12 +247,12 @@ actually recover». For a restore when the **APP_KEY is lost**, see
   later deploy — `git stash` does not clear untracked files). Note the checkout is
   `--force`, so it destroys anything on disk git doesn't track here — untracked
   **or gitignored** — that collides with a path the target ref tracks (the same
-  path, a folder where the ref has a file, or a file where it has a folder). The
+  path, a folder where the ref has a file, or a file/symlink where it has a folder). The
   pre-flight names those and **copies them to `storage/app/deploy-untracked/<timestamp>/`**
   first (and aborts if a copy fails) — only once every refuse-check has passed,
   just before maintenance, so a refused deploy leaves no copies behind. It also
-  refuses up front when the target changes an environment-edited skip-worktree file
-  (cPanel's `public/.htaccess`) — that checkout would otherwise die mid-deploy with
+  refuses up front when the target changes an environment-edited skip-worktree or
+  assume-unchanged file (cPanel's `public/.htaccess`) — that checkout would otherwise die mid-deploy with
   the site down; the message says how to clear the flag. `rollback.sh` also refuses
   an unknown ref up front. All of this runs before maintenance mode: an abort
   changes nothing. Delete those copies once you've checked them.
