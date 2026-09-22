@@ -87,6 +87,27 @@ final class Afm
         return self::uniqueKey($text) ?? ($text === '' ? null : $text);
     }
 
+    /**
+     * Does a Greek ΑΦΜ pass its check digit (the mod-11 rule: Σ dᵢ·2⁸⁻ⁱ over the
+     * first eight digits, mod 11, mod 10 = the ninth)? Null when the value is not
+     * a 9-digit Greek ΑΦΜ at all — a foreign VAT, a placeholder, free text — so
+     * callers only judge what they can.
+     */
+    public static function greekChecksumOk(?string $raw): ?bool
+    {
+        $key = self::uniqueKey($raw);
+        if ($key === null || preg_match('/^\d{9}$/', $key) !== 1) {
+            return null;
+        }
+
+        $sum = 0;
+        for ($i = 0; $i < 8; $i++) {
+            $sum += (int) $key[$i] * (2 ** (8 - $i));
+        }
+
+        return ($sum % 11) % 10 === (int) $key[8];
+    }
+
     /** A dummy ΑΦΜ (000000000, 999999999, …) that identifies nobody. */
     public static function isPlaceholder(string $key): bool
     {

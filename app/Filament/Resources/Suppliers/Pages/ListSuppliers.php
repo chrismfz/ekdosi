@@ -4,10 +4,12 @@ namespace App\Filament\Resources\Suppliers\Pages;
 
 use App\Filament\BaseListRecords;
 use App\Filament\Resources\Suppliers\SupplierResource;
+use App\Filament\Support\CsvImportAction;
 use App\Filament\Support\PartySyncWindow;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Company;
 use App\Models\Supplier;
+use App\Services\Import\SupplierCsvImporter;
 use App\Services\MyData\SupplierNameBackfiller;
 use App\Services\MyData\SupplierSyncFromMyData;
 use Filament\Actions\Action;
@@ -31,6 +33,8 @@ class ListSuppliers extends BaseListRecords
     {
         return [
             CreateAction::make(),
+
+            CsvImportAction::make(new SupplierCsvImporter, fn (): bool => SupplierResource::canCreate(), 'protypo-promitheftes.csv'),
 
             // Bulk "sync" provenance: pull RequestDocs issuer AFMs and create
             // any supplier we don't have yet (GSIS-enriched). Only meaningful

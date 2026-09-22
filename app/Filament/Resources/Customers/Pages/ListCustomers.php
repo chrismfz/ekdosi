@@ -4,9 +4,11 @@ namespace App\Filament\Resources\Customers\Pages;
 
 use App\Filament\BaseListRecords;
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Support\CsvImportAction;
 use App\Filament\Support\PartySyncWindow;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Customer;
+use App\Services\Import\CustomerCsvImporter;
 use App\Services\MyData\CustomerSyncFromMyData;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
@@ -24,6 +26,8 @@ class ListCustomers extends BaseListRecords
     {
         return [
             CreateAction::make(),
+
+            CsvImportAction::make(new CustomerCsvImporter, fn (): bool => CustomerResource::canCreate(), 'protypo-pelates.csv'),
 
             // Bulk customer discovery: scan our sales (RequestTransmittedDocs)
             // and create any B2B customer we don't have yet from the counterpart

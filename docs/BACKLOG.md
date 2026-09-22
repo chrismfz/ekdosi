@@ -14,7 +14,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
 1. **Delivery notes (ΔΑ)** — πλήρη **9.1 / 9.2** (το inbound inbox 4b είναι ήδη χτισμένο).
-2. **Migration / money tooling:** Generic CSV importer → Bank-statement import → Dunning ladder → Cashflow /
+2. **Migration / money tooling:** Dunning ladder → Bank-statement import → CSV εξόδων (αν χρειαστεί) → Cashflow /
    recurring-expenses (accountant-gated).
 3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
    Portal transactional surfaces (largely greenfield).
@@ -58,9 +58,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   → κρύψ' το από τη ροή του εκδότη (punch-list, TIER-1 delivery).
 
 ### 📥 Import / onboarding
-- **Generic CSV importer (προϊόντα / πελάτες / supplier έξοδα)** — έχουμε CSV *export* (`CsvEntityExporter`), λείπει
-  το *import*: column-map + dry-run preview + tenant-scope (+ supplier CSV → `source=import`). Το μεγαλύτερο win
-  για μεταφορά καταλόγου/πελατολογίου.
+- **CSV εξόδων** — το CSV import πελατών/προϊόντων/προμηθευτών ✅ υπάρχει· τα έξοδα έμειναν έξω σκόπιμα (τα GR
+  έρχονται από myDATA· έξοδα εκτός myDATA = κίνδυνος διπλομέτρησης). Μαζί με το «Ταμειακή εικόνα» αν χρειαστεί.
 - **Setup profiles + curated tax-presets ανά κλάδο** (λιανική / εστίαση / ξενοδοχείο / υπηρεσίες) — bundle σε ένα
   κλικ: invoice types + default ΦΠΑ + «πρότυπα τελών» + payment methods + withholding/Ψηφιακό Τέλος presets
   (+ %-ανά-προϊόν, όχι μόνο €/τεμ). Πάνω στο υπάρχον seeding.

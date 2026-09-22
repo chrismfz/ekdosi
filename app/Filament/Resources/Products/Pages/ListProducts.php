@@ -5,15 +5,18 @@ namespace App\Filament\Resources\Products\Pages;
 use App\Actions\ImportLeviedProducts;
 use App\Filament\BaseListRecords;
 use App\Filament\Resources\Products\ProductResource;
+use App\Filament\Support\CsvImportAction;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Company;
 use App\Models\Product;
+use App\Services\Import\ProductCsvImporter;
 use App\Support\Products\LeviedProductTemplates;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Notifications\Notification;
+use Illuminate\Support\Facades\Gate;
 
 class ListProducts extends BaseListRecords
 {
@@ -24,6 +27,11 @@ class ListProducts extends BaseListRecords
         return [
             CreateAction::make(),
             $this->importLeviedTemplatesAction(),
+            CsvImportAction::make(
+                new ProductCsvImporter(fn (string $model): bool => Gate::allows('create', $model)),
+                fn (): bool => ProductResource::canCreate(),
+                'protypo-proionta.csv',
+            ),
         ];
     }
 
