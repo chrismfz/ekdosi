@@ -3,6 +3,8 @@
 namespace App\Services\Reminders;
 
 use App\Models\Company;
+use App\Models\CustomerUser;
+use App\Models\CustomerUserAccess;
 use App\Models\Invoice;
 use App\Models\PaymentGatewayConnection;
 use App\Models\Scopes\CompanyScope;
@@ -81,10 +83,25 @@ final class ReminderMessage
         ];
     }
 
-    /** The portal «Πλήρωσε» link for this document — only when the tenant takes online payments. */
+    /**
+     * The portal «Πλήρωσε» link for this document — only when the tenant takes
+     * online payments AND the customer has a portal login that can use it (an
+     * active grant on a non-suspended login; an invited one claims it via the
+     * reset link). On the tenant's own portal host when it has one.
+     */
     private function payUrl(?Company $company, Invoice $invoice): ?string
     {
         if ($company === null || $invoice->customer_id === null) {
+            return null;
+        }
+
+        $hasLogin = CustomerUserAccess::query()
+            ->active()
+            ->where('company_id', $company->getKey())
+            ->where('customer_id', $invoice->customer_id)
+            ->whereHas('customerUser', fn ($q) => $q->where('status', '!=', CustomerUser::STATUS_SUSPENDED))
+            ->exists();
+        if (! $hasLogin) {
             return null;
         }
 
@@ -94,9 +111,14 @@ final class ReminderMessage
             ->where('is_active', true)
             ->get()
             ->contains(fn (PaymentGatewayConnection $c): bool => $this->gateways->for($c->gateway)->capabilities()->chargeable());
+        if (! $chargeable) {
+            return null;
+        }
 
-        return $chargeable
-            ? route('portal.payment.create', ['customer' => $invoice->customer_id, 'invoice' => $invoice->getKey()])
-            : null;
+        $path = route('portal.payment.create', ['customer' => $invoice->customer_id, 'invoice' => $invoice->getKey()], absolute: false);
+
+        return filled($company->portal_host)
+            ? (parse_url((string) config('app.url'), PHP_URL_SCHEME) ?: 'https').'://'.$company->portal_host.$path
+            : url($path);
     }
 }

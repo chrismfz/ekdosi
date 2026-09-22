@@ -8,10 +8,13 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceReminder;
 use App\Models\Scopes\CompanyScope;
+use App\Models\User;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Database\UniqueConstraintViolationException;
+use Illuminate\Support\Facades\Gate;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * The daily pass for one tenant: tidy the log, plan today's reminders, record
@@ -31,11 +34,12 @@ final class ReminderRunner
     public function run(Company $company, CarbonImmutable $today, bool $dryRun = false): array
     {
         $settings = ReminderSettings::for($company);
+        $cancelled = $dryRun ? 0 : $this->tidy($company, $settings);
         if (! $settings->enabled) {
-            return ['planned' => 0, 'created' => 0, 'cancelled' => 0];
+            // Switched off: the tidy above cancelled whatever was still waiting.
+            return ['planned' => 0, 'created' => 0, 'cancelled' => $cancelled];
         }
 
-        $cancelled = $dryRun ? 0 : $this->tidy($company, $settings);
         $planned = $this->planner->plan($company, $today);
         if ($dryRun) {
             return ['planned' => count($planned), 'created' => 0, 'cancelled' => 0];
@@ -62,6 +66,7 @@ final class ReminderRunner
                 continue;   // a parallel run recorded this stage first
             }
             $created++;
+            $cancelled += $this->supersede($row);
 
             if ($auto) {
                 SendInvoiceReminder::dispatch($row->getKey());
@@ -77,8 +82,8 @@ final class ReminderRunner
 
     /**
      * Cancel reminders still waiting for a document that no longer qualifies
-     * (paid, cancelled, opted out…), and release rows interrupted mid-send so the
-     * operator can decide to send them again.
+     * (paid, cancelled, opted out, reminders switched off…), and release rows
+     * interrupted mid-send so the operator can decide to send them again.
      */
     private function tidy(Company $company, ReminderSettings $settings): int
     {
@@ -95,9 +100,8 @@ final class ReminderRunner
                 ->where('company_id', $company->getKey())
                 ->with(['customer', 'paymentMethod', 'invoiceType'])
                 ->find($row->invoice_id);
-            $blocker = $invoice === null ? 'Το παραστατικό δεν υπάρχει.' : $this->planner->blocker($invoice, $settings);
-            if ($blocker !== null) {
-                $row->forceFill(['status' => InvoiceReminder::STATUS_CANCELLED, 'reason' => $blocker])->save();
+            $blocker = $this->planner->rowBlocker($row, $invoice, $settings);
+            if ($blocker !== null && $this->cancel($row, $blocker)) {
                 $cancelled++;
             }
         }
@@ -105,12 +109,51 @@ final class ReminderRunner
         return $cancelled;
     }
 
+    /**
+     * A new stage replaces the document's earlier ones that never went out
+     * (still «προς έγκριση», or failed) — the customer gets the CURRENT stage,
+     * never the 1st and the 2nd on the same day, nor a 1st after the final.
+     */
+    private function supersede(InvoiceReminder $row): int
+    {
+        return InvoiceReminder::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('invoice_id', $row->invoice_id)
+            ->whereKeyNot($row->getKey())
+            ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_FAILED])
+            ->update([
+                'status' => InvoiceReminder::STATUS_CANCELLED,
+                'reason' => 'Αντικαταστάθηκε από «'.(InvoiceReminder::STAGE_LABELS[$row->stage] ?? $row->stage).'».',
+                'updated_at' => now(),
+            ]);
+    }
+
+    /** Cancel only if still waiting (an operator may have sent it meanwhile). */
+    private function cancel(InvoiceReminder $row, string $reason): bool
+    {
+        return InvoiceReminder::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->whereKey($row->getKey())
+            ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED])
+            ->update(['status' => InvoiceReminder::STATUS_CANCELLED, 'reason' => $reason, 'updated_at' => now()]) > 0;
+    }
+
     private function notifyOperators(Company $company, int $count): void
     {
-        foreach ($company->users()->get() as $user) {
-            if (! $user->can('viewAny', InvoiceReminder::class)) {
-                continue;
-            }
+        // Teams-mode permissions are per tenant: a scheduled (CLI) run has no
+        // team context, and without it nobody «may» see the page → no bell.
+        $registrar = app(PermissionRegistrar::class);
+        $previousTeam = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+
+        try {
+            $users = $company->users()->get()
+                ->filter(fn (User $u): bool => Gate::forUser($u)->allows('viewAny', InvoiceReminder::class));
+        } finally {
+            $registrar->setPermissionsTeamId($previousTeam);
+        }
+
+        foreach ($users as $user) {
             Notification::make()
                 ->title('Υπενθυμίσεις πληρωμής προς έγκριση')
                 ->body("{$count} νέες υπενθυμίσεις περιμένουν έγκριση για αποστολή.")

@@ -151,8 +151,9 @@ class InvoiceReminderResource extends Resource
                     ->authorize(fn (InvoiceReminder $r): bool => auth()->user()?->can('update', $r) ?? false)
                     ->requiresConfirmation()
                     ->action(function (InvoiceReminder $r): void {
-                        self::skip($r);
-                        Notification::make()->title('Η υπενθύμιση παραλείφθηκε')->success()->send();
+                        self::skip($r)
+                            ? Notification::make()->title('Η υπενθύμιση παραλείφθηκε')->success()->send()
+                            : Notification::make()->title('Δεν παραλείφθηκε — η κατάστασή της άλλαξε στο μεταξύ.')->warning()->send();
                     }),
                 Action::make('view_error')
                     ->label('Σφάλμα')
@@ -182,8 +183,7 @@ class InvoiceReminderResource extends Resource
                         ->icon('heroicon-o-no-symbol')
                         ->requiresConfirmation()
                         ->action(function (Collection $records): void {
-                            $skipped = $records->filter(fn (InvoiceReminder $r): bool => $r->status === InvoiceReminder::STATUS_AWAITING && (auth()->user()?->can('update', $r) ?? false))
-                                ->each(fn (InvoiceReminder $r) => self::skip($r))
+                            $skipped = $records->filter(fn (InvoiceReminder $r): bool => (auth()->user()?->can('update', $r) ?? false) && self::skip($r))
                                 ->count();
                             Notification::make()->title("Παραλείφθηκαν: {$skipped}")->success()->send();
                         }),
@@ -259,13 +259,18 @@ class InvoiceReminderResource extends Resource
         return $updated > 0;
     }
 
-    public static function skip(InvoiceReminder $r): void
+    /** Skip a row still «προς έγκριση» — conditional, like queue(): a row sent meanwhile stays sent. */
+    public static function skip(InvoiceReminder $r): bool
     {
-        $r->forceFill([
-            'status' => InvoiceReminder::STATUS_SKIPPED,
-            'reason' => 'Παράλειψη από '.(auth()->user()?->name ?? 'χειριστή').'.',
-            'triggered_by_user_id' => auth()->id(),
-        ])->save();
+        return InvoiceReminder::query()
+            ->whereKey($r->getKey())
+            ->where('status', InvoiceReminder::STATUS_AWAITING)
+            ->update([
+                'status' => InvoiceReminder::STATUS_SKIPPED,
+                'reason' => 'Παράλειψη από '.(auth()->user()?->name ?? 'χειριστή').'.',
+                'triggered_by_user_id' => auth()->id(),
+                'updated_at' => now(),
+            ]) > 0;
     }
 
     public static function getPages(): array

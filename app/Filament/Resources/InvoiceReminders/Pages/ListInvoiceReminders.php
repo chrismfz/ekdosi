@@ -70,10 +70,12 @@ class ListInvoiceReminders extends BaseListRecords
                 ->visible(fn (): bool => CompanySettings::canAccess()),
 
             // The daily pass, on demand (e.g. right after switching reminders on).
+            // In auto mode it SENDS — so it needs the same right as «Αποστολή».
             Action::make('run_now')
                 ->label('Εκτέλεση τώρα')
                 ->icon('heroicon-o-play')
-                ->visible(fn (): bool => (bool) $this->tenant()?->reminders_enabled && (auth()->user()?->can('viewAny', InvoiceReminder::class) ?? false))
+                ->visible(fn (): bool => (bool) $this->tenant()?->reminders_enabled)
+                ->authorize(fn (): bool => auth()->user()?->can('Update:InvoiceReminder') ?? false)
                 ->requiresConfirmation()
                 ->modalDescription(fn (): string => ReminderSettings::for($this->tenant())->mode === ReminderSettings::MODE_AUTO
                     ? 'Καταγράφει τις σημερινές υπενθυμίσεις και τις ΣΤΕΛΝΕΙ αμέσως (αυτόματη λειτουργία).'
@@ -104,26 +106,16 @@ class ListInvoiceReminders extends BaseListRecords
             return new HtmlString('<p>Οι υπενθυμίσεις είναι ανενεργές — ενεργοποίησέ τες στις «Ρυθμίσεις εταιρείας».</p>');
         }
 
-        $planner = app(ReminderPlanner::class);
-        $today = CarbonImmutable::today();
-        $seen = [];
         $rows = '';
-        for ($d = 0; $d <= self::UPCOMING_DAYS; $d++) {
-            foreach ($planner->plan($company, $today->addDays($d)) as $p) {
-                $id = $p['invoice']->getKey();
-                if (isset($seen[$id])) {
-                    continue;
-                }
-                $seen[$id] = true;
-                $rows .= '<tr>'
-                    .'<td style="padding:.25rem .5rem">'.e($today->addDays($d)->format('d/m')).'</td>'
-                    .'<td style="padding:.25rem .5rem">'.e(InvoiceReminder::STAGE_LABELS[$p['stage']] ?? $p['stage']).'</td>'
-                    .'<td style="padding:.25rem .5rem">'.e((string) $p['invoice']->invcode)
-                    .(ReminderPlanner::kindOf($p['invoice']) === InvoiceReminder::KIND_PROFORMA ? ' <em>(προτιμολόγιο)</em>' : '').'</td>'
-                    .'<td style="padding:.25rem .5rem">'.e((string) $p['invoice']->customer?->name).'</td>'
-                    .'<td style="padding:.25rem .5rem;text-align:right">'.e(number_format($p['balance'], 2, ',', '.')).' €</td>'
-                    .'</tr>';
-            }
+        foreach (app(ReminderPlanner::class)->upcoming($company, CarbonImmutable::today(), self::UPCOMING_DAYS) as $p) {
+            $rows .= '<tr>'
+                .'<td style="padding:.25rem .5rem">'.e($p['date']->format('d/m')).'</td>'
+                .'<td style="padding:.25rem .5rem">'.e(InvoiceReminder::STAGE_LABELS[$p['stage']] ?? $p['stage']).'</td>'
+                .'<td style="padding:.25rem .5rem">'.e((string) $p['invoice']->invcode)
+                .(ReminderPlanner::kindOf($p['invoice']) === InvoiceReminder::KIND_PROFORMA ? ' <em>(προτιμολόγιο)</em>' : '').'</td>'
+                .'<td style="padding:.25rem .5rem">'.e((string) $p['invoice']->customer?->name).'</td>'
+                .'<td style="padding:.25rem .5rem;text-align:right">'.e(number_format($p['balance'], 2, ',', '.')).' €</td>'
+                .'</tr>';
         }
 
         if ($rows === '') {

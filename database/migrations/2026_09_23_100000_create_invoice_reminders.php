@@ -10,7 +10,7 @@ use Illuminate\Support\Facades\Schema;
  * planned/sent, so the operator sees what went out and what did not.
  *
  * `auto_stage` = the stage for an automatic reminder, NULL for a manual one:
- * UNIQUE(invoice_id, auto_stage) makes «never the same automatic stage twice»
+ * UNIQUE(invoice_id, document_kind, auto_stage) makes «never the same automatic stage twice»
  * a database guarantee (MariaDB and sqlite both allow many NULLs under it).
  */
 return new class extends Migration
@@ -55,7 +55,10 @@ return new class extends Migration
             $table->timestamp('sent_at')->nullable();
             $table->timestamps();
 
-            $table->unique(['invoice_id', 'auto_stage']);
+            // One automatic stage per document per kind, forever (NULL auto_stage =
+            // a manual reminder, never unique-bound). A προτιμολόγιο issued as an
+            // invoice keeps its row, so its invoice ladder is a separate set.
+            $table->unique(['invoice_id', 'document_kind', 'auto_stage']);
             $table->index(['company_id', 'status', 'created_at']);
         });
     }

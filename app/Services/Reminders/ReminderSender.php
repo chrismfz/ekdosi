@@ -49,23 +49,21 @@ final class ReminderSender
             ->with(['customer', 'company', 'paymentMethod', 'invoiceType'])
             ->find($row->invoice_id);
 
-        if ($invoice === null) {
-            return $this->finish($row, InvoiceReminder::STATUS_CANCELLED, reason: 'Το παραστατικό δεν υπάρχει.');
-        }
-
-        $settings = ReminderSettings::for($invoice->company);
-        if (($blocker = $this->planner->blocker($invoice, $settings)) !== null) {
+        $settings = ReminderSettings::for($invoice?->company ?? $row->company);
+        if (($blocker = $this->planner->rowBlocker($row, $invoice, $settings)) !== null) {
             return $this->finish($row, InvoiceReminder::STATUS_CANCELLED, reason: $blocker);
         }
 
-        $due = ReminderPlanner::dueDateOf($invoice);
-        $days = $due !== null ? (int) $due->diffInDays(CarbonImmutable::today(), false) : null;
-        $balance = $this->balances->for($invoice)->balance;
-        $locale = CustomerLanguage::forDocumentMail($invoice);
-        $message = $this->message->build($invoice, $row->stage, $due, $days, $balance, $settings, $locale);
         $recipient = (string) $invoice->customer->email;
+        $subject = null;
 
         try {
+            $due = ReminderPlanner::dueDateOf($invoice);
+            $days = $due !== null ? (int) $due->diffInDays(CarbonImmutable::today(), false) : null;
+            $balance = $this->balances->for($invoice)->balance;
+            $locale = CustomerLanguage::forDocumentMail($invoice);
+            $message = $this->message->build($invoice, $row->stage, $due, $days, $balance, $settings, $locale);
+            $subject = $message['subject'];
             $pdf = $settings->attachPdf ? $this->pdf->render($invoice) : null;
 
             $this->mailers->for($invoice->company)
@@ -74,18 +72,26 @@ final class ReminderSender
         } catch (Throwable $e) {
             report($e);
 
-            return $this->finish($row, InvoiceReminder::STATUS_FAILED, recipient: $recipient, subject: $message['subject'], error: mb_substr($e->getMessage(), 0, 2000));
+            return $this->finish($row, InvoiceReminder::STATUS_FAILED, recipient: $recipient, subject: $subject, error: mb_substr($e->getMessage(), 0, 2000));
         }
 
-        // A reminder is a contact: it feeds «Τελ. επαφή» on the aged-receivables page.
-        $invoice->customer->forceFill(['collection_last_contact_at' => now()->toDateString()])->save();
-
-        return $this->finish($row, InvoiceReminder::STATUS_SENT, recipient: $recipient, subject: $message['subject'], extra: [
+        // Record the send FIRST — it happened; nothing after this may turn it into
+        // a «failed» row that invites a second email.
+        $this->finish($row, InvoiceReminder::STATUS_SENT, recipient: $recipient, subject: $subject, extra: [
             'sent_at' => now(),
             'due_date' => $due?->toDateString(),
             'days_overdue' => $days,
             'balance' => $balance,
         ]);
+
+        // A reminder is a contact: it feeds «Τελ. επαφή» on the aged-receivables page.
+        try {
+            $invoice->customer->forceFill(['collection_last_contact_at' => now()->toDateString()])->save();
+        } catch (Throwable $e) {
+            report($e);
+        }
+
+        return $row;
     }
 
     private function finish(
