@@ -13,7 +13,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 Ο κανόνας της σειράς: **η προτεραιότητα ενός finding δεν είναι ιδιότητά του — είναι finding × αυτή η επιχείρηση ×
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
-1. **Delivery notes (ΔΑ)** — inbound inbox **4b**, μετά πλήρη **9.1 / 9.2**.
+1. **Delivery notes (ΔΑ)** — πλήρη **9.1 / 9.2** (το inbound inbox 4b είναι ήδη χτισμένο).
 2. **Migration / money tooling:** Generic CSV importer → Bank-statement import → Dunning ladder → Cashflow /
    recurring-expenses (accountant-gated).
 3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
@@ -48,8 +48,9 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   λογιστή: ποια foreign δηλώνονται ήδη. Λείπουν μόνο recurring-templates + cashflow widget + anti-double-count.
 
 ### 🚚 Delivery notes (Ψηφιακό ΔΑ)
-- **Inbound «Εισερχόμενα Διακίνησης» (4b)** — inbox Resource + Reject/Refresh/Acknowledge πάνω στο υπάρχον
-  direct-myDATA path (core + two-party sandbox ✅). Το 4c (qrUrl Confirm-outcome) μένει DEFERRED.
+- **Inbound «Εισερχόμενα Διακίνησης»** — 4a+4b ✅ ΧΤΙΣΜΕΝΑ (#540/#566: fetch + Απόρριψη/Έλεγχος/Παραλήφθηκε).
+  Μένουν: sandbox rehearsal μιας πραγματικής απόρριψης (nexon⇄myip) · **4c** (qrUrl Confirm-outcome) DEFERRED
+  μέχρι να παραλάβει tenant ψηφιακά παρακολουθούμενη διακίνηση.
 - **Πλήρη 9.1 / 9.2** — 9.1 (συσχετιζόμενο) θέλει correlated MARKs (`addCorrelatedInvoice` + επιλογή σχετικών)·
   9.2 (συγκεντρωτικό) μοντέλο σύνοψης κινήσεων. Σήμερα κρυμμένα + μπλοκαρισμένα (MYD-012) — ξεμπλόκαρε με
   προσθήκη στο `Codes::SUPPORTED_DELIVERY_TYPES` όταν χτιστεί το μοντέλο.
