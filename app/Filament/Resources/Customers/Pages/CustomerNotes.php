@@ -2,23 +2,18 @@
 
 namespace App\Filament\Resources\Customers\Pages;
 
+use App\Filament\Resources\Customers\Concerns\ManagesCustomerNotes;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Customer;
 use App\Models\Note;
-use App\Models\Tag;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
 use Filament\Actions\ViewAction;
 use Filament\Facades\Filament;
-use Filament\Forms\Components\Select;
-use Filament\Forms\Components\Textarea;
-use Filament\Forms\Components\TextInput;
-use Filament\Forms\Components\Toggle;
 use Filament\Resources\Pages\Page;
-use Filament\Schemas\Components\Component;
 use Filament\Tables\Columns\ViewColumn;
 use Filament\Tables\Concerns\InteractsWithTable;
 use Filament\Tables\Contracts\HasTable;
@@ -43,6 +38,7 @@ use Livewire\Attributes\Locked;
 class CustomerNotes extends Page implements HasTable
 {
     use InteractsWithTable;
+    use ManagesCustomerNotes;
 
     protected static string $resource = CustomerResource::class;
 
@@ -77,12 +73,6 @@ class CustomerNotes extends Page implements HasTable
     public function getBreadcrumb(): string
     {
         return 'Σημειώσεις';
-    }
-
-    /** Whether the operator may add/change notes (drives the create/edit gates). */
-    protected function canManageNotes(): bool
-    {
-        return auth()->user()?->can('update', $this->record) ?? false;
     }
 
     protected function getHeaderActions(): array
@@ -185,78 +175,5 @@ class CustomerNotes extends Page implements HasTable
             ->emptyStateHeading('Καμία σημείωση ακόμη')
             ->emptyStateDescription('Κράτα εδώ ό,τι χρειάζεται η υποστήριξη του πελάτη: IPs, servers/workstations, εκτυπωτές, TeamViewer/AnyDesk, RouterOS export…')
             ->emptyStateIcon('heroicon-o-document-text');
-    }
-
-    /**
-     * Shared create/edit form. Tags are a plain option field (the note is not the
-     * form's bound relationship owner here), synced by persistNote() after save.
-     *
-     * @return array<int, Component>
-     */
-    private function noteFormSchema(): array
-    {
-        return [
-            TextInput::make('title')
-                ->label('Τίτλος')
-                ->maxLength(255)
-                ->placeholder('π.χ. Δίκτυο γραφείου / RouterOS')
-                ->columnSpanFull(),
-
-            Select::make('kind')
-                ->label('Είδος')
-                ->options(Note::kindOptions())
-                ->default(Note::KIND_GENERAL)
-                ->required()
-                ->native(false),
-
-            Toggle::make('is_pinned')
-                ->label('Καρφιτσωμένη (εμφανίζεται πρώτη)'),
-
-            TagControls::plainField(),
-
-            Textarea::make('body')
-                ->label('Κείμενο')
-                ->required()
-                ->rows(18)
-                ->helperText('Υποστηρίζει Markdown: για configs/IP βάλε τα ανάμεσα σε ``` (code block) ώστε να διαβάζονται με σταθερό πλάτος. Εσωτερικό — δεν εκτυπώνεται και δεν αποστέλλεται στην ΑΑΔΕ.')
-                ->columnSpanFull(),
-        ];
-    }
-
-    /**
-     * Persist a note against THIS customer, tenant-stamped, and sync its tags.
-     * Owner/company/notable are set from the page's record (never from form data),
-     * so the write can't be pointed at another customer or tenant. author_user_id
-     * is stamped once, on create.
-     */
-    private function persistNote(Note $note, array $data): Note
-    {
-        abort_unless($this->canManageNotes(), 403);
-
-        $tags = array_filter($data['tags'] ?? []);
-        unset($data['tags']);
-
-        $note->fill($data);
-        $note->company_id = $this->record->company_id;
-        $note->notable_type = $this->record->getMorphClass();
-        $note->notable_id = $this->record->getKey();
-        if (! $note->exists) {
-            $note->author_user_id = auth()->id();
-        }
-        $note->save();
-
-        // Tenant-guard the SUBMITTED tag ids: the picker is tenant-scoped, but the
-        // posted value is attacker-controllable — only sync tags this tenant owns,
-        // so a tampered request can't attach (and surface) another tenant's tag.
-        $ownTags = $tags === []
-            ? []
-            : Tag::query()
-                ->where('company_id', $this->record->company_id)
-                ->whereKey($tags)
-                ->pluck('id')
-                ->all();
-        $note->tags()->sync($ownTags);
-
-        return $note;
     }
 }

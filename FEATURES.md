@@ -386,7 +386,10 @@
   δελτίο), **ετικέτες ανά σημείωση**, **αναζήτηση** (τίτλος+σώμα) και **Markdown με code blocks**
   (monospace + οριζόντιο scroll — για RouterOS export, IP/hostname/printer πίνακες, TeamViewer/AnyDesk
   ids). Ένα πολυμορφικό `Note` store (κοινό με το tab «Σημειώσεις (εσωτερικές)»), ποτέ σε PDF/ΑΑΔΕ,
-  render ασφαλές (escaped HTML), imported/backup read-only.
+  render ασφαλές (escaped HTML), imported/backup read-only. **Στην ίδια την Καρτέλα** η section
+  «Σημειώσεις (εσωτερικές)» δίνει ανά σημείωση **«Άνοιγμα»** (modal με το πλήρες κείμενο, όχι μόνο excerpt)
+  και **«Επεξεργασία»** inline (κοινό note-form/write-path με τη σελίδα — `ManagesCustomerNotes`· κρυφό σε
+  imported/χωρίς δικαίωμα· ο δείκτης σημείωσης επικυρώνεται tenant/customer-scoped).
 - **Στήλες δραστηριότητας στη λίστα** (`Customer::scopeWithInvoiceStats`, SQL grouped sub-select →
   sortable χωρίς per-row PHP): **«Αρ. Παρ/ων»** (πλήθος εκδομένων παραστατικών — LIVE, χωρίς
   πρόχειρα/πιστωτικά· ορατή, τα «0» γκριζάρουν → sort εντοπίζει «νεκρούς» & busy), **«Τζίρος»**

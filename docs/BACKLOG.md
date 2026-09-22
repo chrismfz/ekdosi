@@ -1402,6 +1402,11 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   toggle = .env edit, σκόπιμα read-only — όχι νέα μηχανική.)
 
 ## ⚙️ Tech debt / latent (also `CLAUDE.md` «Known latent items»)
+- **Καρτέλα inline note edit: το panel δείχνει τα πρώτα 8 (is_pinned, created_at desc) — P2 UX (review 2026-09-22).**
+  Μετά από inline «Επεξεργασία» το panel ξαναφορτώνει το ίδιο top-8 window· αν μια επεξεργασία άλλαζε τη
+  σειρά (π.χ. ξεκαρφίτσωμα) η σημείωση μπορεί να μη «ανέβει» όπως στη σελίδα Σημειώσεων (που δείχνει
+  updated_at). Non-issue σήμερα: κουμπιά edit υπάρχουν ΜΟΝΟ στα εμφανιζόμενα, οπότε επεξεργάζεσαι πάντα
+  ορατή σημείωση. Αν ενοχλήσει: order το panel by `updated_at` (πρόσεξε ripple στο `internalNotes`).
 - **Portal receipt: το έμβασμα group-by-reference predicate διπλασιάζεται (P2, review 2026-09-21).**
   Το `ReceiptShowController` ξαναχτίζει το group με `reference == … AND kind != 'refund' AND amount > 0`
   (same company/customer), καθρεφτίζοντας με σχόλιο τον κανόνα ομαδοποίησης του `CustomerLedgerBuilder::computeLedger`

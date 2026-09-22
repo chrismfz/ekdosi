@@ -103,6 +103,9 @@
     @php($internalNotes = $cust->internalNotes)
     @if ($internalNotes->isNotEmpty())
         @php($shownNotes = $internalNotes->take(8))
+        {{-- Hoisted: the update gate is the same for every note (it checks the
+             customer, not the note), so resolve the policy once, not per row. --}}
+        @php($canManageNotes = $this->canManageNotes())
         <x-filament::section>
             <x-slot name="heading">Σημειώσεις (εσωτερικές)</x-slot>
             <x-slot name="description">Δεν εκτυπώνονται και δεν αποστέλλονται στην ΑΑΔΕ.</x-slot>
@@ -131,6 +134,23 @@
                             <div class="text-xs fi-color-gray">
                                 {{-- created_at matches the relation's ordering (latest first). --}}
                                 {{ $note->author?->name ?? 'Σύστημα' }} · {{ $note->created_at?->format('d/m/Y H:i') }}
+                            </div>
+                            {{-- Per-note «Άνοιγμα» (read the full note in a modal — the panel
+                                 above shows only an excerpt) + «Επεξεργασία» (inline edit via the
+                                 same note form as the «Σημειώσεις» page). Edit is hidden for
+                                 imported («backup») notes and without update rights; both are also
+                                 re-checked server-side in the mounted actions. --}}
+                            <div class="flex items-center gap-2">
+                                <x-filament::link tag="button" size="sm"
+                                    wire:click="mountAction('viewNote', { note: {{ $note->id }} })">
+                                    Άνοιγμα
+                                </x-filament::link>
+                                @if (! $note->isImported() && $canManageNotes)
+                                    <x-filament::link tag="button" size="sm" color="gray"
+                                        wire:click="mountAction('editNote', { note: {{ $note->id }} })">
+                                        Επεξεργασία
+                                    </x-filament::link>
+                                @endif
                             </div>
                         </div>
                     </div>
