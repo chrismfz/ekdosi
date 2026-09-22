@@ -650,6 +650,213 @@ class ThirdPartyStore
         return $out;
     }
 
+    // ----------------------------------------------------------------------
+    // Admin-side helpers (addon admin page). The admin operator is trusted
+    // (WHMCS admin auth + CSRF at the controller), so the by-id reads/deletes
+    // below are NOT userid-scoped — they act on a specific row the operator
+    // picked from a rendered list (a client's contact, an orphan row). The
+    // per-client contact CREATE/UPDATE reuse the userid-scoped *ForUser methods
+    // (the admin page is always in one client's context).
+    // ----------------------------------------------------------------------
+
+    /** One contact by id (any client) — for the admin edit form. */
+    public static function contactById(int $id): ?object
+    {
+        return Capsule::table(self::CONTACTS)->where('id', $id)->first();
+    }
+
+    /**
+     * Delete one contact by id AND cascade its routing rows (a route with no
+     * billing identity is meaningless). Admin-only; returns true if it existed.
+     */
+    public static function deleteContactById(int $id): bool
+    {
+        if (self::contactById($id) === null) {
+            return false;
+        }
+        Capsule::connection()->transaction(function () use ($id) {
+            Capsule::table(self::ROUTING)->where('contactid', $id)->delete();
+            Capsule::table(self::CONTACTS)->where('id', $id)->delete();
+        });
+
+        return true;
+    }
+
+    /** Delete one routing row by id. Admin-only. Returns true if it existed. */
+    public static function deleteRouteById(int $id): bool
+    {
+        return Capsule::table(self::ROUTING)->where('id', $id)->delete() > 0;
+    }
+
+    /**
+     * A client's routing rows whose SERVICE no longer exists (dead) —
+     * hosting/domain serviceid gone from tblhosting/tbldomains.
+     * servicesForUser() lists only LIVE services, so these dead routes are
+     * otherwise invisible AND unmanageable on the per-client page. Each carries
+     * the contact it routes to (name) so the operator can decide. Guarded by the
+     * reference table being non-empty (same rule as orphanSummary/purgeOrphans),
+     * so a transient empty table never flags a live route dead.
+     *
+     * @return array<int, array{id:int, serviceid:int, service_type:string, contactid:int, contact_name:string}>
+     */
+    public static function deadServiceRoutesForUser(int $userid): array
+    {
+        if (! self::hasOwnTables()) {
+            return [];
+        }
+        $rows = Capsule::table(self::ROUTING)->where('userid', $userid)->get();
+        if ($rows->isEmpty()) {
+            return [];
+        }
+
+        $hasHosting = self::tableHasRows('tblhosting');
+        $hasDomains = self::tableHasRows('tbldomains');
+        $names = self::contactNamesFor($rows);
+
+        $out = [];
+        foreach ($rows as $r) {
+            $type = strtolower(trim((string) $r->service_type));
+            $sid = (int) $r->serviceid;
+            $dead = false;
+            if ($type === 'hosting' && $hasHosting) {
+                $dead = ! Capsule::table('tblhosting')->where('id', $sid)->exists();
+            } elseif ($type === 'domain' && $hasDomains) {
+                $dead = ! Capsule::table('tbldomains')->where('id', $sid)->exists();
+            }
+            if ($dead) {
+                $out[] = [
+                    'id' => (int) $r->id,
+                    'serviceid' => $sid,
+                    'service_type' => $type,
+                    'contactid' => (int) $r->contactid,
+                    'contact_name' => (string) ($names[(int) $r->contactid] ?? ('#'.(int) $r->contactid)),
+                ];
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * Detailed orphan rows for the admin «Ορφανά» page — the SAME existence gaps
+     * orphanSummary() counts and purgeOrphans() deletes, but ENUMERATED so the
+     * operator sees exactly which rows before deleting, with per-row delete. Two
+     * lists: orphan contacts (WHMCS client gone) and orphan routes (client gone
+     * OR service dead). Every existence check is guarded by the reference table
+     * being non-empty, so a fresh/empty install never reports everything orphan.
+     *
+     * @return array{contacts: array<int, array{id:int,userid:int,company_name:string,gr_vatno:string}>,
+     *               routes: array<int, array{id:int,userid:int,serviceid:int,service_type:string,contact_name:string,reason:string}>}
+     */
+    public static function orphanRows(): array
+    {
+        $out = ['contacts' => [], 'routes' => []];
+        if (! self::hasOwnTables()) {
+            return $out;
+        }
+
+        $hasClients = self::tableHasRows('tblclients');
+        $hasHosting = self::tableHasRows('tblhosting');
+        $hasDomains = self::tableHasRows('tbldomains');
+
+        // null = "can't verify" (empty tblclients) → never flag a deleted-client orphan.
+        $liveClients = $hasClients
+            ? array_flip(array_map('intval', Capsule::table('tblclients')->pluck('id')->all()))
+            : null;
+
+        // Orphan contacts: WHMCS client gone.
+        if ($liveClients !== null) {
+            foreach (Capsule::table(self::CONTACTS)->get() as $c) {
+                if (! isset($liveClients[(int) $c->userid])) {
+                    $out['contacts'][] = [
+                        'id' => (int) $c->id,
+                        'userid' => (int) $c->userid,
+                        'company_name' => (string) ($c->company_name ?? ''),
+                        'gr_vatno' => (string) ($c->gr_vatno ?? ''),
+                    ];
+                }
+            }
+        }
+
+        // Orphan routes: client gone OR service dead. Preload the live service id
+        // sets for the relids present (2 queries) — no per-row exists() fan-out.
+        $routes = Capsule::table(self::ROUTING)->get();
+        $names = self::contactNamesFor($routes);
+        $hostIds = [];
+        $domIds = [];
+        foreach ($routes as $r) {
+            $t = strtolower(trim((string) $r->service_type));
+            $sid = (int) $r->serviceid;
+            if ($t === 'hosting') {
+                $hostIds[$sid] = true;
+            } elseif ($t === 'domain') {
+                $domIds[$sid] = true;
+            }
+        }
+        $liveHost = ($hasHosting && $hostIds !== [])
+            ? array_flip(array_map('intval', Capsule::table('tblhosting')->whereIn('id', array_keys($hostIds))->pluck('id')->all()))
+            : [];
+        $liveDom = ($hasDomains && $domIds !== [])
+            ? array_flip(array_map('intval', Capsule::table('tbldomains')->whereIn('id', array_keys($domIds))->pluck('id')->all()))
+            : [];
+
+        foreach ($routes as $r) {
+            $uid = (int) $r->userid;
+            $sid = (int) $r->serviceid;
+            $type = strtolower(trim((string) $r->service_type));
+
+            $clientGone = $liveClients !== null && ! isset($liveClients[$uid]);
+            $serviceDead = false;
+            if ($type === 'hosting' && $hasHosting) {
+                $serviceDead = ! isset($liveHost[$sid]);
+            } elseif ($type === 'domain' && $hasDomains) {
+                $serviceDead = ! isset($liveDom[$sid]);
+            }
+            if (! $clientGone && ! $serviceDead) {
+                continue;
+            }
+
+            $reasons = [];
+            if ($clientGone) {
+                $reasons[] = 'διαγρ. πελάτης';
+            }
+            if ($serviceDead) {
+                $reasons[] = 'νεκρή υπηρεσία';
+            }
+            $out['routes'][] = [
+                'id' => (int) $r->id,
+                'userid' => $uid,
+                'serviceid' => $sid,
+                'service_type' => $type,
+                'contact_name' => (string) ($names[(int) $r->contactid] ?? ('#'.(int) $r->contactid)),
+                'reason' => implode(' + ', $reasons),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * contactid => company_name for a collection of routing rows (one query).
+     *
+     * @param  iterable<object>  $routes
+     * @return array<int, string>
+     */
+    private static function contactNamesFor($routes): array
+    {
+        $ids = [];
+        foreach ($routes as $r) {
+            $ids[(int) $r->contactid] = true;
+        }
+        if ($ids === []) {
+            return [];
+        }
+
+        return Capsule::table(self::CONTACTS)
+            ->whereIn('id', array_keys($ids))
+            ->pluck('company_name', 'id')->all();
+    }
+
     /**
      * Shape an own-contacts row into the resolve.php contact object. Values
      * are returned AS STORED (ekdosi decodes HTML entities when it

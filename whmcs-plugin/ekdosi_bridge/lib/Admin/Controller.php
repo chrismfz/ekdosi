@@ -1001,15 +1001,16 @@ EOF;
         // confirm-guarded cleanup of the orphan rows. Gated on the SAME per-row
         // orphan count the toggle/highlights use (not the SQL summary), so the
         // button is offered only for rows the operator can actually see & filter.
-        $cleanup = '';
-        if ($orphanRowCount > 0) {
-            $token = $this->csrfField();
-            $confirm = 'Διαγραφή ΟΛΩΝ των ορφανών γραμμών (δρομολογήσεις/επαφές που δείχνουν σε ανύπαρκτο πελάτη, υπηρεσία ή επαφή); Δεν επηρεάζει καμία ζωντανή δρομολόγηση. Μη αναστρέψιμο.';
-            $cleanup = '<form action="'.htmlspecialchars($link.'&action=cleanOrphans').'" method="POST" style="display:inline-block;margin-left:8px">'
-                .$token
-                .'<button class="btn btn-xs btn-danger" type="submit" onclick="return confirm('.htmlspecialchars(json_encode($confirm), ENT_QUOTES).');">'
-                .'<i class="fa fa-trash"></i> Καθαρισμός ορφανών</button></form>';
-        }
+        // Point to the DETAILED orphan page (see every row + per-row delete)
+        // instead of a blind bulk delete on the list — the operator asked to know
+        // exactly what would be removed before deleting. The bulk «Καθαρισμός όλων»
+        // still lives there, behind the visible list. Gated on the SQL summary so
+        // the link shows whenever any orphan row exists (route/contact level), not
+        // only when a whole client row reads orphan.
+        $cleanup = $orphans['total'] > 0
+            ? '<a class="btn btn-xs btn-warning" href="'.htmlspecialchars($link.'&action=orphans').'" style="margin-left:8px">'
+                .'<i class="fa fa-search"></i> Προβολή/διαχείριση ορφανών</a>'
+            : '';
         $orphanToggle = $orphanRowCount > 0
             ? '<button id="ek-prefs-orphans" class="btn btn-xs btn-default" type="button">⚠ Μόνο ορφανά ('.$orphanRowCount.' πελάτες)</button>'
             : '';
@@ -1099,29 +1100,48 @@ EOF;
         return $this->prefsList($link, $flash);
     }
 
-    /** One client's contacts + service routing (read-only). */
+    /** One client's contacts + service routing — with admin CRUD + service links. */
     private function prefsClient(string $link, int $userid, ?string $flash = null): string
     {
         $client = Capsule::table('tblclients')->find($userid);
-        $name = $client
+        $clientGone = $client === null;
+        $name = ! $clientGone
             ? htmlspecialchars(trim((string) $client->companyname) !== ''
                 ? (string) $client->companyname
                 : trim($client->firstname.' '.$client->lastname))
             : ('#'.$userid);
 
+        $token = $this->csrfField();
         $contacts = ThirdPartyStore::contactsForUser($userid);
-        $byId = [];
+
+        // --- Contacts, with per-row EDIT + DELETE and a «Νέα επαφή» button. The
+        // admin operator manages this client's third-party beneficiaries directly
+        // (was impossible before — only re-routing existed). Reuses the same
+        // userid-scoped store writes as the client v2 page.
         $contactRows = '';
         foreach ($contacts as $c) {
-            $byId[(int) $c->id] = (string) $c->company_name;
-            $contactRows .= '<tr><td>'.htmlspecialchars((string) $c->company_name).'</td>'
+            $cid = (int) $c->id;
+            $editUrl = htmlspecialchars($link.'&action=contactForm&userid='.$userid.'&id='.$cid);
+            $delConfirm = htmlspecialchars(json_encode('Διαγραφή της επαφής «'.((string) $c->company_name)
+                .'»; Θα διαγραφούν ΚΑΙ οι δρομολογήσεις της. Μη αναστρέψιμο.'), ENT_QUOTES);
+            $contactRows .= '<tr>'
+                .'<td>'.htmlspecialchars((string) $c->company_name).'</td>'
                 .'<td>'.htmlspecialchars((string) ($c->gr_vatno ?? '')).'</td>'
                 .'<td>'.htmlspecialchars((string) ($c->tax_office ?? '')).'</td>'
-                .'<td>'.htmlspecialchars((string) ($c->city ?? '')).'</td></tr>';
+                .'<td>'.htmlspecialchars((string) ($c->email ?? '')).'</td>'
+                .'<td>'.htmlspecialchars((string) ($c->city ?? '')).'</td>'
+                .'<td class="text-right"><a class="btn btn-xs btn-default" href="'.$editUrl.'">Επεξεργασία</a> '
+                .'<form method="POST" action="'.htmlspecialchars($link.'&action=contactDelete').'" style="display:inline">'
+                .$token
+                .'<input type="hidden" name="userid" value="'.$userid.'">'
+                .'<input type="hidden" name="id" value="'.$cid.'">'
+                .'<button class="btn btn-xs btn-danger" onclick="return confirm('.$delConfirm.');">Διαγραφή</button>'
+                .'</form></td></tr>';
         }
         if ($contactRows === '') {
-            $contactRows = '<tr><td colspan="4" class="text-muted">Καμία επαφή.</td></tr>';
+            $contactRows = '<tr><td colspan="6" class="text-muted">Καμία επαφή.</td></tr>';
         }
+        $newContactUrl = htmlspecialchars($link.'&action=contactForm&userid='.$userid.'&id=0');
 
         // Contact <option> set for the routing selects (admin-side EDIT — the
         // operator can re-route a service to the correct beneficiary when the
@@ -1134,13 +1154,19 @@ EOF;
                 .htmlspecialchars((string) $c->company_name).'</option>';
         }
 
-        $token = $this->csrfField();
+        // --- LIVE service routing (service id + a deep-link to the WHMCS service).
         $serviceRows = '';
         foreach (ThirdPartyStore::servicesForUser($userid) as $s) {
             $sel = $this->optionsWithSelected($options, (int) ($s['contactid'] ?? 0));
             $checked = ! empty($s['is_receipt']) ? ' checked' : '';
-            $serviceRows .= '<tr><td>'.htmlspecialchars((string) $s['label'])
-                .' <span class="label label-default">'.htmlspecialchars((string) $s['service_type']).'</span></td>'
+            $label = htmlspecialchars((string) $s['label']);
+            $svcLink = $this->serviceAdminLink((string) $s['service_type'], (int) $s['serviceid'], $userid);
+            $labelCell = $svcLink !== null
+                ? '<a href="'.htmlspecialchars($svcLink).'" title="Άνοιγμα υπηρεσίας στο WHMCS">'.$label.'</a>'
+                : $label;
+            $serviceRows .= '<tr><td>'.$labelCell
+                .' <span class="label label-default">'.htmlspecialchars((string) $s['service_type']).'</span>'
+                .' <span class="text-muted">#'.(int) $s['serviceid'].'</span></td>'
                 .'<td><form method="POST" action="'.$link.'&action=route" class="form-inline">'
                 .$token
                 .'<input type="hidden" name="userid" value="'.$userid.'">'
@@ -1155,16 +1181,47 @@ EOF;
             $serviceRows = '<tr><td colspan="2" class="text-muted">Καμία υπηρεσία / δρομολόγηση.</td></tr>';
         }
 
+        // --- DEAD-service routes: routes whose service no longer exists in WHMCS.
+        // servicesForUser() lists only LIVE services, so these were invisible AND
+        // unmanageable on this page — the operator couldn't tell an active route
+        // from a dead one, nor delete it. Surface them with a per-row delete.
+        $deadRows = '';
+        foreach (ThirdPartyStore::deadServiceRoutesForUser($userid) as $d) {
+            $delConfirm = htmlspecialchars(json_encode('Διαγραφή αυτής της δρομολόγησης σε νεκρή υπηρεσία (#'
+                .$d['serviceid'].');'), ENT_QUOTES);
+            $deadRows .= '<tr>'
+                .'<td><span class="text-muted">#'.$d['serviceid'].'</span> '
+                .'<span class="label label-default">'.htmlspecialchars($d['service_type']).'</span> '
+                .'<span class="label label-warning">νεκρή υπηρεσία</span></td>'
+                .'<td>'.htmlspecialchars($d['contact_name']).'</td>'
+                .'<td class="text-right"><form method="POST" action="'.htmlspecialchars($link.'&action=routeDelete').'" style="display:inline">'
+                .$token
+                .'<input type="hidden" name="userid" value="'.$userid.'">'
+                .'<input type="hidden" name="id" value="'.$d['id'].'">'
+                .'<button class="btn btn-xs btn-danger" onclick="return confirm('.$delConfirm.');">Διαγραφή</button>'
+                .'</form></td></tr>';
+        }
+        $deadSection = '';
+        if ($deadRows !== '') {
+            $deadSection = '<h3>Δρομολογήσεις σε νεκρές υπηρεσίες</h3>'
+                .'<p class="text-muted">Η υπηρεσία δεν υπάρχει πλέον στο WHMCS — η δρομολόγηση είναι ανενεργή. Διάγραψέ την αν δεν τη χρειάζεσαι.</p>'
+                .'<table class="table table-striped"><thead><tr><th>Υπηρεσία</th><th>Δικαιούχος</th><th></th></tr></thead>'
+                .'<tbody>'.$deadRows.'</tbody></table>';
+        }
+
         $backList = $link.'&action=prefs';
         $flashHtml = $flash ?? '';
+        $clientBadge = $clientGone
+            ? ' <span class="label label-warning" title="Ο πελάτης δεν υπάρχει πλέον στο WHMCS">⚠ διαγραμμένος πελάτης</span>'
+            : ' <a href="'.htmlspecialchars('clientssummary.php?userid='.$userid).'" class="text-muted" title="Άνοιγμα πελάτη στο WHMCS">#'.$userid.'</a>';
 
         return <<<EOF
 <p><a class="btn btn-default" href="{$backList}">&larr; Όλοι οι πελάτες</a></p>
-<h2>{$name} <span class="text-muted">#{$userid}</span></h2>
+<h2>{$name}{$clientBadge}</h2>
 {$flashHtml}
-<h3>Επαφές (δικαιούχοι τιμολόγησης)</h3>
+<h3>Επαφές (δικαιούχοι τιμολόγησης) <a class="btn btn-sm btn-success" href="{$newContactUrl}">+ Νέα επαφή</a></h3>
 <table class="table table-striped">
-    <thead><tr><th>Επωνυμία</th><th>ΑΦΜ</th><th>ΔΟΥ</th><th>Πόλη</th></tr></thead>
+    <thead><tr><th>Επωνυμία</th><th>ΑΦΜ</th><th>ΔΟΥ</th><th>Email</th><th>Πόλη</th><th></th></tr></thead>
     <tbody>{$contactRows}</tbody>
 </table>
 <h3>Δρομολόγηση υπηρεσιών</h3>
@@ -1173,7 +1230,22 @@ EOF;
     <thead><tr><th>Υπηρεσία</th><th>Εκδίδεται σε</th></tr></thead>
     <tbody>{$serviceRows}</tbody>
 </table>
+{$deadSection}
 EOF;
+    }
+
+    /** WHMCS admin deep-link to a hosting/domain service (null for unknown types). */
+    private function serviceAdminLink(string $serviceType, int $serviceid, int $userid): ?string
+    {
+        $t = strtolower(trim($serviceType));
+        if ($t === 'hosting') {
+            return 'clientshosting.php?userid='.$userid.'&id='.$serviceid;
+        }
+        if ($t === 'domain') {
+            return 'clientsdomains.php?userid='.$userid.'&id='.$serviceid;
+        }
+
+        return null;
     }
 
     /**
@@ -1247,6 +1319,248 @@ EOF;
             : $this->alert('warning', 'Αποτυχία: η επαφή δεν ανήκει σε αυτόν τον πελάτη.');
 
         return $this->prefsClient($link, $userid, $flash);
+    }
+
+    /**
+     * Admin form to CREATE (id=0) or EDIT a third-party contact for a client.
+     * GET-only (renders the form); the write is contactSave. Scoped to $userid.
+     */
+    public function contactForm(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        $userid = (int) ($_GET['userid'] ?? 0);
+        $id = (int) ($_GET['id'] ?? 0);
+        if ($userid <= 0) {
+            return $this->errorPage($link, 'Λείπει το userid του πελάτη.');
+        }
+
+        $row = null;
+        if ($id > 0) {
+            $row = ThirdPartyStore::contactForUser($userid, $id);
+            if ($row === null) {
+                return $this->errorPage($link.'&action=prefs&userid='.$userid,
+                    'Η επαφή δεν βρέθηκε για αυτόν τον πελάτη.');
+            }
+        }
+
+        $token = $this->csrfField();
+        $back = htmlspecialchars($link.'&action=prefs&userid='.$userid);
+        $save = htmlspecialchars($link.'&action=contactSave');
+        $title = $id > 0 ? 'Επεξεργασία επαφής' : 'Νέα επαφή';
+        $labels = [
+            'company_name' => 'Επωνυμία *', 'gr_vatno' => 'ΑΦΜ', 'vies_vatno' => 'VIES VAT',
+            'tax_office' => 'ΔΟΥ', 'address1' => 'Διεύθυνση', 'address2' => 'Διεύθυνση 2',
+            'city' => 'Πόλη', 'postal_code' => 'Τ.Κ.', 'country' => 'Χώρα',
+            'description' => 'Δραστηριότητα', 'email' => 'Email', 'telephone' => 'Τηλέφωνο',
+        ];
+        $inputs = '';
+        foreach ($labels as $f => $labelText) {
+            $val = htmlspecialchars($row !== null ? (string) ($row->$f ?? '') : '', ENT_QUOTES);
+            $inputs .= '<div class="form-group"><label>'.htmlspecialchars($labelText).'</label>'
+                .'<input type="text" name="'.$f.'" value="'.$val.'" class="form-control"></div>';
+        }
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$back}">&larr; Πίσω</a></p>
+<h2>{$title}</h2>
+<form method="POST" action="{$save}" style="max-width:640px">
+{$token}
+<input type="hidden" name="userid" value="{$userid}">
+<input type="hidden" name="id" value="{$id}">
+{$inputs}
+<button class="btn btn-primary" type="submit">Αποθήκευση</button>
+<a class="btn btn-default" href="{$back}">Άκυρο</a>
+</form>
+EOF;
+    }
+
+    /** POST: create/update a client's contact, then back to the client page. */
+    public function contactSave(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return $this->errorPage($link, 'Μη έγκυρο αίτημα.');
+        }
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage($link);
+        }
+        $userid = (int) ($_POST['userid'] ?? 0);
+        $id = (int) ($_POST['id'] ?? 0);
+        if ($userid <= 0) {
+            return $this->errorPage($link, 'Λείπει το userid του πελάτη.');
+        }
+
+        $input = [];
+        foreach (ThirdPartyStore::CONTACT_FIELDS as $f) {
+            $input[$f] = (string) ($_POST[$f] ?? '');
+        }
+        if (trim((string) $input['company_name']) === '') {
+            return $this->prefsClient($link, $userid,
+                $this->alert('warning', 'Η επωνυμία είναι υποχρεωτική — δεν αποθηκεύτηκε.'));
+        }
+
+        if ($id > 0) {
+            $ok = ThirdPartyStore::updateContactForUser($userid, $id, $input);
+            $msg = $ok ? 'Η επαφή ενημερώθηκε.' : 'Η επαφή δεν βρέθηκε για αυτόν τον πελάτη.';
+        } else {
+            $ok = ThirdPartyStore::createContactForUser($userid, $input) > 0;
+            $msg = $ok ? 'Η επαφή δημιουργήθηκε.' : 'Αποτυχία δημιουργίας επαφής.';
+        }
+        $this->logActivity('EkdosiBridge: admin '.($id > 0 ? 'updated' : 'created')
+            .' third-party contact for client #'.$userid.($ok ? '' : ' (FAILED)'));
+
+        return $this->prefsClient($link, $userid, $this->alert($ok ? 'success' : 'warning', $msg));
+    }
+
+    /**
+     * POST: delete one third-party contact by id (cascades its routing rows).
+     * Reached from the per-client page AND the orphan page (from=orphans).
+     */
+    public function contactDelete(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return $this->errorPage($link, 'Μη έγκυρο αίτημα.');
+        }
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage($link);
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $userid = (int) ($_POST['userid'] ?? 0);
+        $ok = $id > 0 && ThirdPartyStore::deleteContactById($id);
+        $this->logActivity('EkdosiBridge: admin deleted third-party contact #'.$id
+            .' (cascaded routes)'.($ok ? '' : ' (FAILED)'));
+        $flash = $this->alert($ok ? 'success' : 'warning',
+            $ok ? 'Η επαφή διαγράφηκε (μαζί με τις δρομολογήσεις της).' : 'Η επαφή δεν βρέθηκε.');
+
+        if (($_POST['from'] ?? '') === 'orphans') {
+            return $this->orphansPage($link, $flash);
+        }
+
+        return $userid > 0 ? $this->prefsClient($link, $userid, $flash) : $this->prefsList($link, $flash);
+    }
+
+    /**
+     * POST: delete one routing row by id. Reached from the dead-service section
+     * (per-client page) AND the orphan page (from=orphans). Never touches a
+     * contact — only the single routing row.
+     */
+    public function routeDelete(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+            return $this->errorPage($link, 'Μη έγκυρο αίτημα.');
+        }
+        if (! $this->csrfValid()) {
+            return $this->csrfFailPage($link);
+        }
+        $id = (int) ($_POST['id'] ?? 0);
+        $userid = (int) ($_POST['userid'] ?? 0);
+        $ok = $id > 0 && ThirdPartyStore::deleteRouteById($id);
+        $this->logActivity('EkdosiBridge: admin deleted routing row #'.$id.($ok ? '' : ' (FAILED)'));
+        $flash = $this->alert($ok ? 'success' : 'warning',
+            $ok ? 'Η δρομολόγηση διαγράφηκε.' : 'Η δρομολόγηση δεν βρέθηκε.');
+
+        if (($_POST['from'] ?? '') === 'orphans') {
+            return $this->orphansPage($link, $flash);
+        }
+
+        return $userid > 0 ? $this->prefsClient($link, $userid, $flash) : $this->prefsList($link, $flash);
+    }
+
+    /**
+     * The detailed «Ορφανά» page: enumerates the orphan contacts + routes (the
+     * same existence gaps orphanSummary() counts + purgeOrphans() bulk-deletes),
+     * so the operator SEES which rows before deleting — per-row delete, plus the
+     * bulk «Καθαρισμός όλων». Read-only until a delete form is submitted.
+     */
+    public function orphans(array $vars): string
+    {
+        $link = htmlspecialchars($vars['modulelink'] ?? 'addonmodules.php?module=ekdosi_bridge');
+        if (! ThirdPartyStore::hasOwnTables()) {
+            return $this->errorPage($link, 'Δεν υπάρχουν πίνακες.');
+        }
+
+        return $this->orphansPage($link);
+    }
+
+    private function orphansPage(string $link, ?string $flash = null): string
+    {
+        $data = ThirdPartyStore::orphanRows();
+        $token = $this->csrfField();
+        $back = htmlspecialchars($link.'&action=prefs');
+        $nc = count($data['contacts']);
+        $nr = count($data['routes']);
+
+        $cRows = '';
+        foreach ($data['contacts'] as $c) {
+            $confirm = htmlspecialchars(json_encode('Διαγραφή ορφανής επαφής «'.$c['company_name']
+                .'» (πελάτης #'.$c['userid'].' διαγραμμένος); Μη αναστρέψιμο.'), ENT_QUOTES);
+            $cRows .= '<tr>'
+                .'<td>'.htmlspecialchars($c['company_name']).'</td>'
+                .'<td>'.htmlspecialchars($c['gr_vatno']).'</td>'
+                .'<td class="text-muted">#'.$c['userid'].'</td>'
+                .'<td class="text-right"><form method="POST" action="'.htmlspecialchars($link.'&action=contactDelete').'" style="display:inline">'
+                .$token
+                .'<input type="hidden" name="from" value="orphans">'
+                .'<input type="hidden" name="id" value="'.$c['id'].'">'
+                .'<button class="btn btn-xs btn-danger" onclick="return confirm('.$confirm.');">Διαγραφή</button>'
+                .'</form></td></tr>';
+        }
+        if ($cRows === '') {
+            $cRows = '<tr><td colspan="4" class="text-muted">Καμία ορφανή επαφή.</td></tr>';
+        }
+
+        $rRows = '';
+        foreach ($data['routes'] as $r) {
+            $confirm = htmlspecialchars(json_encode('Διαγραφή ορφανής δρομολόγησης (#'.$r['serviceid']
+                .' '.$r['service_type'].' → '.$r['contact_name'].'); Μη αναστρέψιμο.'), ENT_QUOTES);
+            $rRows .= '<tr>'
+                .'<td><span class="text-muted">#'.$r['serviceid'].'</span> '
+                .'<span class="label label-default">'.htmlspecialchars($r['service_type']).'</span></td>'
+                .'<td>'.htmlspecialchars($r['contact_name']).'</td>'
+                .'<td class="text-muted">#'.$r['userid'].'</td>'
+                .'<td><span class="label label-warning">'.htmlspecialchars($r['reason']).'</span></td>'
+                .'<td class="text-right"><form method="POST" action="'.htmlspecialchars($link.'&action=routeDelete').'" style="display:inline">'
+                .$token
+                .'<input type="hidden" name="from" value="orphans">'
+                .'<input type="hidden" name="id" value="'.$r['id'].'">'
+                .'<button class="btn btn-xs btn-danger" onclick="return confirm('.$confirm.');">Διαγραφή</button>'
+                .'</form></td></tr>';
+        }
+        if ($rRows === '') {
+            $rRows = '<tr><td colspan="5" class="text-muted">Καμία ορφανή δρομολόγηση.</td></tr>';
+        }
+
+        $flashHtml = $flash ?? '';
+        $bulk = '';
+        if ($nc + $nr > 0) {
+            $confirm = htmlspecialchars(json_encode('Διαγραφή ΟΛΩΝ των ορφανών (επαφές διαγρ. πελάτη + '
+                .'δρομολ. διαγρ. πελάτη/νεκρής υπηρεσίας); Δεν επηρεάζει καμία ζωντανή δρομολόγηση. '
+                .'Μη αναστρέψιμο.'), ENT_QUOTES);
+            $bulk = '<form method="POST" action="'.htmlspecialchars($link.'&action=cleanOrphans').'" style="display:inline-block;margin-bottom:10px">'
+                .$token
+                .'<button class="btn btn-danger" onclick="return confirm('.$confirm.');"><i class="fa fa-trash"></i> Καθαρισμός όλων των ορφανών</button>'
+                .'</form>';
+        }
+
+        return <<<EOF
+<p><a class="btn btn-default" href="{$back}">&larr; Πελάτες</a></p>
+<h2>Ορφανά — έλεγχος &amp; διαγραφή</h2>
+<p class="text-muted">Γραμμές που δείχνουν σε ανύπαρκτο πελάτη ή υπηρεσία. Δεν επηρεάζουν καμία ζωντανή δρομολόγηση. Διάγραψε επιλεκτικά ή όλα μαζί.</p>
+{$flashHtml}
+{$bulk}
+<h3>Ορφανές επαφές — διαγραμμένος πελάτης ({$nc})</h3>
+<table class="table table-striped">
+    <thead><tr><th>Επωνυμία</th><th>ΑΦΜ</th><th>Πελάτης</th><th></th></tr></thead>
+    <tbody>{$cRows}</tbody>
+</table>
+<h3>Ορφανές δρομολογήσεις ({$nr})</h3>
+<table class="table table-striped">
+    <thead><tr><th>Υπηρεσία</th><th>Δικαιούχος</th><th>Πελάτης</th><th>Λόγος</th><th></th></tr></thead>
+    <tbody>{$rRows}</tbody>
+</table>
+EOF;
     }
 
     /**
