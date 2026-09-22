@@ -11,6 +11,14 @@ the shared-hosting counterpart to the VPS/systemd instructions in
 > binary and application path, plus the live state (is cron/worker already alive?).
 > The lines here are the reference; `ops:cron` is the source of truth per host.
 
+## Set `TRUSTED_PROXIES=none` in `.env`
+
+The default (`local`) trusts proxy headers from loopback and the box's own IPs —
+right for a dedicated server behind the CFM edge, wrong on a shared box, where other
+accounts' scripts also connect from `127.0.0.1` and could forge the client IP that the
+login log and the per-IP throttles see. If the shared host itself sits behind a proxy
+you do trust, list that proxy's IP instead (`TRUSTED_PROXIES=203.0.113.7`).
+
 ## What a shared box lacks
 
 No `systemd`, no `supervisord`, no root — so the resident `queue:work` service from

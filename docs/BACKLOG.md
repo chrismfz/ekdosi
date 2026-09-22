@@ -13,27 +13,19 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 Ο κανόνας της σειράς: **η προτεραιότητα ενός finding δεν είναι ιδιότητά του — είναι finding × αυτή η επιχείρηση ×
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
-1. **Τώρα (δικό του PR):** `TRUSTED_PROXIES` + `trustHosts()` hardening (→ Security/ops).
-2. **Delivery notes (ΔΑ)** — inbound inbox **4b**, μετά πλήρη **9.1 / 9.2**.
-3. **Migration / money tooling:** Generic CSV importer → Bank-statement import → Dunning ladder → Cashflow /
+1. **Delivery notes (ΔΑ)** — inbound inbox **4b**, μετά πλήρη **9.1 / 9.2**.
+2. **Migration / money tooling:** Generic CSV importer → Bank-statement import → Dunning ladder → Cashflow /
    recurring-expenses (accountant-gated).
-4. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
+3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
    Portal transactional surfaces (largely greenfield).
-5. **Parked / blocked-on-external:** PEPPOL Phase 2 (review 2027) · PROV-003 archive (InvoSign endpoint) · POS-1(c) ·
+4. **Parked / blocked-on-external:** PEPPOL Phase 2 (review 2027) · PROV-003 archive (InvoSign endpoint) · POS-1(c) ·
    «Εισερχόμενα από Πύλη» (ερώτημα λογιστή) · 2ος GR πάροχος.
-6. **Ideas / low-commitment:** κεντρικός editor κειμένων (owner-requested) · setup profiles ανά κλάδο ·
+5. **Ideas / low-commitment:** κεντρικός editor κειμένων (owner-requested) · setup profiles ανά κλάδο ·
    multi-currency · shared Contacts CRM · Bridges Phase 1 · AI Phase 2c.
 
 ---
 
 ## 🗺️ Roadmap
-
-### 🔐 Security / ops
-- **`TRUSTED_PROXIES` + Host pinning (planned as its own PR).** Το `bootstrap/app.php` διαβάζει `env()` μέσα στο
-  `withMiddleware` → αγνοείται όταν είναι set μόνο στο `.env` (verified). Fix = `config/trustedproxy.php` + keyword
-  `local` (loopback + `SERVER_ADDR`) + trust μόνο `X-Forwarded-For/Proto/Port`· μαζί με `trustHosts()` (το Host header
-  δεν είναι pinned — reset-link poisoning υπό sync queue). Λύνει και τα throttles (`throttle:oauth`/portal login/
-  webhooks) που αλλιώς κλειδώνουν στο edge IP πίσω από CDN.
 
 ### 💳 Payments / money
 - **POS-1(c) — πραγματική POS διασύνδεση (ν.5073/2023).** Σύλληψη `ProvidersSignature` + `tid` + `transactionId` από το
@@ -180,6 +172,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 
 **Security / tenancy / secrets**
 - **Legacy secrets (`/legacy/` .dfm/.cfg) — κλειστό:** τα credentials άλλαξαν και το git history καθαρίστηκε (2026-09).
+- **Proxies/hosts (2026-09):** `TRUSTED_PROXIES` default `local` (loopback + οι IP του server → CFM edge χωρίς ρύθμιση· `none` σε shared hosting) · trust μόνο `X-Forwarded-For/Proto` (ποτέ Host/Port) · **host pinning (`trustHosts`) — χτίστηκε και ΑΦΑΙΡΕΘΗΚΕ:** το CFM edge δρομολογεί ανά vhost (άγνωστα Host κατά κανόνα δεν φτάνουν στην εφαρμογή), και ένα pin δίνει 400 σε κάθε αλλαγή domain/CDN/IP· ξανανοίγει μόνο αν η εφαρμογή γίνει default vhost ενός box.
 - **Strict tenant scope (null→throw) — deferred:** audit 0 leaks σε ~54 entry points· το no-op default είναι load-bearing (`CLAUDE.md`).
 - **Secrets μένουν super_admin**· `CompanySettings` = SAFE whitelisted subset — μην μεταφέρεις credentials μαζικά στον company_admin.
 - **Declined:** tenant-slug existence oracle (404 vs 401) στο `issued-doc-pdf` — συνεπές με τα sibling webhooks, τα slugs δεν είναι μυστικά.

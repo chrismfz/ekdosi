@@ -742,8 +742,9 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Log συνδέσεων & ασφάλειας** (`auth_events`) — σύνδεση/αποσύνδεση/**αποτυχία** και στα δύο panels
   (`/admin`, `/user`) με IP + user-agent + επιχειρούμενο username (ακόμη & ανύπαρκτο· κωδικός ποτέ):
   ορατότητα για recon/brute-force. Tab «Συνδέσεις & ασφάλεια» στη «Δραστηριότητα» (**super-admin
-  μόνο**), retention με `model:prune`. Στους «Χρήστες»: «Τελ. σύνδεση» + «IP». `TRUSTED_PROXIES` για
-  πραγματικό client IP πίσω από edge.
+  μόνο**), retention με `model:prune`. Στους «Χρήστες»: «Τελ. σύνδεση» + «IP». Πραγματικό client IP
+  πίσω από edge: `TRUSTED_PROXIES` (default `local` = loopback + οι IP του server → το CFM edge δουλεύει χωρίς
+  ρύθμιση).
 - **FK-aware delete guard** (`GuardedDeleteAction`) — μπλοκάρει διαγραφή lookup σε χρήση, σε **single + bulk +
   force** (η μαζική/οριστική διαγραφή παραλείπει τις σε-χρήση εγγραφές με σύνοψη «Διαγράφηκαν/Παραλείφθηκαν»).
 - **Off-site backup verification** (`ops:health` → `backup.companies`) — ανά tenant με

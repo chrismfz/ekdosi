@@ -19,6 +19,12 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Security
+- **`TRUSTED_PROXIES` από το `.env` αγνοούνταν — τώρα εφαρμόζεται, με default `local`.** Διαβαζόταν με `env()` μέσα στο
+  `bootstrap/app.php` πριν φορτωθεί το `.env`, άρα πίσω από edge το log συνδέσεων/«Τελ. σύνδεση» και τα per-IP throttles
+  έβλεπαν το IP του proxy. Νέο `config/trustedproxy.php` (ανά request)· default `local` = loopback + όλες οι IP του
+  server (το CFM edge δουλεύει χωρίς ρύθμιση), `none` για shared hosting· εμπιστευόμαστε μόνο `X-Forwarded-For/Proto`
+  (ποτέ `-Host`/`-Port`). Το `EnsureInstalled` τρέχει πλέον μετά το TrustProxies (σωστό scheme στα redirects του).
+  **⚠ Upgrade σε shared hosting (cPanel/DirectAdmin): βάλε `TRUSTED_PROXIES=none`** (`docs/shared-hosting-deploy.md`).
 - **vPOS return: canonical επαλήθευση digest — ένα payment δεν settle-άρει δύο intents.** Το digest της Cardlink υπογράφει **concatenation των τιμών χωρίς delimiters**, οπότε τα
   *σύνορα* των πεδίων ΔΕΝ είναι υπογεγραμμένα — μόνο το τελικό byte string. Πελάτης που ολοκλήρωσε μία
   γνήσια πληρωμή μπορούσε να κάνει replay το σωστά υπογεγραμμένο return ξανα-μοιράζοντας τα ίδια bytes

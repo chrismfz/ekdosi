@@ -835,6 +835,29 @@ If you go with apache, change `listen.owner` / `listen.group` in
 `/etc/php-fpm.d/ekdosi.conf` from `nginx` to `apache` so httpd can
 talk to the socket. The pool itself still runs as `ekdosi:ekdosi`.
 
+### 10c. Behind a reverse proxy / edge
+
+Nothing to set when the proxy runs **on the same box** (the CFM edge, or an nginx in
+front of this one): the default `TRUSTED_PROXIES` (`local` = loopback + every IP of
+this server) already takes the real client IP from `X-Forwarded-For` and `https` from
+`X-Forwarded-Proto`. An external proxy/CDN → add its IP/CIDR: `TRUSTED_PROXIES=local,203.0.113.0/24`.
+`X-Forwarded-Host`/`-Port` are never trusted. The proxy must pass the real `Host` through
+and **set** the forwarding headers itself — a proxy that relays a client's own
+`X-Forwarded-For` untouched lets that client pick its logged IP. nginx:
+
+```nginx
+proxy_set_header Host              $host;
+proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;   # appends the real peer
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+No proxy in front (nginx → php-fpm directly)? Nothing to do either: requests then
+arrive from the client's own address, which `local` doesn't trust.
+
+A CDN (Cloudflare…) added in front of the edge breaks nothing: until its ranges are in
+`TRUSTED_PROXIES` (or the edge rewrites `X-Forwarded-For` from `CF-Connecting-IP`), the
+login log simply shows the CDN's IP instead of the client's.
+
 ## 11. Background jobs
 
 > **Shortcut:** `php artisan ops:cron` prints the exact crontab + worker lines for
