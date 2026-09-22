@@ -169,16 +169,7 @@ class SelfUpdate extends Command
         if (! is_dir(base_path('.git'))) {
             throw new \RuntimeException('Δεν βρέθηκε φάκελος .git — η in-app ενημέρωση («php» strategy) απαιτεί deployment μέσω git checkout.');
         }
-        // TRACKED changes only (`--untracked-files=no`), same rule as
-        // deploy/update.sh: a bare `--porcelain` counts UNTRACKED files, and the
-        // `shield:generate` step below writes one for any resource shipping
-        // without a policy — which then refused every later update. Here it is
-        // worse than on the shell script: the panel operator has no shell to
-        // clear it with, so this must never be the stop condition.
-        $dirty = trim($this->capture(['git', 'status', '--porcelain', '--untracked-files=no'], base_path()));
-        if ($dirty !== '') {
-            throw new \RuntimeException("Το working tree δεν είναι καθαρό — ματαίωση:\n".$dirty);
-        }
+        $this->assertCleanTrackedTree('ενημέρωσης');
 
         // ── fetch — still UP, so a network failure costs no downtime (same
         //    order as deploy/update.sh: fetch, then resolve, then go down) ────
@@ -190,10 +181,12 @@ class SelfUpdate extends Command
             $this->gitFetch($run);
         });
 
-        // Copy aside anything the checkout would replace — needs the ref FETCHED
-        // (to know what it ships) and must run BEFORE maintenance, so its
-        // abort-on-failed-backup never strands the app down with no shell.
+        // Needs the ref FETCHED (to know what it ships) and must run BEFORE
+        // maintenance, so an abort never strands the app down with no shell:
+        // refuse a checkout that would die on an environment-edited skip-worktree
+        // file, then copy aside anything the checkout would destroy.
         $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $target) {
+            $this->assertSkipWorktreeSafe($target);
             $this->protectUntracked($run, $target);
         });
 
@@ -324,28 +317,20 @@ class SelfUpdate extends Command
             throw new \RuntimeException('Δεν βρέθηκε φάκελος .git — αδύνατη η επαναφορά κώδικα.');
         }
 
-        // The same guards as runPhp(), all BEFORE maintenance so any abort leaves
-        // the app up. The target is the pre-update ref, already local (no fetch).
-        // Resolve it first: protectUntracked() probes `<ref>:<path>`, and a bad ref
-        // would read as «not tracked there» for every file — skipping the backup
-        // it exists to take — before the checkout failed anyway.
+        // The same guards as runPhp(), all BEFORE maintenance, so an abort changes
+        // nothing — the app stays as it was (up, or still down from the failed
+        // update that prompted this rollback). The target is the pre-update ref,
+        // already local (no fetch). Resolve it ONCE and probe that commit: an
+        // unknown ref is refused here, not at the checkout mid-rollback.
         try {
-            $this->capture(['git', 'rev-parse', '--verify', '--quiet', $target.'^{commit}'], base_path());
+            $sha = trim($this->capture(['git', 'rev-parse', '--verify', '--quiet', $target.'^{commit}'], base_path()));
         } catch (Throwable) {
             throw new \RuntimeException('Άγνωστο target ref για την επαναφορά: '.$target);
         }
-        // TRACKED changes only, same rule as runPhp(): `checkout --force` below
-        // would silently discard a hand edit to a tracked file, so refuse instead —
-        // and a bare `--porcelain` would count shield:generate's untracked policy
-        // stubs and block every rollback.
-        $dirty = trim($this->capture(['git', 'status', '--porcelain', '--untracked-files=no'], base_path()));
-        if ($dirty !== '') {
-            throw new \RuntimeException("Το working tree δεν είναι καθαρό — ματαίωση επαναφοράς:\n".$dirty);
-        }
-        // Copy aside any untracked file the old ref ships as tracked — the forced
-        // checkout below would replace it without a trace.
-        $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $target) {
-            $this->protectUntracked($run, $target);
+        $this->assertCleanTrackedTree('επαναφοράς');
+        $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $sha) {
+            $this->assertSkipWorktreeSafe($sha);
+            $this->protectUntracked($run, $sha);
         });
 
         // ── maintenance ON (idempotent — a failed apply may have left it down) ─
@@ -482,41 +467,137 @@ class SelfUpdate extends Command
     }
 
     /**
-     * `checkout --force` REPLACES an untracked file whose path the target ref
-     * ships as a tracked one — usually a generated artefact, which is exactly
-     * what should happen. Copy them aside first anyway (the panel operator has
-     * no shell to recover one), and abort rather than overwrite blind if the
-     * copy fails. Used by BOTH the update and the rollback path; mirrors the same
-     * block in deploy/update.sh and deploy/rollback.sh.
+     * Refuse uncommitted changes to TRACKED files — `checkout --force` would
+     * silently discard them. Tracked only (`--untracked-files=no`), same rule as
+     * deploy/update.sh + rollback.sh: a bare `--porcelain` counts UNTRACKED
+     * files, and `shield:generate` writes one for any resource shipping without a
+     * policy — which then refused every later run, and the panel operator has no
+     * shell to clear it. A dirty TRACKED tree means someone edited code on the
+     * server (so has a shell): the message says how to clear it.
+     */
+    private function assertCleanTrackedTree(string $action): void
+    {
+        $dirty = trim($this->capture(['git', 'status', '--porcelain', '--untracked-files=no'], base_path()));
+        if ($dirty !== '') {
+            throw new \RuntimeException(
+                "Το working tree δεν είναι καθαρό (αλλαγές σε tracked αρχεία) — ματαίωση {$action}, δεν άλλαξε τίποτα. "
+                ."Στον server: `git stash` (κρατά τις αλλαγές) ή `git checkout -- <αρχείο>` (τις πετά), και ξανά.\n".$dirty
+            );
+        }
+    }
+
+    /**
+     * A skip-worktree file the host's environment edited (cPanel's MultiPHP
+     * rewrites public/.htaccess; deploy/update.sh flags it) makes `checkout
+     * --force` of a ref that CHANGES that file die with «Entry … not uptodate.
+     * Cannot merge.» — after maintenance is already ON. Refuse up front instead,
+     * saying how to clear it. A flagged file nobody touched, or one the target
+     * leaves as it is, checks out fine. Same check as the two deploy scripts.
+     */
+    private function assertSkipWorktreeSafe(string $target): void
+    {
+        foreach ($this->nulList(['git', 'ls-files', '-v', '-z']) as $entry) {
+            if (! preg_match('/^[Ss] (.+)$/s', $entry, $m)) {
+                continue;   // not skip-worktree
+            }
+            $path = $m[1];
+            $indexed = trim($this->capture(['git', 'rev-parse', ':'.$path], base_path()));
+            if (is_file(base_path($path)) && trim($this->capture(['git', 'hash-object', '--', $path], base_path())) === $indexed) {
+                continue;   // flagged but untouched — the checkout updates it normally
+            }
+            try {
+                $inTarget = trim($this->capture(['git', 'rev-parse', '--verify', '--quiet', $target.':'.$path], base_path()));
+            } catch (Throwable) {
+                $inTarget = '';   // the target drops the file
+            }
+            if ($inTarget === $indexed) {
+                continue;   // the target leaves it as it is
+            }
+
+            throw new \RuntimeException(
+                "Το {$target} αλλάζει το «{$path}», που το περιβάλλον του server έχει τροποποιήσει (skip-worktree) — "
+                .'το checkout θα αποτύγχανε με την εφαρμογή ήδη σε maintenance. Δεν άλλαξε τίποτα. '
+                ."Στον server: κράτα αντίγραφο του αρχείου, `git update-index --no-skip-worktree {$path} && git checkout -- {$path}`, "
+                .'ξανά, και μετά επανέφερε την τροποποίηση του περιβάλλοντος (cPanel: ξανα-αποθήκευση του PHP handler).'
+            );
+        }
+    }
+
+    /**
+     * `checkout --force` destroys, without a trace, anything on disk that git does
+     * NOT track here — untracked OR gitignored — that collides with a path the
+     * target ref tracks: the exact path, a directory standing where the target has
+     * a file (deleted with all its contents), or a file standing where the target
+     * has a directory. Copy all of those aside first (the panel operator has no
+     * shell to recover one), and abort rather than overwrite blind if a copy fails.
+     * A generated artefact being replaced is exactly what should happen — the copy
+     * just makes it visible. Two git calls whatever the tree size. Used by BOTH the
+     * update and the rollback path; same algorithm as deploy/update.sh + rollback.sh.
      */
     private function protectUntracked(UpdateRun $run, string $target): void
     {
-        // -z + quotePath=false: git C-quotes non-ASCII paths by default, which
-        // would make the cat-file probe miss a Greek filename.
-        $listed = $this->capture(
-            ['git', '-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '-z'],
-            base_path(),
-        );
+        $root = base_path();
+        $inIndex = array_flip($this->nulList(['git', 'ls-files', '-z']));
+        $atRisk = [];
+        $flag = function (string $path) use (&$atRisk, $inIndex): void {
+            if (! isset($inIndex[$path])) {
+                $atRisk[$path] = true;   // git holds no copy — ours is the only one
+            }
+        };
+
+        foreach ($this->nulList(['git', 'ls-tree', '-r', '--name-only', '-z', $target]) as $path) {
+            if (isset($inIndex[$path])) {
+                continue;   // tracked here too: git holds both versions
+            }
+            $abs = $root.'/'.$path;
+            if (is_link($abs) || is_file($abs)) {
+                $flag($path);
+            } elseif (is_dir($abs)) {
+                $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($abs, \FilesystemIterator::SKIP_DOTS));
+                foreach ($files as $file) {
+                    $flag(substr($file->getPathname(), strlen($root) + 1));
+                }
+            }
+            for ($dir = dirname($path); $dir !== '.'; $dir = dirname($dir)) {
+                $absDir = $root.'/'.$dir;
+                if (is_link($absDir) || (file_exists($absDir) && ! is_dir($absDir))) {
+                    $flag($dir);
+                }
+            }
+        }
+
+        if ($atRisk === []) {
+            return;
+        }
 
         $backup = storage_path('app/deploy-untracked/'.now()->format('Ymd-His'));
-
-        foreach (array_filter(explode("\0", $listed)) as $path) {
-            $tracked = new Process(['git', 'cat-file', '-e', $target.':'.$path], base_path(), null, null, 60);
-            $tracked->run();
-
-            if (! $tracked->isSuccessful()) {
-                continue;   // not in the target ref — the checkout leaves it alone
-            }
-
+        foreach (array_keys($atRisk) as $path) {
+            $from = $root.'/'.$path;
             $to = $backup.'/'.$path;
             File::ensureDirectoryExists(dirname($to));
+            $copied = is_link($from) ? @symlink((string) readlink($from), $to) : File::copy($from, $to);
 
-            if (! File::copy(base_path($path), $to)) {
+            if (! $copied) {
                 throw new \RuntimeException("Δεν μπόρεσα να κρατήσω αντίγραφο του '{$path}' στο {$backup} — ματαίωση πριν αντικατασταθεί.");
             }
 
             $this->append($run, "  αντίγραφο: {$path} → {$to}\n");
         }
+    }
+
+    /**
+     * A `-z` git listing, split into paths (throws like capture()). `-z` output is
+     * verbatim — no C-quoting of the Greek filenames we have.
+     *
+     * @param  list<string>  $cmd
+     * @return list<string>
+     */
+    private function nulList(array $cmd): array
+    {
+        return array_values(array_filter(
+            explode("\0", $this->capture($cmd, base_path())),
+            fn (string $path) => $path !== '',
+        ));
     }
 
     /**

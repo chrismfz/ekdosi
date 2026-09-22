@@ -2,29 +2,47 @@
 
 namespace Tests\Feature\Updates;
 
-use App\Console\Commands\SelfUpdate;
+use App\Models\UpdateRun;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\File;
-use ReflectionMethod;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 use Tests\TestCase;
 
 /**
- * The deploy/rollback pre-flight guards: they must run BEFORE maintenance (so an
- * abort changes nothing) and never let a forced checkout destroy an operator's
- * file unseen — on the rollback path exactly as on the update path.
+ * The deploy/rollback pre-flight guards: they run BEFORE maintenance (so an abort
+ * changes nothing) and never let a forced checkout destroy an operator's file
+ * unseen — on every path: deploy/update.sh, deploy/rollback.sh and the in-app
+ * «Επαναφορά» (SelfUpdate::runRollback).
  *
- * The shell scripts run FOR REAL in a throwaway git repo, with a stub `php` that
- * logs its calls and fails `artisan down` — so every run stops right after the
- * pre-flight and the test sees exactly what it did (or did not) touch. A full
- * in-app apply mutates the repo, so SelfUpdate's rollback guards are pinned
- * structurally instead: their ORDER is the invariant.
+ * Everything runs FOR REAL against a throwaway git repo. The shell scripts get a
+ * stub `php` that logs its calls and fails `artisan down`; the in-app rollback has
+ * base_path() pointed at the repo, which has no `artisan`, so its `down` fails the
+ * same way. Either way each run stops right after the pre-flight, and the test
+ * sees exactly what it did (or did not) touch. BOTH scripts go through the same
+ * scenarios, so a fix applied to one copy of the logic but not the other fails.
  *
- * Fixture: v1 tracks a.txt; v2 deletes it; HEAD = v2; the operator's own
- * UNTRACKED a.txt ("MINE") sits where v1 would put its tracked one.
+ * Fixture — v1 is the older ref (the rollback / downgrade target), v2 = HEAD:
+ *   a.txt     v1 tracks it, v2 deletes it          → operator's own untracked a.txt
+ *   ign.txt   v1 tracks it, v2 untracks + ignores  → operator's own GITIGNORED ign.txt
+ *   foo       v1 tracks a FILE foo, v2 deletes it  → operator's untracked DIR foo/bar
+ *   dir/x     v1 tracks dir/x, v2 deletes it       → operator's untracked FILE dir
+ *   b.txt, public/.htaccess — tracked in both.
  */
 class DeployPreflightGuardsTest extends TestCase
 {
+    use RefreshDatabase;
+
+    /** What `checkout --force v1` would destroy that git has no copy of. */
+    private const OPERATOR_FILES = [
+        'a.txt' => "MINE-A\n",
+        'dir' => "MINE-DIR\n",
+        'foo/bar' => "MINE-FOO\n",
+        'ign.txt' => "MINE-IGN\n",
+    ];
+
     /** Never let an ambient git env (e.g. a hook) redirect the fixture's git. */
     private const CLEAN_GIT_ENV = ['GIT_DIR' => false, 'GIT_WORK_TREE' => false, 'GIT_INDEX_FILE' => false];
 
@@ -39,22 +57,54 @@ class DeployPreflightGuardsTest extends TestCase
         parent::tearDown();
     }
 
-    public function test_rollback_copies_aside_an_untracked_file_the_target_tracks_before_maintenance(): void
+    /** @return array<string, array{string, array<string, string>}> */
+    public static function scriptsTargetingV1(): array
+    {
+        return [
+            'rollback.sh' => ['rollback.sh', []],
+            'update.sh (deliberate downgrade)' => ['update.sh', ['ALLOW_DOWNGRADE' => '1']],
+        ];
+    }
+
+    // ───────────────────────────── both scripts ─────────────────────────────
+
+    /** @param array<string, string> $env */
+    #[DataProvider('scriptsTargetingV1')]
+    public function test_it_copies_aside_everything_the_checkout_would_destroy_before_maintenance(string $script, array $env): void
     {
         $this->fixture();
 
-        [$code, $out] = $this->runScript('rollback.sh', 'v1');
+        [$code, $out] = $this->runScript($script, 'v1', $env);
 
-        $this->assertSame(1, $code, 'the stub `php` fails `artisan down`, so the run stops right there');
-        $backups = $this->backups();
-        $this->assertCount(1, $backups, $out);
-        $this->assertStringEndsWith('/a.txt', $backups[0]);
-        $this->assertSame("MINE\n", File::get($this->repo.'/storage/app/deploy-untracked/'.$backups[0]), "the operator's own bytes are what was kept");
-        $this->assertSame("MINE\n", File::get($this->repo.'/a.txt'), 'nothing was checked out');
-        $this->assertStringContainsString('copied aside: a.txt', $out);
-        $this->assertStringContainsString('Maintenance mode ON', $out);
-        $this->assertLessThan(strpos($out, 'Maintenance mode ON'), strpos($out, 'copied aside: a.txt'), 'the copy is taken BEFORE maintenance');
+        // The stub `php` fails `artisan down` and the script exits right there —
+        // so the copies it left were taken BEFORE maintenance, and nothing was
+        // checked out.
+        $this->assertSame(1, $code, $out);
+        $this->assertStringContainsString('artisan down', (string) $this->phpCalls(), $out);
+        $this->assertBackedUp(self::OPERATOR_FILES, $out);
+        $this->assertOperatorFilesIntact();
     }
+
+    /** @param array<string, string> $env */
+    #[DataProvider('scriptsTargetingV1')]
+    public function test_it_refuses_a_checkout_that_would_die_on_an_edited_skip_worktree_file(string $script, array $env): void
+    {
+        // v2 changed public/.htaccess and cPanel edited it on the server; the script
+        // flags it skip-worktree itself. `checkout --force v1` would exit 128
+        // («not uptodate») with the site already down — refuse before that.
+        $this->fixture(releaseChangesHtaccess: true);
+        File::append($this->repo.'/public/.htaccess', "# php -- BEGIN cPanel-generated handler\n");
+
+        [$code, $out] = $this->runScript($script, 'v1', $env);
+
+        $this->assertSame(1, $code);
+        $this->assertStringContainsString('changes public/.htaccess', $out);
+        $this->assertStringContainsString('git update-index --no-skip-worktree public/.htaccess', $out);
+        $this->assertStringNotContainsString('artisan down', (string) $this->phpCalls(), 'refused before maintenance');
+        $this->assertSame([], $this->backups(), 'a refused run leaves no copies');
+    }
+
+    // ────────────────────────────── rollback.sh ─────────────────────────────
 
     public function test_rollback_refuses_uncommitted_tracked_changes_before_touching_anything(): void
     {
@@ -83,8 +133,9 @@ class DeployPreflightGuardsTest extends TestCase
 
     public function test_rollback_never_refuses_over_untracked_files_and_leaves_the_rest_alone(): void
     {
-        // a.txt is untracked AND absent from v2: the deadlock case (a bare `git
-        // status --porcelain` would count it and refuse) and nothing to protect.
+        // v2 = HEAD: nothing the checkout touches collides with the operator's
+        // untracked/ignored leftovers — and they must not block it either (a bare
+        // `git status --porcelain` would count them: the shield:generate deadlock).
         $this->fixture();
 
         [$code, $out] = $this->runScript('rollback.sh', 'v2');
@@ -92,10 +143,10 @@ class DeployPreflightGuardsTest extends TestCase
         $this->assertSame(1, $code);
         $this->assertStringNotContainsString('not clean', $out);
         $this->assertStringContainsString('artisan down', (string) $this->phpCalls(), 'it went on to maintenance');
-        $this->assertSame([], $this->backups(), 'nothing the checkout would replace');
+        $this->assertSame([], $this->backups(), 'nothing the checkout would destroy');
     }
 
-    public function test_rollback_ignores_an_environment_managed_htaccess_edit(): void
+    public function test_rollback_ignores_an_environment_managed_htaccess_edit_the_target_does_not_change(): void
     {
         // cPanel's MultiPHP rewrites public/.htaccess: that must not read as a
         // dirty tree (same skip-worktree as update.sh), or no rollback could run.
@@ -105,13 +156,16 @@ class DeployPreflightGuardsTest extends TestCase
         [, $out] = $this->runScript('rollback.sh', 'v2');
 
         $this->assertStringNotContainsString('not clean', $out);
+        $this->assertStringNotContainsString('skip-worktree) —', $out);
         $this->assertStringContainsString('artisan down', (string) $this->phpCalls());
     }
 
-    public function test_an_update_refused_by_a_later_check_leaves_no_untracked_copies(): void
+    // ─────────────────────────────── update.sh ──────────────────────────────
+
+    public function test_an_update_refused_by_a_later_check_leaves_no_copies(): void
     {
-        // v1 is an ancestor of HEAD → the downgrade guard refuses. a.txt (untracked,
-        // tracked in v1) WOULD be copied — but only once every refuse-check passed.
+        // v1 is an ancestor of HEAD → the downgrade guard refuses. The operator's
+        // files WOULD be copied — but only once every refuse-check has passed.
         $this->fixture();
 
         [$code, $out] = $this->runScript('update.sh', 'v1');
@@ -122,45 +176,65 @@ class DeployPreflightGuardsTest extends TestCase
         $this->assertStringNotContainsString('Copies kept', $out);
     }
 
-    public function test_an_update_that_proceeds_still_copies_aside_before_maintenance(): void
+    // ─────────────────────── in-app «Επαναφορά» (php) ───────────────────────
+
+    public function test_in_app_rollback_copies_aside_everything_the_checkout_would_destroy_before_maintenance(): void
     {
-        // The other direction: moving the block must not lose the protection.
         $this->fixture();
 
-        [$code, $out] = $this->runScript('update.sh', 'v1', ['ALLOW_DOWNGRADE' => '1']);
+        $run = $this->inAppRollback('v1');
 
-        $this->assertSame(1, $code, 'the stub `php` fails `artisan down`');
-        $this->assertCount(1, $this->backups(), $out);
-        $this->assertStringContainsString('Copies kept', $out);
-        $this->assertStringContainsString('Maintenance mode ON', $out);
-        $this->assertLessThan(strpos($out, 'Maintenance mode ON'), strpos($out, 'Copies kept'));
-        $this->assertSame("MINE\n", File::get($this->repo.'/a.txt'), 'nothing was checked out');
+        $this->assertSame(UpdateRun::STATUS_FAILED, $run->status, (string) $run->output);
+        $this->assertSame('maintenance', $run->phase, 'it got past every guard and failed only at `artisan down`');
+        $this->assertBackedUp(self::OPERATOR_FILES, (string) $run->output);
+        $this->assertOperatorFilesIntact();
     }
 
-    public function test_the_in_app_rollback_runs_every_guard_before_maintenance(): void
+    public function test_in_app_rollback_refuses_uncommitted_tracked_changes(): void
     {
-        $method = new ReflectionMethod(SelfUpdate::class, 'runRollback');
-        $lines = file((string) $method->getFileName());
-        $body = implode('', array_slice($lines, $method->getStartLine() - 1, $method->getEndLine() - $method->getStartLine() + 1));
+        $this->fixture();
+        File::append($this->repo.'/b.txt', "hand hotfix\n");
 
-        $last = -1;
-        foreach ([
-            "'rev-parse', '--verify'",   // resolve the target ref
-            "'--untracked-files=no'",    // refuse a dirty TRACKED tree (never untracked)
-            '$this->protectUntracked(',  // copy aside what the checkout replaces (the CALL, not a comment)
-            "'Maintenance mode ON'",     // … only then go down
-            "'checkout', '--force'",     // … and only then replace files
-        ] as $step) {
-            $pos = strpos($body, $step);
-            $this->assertNotFalse($pos, "runRollback() lost its `{$step}` step");
-            $this->assertGreaterThan($last, $pos, "`{$step}` is out of order in runRollback()");
-            $last = $pos;
-        }
+        $run = $this->inAppRollback('v1');
+
+        $this->assertSame(UpdateRun::STATUS_FAILED, $run->status);
+        $this->assertStringContainsString('δεν είναι καθαρό', (string) $run->error_message);
+        $this->assertStringContainsString('git stash', (string) $run->error_message);
+        $this->assertNotSame('maintenance', $run->phase);
+        $this->assertSame([], $this->backups());
+    }
+
+    public function test_in_app_rollback_refuses_an_unknown_ref(): void
+    {
+        $this->fixture();
+
+        $run = $this->inAppRollback('no-such-ref');
+
+        $this->assertSame(UpdateRun::STATUS_FAILED, $run->status);
+        $this->assertStringContainsString('Άγνωστο target ref', (string) $run->error_message);
+        $this->assertNotSame('maintenance', $run->phase);
+    }
+
+    public function test_in_app_rollback_refuses_a_checkout_that_would_die_on_an_edited_skip_worktree_file(): void
+    {
+        // deploy/update.sh flagged public/.htaccess on this host earlier; cPanel
+        // edited it since, and v1 has a different version.
+        $this->fixture(releaseChangesHtaccess: true);
+        File::append($this->repo.'/public/.htaccess', "# php -- BEGIN cPanel-generated handler\n");
+        $this->git('update-index', '--skip-worktree', 'public/.htaccess');
+
+        $run = $this->inAppRollback('v1');
+
+        $this->assertSame(UpdateRun::STATUS_FAILED, $run->status);
+        $this->assertStringContainsString('public/.htaccess', (string) $run->error_message);
+        $this->assertStringContainsString('skip-worktree', (string) $run->error_message);
+        $this->assertSame('protect', $run->phase, 'refused before maintenance');
+        $this->assertSame([], $this->backups());
     }
 
     // ─────────────────────────────── fixture ───────────────────────────────
 
-    private function fixture(): void
+    private function fixture(bool $releaseChangesHtaccess = false): void
     {
         foreach (['bash', 'git'] as $bin) {
             if ((new ExecutableFinder)->find($bin) === null) {
@@ -171,6 +245,7 @@ class DeployPreflightGuardsTest extends TestCase
         $this->repo = sys_get_temp_dir().'/ekdosi-deploy-'.bin2hex(random_bytes(6));
         File::ensureDirectoryExists($this->repo.'/deploy');
         File::ensureDirectoryExists($this->repo.'/public');
+        File::ensureDirectoryExists($this->repo.'/dir');
         File::copy(base_path('deploy/rollback.sh'), $this->repo.'/deploy/rollback.sh');
         File::copy(base_path('deploy/update.sh'), $this->repo.'/deploy/update.sh');
         File::put($this->repo.'/fakephp', "#!/usr/bin/env bash\necho \"\$*\" >> \"\$(pwd)/php.log\"\nexit 1\n");
@@ -180,20 +255,38 @@ class DeployPreflightGuardsTest extends TestCase
         $this->git('config', 'user.email', 'test@example.com');
         $this->git('config', 'user.name', 'test');
         File::ensureDirectoryExists($this->repo.'/.git/info');
-        File::append($this->repo.'/.git/info/exclude', "deploy/\nfakephp\nphp.log\n");
+        File::append($this->repo.'/.git/info/exclude', "deploy/\nfakephp\nphp.log\nsnap.sql.gz\n");
 
-        File::put($this->repo.'/a.txt', "v1 content\n");
+        // v1 — the older ref.
+        File::put($this->repo.'/a.txt', "v1 a\n");
+        File::put($this->repo.'/ign.txt', "v1 ign\n");
+        File::put($this->repo.'/foo', "v1 foo\n");
+        File::put($this->repo.'/dir/x', "v1 x\n");
         File::put($this->repo.'/b.txt', "keep\n");
-        File::put($this->repo.'/public/.htaccess', "# laravel\n");
-        $this->git('add', 'a.txt', 'b.txt', 'public/.htaccess');
+        File::put($this->repo.'/public/.htaccess', $releaseChangesHtaccess ? "# laravel v1\n" : "# laravel\n");
+        $this->git('add', '.');
         $this->git('commit', '-q', '-m', 'v1');
         $this->git('tag', 'v1');
-        $this->git('rm', '-q', 'a.txt');
+
+        // v2 — HEAD.
+        $this->git('rm', '-q', 'a.txt', 'foo', 'dir/x');
+        $this->git('rm', '-q', '--cached', 'ign.txt');
+        File::put($this->repo.'/.gitignore', "ign.txt\n");
+        if ($releaseChangesHtaccess) {
+            File::put($this->repo.'/public/.htaccess', "# laravel v2\n");
+        }
+        $this->git('add', '.gitignore', 'public/.htaccess');
         $this->git('commit', '-q', '-m', 'v2');
         $this->git('tag', 'v2');
 
-        // The operator's own file, where v1 would put its tracked a.txt.
-        File::put($this->repo.'/a.txt', "MINE\n");
+        // The operator's own files, standing where v1 would put its tracked ones.
+        if (is_dir($this->repo.'/dir')) {
+            rmdir($this->repo.'/dir');
+        }
+        File::ensureDirectoryExists($this->repo.'/foo');
+        foreach (self::OPERATOR_FILES as $path => $content) {
+            File::put($this->repo.'/'.$path, $content);
+        }
     }
 
     private function git(string ...$args): void
@@ -209,7 +302,7 @@ class DeployPreflightGuardsTest extends TestCase
 
     /**
      * @param  array<string, string|false>  $env
-     * @return array{int, string} exit code + output (ANSI stripped; stdout first, where the ordered progress lines are)
+     * @return array{int, string} exit code + output (ANSI stripped)
      */
     private function runScript(string $script, string $ref, array $env = []): array
     {
@@ -225,6 +318,47 @@ class DeployPreflightGuardsTest extends TestCase
         $out = $process->getOutput().$process->getErrorOutput();
 
         return [(int) $process->getExitCode(), (string) preg_replace('/\e\[[0-9;]*m/', '', $out)];
+    }
+
+    /** Run a queued in-app rollback to $ref with base_path() pointed at the fixture repo. */
+    private function inAppRollback(string $ref): UpdateRun
+    {
+        config(['ekdosi.updates.allow_in_app_apply' => true]);
+        File::put($this->repo.'/snap.sql.gz', 'snapshot');
+
+        $run = UpdateRun::create([
+            'status' => UpdateRun::STATUS_QUEUED,
+            'kind' => UpdateRun::KIND_ROLLBACK,
+            'strategy' => UpdateRun::STRATEGY_PHP,
+            'to_ref' => $ref,
+            'restore_snapshot' => $this->repo.'/snap.sql.gz',
+        ]);
+
+        $this->app->setBasePath($this->repo);
+        Artisan::call('ekdosi:self-update', ['--run' => $run->id]);
+
+        return $run->fresh();
+    }
+
+    /** @param array<string, string> $expected path => content */
+    private function assertBackedUp(array $expected, string $context): void
+    {
+        $got = [];
+        foreach ($this->backups() as $relative) {
+            [, $path] = explode('/', $relative, 2);   // drop the <timestamp>/ dir
+            $got[$path] = File::get($this->repo.'/storage/app/deploy-untracked/'.$relative);
+        }
+        ksort($got);
+        ksort($expected);
+
+        $this->assertSame($expected, $got, "the operator's own bytes are what was kept\n".$context);
+    }
+
+    private function assertOperatorFilesIntact(): void
+    {
+        foreach (self::OPERATOR_FILES as $path => $content) {
+            $this->assertSame($content, File::get($this->repo.'/'.$path), "{$path} was not checked out over");
+        }
     }
 
     /** @return list<string> backed-up files, relative to storage/app/deploy-untracked/ */

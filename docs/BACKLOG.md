@@ -1356,6 +1356,15 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   clobberable untracked αρχείο ΚΑΙ τέτοια αποτυχία· ίδιο στο in-app `runPhp()`/`runRollback()`
   (protect → maintenance). Αβλαβές (μόνο δίσκος, το μήνυμα λέει «delete them once you've checked»). Λύση αν
   ενοχλήσει: retention/καθάρισμα του `storage/app/deploy-untracked/` (π.χ. μαζί με το `--keep` των snapshots).
+  Διαθέσεις από το review του ίδιου PR (fixed: gitignored + φάκελος↔αρχείο συγκρούσεις, skip-worktree άρνηση
+  up front — βλ. CHANGELOG):
+  - **Override για dirty tracked tree στο rollback — DECLINED.** Άρνηση όπως στο update path: dirty *tracked*
+    tree σημαίνει ότι κάποιος έγραψε κώδικα στον server (άρα έχει shell)· το `git stash` ΕΙΝΑΙ το override και
+    κρατά την αλλαγή ανακτήσιμη, ενώ ένα force-flag θα την πετούσε σιωπηλά. Το μήνυμα λέει πλέον τι να κάνει.
+  - **Κοινό sourced script για τα pre-flight των `update.sh`/`rollback.sh` — DECLINED (P2).** Τα δύο scripts
+    μένουν self-contained (ίδιο μοτίβο με το ήδη διπλό queue-drain block). Το drift φυλάσσεται αντ' αυτού από
+    το `DeployPreflightGuardsTest`, που περνά **και τα δύο** από τα ίδια σενάρια (fix στο ένα μόνο → κόκκινο
+    το άλλο). Αν το pre-flight μεγαλώσει κι άλλο, εξαγωγή σε `deploy/lib/`.
 - **Το tab του link είναι χοντρότερη κοπή από τον αριθμό δίπλα του** (ημερολόγιο leads): το
   `overdueBeforeGrid()` μετράει μόνο τα ΠΡΙΝ το πλέγμα αλλά ανοίγει ΟΛΑ τα ληξιπρόθεσμα, και το
   `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η

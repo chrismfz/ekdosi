@@ -12,9 +12,11 @@
 # change. If it ran migrations, restore the snapshot too — a forward migration
 # may be irreversible. When in doubt, pass the snapshot.
 #
-# Pre-flight (before maintenance, same as update.sh): refuses an unknown ref or
-# uncommitted TRACKED changes, and copies aside any untracked file GIT_REF ships
-# as tracked (to storage/app/deploy-untracked/) before the forced checkout.
+# Pre-flight (before maintenance, same as update.sh): refuses an unknown ref,
+# uncommitted TRACKED changes, or an environment-edited skip-worktree file that
+# GIT_REF changes; then copies aside everything the forced checkout would destroy
+# that git can't give back (untracked or gitignored files on a path GIT_REF uses)
+# to storage/app/deploy-untracked/.
 #
 # Env overrides:  PHP=/usr/bin/php8.4  COMPOSER=/usr/local/bin/composer
 #
@@ -98,30 +100,75 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   exit 1
 fi
 
-# Untracked files that $REF ships as tracked get REPLACED by the forced checkout:
-# copy them aside first, and refuse if a copy fails. NUL-separated + quotePath=off
-# (Greek filenames), read via a temp file — CloudLinux CageFS has no /dev/fd, so
-# process substitution dies there. Same probe as update.sh.
-_untracked_list="$(mktemp)"
-git -c core.quotePath=false ls-files --others --exclude-standard -z > "$_untracked_list"
-_backup=""
-while IFS= read -r -d '' f; do
-  if ! git cat-file -e "${TARGET_SHA}:${f}" 2>/dev/null; then
-    continue   # not in $REF — the checkout leaves it alone
+# Skip-worktree files the environment edited (the list above): if $REF changes one,
+# the forced checkout dies («Entry … not uptodate. Cannot merge.», exit 128) — with
+# the site already down. Refuse now instead. Same check as update.sh. (NUL lists
+# are read via temp files: CloudLinux CageFS has no /dev/fd, so process
+# substitution dies there.)
+_list="$(mktemp)"
+git ls-files -v -z > "$_list"
+while IFS= read -r -d '' _entry; do
+  [[ "$_entry" == [Ss]\ * ]] || continue
+  _f="${_entry:2}"
+  _indexed="$(git rev-parse ":$_f")"
+  if [[ -f "$_f" && "$(git hash-object -- "$_f")" == "$_indexed" ]]; then
+    continue   # flagged but untouched — the checkout updates it normally
   fi
-  if [[ -z "$_backup" ]]; then
-    _backup="storage/app/deploy-untracked/$(date -u +%Y%m%d-%H%M%S)"
+  if [[ "$(git rev-parse --verify --quiet "${TARGET_SHA}:${_f}" || true)" == "$_indexed" ]]; then
+    continue   # $REF leaves it as it is
   fi
-  if ! mkdir -p "$_backup/$(dirname "$f")" || ! cp -p "$f" "$_backup/$f"; then
-    echo "✗ Could not back up '$f' to $_backup — refusing to overwrite it. Nothing was changed." >&2
-    rm -f "$_untracked_list"
-    exit 1
+  echo "✗ $REF changes $_f, which this host's environment has edited (skip-worktree) — the checkout would fail with the site already down. Nothing was changed." >&2
+  echo "  Keep a copy of it, then: git update-index --no-skip-worktree $_f && git checkout -- $_f" >&2
+  echo "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)." >&2
+  rm -f "$_list"
+  exit 1
+done < "$_list"
+
+# What the forced checkout destroys that git can NOT give back: anything on disk
+# that isn't in the index — untracked OR gitignored — and collides with a path $REF
+# tracks: the exact path, a directory where $REF has a file (deleted with all its
+# contents), or a file where $REF has a directory. Copy those aside first, and
+# refuse if a copy fails. Same algorithm as update.sh and SelfUpdate.
+declare -A _in_index=() _risk_seen=()
+_at_risk=()
+git ls-files -z > "$_list"
+while IFS= read -r -d '' p; do _in_index["$p"]=1; done < "$_list"
+_risk() {
+  if [[ -z "${_in_index[$1]:-}" && -z "${_risk_seen[$1]:-}" ]]; then
+    _risk_seen["$1"]=1
+    _at_risk+=("$1")
   fi
-  echo "  copied aside: $f → $_backup/$f"
-done < "$_untracked_list"
-rm -f "$_untracked_list"
-if [[ -n "$_backup" ]]; then
-  echo "▶ $REF replaces the untracked files above — copies kept in $_backup/ (delete them once you've checked)."
+}
+git ls-tree -r --name-only -z "$TARGET_SHA" > "$_list"
+_sub="$(mktemp)"
+while IFS= read -r -d '' p; do
+  if [[ -n "${_in_index[$p]:-}" ]]; then
+    continue   # tracked here too: git holds both versions
+  fi
+  if [[ -L "$p" || -f "$p" ]]; then
+    _risk "$p"
+  elif [[ -d "$p" ]]; then
+    find "./$p" \( -type f -o -type l \) -print0 > "$_sub"
+    while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
+  fi
+  a="$p"
+  while [[ "$a" == */* ]]; do
+    a="${a%/*}"
+    if [[ -L "$a" ]] || { [[ -e "$a" ]] && [[ ! -d "$a" ]]; }; then _risk "$a"; fi
+  done
+done < "$_list"
+rm -f "$_list" "$_sub"
+
+if [[ ${#_at_risk[@]} -gt 0 ]]; then
+  _backup="storage/app/deploy-untracked/$(date -u +%Y%m%d-%H%M%S)"
+  for f in "${_at_risk[@]}"; do
+    if ! mkdir -p -- "$_backup/$(dirname -- "$f")" || ! cp -pP -- "$f" "$_backup/$f"; then
+      echo "✗ Could not back up '$f' to $_backup — refusing to overwrite it. Nothing was changed." >&2
+      exit 1
+    fi
+    echo "  copied aside: $f → $_backup/$f"
+  done
+  echo "▶ $REF replaces or removes the files above — copies kept in $_backup/ (delete them once you've checked)."
 fi
 
 echo "▶ Maintenance mode ON"

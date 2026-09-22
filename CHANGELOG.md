@@ -189,12 +189,22 @@ from `[Unreleased]`; `--major` explicit for milestones).
   χανόταν, και ένα **untracked** αρχείο που το παλιό ref έχει ως tracked αντικαθιστόταν **χωρίς αντίγραφο**.
   Τώρα, **πριν το maintenance** (άρα ένα abort δεν αλλάζει τίποτα): άγνωστο ref → άρνηση· uncommitted
   **tracked** αλλαγές → άρνηση (`--untracked-files=no` — τα untracked δεν μπλοκάρουν ποτέ, όπως στο
-  update)· και τα untracked που θα αντικατασταθούν αντιγράφονται στο `storage/app/deploy-untracked/<ts>/`
-  (άρνηση αν αποτύχει η αντιγραφή). Το `rollback.sh` παίρνει και το cPanel `public/.htaccess`
-  skip-worktree του `update.sh`. Επίσης στο `update.sh` η αντιγραφή untracked τρέχει πλέον **μετά** τους
-  ελέγχους άρνησης (ΑΦΜ διπλότυπα, downgrade) — ένα deploy που αρνείται δεν αφήνει πίσω φάκελο
-  αντιγράφων ούτε τυπώνει «Copies kept…». Νέο `DeployPreflightGuardsTest`: τρέχει τα scripts **πραγματικά**
-  σε throwaway git repo (stub `php`), + ordering test για το in-app rollback.
+  update)· και ό,τι θα κατέστρεφε το checkout αντιγράφεται στο `storage/app/deploy-untracked/<ts>/` (άρνηση
+  αν αποτύχει η αντιγραφή). Το `rollback.sh` παίρνει και το cPanel `public/.htaccess` skip-worktree του
+  `update.sh`. Επίσης στο `update.sh` η αντιγραφή τρέχει πλέον **μετά** τους ελέγχους άρνησης (ΑΦΜ
+  διπλότυπα, downgrade) — ένα deploy που αρνείται δεν αφήνει πίσω φάκελο αντιγράφων ούτε «Copies kept…».
+- **Deploy/update/rollback: η προστασία αρχείων έπιανε μόνο μέρος όσων καταστρέφει το `checkout --force`.**
+  Ο παλιός έλεγχος (και στο update path) κοίταζε μόνο **μη-ignored untracked** αρχεία με **ακριβώς** το ίδιο
+  path με tracked αρχείο του target — ενώ το forced checkout σβήνει και (α) **gitignored** αρχεία που το target
+  έχει tracked (π.χ. rollback πέρα από commit που έκανε ένα αρχείο per-box/ignored), (β) έναν **φάκελο** εκεί
+  που το target έχει αρχείο (με όλο το περιεχόμενό του), (γ) ένα **αρχείο** εκεί που το target έχει φάκελο —
+  όλα επιβεβαιωμένα. **Fix στη ρίζα** και στα τρία (`update.sh`, `rollback.sh`, `SelfUpdate::protectUntracked()`):
+  at-risk = ό,τι υπάρχει στον δίσκο **εκτός index** και συγκρούεται με path που κάνει track το target — 2 git
+  κλήσεις αντί για μία ανά αρχείο. **Και:** αρχείο skip-worktree που το περιβάλλον έχει τροποποιήσει (cPanel
+  `.htaccess`) + target που το αλλάζει → το checkout πέθαινε («not uptodate», exit 128) **με το site ήδη σε
+  maintenance**· τώρα άρνηση **πριν** το maintenance με οδηγίες (και στα in-app update/rollback) — το
+  τεκμηριωμένο «HARD PRE-STEP» του `update.sh` γίνεται αυτόματος έλεγχος. Νέο `DeployPreflightGuardsTest`:
+  τρέχει **και τα δύο** scripts **και** το in-app rollback πραγματικά σε throwaway git repo, με τα ίδια σενάρια.
 - **`PaymentAllocator`: δύο ταυτόχρονες εισπράξεις στο ίδιο τιμολόγιο μπορούσαν να το υπερ-πληρώσουν
   (overpay race).** Και το `allocate()` (FIFO) και το `allocateToInvoice()` (targeted) διάβαζαν το
   υπόλοιπο του τιμολογίου με **plain read** και μετά έγραφαν — δύο concurrent εισπράξεις (π.χ. δύο
