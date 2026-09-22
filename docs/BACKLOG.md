@@ -1529,13 +1529,23 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   paid/credited ανά πελάτη (όπως το `Customer::withOutstandingBalance`) και live-confirm μόνο στα λίγα
   υποψήφια. Καρφωμένη συμπεριφορά: `CustomerLedgerReceiptGuardTest`.
 - **`PaymentAllocator` overpay-under-contention: true proof = MariaDB-only (deferred).** Το check-then-write
-  overpay race στο `allocate()`/`allocateToInvoice()` **διορθώθηκε** (2026-09-22, `lockForUpdate()` + locking
-  balance read· βλ. CHANGELOG «Fixed»). Το portable μισό είναι καρφωμένο (`PaymentAllocatorTest` —
-  nested-under-outer-read + cap/on-account), αλλά η αληθινή lost-update-under-contention απόδειξη θέλει
-  πραγματικά MariaDB row locks + forked processes (sqlite δεν έχει `FOR UPDATE`/row-MVCC), όπως τα
-  InvoiceNumberer/InvoiceBalance probes. Deferred με το ίδιο σκεπτικό: το write-path είναι πλέον σωστό·
-  ένα forked hammer (πρότυπο: `test:invoice-numbering-concurrent`) μένει ως ξεχωριστό MariaDB-only artisan
-  command αν ποτέ θελήσουμε live contention coverage.
+  overpay race στο `allocate()`/`allocateToInvoice()` **διορθώθηκε** (2026-09-22, per-PK `lockForUpdate()` +
+  locking balance read· βλ. CHANGELOG «Fixed»). Το portable μισό είναι καρφωμένο (`PaymentAllocatorTest` —
+  cap/on-account + nested-under-outer-read), **αλλά** αυτό το nested-read test είναι στην πράξη ισοδύναμο σε
+  sqlite: χωρίς `FOR UPDATE`/row-MVCC δεν διακρίνει το locked από το unlocked path (ένα revert του locking
+  το κρατά πράσινο). Η αληθινή lost-update-under-contention απόδειξη θέλει πραγματικά MariaDB row locks +
+  forked processes, όπως τα InvoiceNumberer/InvoiceBalance probes. Deferred με το ίδιο σκεπτικό: το
+  write-path είναι πλέον σωστό ΚΑΙ δεν μπορώ να τρέξω/επαληθεύσω MariaDB εδώ (CI = sqlite), οπότε ένα
+  ανεπαλήθευτο forked command θα ρίσκαρε broken prover. Πρότυπο όταν χρειαστεί: το υπαρκτό
+  `app/Console/Commands/TestInvoiceNumberingConcurrent.php` → ξεχωριστό MariaDB-only artisan command.
+- **Pre-existing latent deadlock surface: `applyCredit()` ↔ `allocate()` lock-ordering inversion (P3, τεκμηριωμένο).**
+  Το `applyCredit()` κλειδώνει πρώτα το on-account pool (`whereNull('invoice_id')->lockForUpdate()`, gap locks)
+  και μετά το invoice row (μέσω του re-point observer recompute)· το `allocate()` κλειδώνει πρώτα invoice rows
+  και στο τέλος **INSERT-άρει** ένα on-account (`invoice_id NULL`) payment → κλασική αντιστροφή σειράς. **Δεν
+  εισήχθη** από το overpay fix (2026-09-22 review το επιβεβαίωσε: προϋπήρχε — το `allocate()` έπαιρνε το
+  invoice PK lock μέσω του observer πριν το NULL insert και πριν το fix). Χαμηλή πιθανότητα (σύντομα tx, στενό
+  παράθυρο)· σωστό κλείσιμο αν ποτέ χτυπήσει 1213: ενιαία σειρά κλειδώματος (invoice row → on-account pool)
+  και στα δύο μονοπάτια, ή advisory lock ανά (company_id, customer_id) για τα customer-level money writes.
 - **Το blob `einvoice_provider_config` δεν καταγράφει ΣΕ ΠΟΙΟΝ πάροχο ανήκει (P2, residual).** Είναι επίπεδο
   (`base_url`, `token`, …) και ο ιδιοκτήτης συνάγεται από το `companies.einvoice_provider_key` — που όμως
   ΜΗΔΕΝΙΖΕΤΑΙ όταν ο tenant παρκάρει σε κανάλι myDATA («Καθόλου»), ενώ το blob κρατιέται σκόπιμα. Έτσι στη

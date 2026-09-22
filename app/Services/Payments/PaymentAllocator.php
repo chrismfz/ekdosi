@@ -53,18 +53,33 @@ class PaymentAllocator
             // can never disagree with this write path). Cash-term & already-paid
             // invoices have balance 0 → skipped below. A draft's amount flows to
             // the on-account remainder instead.
-            // Lock the candidate invoice rows (FIFO order → consistent lock order,
-            // no deadlock) and read each balance as a LOCKING/current read below, so
-            // two concurrent receipts touching the same invoices serialize their
-            // check-then-write. Without it both read the same pre-write balance, both
-            // cap at it and both write — overpaying the invoice instead of parking the
-            // remainder on-account (the per-invoice cap invariant this method exists
-            // to hold). Mirrors recompute()'s lockForUpdate + locking payment read.
-            $open = $this->openInvoicesQuery($customer)->lockForUpdate()->get();
+            //
+            // Read the candidate LIST with a plain read, then lock each candidate by
+            // PRIMARY KEY inside the loop (below) before reading its balance. Locking
+            // by PK takes a single-row lock with NO gap lock — unlike a range
+            // lockForUpdate() over the customer index, which would gap-lock the
+            // customer's open-invoice range and block a concurrent new-invoice INSERT
+            // for the same customer (CreateInvoice / IssueCreditNote / WHMCS ingest).
+            // The candidates are locked in FIFO (issued_at, id) order → consistent
+            // lock order across concurrent receipts, no deadlock between them.
+            $open = $this->openInvoicesQuery($customer)->get();
 
-            foreach ($open as $invoice) {
+            foreach ($open as $candidate) {
                 if ($remaining <= 0.005) {
                     break;
+                }
+                // Re-resolve THIS candidate under a single-row PK lock (re-applying
+                // openInvoicesQuery's eligibility predicate, so an invoice cancelled/
+                // credited between the list read and the lock drops out) and read its
+                // balance as a LOCKING/current read behind that lock — so two
+                // concurrent receipts touching the same invoice serialize their
+                // check-then-write instead of both capping at the same pre-write
+                // balance and overpaying it (the per-invoice cap invariant this
+                // method exists to hold). Mirrors recompute() / allocateToInvoice(),
+                // which lock by whereKey, never a range.
+                $invoice = $this->openInvoicesQuery($customer)->whereKey($candidate->id)->lockForUpdate()->first();
+                if ($invoice === null) {
+                    continue; // left the eligible set (cancelled/credited) after the list read
                 }
                 $balance = round((float) app(InvoiceBalance::class)->for($invoice, true)->balance, 2);
                 if ($balance <= 0.005) {
