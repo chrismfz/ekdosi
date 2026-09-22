@@ -55,7 +55,10 @@ class ReverseCharge
      */
     public static function appliesTo(Customer $customer): bool
     {
-        if (! self::isEuNonGreek($customer->country)) {
+        // The NORMALISED country, not the raw free text: a legacy «ΙΤΑΛΙΑ» label
+        // must count as IT (isoCountryCode() = stored ISO cache ?? normalised text).
+        // Raw fallback for codes the normaliser doesn't know (XI = N. Ireland).
+        if (! self::isEuNonGreek($customer->isoCountryCode() ?? $customer->country)) {
             return false;
         }
 

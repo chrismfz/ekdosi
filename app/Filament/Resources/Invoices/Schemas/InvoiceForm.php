@@ -210,7 +210,7 @@ class InvoiceForm
                                 $autoDefaults = $tenant && ReverseCharge::shouldDefaultZeroVat($tenant, $customer);
                                 Notification::make()
                                     ->title('Ενδοκοινοτική παράδοση (reverse charge)')
-                                    ->body('Πελάτης ΕΕ ('.strtoupper((string) $customer->country).') με ΑΦΜ/ΦΠΑ. '
+                                    ->body('Πελάτης ΕΕ ('.strtoupper((string) ($customer->isoCountryCode() ?? $customer->country)).') με ΑΦΜ/ΦΠΑ. '
                                         .($autoDefaults
                                             ? 'Οι νέες γραμμές προεπιλέγονται σε 0% ΦΠΑ· η αιτία §8.3 ορίζεται ανά γραμμή από τον τύπο (υπηρεσία 2.2→«4 — άρθρο 18», αγαθά 1.2→«14 — άρθρο 33»). Αλλάξτε ανά γραμμή αν χρειάζεται.'
                                             : 'Συνήθως 0% ΦΠΑ (ενδοκοινοτικό) — ρυθμίστε μια 0% κατηγορία ΦΠΑ με αιτία εξαίρεσης (Setup → VAT Categories) για αυτόματη προεπιλογή. Η αιτία διαφέρει: υπηρεσία→4, αγαθά→14.'))

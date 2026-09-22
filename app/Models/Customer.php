@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Exceptions\DeletionBlocked;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
@@ -154,6 +155,50 @@ class Customer extends Model
 
             IsoCountry::syncCountryCode($customer);
         });
+
+        // A PERMANENT delete must never take money or legal records with it: the
+        // FKs CASCADE the customer's payments/payment intents and SET NULL the
+        // customer on invoices, quotes and delivery notes — which keep no copy of
+        // the counterparty's name or ΑΦΜ. Refuse on every Eloquent forceDelete()
+        // (panel, CLI, MCP, customers:merge — which repoints them first) while
+        // anything like that exists; the soft delete stays allowed. (A raw
+        // query-builder delete bypasses model events — don't add one.)
+        static::forceDeleting(function (self $customer): void {
+            $blockers = array_filter($customer->hardDeleteBlockers(), fn (int $n): bool => $n > 0);
+            if ($blockers !== []) {
+                $parts = array_map(fn (string $label, int $n): string => "{$label}: {$n}", array_keys($blockers), $blockers);
+
+                throw new DeletionBlocked("Ο πελάτης #{$customer->id} δεν διαγράφεται οριστικά — έχει ".implode(' · ', $parts).'.');
+            }
+        });
+    }
+
+    /**
+     * What a PERMANENT delete of this customer would destroy or orphan — label →
+     * count, soft-deleted rows included (a trashed invoice is still a legal
+     * document) and across tenants' scopes (the id is this customer's alone).
+     *
+     * @return array<string, int>
+     */
+    public function hardDeleteBlockers(): array
+    {
+        $count = function (string $model): int {
+            return $model::query()
+                ->withoutGlobalScopes()
+                ->where('customer_id', $this->getKey())
+                ->count();
+        };
+
+        return [
+            'παραστατικά' => $count(Invoice::class),
+            'πληρωμές' => $count(Payment::class),
+            'πληρωμές πύλης' => $count(PaymentIntent::class),
+            'προσφορές' => $count(Quote::class),
+            'δελτία αποστολής' => $count(DeliveryNote::class),
+            'CMR' => $count(CmrNote::class),
+            'συμβόλαια' => $count(ServiceContract::class),
+            'domains' => $count(Domain::class),
+        ];
     }
 
     /**

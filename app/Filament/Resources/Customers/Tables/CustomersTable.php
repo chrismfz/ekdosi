@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Customers\Tables;
 
 use App\Filament\Resources\Customers\CustomerResource;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Customer;
 use App\Support\InvoiceScope;
@@ -10,7 +11,6 @@ use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
@@ -369,7 +369,10 @@ class CustomersTable
                 BulkActionGroup::make([
                     DeleteBulkAction::make(),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    // Permanent delete skips customers that still have invoices,
+                    // payments, … (Customer::hardDeleteBlockers — the model's
+                    // forceDeleting guard refuses them on every other path too).
+                    GuardedDeleteAction::forceBulk(fn (Customer $record): array => $record->hardDeleteBlockers()),
                 ]),
             ])
             // Row click → Καρτέλα (the financial view). Matches Greek
