@@ -303,8 +303,8 @@ gateways — τα services έχουν ήδη το billing+dunning loop.
 → false). Στο portal γίνεται ο «λογαριασμός σου» (recurring auto-issue → πλήρωσε
 → convert σε νόμιμο τιμολόγιο με τον τρόπο πληρωμής → mark paid → money trail).
 Η αρχιτεκτονική το σηκώνει ήδη (`local_status` ⟂ `mydata_state`)· η «Καρτέλα μου»
-το εμφανίζει αυτόματα (ίδιο `CustomerLedgerBuilder`). Λεπτομέρεια numbering:
-`docs/BACKLOG.md` → «Pro-forma numbering».
+το εμφανίζει αυτόματα (ίδιο `CustomerLedgerBuilder`). Λεπτομέρεια numbering
+(αρχειοθετημένη): `git show 631078d:docs/BACKLOG.md` → «Pro-forma numbering».
 
 ---
 
@@ -351,7 +351,7 @@ email/PDF completion. Μετά, οι πυλώνες A/B/C/E δοκιμάζοντ
 **2027 (proposed)**· B2C = εκτός DRR. PEPPOL είναι δίκτυο → **ένα** Access Point καλύπτει
 GR-send ΚΑΙ EE-send (`ee-peppol` σήμερα = NullSubmitter stub). Providers EE: Telema/
 Billberry/Finbite/Unifiedpost· **check αν ο InvoSign κάνει ήδη PEPPOL send** (φθηνότερο).
-→ parked, review 2027· εκτελέσιμα: `docs/BACKLOG.md #1b`. Ο UBL builder
+→ parked, review 2027· εκτελέσιμα: `docs/BACKLOG.md` → «PEPPOL Phase 2». Ο UBL builder
 (`PeppolInvoiceDocument`, Phase 1) είναι ήδη έτοιμος + country-agnostic.
 
 ## 7. Σειρά & γιατί
