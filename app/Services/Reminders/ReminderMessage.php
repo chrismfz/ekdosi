@@ -14,8 +14,8 @@ use Carbon\CarbonImmutable;
 
 /**
  * The subject + body of one reminder, in the recipient's language. The tenant's
- * per-stage override wins; otherwise the translated default (lang/{el,en}/mail.php
- * `reminder.*`). Placeholders:
+ * per-stage override wins for recipients in the tenant's language; otherwise the
+ * translated default (lang/{el,en}/mail.php `reminder.*`). Placeholders:
  *
  *   {tenant_name} {customer_name} {document_kind} {invoice_code} {issued_at}
  *   {due_date} {days_overdue} {balance} {total} {pay_section} {pay_url}
@@ -43,8 +43,8 @@ final class ReminderMessage
     ): array {
         $values = $this->values($invoice, $due, $daysOverdue, $balance, $locale);
 
-        $subject = $settings->template($stage, 'subject') ?? trans("mail.reminder.{$stage}.subject", [], $locale);
-        $body = $settings->template($stage, 'body') ?? trans("mail.reminder.{$stage}.body", [], $locale);
+        $subject = $settings->template($stage, 'subject', $locale) ?? trans("mail.reminder.{$stage}.subject", [], $locale);
+        $body = $settings->template($stage, 'body', $locale) ?? trans("mail.reminder.{$stage}.body", [], $locale);
 
         // Values are data: markdown-neutralised in the HTML body (the mail view
         // e()-escapes the whole string); raw in the subject and the text part.

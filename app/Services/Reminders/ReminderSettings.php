@@ -16,6 +16,7 @@ final class ReminderSettings
     /**
      * @param  array<string, int>  $stages  stage => day offset from the due date (pre_due is negative), ascending
      * @param  array<string, array{subject?: ?string, body?: ?string}>  $templates  per-stage overrides
+     * @param  string  $templateLocale  the language the overrides are written in (the tenant's)
      */
     private function __construct(
         public readonly bool $enabled,
@@ -25,6 +26,7 @@ final class ReminderSettings
         public readonly float $minBalance,
         public readonly bool $attachPdf,
         public readonly array $templates,
+        public readonly string $templateLocale,
     ) {}
 
     public static function for(Company $company): self
@@ -48,12 +50,27 @@ final class ReminderSettings
             minBalance: (float) ($company->reminder_min_balance ?? 0),
             attachPdf: (bool) $company->reminder_attach_pdf,
             templates: is_array($company->reminder_templates) ? $company->reminder_templates : [],
+            templateLocale: self::templateLocaleOf($company),
         );
     }
 
-    /** A per-stage override, or null to use the translated default. */
-    public function template(string $stage, string $part): ?string
+    /** The operator writes the overrides in the tenant's language (el unless it is English-first). */
+    public static function templateLocaleOf(Company $company): string
     {
+        return $company->default_language === 'en' ? 'en' : 'el';
+    }
+
+    /**
+     * A per-stage override, or null to use the translated default. Overrides are
+     * single-language, so a customer in another language gets the translated
+     * default instead of text they may not read.
+     */
+    public function template(string $stage, string $part, string $locale): ?string
+    {
+        if ($locale !== $this->templateLocale) {
+            return null;
+        }
+
         $value = trim((string) ($this->templates[$stage][$part] ?? ''));
 
         return $value === '' ? null : $value;

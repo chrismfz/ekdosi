@@ -26,7 +26,7 @@ class SendInvoiceReminders extends Command
         $today = CarbonImmutable::today();
 
         // Enabled tenants — plus any switched off that still have reminders
-        // waiting, so the run cancels those instead of leaving them sendable.
+        // waiting (cancelled, not left sendable) or stuck mid-send (released).
         $companies = Company::query()
             ->when(
                 $this->option('tenant'),
@@ -35,7 +35,7 @@ class SendInvoiceReminders extends Command
                     ->where('reminders_enabled', true)
                     ->orWhereExists(fn ($e) => $e->selectRaw('1')->from('invoice_reminders')
                         ->whereColumn('invoice_reminders.company_id', 'companies.id')
-                        ->whereIn('invoice_reminders.status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED]))),
+                        ->whereIn('invoice_reminders.status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_SENDING]))),
             )
             ->get();
 

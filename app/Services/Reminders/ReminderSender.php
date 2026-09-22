@@ -51,7 +51,7 @@ final class ReminderSender
 
         $settings = ReminderSettings::for($invoice?->company ?? $row->company);
         if (($blocker = $this->planner->rowBlocker($row, $invoice, $settings)) !== null) {
-            return $this->finish($row, InvoiceReminder::STATUS_CANCELLED, reason: $blocker);
+            return $this->finish($row, InvoiceReminder::STATUS_CANCELLED, reason: $blocker, extra: ['auto_stage' => null]);
         }
 
         $recipient = (string) $invoice->customer->email;

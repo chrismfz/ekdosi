@@ -262,6 +262,87 @@ class InvoiceRemindersTest extends TestCase
         $this->assertSame(InvoiceReminder::STAGE_FIRST, $invoiceRow->auto_stage);
     }
 
+    public function test_a_stage_queued_behind_a_stalled_worker_is_superseded_too(): void
+    {
+        $inv = $this->invoice(34);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        $first = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+        $first->forceFill(['status' => InvoiceReminder::STATUS_QUEUED])->save();   // approved, worker down
+
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today()->addDays(7));
+        $this->assertSame('Αντικαταστάθηκε από «2η υπενθύμιση».', $first->fresh()->reason, 'cancelled when the 2nd is recorded');
+        app(ReminderSender::class)->send($first->id);   // the worker catches up
+
+        $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $first->fresh()->status);
+        Mail::assertNothingSent();
+    }
+
+    public function test_a_lower_stage_never_goes_out_after_a_later_one(): void
+    {
+        $inv = $this->invoice(44);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());   // the 2nd
+        $second = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+        // A 1st that was mid-send when the 2nd was recorded, and failed afterwards.
+        $first = InvoiceReminder::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id, 'customer_id' => $this->customer->id,
+            'stage' => 'first', 'auto_stage' => 'first', 'document_kind' => 'invoice', 'balance' => 124,
+            'status' => InvoiceReminder::STATUS_FAILED, 'trigger' => 'auto',
+        ]);
+
+        app(ReminderSender::class)->send($first->id);
+
+        $this->assertSame('Αντικαταστάθηκε από νεότερη βαθμίδα.', $first->fresh()->reason);
+        $this->assertSame(InvoiceReminder::STATUS_AWAITING, $second->fresh()->status);
+        Mail::assertNothingSent();
+    }
+
+    public function test_a_cancelled_stage_is_planned_again_once_the_document_qualifies_again(): void
+    {
+        $inv = $this->invoice(34);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        $this->tenant->update(['reminders_enabled' => false]);
+        $this->artisan('invoices:send-reminders')->assertSuccessful();   // cancels the waiting 1st
+
+        $this->tenant->update(['reminders_enabled' => true]);
+        $r = app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+
+        $this->assertSame(1, $r['created'], 'switching off for a day must not burn the stage');
+        $this->assertSame(
+            [InvoiceReminder::STATUS_CANCELLED, InvoiceReminder::STATUS_AWAITING],
+            InvoiceReminder::where('invoice_id', $inv->id)->orderBy('id')->pluck('status')->all(),
+        );
+        $this->assertNull(InvoiceReminder::where('invoice_id', $inv->id)->orderBy('id')->first()->auto_stage, 'a cancelled row releases its stage');
+    }
+
+    public function test_a_before_due_reminder_is_not_sent_once_the_document_is_overdue(): void
+    {
+        $inv = $this->invoice(28);   // due in 2 days → «before due»
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        $row = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+        $this->assertSame(InvoiceReminder::STAGE_PRE_DUE, $row->stage);
+
+        $this->travel(3)->days();   // approved only after the due date
+        app(ReminderSender::class)->send($row->id);
+
+        $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $row->fresh()->status);
+        Mail::assertNothingSent();
+    }
+
+    public function test_an_unset_start_date_is_pinned_to_the_first_run(): void
+    {
+        $this->tenant->update(['reminders_since' => null]);
+        $inv = $this->invoice(34);   // due before today → not reminded
+
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        $this->assertSame(now()->toDateString(), $this->tenant->fresh()->reminders_since?->toDateString());
+        $this->assertSame(0, InvoiceReminder::where('invoice_id', $inv->id)->count());
+
+        // A document falling due from that day on does get its after-due stages later.
+        $later = $this->invoice(30);   // due today
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today()->addDays(3));
+        $this->assertSame(1, InvoiceReminder::where('invoice_id', $later->id)->count());
+    }
+
     public function test_auto_mode_sends_straight_away(): void
     {
         $this->tenant->update(['reminders_mode' => 'auto']);
@@ -354,6 +435,10 @@ class InvoiceRemindersTest extends TestCase
         $custom = app(ReminderMessage::class)->build($inv, 'first', $due, 4, 124.0, ReminderSettings::for($this->tenant->fresh()), 'el');
         $this->assertSame("Οφειλή {$inv->invcode} — Πελάτης Α", $custom['subject']);
         $this->assertStringContainsString('έληξε στις', $custom['bodyText'], 'a blank override keeps the default body');
+
+        $english = app(ReminderMessage::class)->build($inv, 'first', $due, 4, 124.0, ReminderSettings::for($this->tenant->fresh()), 'en');
+        $this->assertStringNotContainsString('Οφειλή', $english['subject'], 'a Greek override never reaches an English-language customer');
+        $this->assertStringContainsString($inv->invcode, $english['subject']);
     }
 
     public function test_the_pay_link_goes_only_to_customers_who_can_use_the_portal(): void

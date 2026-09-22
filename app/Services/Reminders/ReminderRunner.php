@@ -33,6 +33,12 @@ final class ReminderRunner
      */
     public function run(Company $company, CarbonImmutable $today, bool $dryRun = false): array
     {
+        // «From today» must mean the day they were switched on, not every new day
+        // (which would never let an after-due stage fire): pin it on first run.
+        if (! $dryRun && $company->reminders_enabled && $company->reminders_since === null) {
+            $company->forceFill(['reminders_since' => CarbonImmutable::today()->toDateString()])->save();
+        }
+
         $settings = ReminderSettings::for($company);
         $cancelled = $dryRun ? 0 : $this->tidy($company, $settings);
         if (! $settings->enabled) {
@@ -111,8 +117,9 @@ final class ReminderRunner
 
     /**
      * A new stage replaces the document's earlier ones that never went out
-     * (still «προς έγκριση», or failed) — the customer gets the CURRENT stage,
-     * never the 1st and the 2nd on the same day, nor a 1st after the final.
+     * (still «προς έγκριση», queued behind a stalled worker, or failed) — the
+     * customer gets the CURRENT stage, never the 1st and the 2nd on the same day,
+     * nor a 1st after the final.
      */
     private function supersede(InvoiceReminder $row): int
     {
@@ -120,9 +127,10 @@ final class ReminderRunner
             ->withoutGlobalScope(CompanyScope::class)
             ->where('invoice_id', $row->invoice_id)
             ->whereKeyNot($row->getKey())
-            ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_FAILED])
+            ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_FAILED])
             ->update([
                 'status' => InvoiceReminder::STATUS_CANCELLED,
+                'auto_stage' => null,
                 'reason' => 'Αντικαταστάθηκε από «'.(InvoiceReminder::STAGE_LABELS[$row->stage] ?? $row->stage).'».',
                 'updated_at' => now(),
             ]);
@@ -135,7 +143,7 @@ final class ReminderRunner
             ->withoutGlobalScope(CompanyScope::class)
             ->whereKey($row->getKey())
             ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED])
-            ->update(['status' => InvoiceReminder::STATUS_CANCELLED, 'reason' => $reason, 'updated_at' => now()]) > 0;
+            ->update(['status' => InvoiceReminder::STATUS_CANCELLED, 'auto_stage' => null, 'reason' => $reason, 'updated_at' => now()]) > 0;
     }
 
     private function notifyOperators(Company $company, int $count): void

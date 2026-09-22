@@ -8,8 +8,10 @@ use App\Models\Company;
 use App\Models\CompanyBackupSetting;
 use App\Models\InvoiceReminder;
 use App\Services\Reminders\ReminderMessage;
+use App\Services\Reminders\ReminderSettings;
 use App\Support\MyData\ClassificationGuidance;
 use BackedEnum;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
@@ -24,6 +26,7 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
 
@@ -305,12 +308,29 @@ class CompanySettings extends Page implements HasForms
      */
     private function remindersSection(): Section
     {
+        // The after-due stages escalate: each set one must come later than the set
+        // ones before it (equal/inverted days would send the «2η» before the «1η»).
+        $afterDue = ['reminder_first_days', 'reminder_second_days', 'reminder_final_days'];
         $stageDays = fn (string $name, string $label, string $help): TextInput => TextInput::make($name)
             ->label($label)
             ->numeric()->integer()->minValue(0)->maxValue(365)
             ->suffix('ημέρες')
             ->placeholder('ανενεργή')
-            ->helperText($help);
+            ->helperText($help)
+            ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($name, $afterDue, $get): void {
+                $at = array_search($name, $afterDue, true);
+                if ($at === false || blank($value)) {
+                    return;
+                }
+                foreach (array_slice($afterDue, 0, $at) as $earlier) {
+                    if (filled($get($earlier)) && (int) $value <= (int) $get($earlier)) {
+                        $fail('Πρέπει να είναι περισσότερες ημέρες από την προηγούμενη υπενθύμιση ('.(int) $get($earlier).').');
+
+                        return;
+                    }
+                }
+            });
+        $templateLocale = ReminderSettings::templateLocaleOf($this->tenant());
 
         $templates = [];
         foreach (InvoiceReminder::STAGE_LABELS as $stage => $label) {
@@ -320,12 +340,12 @@ class CompanySettings extends Page implements HasForms
             $templates[] = TextInput::make("reminder_templates.{$stage}.subject")
                 ->label("{$label} — θέμα")
                 ->maxLength(191)
-                ->placeholder(fn (): string => trans("mail.reminder.{$stage}.subject", [], 'el'))
+                ->placeholder(fn (): string => trans("mail.reminder.{$stage}.subject", [], $templateLocale))
                 ->columnSpanFull();
             $templates[] = Textarea::make("reminder_templates.{$stage}.body")
                 ->label("{$label} — κείμενο")
                 ->rows(5)
-                ->placeholder(fn (): string => trans("mail.reminder.{$stage}.body", [], 'el'))
+                ->placeholder(fn (): string => trans("mail.reminder.{$stage}.body", [], $templateLocale))
                 ->columnSpanFull();
         }
 
@@ -373,7 +393,7 @@ class CompanySettings extends Page implements HasForms
                     ->dehydrateStateUsing(fn ($state): bool => (bool) $state)
                     ->columnSpanFull(),
                 Section::make('Κείμενα email')
-                    ->description('Κενό = το προεπιλεγμένο κείμενο (φαίνεται αχνά), στη γλώσσα του πελάτη. Placeholders: '.ReminderMessage::PLACEHOLDERS.'. Το {pay_section} γίνεται «πληρώστε online: …» μόνο αν η εταιρεία δέχεται online πληρωμές.')
+                    ->description('Κενό = το προεπιλεγμένο κείμενο (φαίνεται αχνά). Τα δικά σου κείμενα πάνε σε πελάτες στη γλώσσα της εταιρείας· οι υπόλοιποι παίρνουν το προεπιλεγμένο στη γλώσσα τους. Placeholders: '.ReminderMessage::PLACEHOLDERS.'. Το {pay_section} γίνεται «πληρώστε online: …» μόνο αν η εταιρεία δέχεται online πληρωμές.')
                     ->collapsed()
                     ->schema($templates)
                     ->columnSpanFull(),

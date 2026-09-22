@@ -13,9 +13,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  *   awaiting_approval ─(operator «Αποστολή»)─┐
  *   queued ──────────────────────────────────┴→ sending → sent | failed
  *   awaiting_approval → skipped    (operator «Παράλειψη»)
- *   awaiting_approval | queued → cancelled   (paid / opted out before it went)
+ *   awaiting_approval | queued → cancelled   (paid / opted out / superseded before it went)
  *
- * A failed reminder can be sent again from the «Υπενθυμίσεις» page.
+ * A failed reminder can be sent again from the «Υπενθυμίσεις» page. A CANCELLED
+ * row releases its `auto_stage` (set to NULL; `stage` keeps the label), so the
+ * stage can be planned again if the document qualifies again (reminders back on,
+ * an email added, a payment reversed) — only what went out, or was deliberately
+ * skipped, counts as «done».
  */
 class InvoiceReminder extends Model
 {
@@ -48,6 +52,9 @@ class InvoiceReminder extends Model
     public const KIND_INVOICE = 'invoice';
 
     public const KIND_PROFORMA = 'proforma';
+
+    /** The automatic ladder, in escalation order. */
+    public const AUTO_STAGES = [self::STAGE_PRE_DUE, self::STAGE_FIRST, self::STAGE_SECOND, self::STAGE_FINAL];
 
     /** Operator-facing labels (the panel is Greek). */
     public const STAGE_LABELS = [

@@ -58,7 +58,7 @@ class InvoiceReminderPagesTest extends TestCase
         $customer = Customer::create(['company_id' => $company->id, 'name' => 'Πελάτης', 'email' => 'c@example.gr']);
         $inv = Invoice::create([
             'company_id' => $company->id, 'invoice_type_id' => $type->id, 'customer_id' => $customer->id,
-            'payment_method_id' => $pm->id, 'code' => 1, 'invcode' => 'ΤΠΥ1', 'issued_at' => now()->subDays(40), 'local_status' => 'active',
+            'payment_method_id' => $pm->id, 'code' => 1, 'invcode' => 'ΤΠΥ'.uniqid(), 'issued_at' => now()->subDays(40), 'local_status' => 'active',
         ]);
         InvoiceLine::create(['company_id' => $company->id, 'invoice_id' => $inv->id, 'qty' => 1, 'price_per_item' => 100, 'vat_percent' => 24]);
         app(RecomputeInvoiceTotals::class)($inv);
@@ -85,9 +85,7 @@ class InvoiceReminderPagesTest extends TestCase
     public function test_send_and_skip(): void
     {
         $send = $this->awaitingReminder($this->tenant);
-        $skip = InvoiceReminder::create(['stage' => 'second', 'auto_stage' => 'second', 'status' => InvoiceReminder::STATUS_AWAITING] + $send->only([
-            'company_id', 'invoice_id', 'customer_id', 'document_kind', 'due_date', 'days_overdue', 'balance', 'trigger',
-        ]));
+        $skip = $this->awaitingReminder($this->tenant);   // another document
 
         Livewire::test(ListInvoiceReminders::class)
             ->callTableAction('send', $send)
@@ -137,5 +135,23 @@ class InvoiceReminderPagesTest extends TestCase
         $this->assertSame(5, $company->reminder_first_days);
         $this->assertNull($company->reminder_final_days);
         $this->assertSame('Οφειλή {invoice_code}', $company->reminder_templates['first']['subject']);
+    }
+
+    public function test_the_after_due_stages_must_escalate(): void
+    {
+        Livewire::test(CompanySettings::class)
+            ->set('data.reminder_first_days', 5)
+            ->set('data.reminder_second_days', 5)
+            ->set('data.reminder_final_days', 2)
+            ->call('save')
+            ->assertHasErrors(['data.reminder_second_days', 'data.reminder_final_days']);
+
+        Livewire::test(CompanySettings::class)
+            ->set('data.reminder_first_days', 5)
+            ->set('data.reminder_second_days', null)   // a switched-off stage is skipped over
+            ->set('data.reminder_final_days', 6)
+            ->call('save')
+            ->assertHasNoErrors();
+        $this->assertSame(6, $this->tenant->fresh()->reminder_final_days);
     }
 }

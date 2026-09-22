@@ -39,17 +39,11 @@ final class ReminderPlanner
     public function plan(Company $company, CarbonImmutable $today): array
     {
         $planned = [];
-        foreach ($this->eligible($company) as [$invoice, $due, $done, $stages]) {
+        foreach ($this->eligible($company) as [$invoice, $due, $done, $stages, $balance]) {
             $days = (int) $due->diffInDays($today->startOfDay(), false);
             $stage = self::stageFor($stages, $days, $done);
             if ($stage !== null) {
-                $planned[] = [
-                    'invoice' => $invoice,
-                    'stage' => $stage,
-                    'due' => $due,
-                    'days' => $days,
-                    'balance' => $this->balances->for($invoice)->balance,
-                ];
+                $planned[] = ['invoice' => $invoice, 'stage' => $stage, 'due' => $due, 'days' => $days, 'balance' => $balance];
             }
         }
 
@@ -57,8 +51,9 @@ final class ReminderPlanner
     }
 
     /**
-     * The first reminder each document would get in the next `$window` days (on
-     * today's data) — what plan() would return day by day, in one pass.
+     * The first reminder each document would get in the next `$window` days,
+     * today included (on today's data) — what plan() would return day by day, in
+     * one pass.
      *
      * @return list<array{date: CarbonImmutable, invoice: Invoice, stage: string, balance: float}>
      */
@@ -66,16 +61,11 @@ final class ReminderPlanner
     {
         $today = $today->startOfDay();
         $upcoming = [];
-        foreach ($this->eligible($company) as [$invoice, $due, $done, $stages]) {
+        foreach ($this->eligible($company) as [$invoice, $due, $done, $stages, $balance]) {
             $days = (int) $due->diffInDays($today, false);
-            for ($d = 0; $d <= $window; $d++) {
+            for ($d = 0; $d < $window; $d++) {
                 if (($stage = self::stageFor($stages, $days + $d, $done)) !== null) {
-                    $upcoming[] = [
-                        'date' => $today->addDays($d),
-                        'invoice' => $invoice,
-                        'stage' => $stage,
-                        'balance' => $this->balances->for($invoice)->balance,
-                    ];
+                    $upcoming[] = ['date' => $today->addDays($d), 'invoice' => $invoice, 'stage' => $stage, 'balance' => $balance];
 
                     break;
                 }
@@ -92,7 +82,7 @@ final class ReminderPlanner
      * automatic stages they already had — AS THIS KIND of document (a προτιμολόγιο
      * issued as an invoice starts a fresh ladder against its new due date).
      *
-     * @return iterable<array{0: Invoice, 1: CarbonImmutable, 2: list<string>, 3: array<string, int>}>
+     * @return iterable<array{0: Invoice, 1: CarbonImmutable, 2: list<string>, 3: array<string, int>, 4: float}>
      */
     private function eligible(Company $company): iterable
     {
@@ -113,11 +103,15 @@ final class ReminderPlanner
 
         foreach ($candidates as $invoice) {
             $due = self::dueDateOf($invoice);
-            if ($due === null || $due->lt($settings->since) || $this->blocker($invoice, $settings) !== null) {
+            if ($due === null || $due->lt($settings->since)) {
+                continue;
+            }
+            $balance = $this->balances->for($invoice)->balance;
+            if ($this->blocker($invoice, $settings, $balance) !== null) {
                 continue;
             }
 
-            yield [$invoice, $due, $done->get($invoice->getKey().'|'.self::kindOf($invoice), []), $settings->stages];
+            yield [$invoice, $due, $done->get($invoice->getKey().'|'.self::kindOf($invoice), []), $settings->stages, $balance];
         }
     }
 
@@ -152,7 +146,7 @@ final class ReminderPlanner
      * Why this document must NOT be reminded right now (null = it may). Checked
      * when planning AND again just before sending — it may have been paid since.
      */
-    public function blocker(Invoice $invoice, ReminderSettings $settings): ?string
+    public function blocker(Invoice $invoice, ReminderSettings $settings, ?float $balance = null): ?string
     {
         $customer = $invoice->customer;
 
@@ -165,7 +159,7 @@ final class ReminderPlanner
             $invoice->isCreditNote() => 'Πιστωτικό.',
             $invoice->legacy_id !== null || $invoice->whmcs_invoice_id !== null => 'Εκτός υπενθυμίσεων (εισαγωγή/WHMCS).',
             self::dueDateOf($invoice) === null => 'Τοις μετρητοίς — δεν οφείλεται.',
-            default => $this->balanceBlocker($invoice, $settings),
+            default => $this->balanceBlocker($balance ?? $this->balances->for($invoice)->balance, $settings),
         };
     }
 
@@ -179,17 +173,36 @@ final class ReminderPlanner
     {
         return match (true) {
             $invoice === null => 'Το παραστατικό δεν υπάρχει.',
-            $row->auto_stage !== null && ! $settings->enabled => 'Οι υπενθυμίσεις απενεργοποιήθηκαν.',
+            $row->trigger === 'auto' && ! $settings->enabled => 'Οι υπενθυμίσεις απενεργοποιήθηκαν.',
             $row->document_kind !== self::kindOf($invoice) => $row->document_kind === InvoiceReminder::KIND_PROFORMA
                 ? 'Το προτιμολόγιο εκδόθηκε ως τιμολόγιο.'
                 : 'Το παραστατικό επανήλθε σε πρόχειρο.',
+            $row->auto_stage === InvoiceReminder::STAGE_PRE_DUE
+                && ($due = self::dueDateOf($invoice)) !== null && $due->lte(CarbonImmutable::today()) => 'Έληξε — ισχύει πλέον η επόμενη βαθμίδα.',
+            $this->laterStageExists($row) => 'Αντικαταστάθηκε από νεότερη βαθμίδα.',
             default => $this->blocker($invoice, $settings),
         };
     }
 
-    private function balanceBlocker(Invoice $invoice, ReminderSettings $settings): ?string
+    /** Has a later automatic stage of this document gone out (or been recorded)? */
+    private function laterStageExists(InvoiceReminder $row): bool
     {
-        $balance = $this->balances->for($invoice)->balance;
+        $at = array_search($row->auto_stage, InvoiceReminder::AUTO_STAGES, true);
+        if ($row->auto_stage === null || $at === false) {
+            return false;
+        }
+
+        return InvoiceReminder::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('invoice_id', $row->invoice_id)
+            ->where('document_kind', $row->document_kind)
+            ->whereIn('auto_stage', array_slice(InvoiceReminder::AUTO_STAGES, $at + 1))
+            ->whereKeyNot($row->getKey())
+            ->exists();
+    }
+
+    private function balanceBlocker(float $balance, ReminderSettings $settings): ?string
+    {
         if ($balance <= 0.005) {
             return 'Εξοφλήθηκε.';
         }
