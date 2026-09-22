@@ -1242,6 +1242,14 @@ manual αποστολές του ίδιου invoice). Ό,τι απέμεινε (
   `trim()` μετά· paste με leading/trailing whitespace μπορεί να χτυπήσει validation error πριν βοηθήσει το trim
   (cosmetic UX — ο operator το διορθώνει). Optional: `->dehydrateStateUsing(fn ($s) => trim((string) $s))` στο input.
 
+**Update (2026-09-22): ενοποιήθηκε στο ένα κουμπί.** Μετά από operator feedback, το χωριστό «Αποστολή σε
+συστήσαντα/άλλον» **αφαιρέθηκε**· το custom-email μπήκε ως προαιρετικό πεδίο πάνω στο `resend_email` (μετονομασμένο
+«Αποστολή PDF με email»): κενό → πελάτης, γεμάτο → targeted αντίγραφο. Το email του συστήσαντα προβάλλεται πλέον ως
+**hint** στο modal. Οι δύο P2 από πάνω ισχύουν πλέον για το `resend_email`. Νέο surviving P2:
+- **helperText lazy-loads `customer.referredBy` (P2 perf, αμελητέο):** το closure του `to_override` helperText διαβάζει
+  `$record->customer?->referredBy?->email` σε κάθε render του modal → 1 extra SELECT όταν ανοίγει/ανανεώνεται το modal
+  (single-record admin surface, όχι list N+1). Eager-load `customer.referredBy` στο ViewInvoice αν ποτέ ενοχλήσει· άσε.
+
 ### WHMCS coupon/promotion discount fold — surviving P2s (από το review, 2026-09-21)
 Το fold μιας αρνητικής promo/coupon γραμμής σε line-level `discount %` (`WhmcsInvoiceMapper::foldPromoDiscounts`)
 πέρασε **χωρίς reachable P0/P1**. Θωρακίσεις που μπήκαν: per-tax-group fold (ποτέ cross-treatment), reject ≥100%
