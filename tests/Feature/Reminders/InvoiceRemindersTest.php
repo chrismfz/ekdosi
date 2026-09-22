@@ -210,7 +210,7 @@ class InvoiceRemindersTest extends TestCase
         $inv = $this->invoice(34);
         app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
         $stale = InvoiceReminder::where('invoice_id', $inv->id)->sole();   // the operator's screen
-        app(ReminderSender::class)->send($stale->id);                    // sent from another screen
+        InvoiceReminderResource::queue($stale->fresh());                // sent from another screen
 
         $this->assertFalse(InvoiceReminderResource::skip($stale));
         $this->assertSame(InvoiceReminder::STATUS_SENT, $stale->fresh()->status);
@@ -238,7 +238,7 @@ class InvoiceRemindersTest extends TestCase
         app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
         $this->tenant->update(['reminders_enabled' => false]);
 
-        app(ReminderSender::class)->send(InvoiceReminder::where('invoice_id', $inv->id)->sole()->id);
+        InvoiceReminderResource::queue(InvoiceReminder::where('invoice_id', $inv->id)->sole());
 
         $this->assertSame(InvoiceReminder::STATUS_CANCELLED, InvoiceReminder::where('invoice_id', $inv->id)->sole()->status);
         Mail::assertNothingSent();
@@ -290,7 +290,7 @@ class InvoiceRemindersTest extends TestCase
             'status' => InvoiceReminder::STATUS_FAILED, 'trigger' => 'auto',
         ]);
 
-        app(ReminderSender::class)->send($first->id);
+        InvoiceReminderResource::queue($first);
 
         $this->assertSame('Αντικαταστάθηκε από νεότερη βαθμίδα.', $first->fresh()->reason);
         $this->assertSame(InvoiceReminder::STATUS_AWAITING, $second->fresh()->status);
@@ -323,7 +323,7 @@ class InvoiceRemindersTest extends TestCase
         $this->assertSame(InvoiceReminder::STAGE_PRE_DUE, $row->stage);
 
         $this->travel(3)->days();   // approved only after the due date
-        app(ReminderSender::class)->send($row->id);
+        InvoiceReminderResource::queue($row);
 
         $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $row->fresh()->status);
         Mail::assertNothingSent();
@@ -355,7 +355,7 @@ class InvoiceRemindersTest extends TestCase
         ]);
         $payment = Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $inv->id,
             'kind' => 'payment', 'amount' => 124, 'pay_date' => now()]);
-        app(ReminderSender::class)->send($row->id);   // «Ξανά αποστολή» → paid → cancelled
+        InvoiceReminderResource::queue($row);   // «Ξανά αποστολή» → paid → cancelled
         $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $row->fresh()->status);
         $this->assertSame('first', $row->fresh()->auto_stage, 'an attempted stage keeps its slot');
 
@@ -377,6 +377,19 @@ class InvoiceRemindersTest extends TestCase
 
         $this->assertSame(InvoiceReminder::STATUS_SENT, $row->fresh()->status);
         Mail::assertSentCount(1);
+    }
+
+    public function test_a_stray_job_never_retries_a_failed_reminder_on_its_own(): void
+    {
+        $inv = $this->invoice(34);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        $row = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+        $row->forceFill(['status' => InvoiceReminder::STATUS_FAILED, 'attempts' => 1])->save();   // job A failed it
+
+        app(ReminderSender::class)->send($row->id);   // job B (a re-dispatch) arrives
+
+        $this->assertSame(InvoiceReminder::STATUS_FAILED, $row->fresh()->status, 'a retry is the operator\'s call («Ξανά αποστολή»)');
+        Mail::assertNothingSent();
     }
 
     public function test_no_new_stage_is_recorded_while_one_is_mid_send(): void
@@ -415,7 +428,7 @@ class InvoiceRemindersTest extends TestCase
 
         Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $inv->id,
             'kind' => 'payment', 'amount' => 124, 'pay_date' => now()]);
-        app(ReminderSender::class)->send($row->id);
+        InvoiceReminderResource::queue($row);
 
         $row->refresh();
         $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $row->status);
@@ -429,8 +442,8 @@ class InvoiceRemindersTest extends TestCase
         app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
         $row = InvoiceReminder::where('invoice_id', $inv->id)->sole();
 
-        app(ReminderSender::class)->send($row->id);
-        app(ReminderSender::class)->send($row->id);
+        InvoiceReminderResource::queue($row);
+        app(ReminderSender::class)->send($row->id);   // a duplicate job arrives later
 
         Mail::assertSentCount(1);
         $this->assertSame(InvoiceReminder::STATUS_SENT, $row->fresh()->status);

@@ -15,9 +15,9 @@ use Illuminate\Support\Facades\DB;
 use Throwable;
 
 /**
- * Sends ONE reminder row. The row is first claimed (awaiting/queued/failed →
- * sending in a single conditional UPDATE), so two workers — or a double click
- * on «Αποστολή» — can never email the customer twice. Everything is re-checked
+ * Sends ONE reminder row. The row is first claimed (queued → sending in a single
+ * conditional UPDATE), so two workers — or a double click on «Αποστολή» — can
+ * never email the customer twice. Everything is re-checked
  * at send time: a document paid, cancelled or opted out since it was planned is
  * cancelled with the reason instead of sent.
  */
@@ -35,8 +35,11 @@ final class ReminderSender
     {
         $rows = fn () => InvoiceReminder::query()->withoutGlobalScope(CompanyScope::class)->whereKey($reminderId);
 
+        // Only a QUEUED row — queued by the daily run (auto mode) or by the operator
+        // («Αποστολή» / «Ξανά αποστολή» move awaiting/failed → queued first). A
+        // failed row is never retried by a stray or duplicate job on its own.
         $claimed = $rows()
-            ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_FAILED])
+            ->where('status', InvoiceReminder::STATUS_QUEUED)
             ->update(['status' => InvoiceReminder::STATUS_SENDING, 'error_message' => null, 'attempts' => DB::raw('attempts + 1'), 'updated_at' => now()]);
 
         $row = $rows()->first();
