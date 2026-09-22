@@ -12,6 +12,10 @@
 # change. If it ran migrations, restore the snapshot too — a forward migration
 # may be irreversible. When in doubt, pass the snapshot.
 #
+# Pre-flight (before maintenance, same as update.sh): refuses an unknown ref or
+# uncommitted TRACKED changes, and copies aside any untracked file GIT_REF ships
+# as tracked (to storage/app/deploy-untracked/) before the forced checkout.
+#
 # Env overrides:  PHP=/usr/bin/php8.4  COMPOSER=/usr/local/bin/composer
 #
 set -Eeuo pipefail
@@ -61,6 +65,64 @@ start_queue_worker() {
   [[ "$_stopped_by" == "drain" ]] && { echo "▶ Queue: workers exited on their own — the supervisor/cron restarts them."; return 0; }
   echo "✗ The queue worker was stopped but could not be started back — START IT YOURSELF NOW." >&2
 }
+
+# --- pre-flight: the same guards as deploy/update.sh, all BEFORE maintenance --
+# (so an abort changes nothing). The forced checkout below would otherwise wipe a
+# hand edit to a tracked file, and replace an untracked file that $REF ships as
+# tracked — both without a copy.
+
+# Environment-managed files (cPanel rewrites public/.htaccess): skip-worktree, so
+# the environment's edit neither reads as "dirty" below nor gets wiped. Same list
+# and caveat as update.sh.
+ENV_MANAGED_FILES=(public/.htaccess)
+for _envfile in "${ENV_MANAGED_FILES[@]}"; do
+  if git ls-files --error-unmatch "$_envfile" >/dev/null 2>&1; then
+    git update-index --skip-worktree "$_envfile" 2>/dev/null \
+      && echo "▶ Ignoring environment-managed $_envfile (skip-worktree)"
+  fi
+done
+
+# Resolve the target first: the untracked probe below reads "<sha>:<path>", and
+# an unknown ref would otherwise only fail at the checkout, in maintenance mode.
+if ! TARGET_SHA="$(git rev-parse --verify --quiet "${REF}^{commit}")"; then
+  echo "✗ Unknown ref: $REF — nothing was changed." >&2
+  exit 1
+fi
+
+# TRACKED changes are a hard stop. Untracked ones never are: shield:generate
+# leaves policy stubs behind, and a bare `git status --porcelain` would count them
+# and block every rollback (the deadlock update.sh already hit).
+if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
+  echo "✗ Working tree not clean — commit/stash changes on the server first. Nothing was changed." >&2
+  git status --short --untracked-files=no | sed 's/^/    /' >&2
+  exit 1
+fi
+
+# Untracked files that $REF ships as tracked get REPLACED by the forced checkout:
+# copy them aside first, and refuse if a copy fails. NUL-separated + quotePath=off
+# (Greek filenames), read via a temp file — CloudLinux CageFS has no /dev/fd, so
+# process substitution dies there. Same probe as update.sh.
+_untracked_list="$(mktemp)"
+git -c core.quotePath=false ls-files --others --exclude-standard -z > "$_untracked_list"
+_backup=""
+while IFS= read -r -d '' f; do
+  if ! git cat-file -e "${TARGET_SHA}:${f}" 2>/dev/null; then
+    continue   # not in $REF — the checkout leaves it alone
+  fi
+  if [[ -z "$_backup" ]]; then
+    _backup="storage/app/deploy-untracked/$(date -u +%Y%m%d-%H%M%S)"
+  fi
+  if ! mkdir -p "$_backup/$(dirname "$f")" || ! cp -p "$f" "$_backup/$f"; then
+    echo "✗ Could not back up '$f' to $_backup — refusing to overwrite it. Nothing was changed." >&2
+    rm -f "$_untracked_list"
+    exit 1
+  fi
+  echo "  copied aside: $f → $_backup/$f"
+done < "$_untracked_list"
+rm -f "$_untracked_list"
+if [[ -n "$_backup" ]]; then
+  echo "▶ $REF replaces the untracked files above — copies kept in $_backup/ (delete them once you've checked)."
+fi
 
 echo "▶ Maintenance mode ON"
 # See update.sh: without maintenance mode the drain guarantees nothing.

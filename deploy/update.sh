@@ -11,9 +11,10 @@
 # current HEAD) is refused unless ALLOW_DOWNGRADE=1.
 #
 # What it does, in order (safe + idempotent):
-#   1. pre-flight: no uncommitted TRACKED changes (untracked files only warn;
-#      any the release ships as tracked are copied to storage/app/deploy-untracked/)
+#   1. pre-flight: no uncommitted TRACKED changes (untracked files only warn)
 #   2. fetch tags/commits
+#   2b. refuse-checks (ΑΦΜ duplicates, downgrade) — THEN copy aside any untracked
+#       file the release ships as tracked → storage/app/deploy-untracked/
 #   3. DB snapshot (rollback point)  →  storage/app/db-snapshots/
 #   4. maintenance mode ON
 #   5. checkout the target ref
@@ -181,7 +182,51 @@ TARGET_SHA="$(git rev-parse --verify "${TARGET_REF}^{commit}" 2>/dev/null)" \
   || { fail "Unknown ref: $REF"; exit 1; }
 echo "Current: $CURRENT   →   Target: $REF ($(git rev-parse --short "$TARGET_SHA"))"
 
+# --- early data pre-flight (read-only, NO downtime) -------------------------
+# The cheap checks run on the CURRENT checkout, before maintenance mode and
+# before we touch the worker: a data problem should cost the operator nothing
+# but a message. (The command only exists from v1.16 on, hence the guard; the
+# authoritative run is still the one after checkout+composer, on the NEW code.)
+if $ART list --raw 2>/dev/null | grep -q '^customers:afm-duplicates'; then
+  log "Pre-flight (read-only): customers with a duplicate ΑΦΜ"
+  if ! $ART customers:afm-duplicates; then
+    fail "Duplicate customer ΑΦΜ — the UNIQUE(company_id, afm_key) migration will refuse."
+    if $ART list --raw 2>/dev/null | grep -q '^customers:merge'; then
+      echo "  Merge them first (nothing has changed, the app is still UP):"
+      echo "    $ART customers:merge <keep-id> <drop-id> --dry-run"
+      echo "    $ART customers:merge <keep-id> <drop-id>"
+    else
+      echo "  The merge tool ships WITH this update, so it is not on the current checkout yet."
+      echo "  Re-run update.sh: it stops again right after the checkout, where you can run"
+      echo "    $ART customers:merge <keep-id> <drop-id>"
+      echo "  (or fix the wrong ΑΦΜ in the panel now, if they are NOT the same party)."
+    fi
+    exit 1
+  fi
+fi
+
+# --- safety: REFUSE a downgrade --------------------------------------------
+# If the target resolves to an ANCESTOR of the current HEAD (older code), bail.
+# Rolling prod back is almost never intended — and if the target predates a
+# tracked file (e.g. this very script), the checkout DELETES it from the working
+# tree. ALLOW_DOWNGRADE=1 for a deliberate rollback (prefer deploy/rollback.sh).
+if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
+   && git merge-base --is-ancestor "$TARGET_SHA" HEAD; then
+  if [[ "${ALLOW_DOWNGRADE:-0}" != "1" ]]; then
+    fail "Target $REF ($(git rev-parse --short "$TARGET_SHA")) is OLDER than current HEAD ($CURRENT) — refusing to downgrade."
+    echo  "  Push your changes first, or pass an explicit newer ref."
+    echo  "  Deliberate rollback: ALLOW_DOWNGRADE=1 deploy/update.sh $REF"
+    exit 1
+  fi
+  log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
+fi
+
 # --- untracked files: report + protect, never refuse -------------------------
+# Runs HERE — after every refuse-check above (ΑΦΜ pre-flight, downgrade guard)
+# and before maintenance — so a deploy those checks abort leaves no copies behind
+# (and never prints «Copies kept…» for a deploy that didn't happen), while a
+# failed copy still aborts with the app up and nothing changed. Same order as the
+# in-app updater (SelfUpdate: protect → maintenance ON).
 # They USED to be a hard stop, and that deadlocked the box: `shield:generate`
 # (step 10) writes a policy file for any resource that ships without one, so one
 # deploy left an untracked artefact behind and EVERY later deploy refused — with
@@ -232,45 +277,6 @@ if [[ ${#_untracked[@]} -gt 0 ]]; then
     done
     ok "Copies kept in $_backup/ (delete them once you've checked)."
   fi
-fi
-
-# --- early data pre-flight (read-only, NO downtime) -------------------------
-# The cheap checks run on the CURRENT checkout, before maintenance mode and
-# before we touch the worker: a data problem should cost the operator nothing
-# but a message. (The command only exists from v1.16 on, hence the guard; the
-# authoritative run is still the one after checkout+composer, on the NEW code.)
-if $ART list --raw 2>/dev/null | grep -q '^customers:afm-duplicates'; then
-  log "Pre-flight (read-only): customers with a duplicate ΑΦΜ"
-  if ! $ART customers:afm-duplicates; then
-    fail "Duplicate customer ΑΦΜ — the UNIQUE(company_id, afm_key) migration will refuse."
-    if $ART list --raw 2>/dev/null | grep -q '^customers:merge'; then
-      echo "  Merge them first (nothing has changed, the app is still UP):"
-      echo "    $ART customers:merge <keep-id> <drop-id> --dry-run"
-      echo "    $ART customers:merge <keep-id> <drop-id>"
-    else
-      echo "  The merge tool ships WITH this update, so it is not on the current checkout yet."
-      echo "  Re-run update.sh: it stops again right after the checkout, where you can run"
-      echo "    $ART customers:merge <keep-id> <drop-id>"
-      echo "  (or fix the wrong ΑΦΜ in the panel now, if they are NOT the same party)."
-    fi
-    exit 1
-  fi
-fi
-
-# --- safety: REFUSE a downgrade --------------------------------------------
-# If the target resolves to an ANCESTOR of the current HEAD (older code), bail.
-# Rolling prod back is almost never intended — and if the target predates a
-# tracked file (e.g. this very script), the checkout DELETES it from the working
-# tree. ALLOW_DOWNGRADE=1 for a deliberate rollback (prefer deploy/rollback.sh).
-if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
-   && git merge-base --is-ancestor "$TARGET_SHA" HEAD; then
-  if [[ "${ALLOW_DOWNGRADE:-0}" != "1" ]]; then
-    fail "Target $REF ($(git rev-parse --short "$TARGET_SHA")) is OLDER than current HEAD ($CURRENT) — refusing to downgrade."
-    echo  "  Push your changes first, or pass an explicit newer ref."
-    echo  "  Deliberate rollback: ALLOW_DOWNGRADE=1 deploy/update.sh $REF"
-    exit 1
-  fi
-  log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
 fi
 
 # --- maintenance window -----------------------------------------------------

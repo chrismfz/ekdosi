@@ -324,6 +324,30 @@ class SelfUpdate extends Command
             throw new \RuntimeException('Δεν βρέθηκε φάκελος .git — αδύνατη η επαναφορά κώδικα.');
         }
 
+        // The same guards as runPhp(), all BEFORE maintenance so any abort leaves
+        // the app up. The target is the pre-update ref, already local (no fetch).
+        // Resolve it first: protectUntracked() probes `<ref>:<path>`, and a bad ref
+        // would read as «not tracked there» for every file — skipping the backup
+        // it exists to take — before the checkout failed anyway.
+        try {
+            $this->capture(['git', 'rev-parse', '--verify', '--quiet', $target.'^{commit}'], base_path());
+        } catch (Throwable) {
+            throw new \RuntimeException('Άγνωστο target ref για την επαναφορά: '.$target);
+        }
+        // TRACKED changes only, same rule as runPhp(): `checkout --force` below
+        // would silently discard a hand edit to a tracked file, so refuse instead —
+        // and a bare `--porcelain` would count shield:generate's untracked policy
+        // stubs and block every rollback.
+        $dirty = trim($this->capture(['git', 'status', '--porcelain', '--untracked-files=no'], base_path()));
+        if ($dirty !== '') {
+            throw new \RuntimeException("Το working tree δεν είναι καθαρό — ματαίωση επαναφοράς:\n".$dirty);
+        }
+        // Copy aside any untracked file the old ref ships as tracked — the forced
+        // checkout below would replace it without a trace.
+        $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $target) {
+            $this->protectUntracked($run, $target);
+        });
+
         // ── maintenance ON (idempotent — a failed apply may have left it down) ─
         $this->step($run, 'maintenance', 'Maintenance mode ON', function () use ($run, $php, $artisan) {
             $this->exec($run, [$php, $artisan, 'down', '--retry=15']);
@@ -462,7 +486,8 @@ class SelfUpdate extends Command
      * ships as a tracked one — usually a generated artefact, which is exactly
      * what should happen. Copy them aside first anyway (the panel operator has
      * no shell to recover one), and abort rather than overwrite blind if the
-     * copy fails. Mirrors the same block in deploy/update.sh.
+     * copy fails. Used by BOTH the update and the rollback path; mirrors the same
+     * block in deploy/update.sh and deploy/rollback.sh.
      */
     private function protectUntracked(UpdateRun $run, string $target): void
     {

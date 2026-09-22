@@ -1346,14 +1346,16 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
 
 ## 🧹 Deploy/rollback + leads-calendar links — P2 από το review (untracked-deadlock PR)
 Δεν μπλοκάρουν τίποτα· καταγραφή για να μη χαθούν.
-- **Το rollback path δεν έχει τις νέες εγγυήσεις.** `SelfUpdate::runRollback()` και
-  `deploy/rollback.sh` κάνουν `git checkout --force` ΧΩΡΙΣ ούτε τον έλεγχο tracked-dirty ούτε το
-  `protectUntracked()` — άρα ένα untracked αρχείο που το target ref το έχει tracked αντικαθίσταται
-  χωρίς αντίγραφο. Ίδιο μοτίβο με το update path· μικρό port.
-- **Ο φάκελος αντιγράφων γράφεται πριν τους μεταγενέστερους ελέγχους.** Στο `update.sh` το
-  copy-aside τρέχει πριν το downgrade-guard και το ΑΦΜ pre-flight, οπότε ένα deploy που ματαιώνεται
-  εκεί αφήνει πίσω ένα `storage/app/deploy-untracked/<ts>/` ανά προσπάθεια (και τυπώνει «Copies
-  kept…» για deploy που δεν έγινε). Είτε μετακίνηση μετά τους ελέγχους, είτε retention/καθάρισμα.
+- ~~**Το rollback path δεν έχει τις νέες εγγυήσεις.**~~ **FIXED (2026-09-22)** — `runRollback()` +
+  `rollback.sh` έχουν πλέον ref-resolve + tracked-dirty (`--untracked-files=no`) + copy-aside, όλα πριν το
+  maintenance (βλ. CHANGELOG «Fixed», `DeployPreflightGuardsTest`).
+- ~~**Ο φάκελος αντιγράφων γράφεται πριν τους μεταγενέστερους ελέγχους.**~~ **FIXED (2026-09-22)** — στο
+  `update.sh` το copy-aside μετακινήθηκε μετά το ΑΦΜ pre-flight + downgrade guard (ακριβώς πριν το
+  maintenance). **Residual (P3):** αν μετά την αντιγραφή αποτύχει το `down` / το queue drain / το snapshot
+  (clean abort), ο φάκελος αντιγράφων μένει και το «Copies kept…» έχει ήδη τυπωθεί — προϋποθέτει ΚΑΙ
+  clobberable untracked αρχείο ΚΑΙ τέτοια αποτυχία· ίδιο στο in-app `runPhp()`/`runRollback()`
+  (protect → maintenance). Αβλαβές (μόνο δίσκος, το μήνυμα λέει «delete them once you've checked»). Λύση αν
+  ενοχλήσει: retention/καθάρισμα του `storage/app/deploy-untracked/` (π.χ. μαζί με το `--keep` των snapshots).
 - **Το tab του link είναι χοντρότερη κοπή από τον αριθμό δίπλα του** (ημερολόγιο leads): το
   `overdueBeforeGrid()` μετράει μόνο τα ΠΡΙΝ το πλέγμα αλλά ανοίγει ΟΛΑ τα ληξιπρόθεσμα, και το
   `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η

@@ -183,6 +183,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
   φραγμοί είναι η ιδιοκτησία (grant-scoped) και τα caps του allocator.
 
 ### Fixed
+- **Επαναφορά (rollback): ίδιες εγγυήσεις με το update — ένα rollback δεν σβήνει πλέον σιωπηλά αρχεία.**
+  Το `deploy/rollback.sh` και το in-app «Επαναφορά» (`SelfUpdate::runRollback()`) έκαναν σκέτο
+  `git checkout --force` χωρίς τα guards του update path: μια χειροκίνητη αλλαγή σε tracked αρχείο
+  χανόταν, και ένα **untracked** αρχείο που το παλιό ref έχει ως tracked αντικαθιστόταν **χωρίς αντίγραφο**.
+  Τώρα, **πριν το maintenance** (άρα ένα abort δεν αλλάζει τίποτα): άγνωστο ref → άρνηση· uncommitted
+  **tracked** αλλαγές → άρνηση (`--untracked-files=no` — τα untracked δεν μπλοκάρουν ποτέ, όπως στο
+  update)· και τα untracked που θα αντικατασταθούν αντιγράφονται στο `storage/app/deploy-untracked/<ts>/`
+  (άρνηση αν αποτύχει η αντιγραφή). Το `rollback.sh` παίρνει και το cPanel `public/.htaccess`
+  skip-worktree του `update.sh`. Επίσης στο `update.sh` η αντιγραφή untracked τρέχει πλέον **μετά** τους
+  ελέγχους άρνησης (ΑΦΜ διπλότυπα, downgrade) — ένα deploy που αρνείται δεν αφήνει πίσω φάκελο
+  αντιγράφων ούτε τυπώνει «Copies kept…». Νέο `DeployPreflightGuardsTest`: τρέχει τα scripts **πραγματικά**
+  σε throwaway git repo (stub `php`), + ordering test για το in-app rollback.
 - **`PaymentAllocator`: δύο ταυτόχρονες εισπράξεις στο ίδιο τιμολόγιο μπορούσαν να το υπερ-πληρώσουν
   (overpay race).** Και το `allocate()` (FIFO) και το `allocateToInvoice()` (targeted) διάβαζαν το
   υπόλοιπο του τιμολογίου με **plain read** και μετά έγραφαν — δύο concurrent εισπράξεις (π.χ. δύο
