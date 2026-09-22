@@ -13,8 +13,9 @@
 # may be irreversible. When in doubt, pass the snapshot.
 #
 # Pre-flight (before maintenance, same as update.sh): refuses an unknown ref,
-# uncommitted TRACKED changes, or an environment-edited skip-worktree file that
-# GIT_REF changes; then copies aside everything the forced checkout would destroy
+# uncommitted TRACKED changes, or a checkout git's own dry run says would fail
+# (e.g. an environment-edited skip-worktree / assume-unchanged file GIT_REF
+# changes); then copies aside everything the forced checkout would destroy
 # that git can't give back (untracked or gitignored files on a path GIT_REF uses)
 # to storage/app/deploy-untracked/.
 #
@@ -100,34 +101,27 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
   exit 1
 fi
 
-# Flagged files — skip-worktree (the list above) or assume-unchanged: git ignores
-# edits to both, so the check above stays clean — that the environment edited: if
-# $REF changes one, the forced checkout dies («Entry … not uptodate. Cannot
-# merge.», exit 128) with the site already down. Refuse now instead; a missing,
-# untouched or unchanged-by-$REF file is fine. Same check as update.sh. (NUL lists
+# Would the forced checkout FAIL? Ask git itself: a dry run of the same reset
+# refuses exactly when the real one would — notably on a skip-worktree (the list
+# above) or assume-unchanged file the environment edited (git decides by stat, not
+# content), which the checkout then cannot overwrite («Entry … not uptodate.
+# Cannot merge.», exit 128) — with the site already down. Refuse now instead. It
+# does NOT refuse the untracked/ignored collisions below (the checkout overwrites
+# those — hence the copies). Same check as update.sh and SelfUpdate. (NUL lists
 # are read via temp files: CloudLinux CageFS has no /dev/fd, so process
 # substitution dies there.)
 _list="$(mktemp)"
-git ls-files -v -z > "$_list"
-while IFS= read -r -d '' _entry; do
-  [[ "$_entry" == [Shs]\ * ]] || continue   # S/s = skip-worktree, h = assume-unchanged
-  _f="${_entry:2}"
-  if [[ ! -e "$_f" && ! -L "$_f" ]]; then
-    continue   # missing on disk — the checkout just restores it
-  fi
-  _indexed="$(git rev-parse ":$_f")"
-  if [[ -f "$_f" && "$(git hash-object -- "$_f")" == "$_indexed" ]]; then
-    continue   # flagged but untouched — the checkout updates it normally
-  fi
-  if [[ "$(git rev-parse --verify --quiet "${TARGET_SHA}:${_f}" || true)" == "$_indexed" ]]; then
-    continue   # $REF leaves it as it is
-  fi
-  echo "✗ $REF changes $_f, which this host's environment has edited (skip-worktree / assume-unchanged) — the checkout would fail with the site already down. Nothing was changed." >&2
-  echo "  Keep a copy of it, then: git update-index --no-skip-worktree --no-assume-unchanged $_f && git checkout -- $_f" >&2
+if ! git read-tree -n -u --reset "$TARGET_SHA" >/dev/null 2>"$_list"; then
+  echo "✗ The checkout of $REF would fail — refusing before maintenance. Nothing was changed." >&2
+  sed 's/^/    /' "$_list" >&2
+  sed -n "s/^.*Entry '\\(.*\\)' not uptodate.*\$/\\1/p" "$_list" | while IFS= read -r _f; do
+    echo "  $_f was edited here while flagged skip-worktree/assume-unchanged. Keep a copy, then:" >&2
+    echo "    git update-index --no-skip-worktree --no-assume-unchanged $_f && git checkout -- $_f" >&2
+  done
   echo "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)." >&2
   rm -f "$_list"
   exit 1
-done < "$_list"
+fi
 
 # What the forced checkout destroys that git can NOT give back: anything on disk
 # that isn't in the index — untracked OR gitignored — and collides with a path $REF
@@ -170,7 +164,11 @@ while IFS= read -r -d '' p; do
     # a directory where it has a file: git deletes it, contents and all (links
     # and regular files only — `find` doesn't follow links, and a FIFO/socket
     # carries nothing to keep)
-    find "./$p" \( -type f -o -type l \) -print0 > "$_sub"
+    if ! find "./$p" \( -type f -o -type l \) -print0 > "$_sub"; then
+      echo "✗ Can't read everything inside '$p/' ($REF has a file there, so it would all be deleted unseen) — refusing. Nothing was changed." >&2
+      rm -f "$_list" "$_sub"
+      exit 1
+    fi
     while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
   fi
 done < "$_list"

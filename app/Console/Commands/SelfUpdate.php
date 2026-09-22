@@ -183,10 +183,10 @@ class SelfUpdate extends Command
 
         // Both need the ref FETCHED (to know what it ships) and must run BEFORE
         // maintenance, so an abort never strands the app down with no shell:
-        // refuse a checkout that would die on an environment-edited flagged file,
-        // then copy aside anything the checkout would destroy.
-        $this->step($run, 'guard', 'Έλεγχος αρχείων περιβάλλοντος (skip-worktree)', function () use ($target) {
-            $this->assertSkipWorktreeSafe($target, $target);
+        // refuse a checkout git's own dry run says would fail, then copy aside
+        // anything the checkout would destroy.
+        $this->step($run, 'guard', 'Έλεγχος ότι το checkout θα πετύχει (dry run)', function () use ($target) {
+            $this->assertCheckoutWouldSucceed($target, $target);
         });
         $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $target) {
             $this->protectUntracked($run, $target);
@@ -330,8 +330,8 @@ class SelfUpdate extends Command
             throw new \RuntimeException('Άγνωστο target ref για την επαναφορά: '.$target);
         }
         $this->assertCleanTrackedTree('επαναφοράς');
-        $this->step($run, 'guard', 'Έλεγχος αρχείων περιβάλλοντος (skip-worktree)', function () use ($sha, $target) {
-            $this->assertSkipWorktreeSafe($sha, $target);
+        $this->step($run, 'guard', 'Έλεγχος ότι το checkout θα πετύχει (dry run)', function () use ($sha, $target) {
+            $this->assertCheckoutWouldSucceed($sha, $target);
         });
         $this->step($run, 'protect', 'Αντίγραφα untracked αρχείων', function () use ($run, $sha) {
             $this->protectUntracked($run, $sha);
@@ -491,46 +491,40 @@ class SelfUpdate extends Command
     }
 
     /**
-     * A skip-worktree (S/s) or assume-unchanged (h) file — git ignores edits to
-     * both, so `status` stays clean — that the host's environment edited (cPanel's
-     * MultiPHP rewrites public/.htaccess; deploy/update.sh flags it) makes
-     * `checkout --force` of a ref that CHANGES it die with «Entry … not uptodate.
-     * Cannot merge.» — after maintenance is already ON. Refuse up front instead,
-     * saying how to clear it. A flagged file that is missing (the checkout just
-     * restores it), untouched, or left as it is by the target checks out fine.
-     * Same check as the two deploy scripts. $label = the ref the operator picked.
+     * Would `checkout --force <target>` FAIL? Ask git itself: `read-tree -n -u
+     * --reset` is a dry run of the same reset and refuses exactly when the real one
+     * would (verified across the flag / stat / deletion cases), with no side
+     * effects. The case that matters: a skip-worktree (cPanel's public/.htaccess,
+     * flagged by deploy/update.sh) or assume-unchanged file the environment edited —
+     * git decides by STAT, not content — makes the checkout die with «Entry …
+     * not uptodate. Cannot merge.» after maintenance is already ON. Refuse up front
+     * instead, naming the files and the way out. It does NOT refuse the
+     * untracked/ignored collisions protectUntracked() copies aside (the checkout
+     * overwrites those). Same check as the two deploy scripts. $label = the ref the
+     * operator picked (the target may be its resolved SHA).
      */
-    private function assertSkipWorktreeSafe(string $target, string $label): void
+    private function assertCheckoutWouldSucceed(string $target, string $label): void
     {
-        foreach ($this->nulList(['git', 'ls-files', '-v', '-z']) as $entry) {
-            if (! preg_match('/^[Shs] (.+)$/s', $entry, $m)) {
-                continue;   // not flagged
-            }
-            $path = $m[1];
-            $abs = base_path($path);
-            if (! file_exists($abs) && ! is_link($abs)) {
-                continue;   // missing on disk — the checkout just restores it
-            }
-            $indexed = trim($this->capture(['git', 'rev-parse', ':'.$path], base_path()));
-            if (is_file($abs) && trim($this->capture(['git', 'hash-object', '--', $path], base_path())) === $indexed) {
-                continue;   // flagged but untouched — the checkout updates it normally
-            }
-            try {
-                $inTarget = trim($this->capture(['git', 'rev-parse', '--verify', '--quiet', $target.':'.$path], base_path()));
-            } catch (Throwable) {
-                $inTarget = '';   // the target drops the file
-            }
-            if ($inTarget === $indexed) {
-                continue;   // the target leaves it as it is
-            }
-
-            throw new \RuntimeException(
-                "Το {$label} αλλάζει το «{$path}», που το περιβάλλον του server έχει τροποποιήσει (skip-worktree / assume-unchanged) — "
-                .'το checkout θα αποτύγχανε με την εφαρμογή ήδη σε maintenance. Δεν άλλαξε τίποτα. '
-                ."Στον server: κράτα αντίγραφο του αρχείου, `git update-index --no-skip-worktree --no-assume-unchanged {$path} && git checkout -- {$path}`, "
-                .'ξανά, και μετά επανέφερε την τροποποίηση του περιβάλλοντος (cPanel: ξανα-αποθήκευση του PHP handler).'
-            );
+        $dry = new Process(['git', 'read-tree', '-n', '-u', '--reset', $target], base_path(), null, null, 120);
+        $dry->run();
+        if ($dry->isSuccessful()) {
+            return;
         }
+
+        $error = trim($dry->getErrorOutput()) ?: trim($dry->getOutput());
+        preg_match_all("/Entry '(.+?)' not uptodate/", $error, $m);
+        $fixes = array_map(
+            fn (string $path) => "`git update-index --no-skip-worktree --no-assume-unchanged {$path} && git checkout -- {$path}`",
+            $m[1],
+        );
+
+        throw new \RuntimeException(
+            "Το checkout του {$label} θα αποτύγχανε — ματαίωση πριν το maintenance, δεν άλλαξε τίποτα.\n"
+            .$this->redact($error)
+            .($fixes === [] ? '' : "\nΑρχεία που τροποποιήθηκαν στον server ενώ είναι flagged (skip-worktree / assume-unchanged) — "
+                .'κράτα αντίγραφο, '.implode(' · ', $fixes)
+                .', ξανά, και μετά επανέφερε την τροποποίηση του περιβάλλοντος (cPanel: ξανα-αποθήκευση του PHP handler).')
+        );
     }
 
     /**
@@ -582,11 +576,16 @@ class SelfUpdate extends Command
                 // A directory where the target has a file: git deletes it, contents
                 // and all. Links + regular files only (the walk never follows links):
                 // a FIFO/socket carries nothing to keep, and copying a FIFO blocks.
-                $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($abs, \FilesystemIterator::SKIP_DOTS));
-                foreach ($files as $file) {
-                    if ($file->isLink() || $file->isFile()) {
-                        $flag(substr($file->getPathname(), strlen($root) + 1));
+                try {
+                    $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($abs, \FilesystemIterator::SKIP_DOTS));
+                    foreach ($files as $file) {
+                        if ($file->isLink() || $file->isFile()) {
+                            $flag(substr($file->getPathname(), strlen($root) + 1));
+                        }
                     }
+                } catch (\UnexpectedValueException) {
+                    // an unreadable sub-directory: its contents would be deleted unseen
+                    throw new \RuntimeException("Δεν μπορώ να διαβάσω όλο το περιεχόμενο του '{$path}/' (το target έχει αρχείο εκεί, άρα θα σβηνόταν) — ματαίωση, δεν άλλαξε τίποτα. Διόρθωσε τα δικαιώματα και ξανά.");
                 }
             }
         }

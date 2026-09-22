@@ -1371,6 +1371,12 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
     checkout θα το έσβηνε (αρκεί write στον φάκελο)· το «ποτέ δεν καταστρέφουμε αρχείο που δεν μπορέσαμε να
     αντιγράψουμε» είναι ο πυρήνας του guard (ίδιος κανόνας με πριν για τα untracked). Γίνεται πριν το
     maintenance — τίποτα δεν αλλάζει· ο χειριστής διορθώνει τα permissions και ξανατρέχει.
+  - **Round 3:** ο χειροποίητος κανόνας «θα αποτύχει το checkout;» αντικαταστάθηκε από το dry run του git
+    (`read-tree -n -u --reset`) — fixed (stat-vs-content P1, tracked symlink false refusal, 3 αντίγραφα
+    λογικής → 1 κλήση). **Assume-unchanged αρχείο τροποποιημένο + target που το αφήνει ίδιο → το checkout
+    το επαναφέρει σιωπηλά — DECLINED (P2).** Κανείς σε αυτό το workflow δεν βάζει assume-unchanged (το
+    `update.sh` βάζει σκόπιμα skip-worktree, που ΚΡΑΤΑ την τροποποίηση)· είναι η τεκμηριωμένη συμπεριφορά του
+    git για assume-unchanged, όχι κάτι που εισάγαμε. Αν χρειαστεί: αντιμετώπιση ενός edited `h` ως dirty tree.
 - **Το tab του link είναι χοντρότερη κοπή από τον αριθμό δίπλα του** (ημερολόγιο leads): το
   `overdueBeforeGrid()` μετράει μόνο τα ΠΡΙΝ το πλέγμα αλλά ανοίγει ΟΛΑ τα ληξιπρόθεσμα, και το
   `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η

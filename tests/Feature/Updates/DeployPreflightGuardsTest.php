@@ -120,6 +120,22 @@ class DeployPreflightGuardsTest extends TestCase
     }
 
     #[DataProvider('entryPoints')]
+    public function test_it_refuses_a_flagged_file_with_the_same_bytes_but_a_new_timestamp(string $via): void
+    {
+        // Git decides «untouched» by STAT, not content: cPanel re-saving identical
+        // bytes (or a touch, or a copy restored over it) still makes the checkout of
+        // a ref that changes the file die. A content comparison would wave it through.
+        $this->fixture(releaseChangesHtaccess: true);
+        $this->git('update-index', '--skip-worktree', 'public/.htaccess');
+        touch($this->repo.'/public/.htaccess', time() + 120);
+
+        [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
+
+        $this->assertFalse($reachedMaintenance, 'refused before maintenance');
+        $this->assertStringContainsString('--no-skip-worktree --no-assume-unchanged public/.htaccess', $out);
+    }
+
+    #[DataProvider('entryPoints')]
     public function test_it_refuses_a_checkout_that_would_die_on_an_edited_assume_unchanged_file(string $via): void
     {
         // Same failure mode by the other flag: git ignores the edit (so the
@@ -186,6 +202,28 @@ class DeployPreflightGuardsTest extends TestCase
         $this->assertStringContainsString("Could not back up 'ign.txt'", $out);
         $this->assertSame([], $this->backedUp(), 'the partial copies were removed');
         $this->assertOperatorFilesIntact();
+    }
+
+    #[DataProvider('scripts')]
+    public function test_an_unreadable_directory_in_the_way_is_refused_with_a_message(string $script): void
+    {
+        // `find` can't read all of foo/ (which v1 replaces with a file, deleting
+        // it): refuse with a message instead of dying silently under `set -e`. A
+        // fake `find` — the suite may run as root, which can read everything.
+        $this->fixture();
+        $real = (new ExecutableFinder)->find('find');
+        File::ensureDirectoryExists($this->repo.'/.bin');
+        File::put($this->repo.'/.bin/find', "#!/usr/bin/env bash\nif [[ \"\$1\" == ./foo ]]; then echo 'find: ./foo/priv: Permission denied' >&2; exit 1; fi\nexec {$real} \"\$@\"\n");
+        chmod($this->repo.'/.bin/find', 0755);
+
+        [$reachedMaintenance, $out] = $this->viaScript($script, 'v1', [
+            'PATH' => $this->repo.'/.bin:'.getenv('PATH'),
+            'ALLOW_DOWNGRADE' => '1',
+        ]);
+
+        $this->assertFalse($reachedMaintenance);
+        $this->assertStringContainsString("Can't read everything inside 'foo/'", $out);
+        $this->assertSame([], $this->backedUp());
     }
 
     public function test_rollback_sh_refuses_an_unknown_ref_before_touching_anything(): void
@@ -276,8 +314,8 @@ class DeployPreflightGuardsTest extends TestCase
 
         $run = $this->inAppRun(UpdateRun::KIND_ROLLBACK, 'v1');
 
-        $this->assertSame('guard', $run->phase, 'shown as the environment-file check, not as «copies»');
-        $this->assertStringContainsString('Το v1 αλλάζει', (string) $run->error_message, 'the ref, not a raw SHA');
+        $this->assertSame('guard', $run->phase, 'shown as the checkout dry-run check, not as «copies»');
+        $this->assertStringContainsString('Το checkout του v1 ', (string) $run->error_message, 'the ref, not a raw SHA');
     }
 
     // ─────────────────────────────── runners ───────────────────────────────

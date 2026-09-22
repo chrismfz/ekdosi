@@ -2337,9 +2337,14 @@ too narrow. Verified behaviour of `git checkout --force <ref>` (git 2.43, scratc
   per-box/ignored). The at-risk set is now computed from `ls-tree -r <ref>` minus `ls-files`,
   shallowest blocking ancestor first — same algorithm in all three implementations.
 - A **flagged** file (skip-worktree `S`/`s`, assume-unchanged `h`) — git ignores edits to both, so
-  `status` stays clean: *edited* + `<ref>` changes it → `exit 128 «not uptodate. Cannot merge.»`
-  (atomic, but in the scripts it lands after `artisan down`); *missing* or *untouched* → fine. So the
-  pre-flight refuses only edited + changed-by-target (update.sh's cPanel `.htaccess` HARD PRE-STEP).
+  `status` stays clean: *edited* + `<ref>` changes (or deletes) it → `exit 128 «not uptodate. Cannot
+  merge.»` (atomic, but in the scripts it lands after `artisan down`); *missing* or *untouched* → fine.
+  Git decides «untouched» by **stat, not content** — two review rounds each found a case a hand-rolled
+  rule got wrong (content vs missing, then identical bytes with a new mtime). So the pre-flight no
+  longer predicts: it asks git. `git read-tree -n -u --reset <ref>` is a dry run of the same reset —
+  it refused exactly when `checkout --force` failed in all 22 scenarios tried (flag × edited / touched /
+  new inode / missing / untouched × target changes / leaves / deletes, plus every untracked-collision
+  kind, which it does NOT refuse), and leaves index, worktree and HEAD untouched.
 - **Ordering rule:** every refuse-check → then the copies → then maintenance. A refused run (or a
   copy failing midway) leaves no copies; an abort changes nothing.
 - Tests run the real scripts in a throwaway repo with a stub `php` that fails `artisan down`, and the

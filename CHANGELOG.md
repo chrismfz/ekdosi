@@ -187,8 +187,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   tracked αρχεία → άρνηση, και αντίγραφα όσων θα κατέστρεφε το checkout, όλα **πριν** το maintenance· στο
   `update.sh` τα αντίγραφα γίνονται πλέον μετά τους ελέγχους άρνησης (ένα refused deploy δεν αφήνει αντίγραφα).
 - **Deploy/rollback: η προστασία αρχείων πιάνει ό,τι σβήνει το `checkout --force`** — και gitignored αρχεία
-  και συγκρούσεις φακέλου↔αρχείου/symlink, όχι μόνο untracked ίδιο path· τροποποιημένο skip-worktree /
-  assume-unchanged αρχείο που αλλάζει το target → άρνηση πριν το maintenance (όχι exit 128 με το site κάτω).
+  και συγκρούσεις φακέλου↔αρχείου/symlink, όχι μόνο untracked ίδιο path· checkout που θα αποτύγχανε (π.χ.
+  τροποποιημένο skip-worktree/assume-unchanged `.htaccess`) → άρνηση πριν το maintenance, με το dry run του
+  ίδιου του git (`read-tree -n -u --reset`) αντί για χειροποίητο κανόνα (όχι exit 128 με το site κάτω).
   Λεπτομέρειες: `docs/CLAUDE-history.md` «Deploy/rollback pre-flight guards».
 - **`PaymentAllocator`: δύο ταυτόχρονες εισπράξεις στο ίδιο τιμολόγιο μπορούσαν να το υπερ-πληρώσουν
   (overpay race).** Και το `allocate()` (FIFO) και το `allocateToInvoice()` (targeted) διάβαζαν το

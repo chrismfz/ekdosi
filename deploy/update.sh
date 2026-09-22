@@ -13,8 +13,9 @@
 # What it does, in order (safe + idempotent):
 #   1. pre-flight: no uncommitted TRACKED changes
 #   2. fetch tags/commits
-#   2b. refuse-checks (ΑΦΜ duplicates, downgrade, an environment-edited
-#       skip-worktree file the release changes) — THEN report untracked files
+#   2b. refuse-checks (ΑΦΜ duplicates, downgrade, a checkout git's own dry run
+#       says would fail — e.g. an environment-edited skip-worktree/assume-unchanged
+#       file the release changes) — THEN report untracked files
 #       (never a stop) and copy aside everything the checkout would destroy that
 #       git can't give back → storage/app/deploy-untracked/
 #   3. DB snapshot (rollback point)  →  storage/app/db-snapshots/
@@ -224,37 +225,30 @@ if [[ "$TARGET_SHA" != "$(git rev-parse HEAD)" ]] \
   log "ALLOW_DOWNGRADE=1 — proceeding with a DOWNGRADE to $REF"
 fi
 
-# --- safety: an environment-edited flagged file the release changes ---------
-# Skip-worktree (the ENV_MANAGED_FILES above) or assume-unchanged: git ignores
-# edits to both, so the pre-flight above stays clean — but the forced checkout
-# dies on them («Entry … not uptodate. Cannot merge.», exit 128) AFTER
-# maintenance ON: the HARD PRE-STEP described there. Refuse now instead, while
-# nothing has changed. A flagged file that is missing (the checkout restores
-# it), untouched, or left as it is by the release, is fine.
+# --- safety: would the forced checkout FAIL? ---------------------------------
+# Ask git itself: a dry run of the same reset refuses exactly when the real one
+# would — notably on a skip-worktree (the ENV_MANAGED_FILES above) or
+# assume-unchanged file the environment edited (git decides by stat, not content),
+# which the checkout then cannot overwrite («Entry … not uptodate. Cannot
+# merge.», exit 128) AFTER maintenance ON: the HARD PRE-STEP described there.
+# Refuse now instead, while nothing has changed. It does NOT refuse the
+# untracked/ignored collisions below (the checkout overwrites those — hence the
+# copies). Same check as rollback.sh and SelfUpdate.
 # NUL lists are read via a temp file, NOT process substitution `< <(...)`:
 # CloudLinux CageFS does not expose /dev/fd, so `< <(…)` dies with «/dev/fd/63:
 # No such file or directory». A real file works everywhere and keeps the NULs.
 _list="$(mktemp)"
-git ls-files -v -z > "$_list"
-while IFS= read -r -d '' _entry; do
-  [[ "$_entry" == [Shs]\ * ]] || continue   # S/s = skip-worktree, h = assume-unchanged
-  _f="${_entry:2}"
-  if [[ ! -e "$_f" && ! -L "$_f" ]]; then
-    continue   # missing on disk — the checkout just restores it
-  fi
-  _indexed="$(git rev-parse ":$_f")"
-  if [[ -f "$_f" && "$(git hash-object -- "$_f")" == "$_indexed" ]]; then
-    continue   # flagged but untouched — the checkout updates it normally
-  fi
-  if [[ "$(git rev-parse --verify --quiet "${TARGET_SHA}:${_f}" || true)" == "$_indexed" ]]; then
-    continue   # the release leaves it as it is
-  fi
-  fail "$REF changes $_f, which this host's environment has edited (skip-worktree / assume-unchanged) — the checkout would fail with the site already down. Nothing was deployed."
-  echo  "  Keep a copy of it, then: git update-index --no-skip-worktree --no-assume-unchanged $_f && git checkout -- $_f"
+if ! git read-tree -n -u --reset "$TARGET_SHA" >/dev/null 2>"$_list"; then
+  fail "The checkout of $REF would fail — refusing before maintenance. Nothing was deployed."
+  sed 's/^/    /' "$_list"
+  sed -n "s/^.*Entry '\\(.*\\)' not uptodate.*\$/\\1/p" "$_list" | while IFS= read -r _f; do
+    echo  "  $_f was edited here while flagged skip-worktree/assume-unchanged. Keep a copy, then:"
+    echo  "    git update-index --no-skip-worktree --no-assume-unchanged $_f && git checkout -- $_f"
+  done
   echo  "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)."
   rm -f "$_list"
   exit 1
-done < "$_list"
+fi
 
 # --- untracked files: report + protect, never refuse -------------------------
 # Runs HERE — after every refuse-check above (ΑΦΜ pre-flight, downgrade guard,
@@ -322,7 +316,11 @@ while IFS= read -r -d '' p; do
     # a directory where it has a file: git deletes it, contents and all (links
     # and regular files only — `find` doesn't follow links, and a FIFO/socket
     # carries nothing to keep)
-    find "./$p" \( -type f -o -type l \) -print0 > "$_sub"
+    if ! find "./$p" \( -type f -o -type l \) -print0 > "$_sub"; then
+      fail "Can't read everything inside '$p/' ($REF has a file there, so it would all be deleted unseen) — refusing. Nothing was deployed."
+      rm -f "$_list" "$_sub"
+      exit 1
+    fi
     while IFS= read -r -d '' s; do _risk "${s#./}"; done < "$_sub"
   fi
 done < "$_list"
