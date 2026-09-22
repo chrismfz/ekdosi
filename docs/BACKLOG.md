@@ -1538,6 +1538,22 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
   write-path είναι πλέον σωστό ΚΑΙ δεν μπορώ να τρέξω/επαληθεύσω MariaDB εδώ (CI = sqlite), οπότε ένα
   ανεπαλήθευτο forked command θα ρίσκαρε broken prover. Πρότυπο όταν χρειαστεί: το υπαρκτό
   `app/Console/Commands/TestInvoiceNumberingConcurrent.php` → ξεχωριστό MariaDB-only artisan command.
+  Surviving P2s από το 2ο (post-fix) review του PR #619, με ρητή διάθεση:
+  - **Test-gap:** δεν καλύπτεται portable το `$invoice === null` skip branch (candidate που έφυγε από το
+    eligible set ανάμεσα σε list-read και PK-lock) ούτε το true lost-update — ίδιος MariaDB-only bucket· το
+    branch είναι trivial (`continue` → το ποσό πάει on-account). Το happy-path του νέου per-PK path καλύπτεται
+    ήδη (κάθε `allocate()` περνά πλέον από αυτό).
+  - **Redundant subquery lock — DECLINED (με λόγο):** το per-PK re-lock (`openInvoicesQuery()->whereKey()`)
+    κουβαλά ακόμη το `excludeCreditNotes` `whereNotExists(invoice_types)` κάτω από `FOR UPDATE` (ένα live
+    τιμολόγιο δεν γίνεται credit note, άρα είναι αμυντικά περιττό). ΔΕΝ το απλοποιώ: το να χτίζω το re-lock
+    από το **ίδιο** `openInvoicesQuery` κρατά το shared-predicate invariant (list-read == re-lock target set —
+    ακριβώς γιατί το review βρήκε το target-set preservation SAFE). Ο περιττός subquery είναι αβλαβής
+    (PK-equality lock → κανένα gap· `invoice_types` = μικρό, σπάνια-εγγραφόμενο lookup).
+  - **Pre-existing (awareness):** το `allocate()`/`openInvoicesQuery` ΔΕΝ κάνει `withoutGlobalScope(CompanyScope)`
+    όπως το `allocateToInvoice()`· αν ποτέ κληθεί υπό **mismatched** ambient tenant context, το explicit
+    `where('company_id', …)` AND το scope `company_id=<ambient>` δίνει κενό set → όλο το ποσό παρκάρει σιωπηλά
+    on-account. Προϋπάρχον (και στο `6e8ea7f` και στο original)· στην πράξη το `allocate()` τρέχει υπό σωστό
+    tenant ή σε CLI (scope no-op). Καταγραφή για επίγνωση.
 - **Pre-existing latent deadlock surface: `applyCredit()` ↔ `allocate()` lock-ordering inversion (P3, τεκμηριωμένο).**
   Το `applyCredit()` κλειδώνει πρώτα το on-account pool (`whereNull('invoice_id')->lockForUpdate()`, gap locks)
   και μετά το invoice row (μέσω του re-point observer recompute)· το `allocate()` κλειδώνει πρώτα invoice rows
