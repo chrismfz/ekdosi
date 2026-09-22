@@ -203,6 +203,12 @@ return [
         'domain_sync_enabled' => env('EKDOSI_SCHEDULE_DOMAIN_SYNC', false),
         'domain_sync_cron' => env('EKDOSI_DOMAIN_SYNC_CRON', '0 5 * * *'),
 
+        // customers:refresh-aade-status — periodic re-check of the AADE/GSIS registry
+        // status (ενεργό/ανενεργό ΑΦΜ) of customers, bounded per run. READ-ONLY at
+        // GSIS. OFF by default (respects GSIS rate limits — opt in). Weekly.
+        'aade_status_refresh_enabled' => env('EKDOSI_SCHEDULE_AADE_STATUS_REFRESH', false),
+        'aade_status_refresh_cron' => env('EKDOSI_AADE_STATUS_REFRESH_CRON', '0 4 * * 1'),
+
         // whmcs:reconcile-payments — READ-ONLY detector: recompute the worklist
         // of open «επί πιστώσει» invoices that WHMCS now reports Paid, cache it
         // for the dashboard widget + «Συγχρονισμός πληρωμών» page, and bell-notify

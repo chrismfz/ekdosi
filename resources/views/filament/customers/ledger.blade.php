@@ -16,6 +16,17 @@
                     @if ($cust->tax_office) &middot; <span class="font-medium">ΔΟΥ:</span> {{ $cust->tax_office }}@endif
                     @if ($cust->occupation) &middot; <span class="font-medium">Δραστηριότητα:</span> {{ $cust->occupation }}@endif
                 </div>
+                {{-- #8: AADE registry activity status of the ΑΦΜ (informational). --}}
+                @if ($cust->aade_status_checked_at)
+                    <div class="flex items-center gap-2 text-xs">
+                        @if ($cust->aade_active === false)
+                            <x-filament::badge color="danger" size="sm">Ανενεργό ΑΦΜ (ΑΑΔΕ)</x-filament::badge>
+                        @elseif ($cust->aade_active === true)
+                            <x-filament::badge color="success" size="sm">Ενεργό ΑΦΜ (ΑΑΔΕ)</x-filament::badge>
+                        @endif
+                        <span class="fi-color-gray">έλεγχος ΑΑΔΕ: {{ $cust->aade_status_checked_at->format('d/m/Y') }}</span>
+                    </div>
+                @endif
                 @if ($cust->address1)
                     <div class="text-sm fi-color-gray">
                         {{ $cust->address1 }}{{ $cust->city ? ', ' . $cust->city : '' }}{{ $cust->postcode ? ' ' . $cust->postcode : '' }}

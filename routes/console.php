@@ -496,6 +496,19 @@ $trackSchedule(
     'domain_sync'
 );
 
+// customers:refresh-aade-status — periodic re-check of the AADE registry status
+// (ενεργό/ανενεργό ΑΦΜ) of customers, bounded per run. READ-ONLY at GSIS. Default
+// OFF (EKDOSI_SCHEDULE_AADE_STATUS_REFRESH) — opt in (respects GSIS rate limits).
+// Weekly. Bounded via withoutOverlapping.
+$trackSchedule(
+    Schedule::command('customers:refresh-aade-status')
+        ->cron($scheduleCron('aade_status_refresh_cron', '0 4 * * 1'))
+        ->name('aade-status-refresh')
+        ->when(fn () => $scheduleEnabled('aade_status_refresh_enabled'))
+        ->withoutOverlapping(120),
+    'aade_status_refresh'
+);
+
 // Hygiene: prune failed queue entries older than 14 days. Import jobs carry an
 // ENCRYPTED Firebird password (see RunFirebirdImport), so failed_jobs never holds
 // plaintext — but keeping the table bounded is still good practice.

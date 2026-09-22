@@ -77,6 +77,7 @@ class ScheduleSettings extends Page implements HasForms
         // myDATA — μητρώα (προμηθευτές/πελάτες)
         'suppliers_sync_enabled' => ['myDATA — συγχρονισμός προμηθευτών', 'Χτίζει το μητρώο Προμηθευτών από τα ΑΦΜ εκδοτών των RequestDocs, ανά myDATA εταιρεία. Read-from-AADE, γράφει ΜΟΝΟ νέους προμηθευτές (idempotent· δεν αγγίζει τιμολόγια/έξοδα/χρήμα). Παράθυρο: τελευταίος μήνας.', false],
         'customers_sync_enabled' => ['myDATA — συγχρονισμός πελατών', 'Χτίζει το μητρώο Πελατών από τους counterpart ΑΦΜ των πωλήσεων (RequestTransmittedDocs), ανά myDATA εταιρεία. Read-from-AADE, γράφει ΜΟΝΟ νέους πελάτες. Παράθυρο: τελευταίοι 12 μήνες (βαρύτερο pull).', false],
+        'aade_status_refresh_enabled' => ['ΑΑΔΕ — έλεγχος κατάστασης ΑΦΜ πελατών', 'Χαλαρός εβδομαδιαίος έλεγχος (GSIS) αν το ΑΦΜ κάθε πελάτη είναι ενεργό/ανενεργό — λίγα ΑΦΜ/φορά, μόνο όσα δεν ελέγχθηκαν πρόσφατα (σεβασμός ορίων GSIS). Διπλό κλειδί: ισχύει ΚΑΙ ανά εταιρεία → «Εταιρείες» → «AADE registry (GSIS)» → «Περιοδικός έλεγχος». Read-only — δεν αλλάζει το δικό σου «ενεργός πελάτης».', false],
         // Αντίγραφα ασφαλείας
         'backup_run_enabled' => ['Backup — λήψη', 'Τρέχει το spatie backup:run (όλη η ΒΔ). Άφησέ το κλειστό αν τα backups τα τρέχει το systemd/cron.', false],
         'backup_cleanup_enabled' => ['Backup — καθαρισμός', 'spatie backup:clean — εφαρμόζει την πολιτική διατήρησης.', false],
@@ -106,7 +107,7 @@ class ScheduleSettings extends Page implements HasForms
         'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_fetch_unpaid_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
         'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_console_refresh_enabled'],
         'Ψηφιακή Διακίνηση (ΔΑ)' => ['delivery_fetch_inbound_enabled'],
-        'myDATA — μητρώα (προμηθευτές/πελάτες)' => ['suppliers_sync_enabled', 'customers_sync_enabled'],
+        'myDATA — μητρώα (προμηθευτές/πελάτες)' => ['suppliers_sync_enabled', 'customers_sync_enabled', 'aade_status_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled', 'intent_expiry_enabled', 'ai_reminders_enabled'],
         'Υποστήριξη & domains' => ['tickets_poll_imap_enabled', 'domain_sync_enabled'],
@@ -135,6 +136,7 @@ class ScheduleSettings extends Page implements HasForms
         'delivery_fetch_inbound_cron' => ['Ψηφιακό ΔΑ — άντληση εισερχόμενων', 'cron'],
         'suppliers_sync_cron' => ['myDATA — συγχρονισμός προμηθευτών', 'cron'],
         'customers_sync_cron' => ['myDATA — συγχρονισμός πελατών', 'cron'],
+        'aade_status_refresh_cron' => ['ΑΑΔΕ — έλεγχος κατάστασης ΑΦΜ πελατών', 'cron'],
         'intent_expiry_cron' => ['Πληρωμές — λήξη εκκρεμών intents', 'cron'],
         'overdue_notifications_time' => ['Ειδοποιήσεις ληξιπρόθεσμων', 'time'],
         'leads_notify_due_time' => ['Leads — υπενθύμιση επόμενου βήματος', 'time'],

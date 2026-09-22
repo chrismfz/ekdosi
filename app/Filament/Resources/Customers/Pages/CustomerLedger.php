@@ -1436,6 +1436,11 @@ class CustomerLedger extends Page implements HasTable
             $diffs[$field] = $pair;
         }
 
+        // #8: persist the registry activity status whenever we got a live answer,
+        // so the καρτέλα/λίστα badge + «τελευταίος έλεγχος» reflect it even when the
+        // operator doesn't apply the field diffs (or there are none).
+        $this->record->recordAadeStatus($record->active, $record->statusDescr);
+
         return $this->aadeCrosscheckMemo = [
             'diffs' => $diffs,
             'error' => null,

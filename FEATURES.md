@@ -89,7 +89,10 @@
   προσπάθεια καταγράφεται (`invoice_mail_log`: παραλήπτης/θέμα/κατάσταση/χρόνοι/ποιος). Ιστορικό
   **per-invoice** (ViewInvoice), **per-customer** (tab «Ιστορικό email»), και **γενικό tenant-wide**
   (`InvoiceMailLogResource`, read-only, φίλτρα). Idempotent (OPS-12 `send_key` — όχι διπλό email σε
-  retry)· markdown-safe body (DOC-8).
+  retry)· markdown-safe body (DOC-8). Πέρα από το «Αποστολή PDF στον πελάτη», χειροκίνητη **«Αποστολή
+  σε συστήσαντα/άλλον»** στέλνει αντίγραφο στον reseller που σύστησε τον πελάτη
+  (`referred_by_customer_id`) ή σε custom email — ίδια μηχανή, recipient override (targeted αντίγραφο:
+  χωρίς το CC λογιστή, με το audit BCC), ορατό μόνο όταν υπάρχει συστήσας με email.
 - **«Υπόλοιπο πελάτη» στο PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») — Προηγούμενο + αυτό το παραστατικό
   = Νέο υπόλοιπο, **snapshot τη στιγμή έκδοσης** (`invoices.customer_balance_snapshot`,
   σταθερό σε reprint)· opt-in ανά εταιρεία (`show_customer_balance_on_pdf`) με override ανά
@@ -333,6 +336,13 @@
   ΑΑΔΕ (π.χ. μετακόμιση → νέα διεύθυνση), ανοίγει **picker ανά πεδίο** («δικό μας → ΑΑΔΕ») για να διαλέξει
   ο χειριστής τι θα αντικατασταθεί — δεν αγνοεί πια σιωπηλά την αλλαγή, ούτε σβήνει ό,τι έχει γραφτεί.
   Το **«Διόρθωση»** παραμένει το overwrite-όλων χωρίς ερώτηση (`ResolvesAadeFormConflicts`).
+- **Κατάσταση ΑΦΜ ΑΑΔΕ (ενεργό/ανενεργό) — αποθηκευμένη + περιοδικός έλεγχος.** Το «Διασταύρωση ΑΦΜ με
+  ΑΑΔΕ» αποθηκεύει πλέον το registry status στον πελάτη (`aade_active`/`aade_status_descr`/
+  `aade_status_checked_at`, ξεχωριστά από το business `is_active`, **δεν** μπλοκάρει έκδοση)· **badge** στην
+  Καρτέλα + στήλη «ΑΦΜ ΑΑΔΕ» στη λίστα. `customers:refresh-aade-status` κάνει **χαλαρό** εβδομαδιαίο re-check
+  (default `--limit=50`, `--stale-days=90`, throttle 500ms — σεβασμός στα όρια GSIS)· **διπλά opt-in**: κεντρικός
+  `EKDOSI_SCHEDULE_AADE_STATUS_REFRESH` (default OFF) **και** per-tenant toggle δίπλα στα GSIS credentials· manual
+  `--tenant=SLUG` το αγνοεί. ΑΦΜ εκτός μητρώου → ανενεργό.
 - **Ένας πελάτης ανά ΑΦΜ (DB-enforced)**: `customers.afm_key` (`Afm::uniqueKey`: ψηφία για GR με/χωρίς
   EL/GR, γράμματα για ξένο VAT, NULL για placeholder/κενό) + `UNIQUE(company_id, afm_key)` και σε
   soft-deleted· φιλικό validation στη φόρμα· ETL/importer/sync/WHMCS όλα μέσω `whereAfmKeyOf`.

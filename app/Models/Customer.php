@@ -99,6 +99,12 @@ class Customer extends Model
         'needs_immediate_invoice',
         'needs_invoice_before_payment',
         'is_active',
+        // #8: AADE/GSIS registry activity status of the ΑΦΜ (distinct from the
+        // operator's `is_active`). Written by the crosscheck action + the periodic
+        // customers:refresh-aade-status command; informational only.
+        'aade_active',
+        'aade_status_descr',
+        'aade_status_checked_at',
         // Operator-feedback polish: pin frequent customers to the top of
         // the invoice-form picker (favourites-first + auto-top).
         'is_favorite',
@@ -129,6 +135,8 @@ class Customer extends Model
             'needs_invoice_before_payment' => 'boolean',
             'auto_email_invoices' => 'boolean',
             'is_active' => 'boolean',
+            'aade_active' => 'boolean',
+            'aade_status_checked_at' => 'datetime',
             'afm_key_parked' => 'boolean',
             'is_favorite' => 'boolean',
             'show_balance_on_pdf' => 'boolean',
@@ -232,6 +240,21 @@ class Customer extends Model
         $key = Afm::uniqueKey($afm);
 
         return $key === null ? $query->whereRaw('1 = 0') : $query->where('afm_key', $key);
+    }
+
+    /**
+     * #8: persist the AADE/GSIS registry activity status of this customer's ΑΦΜ.
+     * Advances «τελευταίος έλεγχος» whenever an answer was received. `forceFill`
+     * (these are not form-editable), and the columns are deliberately NOT in
+     * loggedAttributes, so a periodic re-check adds no activity-log noise.
+     */
+    public function recordAadeStatus(bool $active, ?string $descr): void
+    {
+        $this->forceFill([
+            'aade_active' => $active,
+            'aade_status_descr' => $descr !== null ? mb_substr(trim($descr), 0, 120) : null,
+            'aade_status_checked_at' => now(),
+        ])->save();
     }
 
     /**
