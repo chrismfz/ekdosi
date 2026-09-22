@@ -436,6 +436,17 @@ class CompanyForm
                                             ->revealable()
                                             ->dehydrated(fn (?string $state): bool => filled($state))
                                             ->maxLength(255),
+
+                                        // #8: opt this tenant into the gentle WEEKLY background
+                                        // re-check of its customers' ΑΦΜ status (ενεργό/ανενεργό).
+                                        // Off by default — GSIS has daily quotas, so the sweep is
+                                        // bounded (few AFMs/run, only stale ones, throttled) AND
+                                        // per-tenant opt-in. The on-demand «Διασταύρωση» button
+                                        // works regardless of this toggle.
+                                        Toggle::make('aade_status_auto_refresh')
+                                            ->label('Περιοδικός έλεγχος κατάστασης ΑΦΜ πελατών (ΑΑΔΕ)')
+                                            ->helperText('Χαλαρός εβδομαδιαίος έλεγχος λίγων ΑΦΜ κάθε φορά (μόνο όσα δεν ελέγχθηκαν πρόσφατα). Χρειάζεται και τον κεντρικό scheduler (EKDOSI_SCHEDULE_AADE_STATUS_REFRESH).')
+                                            ->default(false),
                                     ])
                                     ->footerActions([
                                         FormAction::make('test_gsis')

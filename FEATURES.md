@@ -333,6 +333,13 @@
   ΑΑΔΕ (π.χ. μετακόμιση → νέα διεύθυνση), ανοίγει **picker ανά πεδίο** («δικό μας → ΑΑΔΕ») για να διαλέξει
   ο χειριστής τι θα αντικατασταθεί — δεν αγνοεί πια σιωπηλά την αλλαγή, ούτε σβήνει ό,τι έχει γραφτεί.
   Το **«Διόρθωση»** παραμένει το overwrite-όλων χωρίς ερώτηση (`ResolvesAadeFormConflicts`).
+- **Κατάσταση ΑΦΜ ΑΑΔΕ (ενεργό/ανενεργό) — αποθηκευμένη + περιοδικός έλεγχος.** Το «Διασταύρωση ΑΦΜ με
+  ΑΑΔΕ» αποθηκεύει πλέον το registry status στον πελάτη (`aade_active`/`aade_status_descr`/
+  `aade_status_checked_at`, ξεχωριστά από το business `is_active`, **δεν** μπλοκάρει έκδοση)· **badge** στην
+  Καρτέλα + στήλη «ΑΦΜ ΑΑΔΕ» στη λίστα. `customers:refresh-aade-status` κάνει **χαλαρό** εβδομαδιαίο re-check
+  (default `--limit=50`, `--stale-days=90`, throttle 500ms — σεβασμός στα όρια GSIS)· **διπλά opt-in**: κεντρικός
+  `EKDOSI_SCHEDULE_AADE_STATUS_REFRESH` (default OFF) **και** per-tenant toggle δίπλα στα GSIS credentials· manual
+  `--tenant=SLUG` το αγνοεί. ΑΦΜ εκτός μητρώου → ανενεργό.
 - **Ένας πελάτης ανά ΑΦΜ (DB-enforced)**: `customers.afm_key` (`Afm::uniqueKey`: ψηφία για GR με/χωρίς
   EL/GR, γράμματα για ξένο VAT, NULL για placeholder/κενό) + `UNIQUE(company_id, afm_key)` και σε
   soft-deleted· φιλικό validation στη φόρμα· ETL/importer/sync/WHMCS όλα μέσω `whereAfmKeyOf`.

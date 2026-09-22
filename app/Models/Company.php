@@ -85,6 +85,9 @@ class Company extends Model
         'mydata_send_item_descr',
         'gsis_username',
         'gsis_password',
+        // #8: per-tenant opt-in for the weekly AADE ΑΦΜ-status re-check (gentle,
+        // bounded). The knob lives next to the GSIS credentials.
+        'aade_status_auto_refresh',
         // PR #27: branding + outbound mail config
         'logo_path',
         'pdf_footer_text',
@@ -166,6 +169,7 @@ class Company extends Model
             'whmcs_custom_field_map' => 'array',
             'whmcs_invoice_min_date' => 'date',
             'whmcs_third_party_enabled' => 'boolean',
+            'aade_status_auto_refresh' => 'boolean',
             'whmcs_amount_includes_tax' => 'boolean',
             'whmcs_fetch_via_bridge' => 'boolean',
             'whmcs_push_payments' => 'boolean',

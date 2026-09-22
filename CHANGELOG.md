@@ -67,6 +67,18 @@ from `[Unreleased]`; `--major` explicit for milestones).
   consent screen, που ονομάζει το client.
 
 ### Added
+- **Ανενεργό ΑΦΜ: το registry status της ΑΑΔΕ αποθηκεύεται στον πελάτη + badge + περιοδικός έλεγχος.**
+  Μέχρι τώρα το «ενεργό/ανενεργό ΑΦΜ» φαινόταν μόνο on-demand ανοίγοντας το «Διασταύρωση ΑΦΜ με ΑΑΔΕ».
+  Πλέον το αποτέλεσμα **αποθηκεύεται** στον πελάτη (`aade_active`/`aade_status_descr`/`aade_status_checked_at`,
+  ξεχωριστά από το δικό σου `is_active`, **ποτέ** δεν μπλοκάρει έκδοση): το on-demand crosscheck το γράφει, και
+  ένα νέο **badge** στην Καρτέλα («Ανενεργό ΑΦΜ (ΑΑΔΕ)» / «Ενεργό ΑΦΜ (ΑΑΔΕ)» + ημ. ελέγχου) και στη λίστα
+  πελατών («ΑΦΜ ΑΑΔΕ») το δείχνει με μια ματιά. Νέα εντολή **`customers:refresh-aade-status`** κάνει **χαλαρό**
+  περιοδικό re-check **σεβόμενη τα ημερήσια όρια του GSIS**: λίγα ΑΦΜ/run (`--limit=50`), μόνο never-checked ή
+  παλιά (`--stale-days=90` — το registry αλλάζει σπάνια), με **throttle 500ms** μεταξύ κλήσεων, εβδομαδιαία. Είναι
+  **διπλά opt-in**: κεντρικός scheduler flag (`EKDOSI_SCHEDULE_AADE_STATUS_REFRESH`, default OFF) **ΚΑΙ** ένα
+  **per-tenant toggle** δίπλα στα GSIS credentials (Company → «AADE registry (GSIS)») — το sweep αγγίζει μόνο
+  tenants που το άναψαν (manual `--tenant=SLUG` τρέχει ό,τι κι αν λέει το toggle). ΑΦΜ εκτός μητρώου → ανενεργό.
+  Το on-demand «Διασταύρωση» (1 ΑΦΜ, 24h cache) μένει ανεπηρέαστο.
 - **WHMCS εισερχόμενα «Τρίτος»: εισαγωγή δικαιούχου-τρίτου ως πελάτη ekdosi (ΑΑΔΕ) + ορατότητα στο popup.**
   Το popup «Δρομολόγηση» δείχνει πλέον ανά δικαιούχο αν **υπάρχει** ήδη πελάτης ekdosi (link «Καρτέλα →»)
   ή **όχι** (badge «Δεν υπάρχει»), με μια σύνοψη «N δικαιούχοι δεν υπάρχουν ακόμη». Νέα ενέργεια
