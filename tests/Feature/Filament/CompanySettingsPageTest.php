@@ -149,6 +149,22 @@ class CompanySettingsPageTest extends TestCase
     }
 
     #[Test]
+    public function company_admin_can_set_the_default_communication_language(): void
+    {
+        // i18n Slice 0 self-service: default_language was super_admin-only
+        // (CompanyResource); it is business identity, not a credential, so the
+        // company_admin settings page may now write it.
+        $company = $this->actAsAuthorized();
+
+        Livewire::test(CompanySettings::class)
+            ->set('data.default_language', 'en')
+            ->call('save')
+            ->assertHasNoErrors();
+
+        $this->assertSame('en', $company->refresh()->default_language);
+    }
+
+    #[Test]
     public function company_admin_toggles_auto_fetch_expenses_on_a_mydata_tenant(): void
     {
         Gate::before(fn () => true);

@@ -165,6 +165,24 @@ class CustomersTable
                     ->tooltip(fn ($record): ?string => $record->aade_status_checked_at?->format('d/m/Y'))
                     ->toggleable(),
 
+                // ETL «parked» rows: a legacy «υποκατάστημα» twin sharing an ΑΦΜ with
+                // the kept row is imported WITHOUT an ΑΦΜ identity (afm_key null,
+                // afm_key_parked = true). Surface it so the operator sees which rows
+                // parked after a panel import (the ⚠ used to live only in stdout /
+                // `customers:afm-duplicates`). Blank badge for normal rows → no noise.
+                // Distinct column key (not the real `afm_key_parked` attribute): the
+                // value comes from ->state(), so we don't overload the boolean column
+                // name (a later ->sortable()/->searchable() would then hit the tinyint,
+                // not this badge string).
+                TextColumn::make('afm_identity_status')
+                    ->label('Ταυτότητα ΑΦΜ')
+                    ->badge()
+                    ->color('warning')
+                    ->icon('heroicon-o-exclamation-triangle')
+                    ->state(fn ($record): ?string => $record->afm_key_parked ? 'Χωρίς ταυτότητα ΑΦΜ' : null)
+                    ->tooltip('Εισήχθη χωρίς ταυτότητα ΑΦΜ (ίδιο ΑΦΜ με άλλον πελάτη — legacy υποκατάστημα). Διόρθωσε το ΑΦΜ ή συγχώνευσε τους διπλότυπους.')
+                    ->toggleable(),
+
                 IconColumn::make('needs_immediate_invoice')
                     ->label('Άμεσο')
                     ->tooltip('Άμεση τιμολόγηση — έκδοση αμέσως μετά την πληρωμή')
@@ -311,6 +329,19 @@ class CustomersTable
                             ->whereRaw(Customer::INVOICE_COUNT_SQL.' > 0'),
                         false: fn (Builder $query): Builder => $query
                             ->whereRaw(Customer::INVOICE_COUNT_SQL.' = 0'),
+                        blank: fn (Builder $query): Builder => $query,
+                    ),
+
+                // Isolate ETL-parked rows (imported without an ΑΦΜ identity) so an
+                // operator can find + fix them after an import.
+                TernaryFilter::make('afm_key_parked')
+                    ->label('Ταυτότητα ΑΦΜ')
+                    ->placeholder('Όλοι')
+                    ->trueLabel('Χωρίς ταυτότητα ΑΦΜ (parked)')
+                    ->falseLabel('Με ταυτότητα ΑΦΜ')
+                    ->queries(
+                        true: fn (Builder $query): Builder => $query->where('afm_key_parked', true),
+                        false: fn (Builder $query): Builder => $query->where('afm_key_parked', false),
                         blank: fn (Builder $query): Builder => $query,
                     ),
 

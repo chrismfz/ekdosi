@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Company;
 use App\Services\Delivery\InboundDeliveryFetcher;
+use App\Support\OperatorHealth\HealthRecorder;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -44,7 +45,7 @@ class DeliveryFetchInbound extends Command
 
     protected $description = 'READ-ONLY: stage inbound delivery-movement docs (RequestDocs) into «Εισερχόμενα Διακίνησης».';
 
-    public function handle(): int
+    public function handle(HealthRecorder $recorder): int
     {
         $tenants = $this->resolveTenants();
         if ($tenants->isEmpty()) {
@@ -59,14 +60,36 @@ class DeliveryFetchInbound extends Command
         $gap = max(0, (int) $this->option('gap'));
         $last = $tenants->count() - 1;
 
+        // Only the SCHEDULED sweep (all readable tenants, default window, real fetch)
+        // owns the consecutive-failure streak that ops:health reads. An ad-hoc
+        // `--tenant` inspection, a `--dry-run`, or a `--from/--to` backfill must not
+        // reset (hide) or inflate that signal.
+        $trackHealth = ! $dryRun
+            && ! $this->option('tenant')
+            && ! $this->option('from')
+            && ! $this->option('to');
+
         foreach ($tenants->values() as $i => $tenant) {
             try {
                 $result = $this->fetcherFor($tenant)->fetch($from, $to, $dryRun);
                 $prefix = $dryRun ? '[dry-run] ' : '';
                 $this->line("✓ {$tenant->slug}: {$prefix}{$result->summary()}");
+                // A clean scheduled fetch resets the consecutive-failure counter.
+                if ($trackHealth) {
+                    $recorder->recordDeliveryInboundFetch($tenant, true);
+                }
             } catch (RuntimeException $e) {
-                // Guard messages (mode off / missing creds) — expected config
-                // states, not errors. Skip quietly; nothing to log or alert on.
+                // Guard messages (mode off / missing creds) — expected config states,
+                // not errors: skip quietly. We deliberately DON'T touch the failure
+                // streak here. Treating this path as a "success reset" would mask a
+                // genuine fault, and counting it as a failure would page for a tenant
+                // that is simply not configured (a blank credential slot fails
+                // canReadMyData() → the tenant isn't in myDataReadable() and isn't
+                // polled at all). The one residual case is a populated-but-undecryptable
+                // key (an app-wide APP_KEY rotation) — a global catastrophe surfaced
+                // everywhere else, not this per-tenant poll's job. Real AADE-auth
+                // failures throw MyDataAuthenticationException → the Throwable branch
+                // below → they DO escalate.
                 $this->warn("• {$tenant->slug}: {$e->getMessage()}");
             } catch (Throwable $e) {
                 // A per-tenant fetch failure — almost always a transient AADE
@@ -82,13 +105,39 @@ class DeliveryFetchInbound extends Command
                 // visible on a manual run, but the command still exits 0. A
                 // persistent problem then shows up as a warning every run rather
                 // than a page.
-                Log::warning('delivery:fetch-inbound: tenant fetch failed (transient; staged nothing this run)', [
+                // Only the scheduled sweep advances the streak (an ad-hoc --tenant /
+                // dry-run run must not inflate it toward a false «persistent»).
+                $consecutive = $trackHealth
+                    ? $recorder->recordDeliveryInboundFetch($tenant, false, [
+                        'last_error' => get_class($e).': '.$e->getMessage(),
+                    ])
+                    : 0;
+                $context = [
                     'company' => $tenant->slug,
                     'exception' => get_class($e),
                     'at' => $e->getFile().':'.$e->getLine(),
                     'message' => $e->getMessage(),
-                ]);
-                $this->warn("• {$tenant->slug}: {$e->getMessage()} (καταγράφηκε — θα ξαναδοκιμαστεί στην επόμενη εκτέλεση)");
+                    'consecutive_failures' => $consecutive,
+                ];
+
+                $persistent = $trackHealth && $consecutive >= HealthRecorder::DELIVERY_INBOUND_PERSISTENT_FAILURES;
+                if ($persistent && $consecutive === HealthRecorder::DELIVERY_INBOUND_PERSISTENT_FAILURES) {
+                    // Escalate to error ONCE, at the crossing: inbound ΔΑ has now
+                    // effectively stopped staging (usually bad/expired creds). The
+                    // ops:health «persistent» row carries the ONGOING signal, so we
+                    // don't re-page every 6h for a known-persistent tenant. The run
+                    // still exits 0 (ops:health is the surface, not the OS-cron alert).
+                    Log::error('delivery:fetch-inbound: tenant fetch has failed '.$consecutive.' times in a row (persistent — inbound ΔΑ not staging)', $context);
+                    $this->warn("• {$tenant->slug}: {$e->getMessage()} (ΕΠΙΜΟΝΗ αποτυχία ×{$consecutive} — έλεγξε creds/σύνδεση ΑΑΔΕ)");
+                } elseif ($persistent) {
+                    // Already-persistent (beyond the crossing): keep it at warning to
+                    // avoid error-log spam; ops:health still shows it as persistent.
+                    Log::warning('delivery:fetch-inbound: tenant fetch still failing (persistent — see ops:health)', $context);
+                    $this->warn("• {$tenant->slug}: {$e->getMessage()} (ΕΠΙΜΟΝΗ αποτυχία ×{$consecutive} — έλεγξε creds/σύνδεση ΑΑΔΕ)");
+                } else {
+                    Log::warning('delivery:fetch-inbound: tenant fetch failed (transient; staged nothing this run)', $context);
+                    $this->warn("• {$tenant->slug}: {$e->getMessage()} (καταγράφηκε — θα ξαναδοκιμαστεί στην επόμενη εκτέλεση)");
+                }
             }
 
             if ($gap > 0 && $i < $last) {

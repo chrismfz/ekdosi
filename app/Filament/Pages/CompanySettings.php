@@ -84,6 +84,10 @@ class CompanySettings extends Page implements HasForms
         'auto_email_on_issue',
         'mail_from_address',
         'mail_from_name',
+        // i18n Slice 0: the tenant's fallback communication language (drives emails
+        // when a customer has no explicit language/country). Business identity, not
+        // a credential → safe to self-serve.
+        'default_language',
         'mydata_auto_fetch_expenses',
     ];
 
@@ -194,6 +198,23 @@ class CompanySettings extends Page implements HasForms
                             ->label('Όνομα αποστολέα (From)')
                             ->maxLength(191)
                             ->placeholder(fn (): string => $this->tenant()->name),
+                        // i18n Slice 0 self-service: the tenant fallback language for
+                        // customer emails when the customer has no explicit language and
+                        // no usable country (the customer/its country still win). The PDF
+                        // stays frozen at issue; this affects emails only.
+                        Select::make('default_language')
+                            ->label('Προεπιλεγμένη γλώσσα επικοινωνίας')
+                            ->options([
+                                'el' => 'Ελληνικά',
+                                'en' => 'Αγγλικά',
+                                'both' => 'Δίγλωσσο (GR/EN)',
+                            ])
+                            // Constrain server-side too (not just the dropdown): save()
+                            // writes this column verbatim, so a crafted payload must not
+                            // land a garbage locale that CustomerLanguage then reads.
+                            ->rules(['nullable', 'in:el,en,both'])
+                            ->placeholder('Αυτόματο (Ελληνικά)')
+                            ->helperText('Fallback γλώσσα όταν ο πελάτης δεν έχει ρητή γλώσσα ούτε χώρα (ο πελάτης/η χώρα του υπερισχύουν). Ισχύει στα email· το PDF μένει «παγωμένο» στο έγγραφο.'),
                     ])
                     ->columns(2),
 

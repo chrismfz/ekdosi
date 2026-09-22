@@ -223,6 +223,21 @@ class OperatorHealthSeverity
             $warnings[] = 'myDATA reconcile «κόλλησε» (ενεργό αλλά καμία εκτέλεση εδώ και ώρες): '.implode(', ', $mydataStale).'.';
         }
 
+        // --- delivery:fetch-inbound: read-only staging poll. A single failure is a
+        // transient AADE hiccup, kept quiet on purpose; only a PERSISTENT run of
+        // failures (bad/expired creds) is surfaced — inbound ΔΑ («goods received»)
+        // can otherwise stop staging silently for days. Warning, never critical:
+        // staging isn't data-loss, and issuing/reconciliation are unaffected.
+        $deliveryPersistent = [];
+        foreach (($data['delivery_inbound'] ?? []) as $row) {
+            if (! empty($row['persistent'])) {
+                $deliveryPersistent[] = $row['tenant'] ?? '?';
+            }
+        }
+        if ($deliveryPersistent !== []) {
+            $warnings[] = 'Λήψη εισερχόμενων ΔΑ: επίμονη αποτυχία (έλεγξε creds/σύνδεση ΑΑΔΕ): '.implode(', ', $deliveryPersistent).'.';
+        }
+
         // SEC-3: two tenants sharing a webhook secret = forgeable cross-tenant
         // webhooks. Not data-loss yet (verify-before-side-effect), so warn.
         if (($data['security']['shared_webhook_secret'] ?? false) === true) {

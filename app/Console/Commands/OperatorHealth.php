@@ -98,6 +98,16 @@ class OperatorHealth extends Command
         ])->all());
 
         $this->newLine();
+        $this->info('Delivery inbound (ΔΑ staging)');
+        $this->table(['Tenant', 'Status', 'Consecutive fails', 'Last success', 'Last failure'], collect($data['delivery_inbound'])->map(fn ($row) => [
+            $row['tenant'],
+            ($row['persistent'] ?? false) ? 'failed (persistent)' : ($row['status'] ?? 'missing'),
+            $row['consecutive_failures'] ?? 0,
+            $row['last_success_at'] ?? 'missing',
+            $row['last_failure_at'] ?? 'none',
+        ])->all());
+
+        $this->newLine();
         $this->info('Security');
         $sharedTenants = $data['security']['shared_webhook_secret_tenants'] ?? [];
         $this->components->twoColumnDetail(

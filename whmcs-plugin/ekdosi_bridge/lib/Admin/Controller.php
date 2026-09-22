@@ -1114,6 +1114,21 @@ EOF;
         $token = $this->csrfField();
         $contacts = ThirdPartyStore::contactsForUser($userid);
 
+        // Read-only ΑΦΜ heads-up: a third-party beneficiary whose ΑΦΜ ALSO exists as
+        // a normal WHMCS client (possible duplicate record, or a service that should
+        // be re-pointed). Purely informational — no move/transfer/delete. Compute the
+        // per-contact ΑΦΜ once (canonical digits) + the base-wide collision map here.
+        $contactAfms = [];      // set of ΑΦΜ digits (for the base-wide scan)
+        $contactAfmById = [];   // contactId => digits (to flag its routed service row)
+        foreach ($contacts as $c) {
+            $a = $this->digits((string) ($c->gr_vatno ?? ''));
+            $contactAfmById[(int) $c->id] = $a;
+            if ($a !== '') {
+                $contactAfms[$a] = true;
+            }
+        }
+        $afmCollisions = $this->contactAfmClientCollisions($userid, $contactAfms);
+
         // --- Contacts, with per-row EDIT + DELETE and a «Νέα επαφή» button. The
         // admin operator manages this client's third-party beneficiaries directly
         // (was impossible before — only re-routing existed). Reuses the same
@@ -1121,12 +1136,19 @@ EOF;
         $contactRows = '';
         foreach ($contacts as $c) {
             $cid = (int) $c->id;
+            $cAfm = $contactAfmById[$cid] ?? '';
+            $afmWarn = ($cAfm !== '' && isset($afmCollisions[$cAfm]))
+                ? ' <span class="label label-warning" title="'
+                    .htmlspecialchars('Το ΑΦΜ υπάρχει και ως κανονικός πελάτης WHMCS: '
+                        .implode(', ', $afmCollisions[$cAfm]).'. Έλεγξε για διπλοεγγραφή ή αλλαγή υπηρεσίας.')
+                    .'">⚠ υπάρχει ως πελάτης</span>'
+                : '';
             $editUrl = htmlspecialchars($link.'&action=contactForm&userid='.$userid.'&id='.$cid);
             $delConfirm = htmlspecialchars(json_encode('Διαγραφή της επαφής «'.((string) $c->company_name)
                 .'»; Θα διαγραφούν ΚΑΙ οι δρομολογήσεις της. Μη αναστρέψιμο.'), ENT_QUOTES);
             $contactRows .= '<tr>'
                 .'<td>'.htmlspecialchars((string) $c->company_name).'</td>'
-                .'<td>'.htmlspecialchars((string) ($c->gr_vatno ?? '')).'</td>'
+                .'<td>'.htmlspecialchars((string) ($c->gr_vatno ?? '')).$afmWarn.'</td>'
                 .'<td>'.htmlspecialchars((string) ($c->tax_office ?? '')).'</td>'
                 .'<td>'.htmlspecialchars((string) ($c->email ?? '')).'</td>'
                 .'<td>'.htmlspecialchars((string) ($c->city ?? '')).'</td>'
@@ -1157,16 +1179,27 @@ EOF;
         // --- LIVE service routing (service id + a deep-link to the WHMCS service).
         $serviceRows = '';
         foreach (ThirdPartyStore::servicesForUser($userid) as $s) {
-            $sel = $this->optionsWithSelected($options, (int) ($s['contactid'] ?? 0));
+            $rcid = (int) ($s['contactid'] ?? 0);
+            $sel = $this->optionsWithSelected($options, $rcid);
             $checked = ! empty($s['is_receipt']) ? ' checked' : '';
             $label = htmlspecialchars((string) $s['label']);
             $svcLink = $this->serviceAdminLink((string) $s['service_type'], (int) $s['serviceid'], $userid);
             $labelCell = $svcLink !== null
                 ? '<a href="'.htmlspecialchars($svcLink).'" title="Άνοιγμα υπηρεσίας στο WHMCS">'.$label.'</a>'
                 : $label;
+            // Flag a service whose routed beneficiary shares an ΑΦΜ with a normal
+            // client — this is exactly the «service tied to a third party whose ΑΦΜ
+            // is also a customer» case the operator wants to eyeball.
+            $rAfm = $contactAfmById[$rcid] ?? '';
+            $routeWarn = ($rAfm !== '' && isset($afmCollisions[$rAfm]))
+                ? ' <span class="label label-warning" title="'
+                    .htmlspecialchars('Ο δικαιούχος (ΑΦΜ '.$rAfm.') υπάρχει και ως κανονικός πελάτης WHMCS: '
+                        .implode(', ', $afmCollisions[$rAfm]).'.')
+                    .'">⚠ ΑΦΜ = πελάτης</span>'
+                : '';
             $serviceRows .= '<tr><td>'.$labelCell
                 .' <span class="label label-default">'.htmlspecialchars((string) $s['service_type']).'</span>'
-                .' <span class="text-muted">#'.(int) $s['serviceid'].'</span></td>'
+                .' <span class="text-muted">#'.(int) $s['serviceid'].'</span>'.$routeWarn.'</td>'
                 .'<td><form method="POST" action="'.$link.'&action=route" class="form-inline">'
                 .$token
                 .'<input type="hidden" name="userid" value="'.$userid.'">'
@@ -1211,6 +1244,11 @@ EOF;
 
         $backList = $link.'&action=prefs';
         $flashHtml = $flash ?? '';
+        $afmCollisionNotice = $afmCollisions !== []
+            ? '<div class="alert alert-warning">⚠ Κάποιοι δικαιούχοι τρίτων έχουν ΑΦΜ που υπάρχει ήδη ως '
+                .'κανονικός πελάτης WHMCS — έλεγξε για διπλοεγγραφή ή αν πρέπει να αλλάξει η δρομολόγηση '
+                .'υπηρεσίας. (Μόνο ενημέρωση — καμία αυτόματη αλλαγή.)</div>'
+            : '';
         $clientBadge = $clientGone
             ? ' <span class="label label-warning" title="Ο πελάτης δεν υπάρχει πλέον στο WHMCS">⚠ διαγραμμένος πελάτης</span>'
             : ' <a href="'.htmlspecialchars('clientssummary.php?userid='.$userid).'" class="text-muted" title="Άνοιγμα πελάτη στο WHMCS">#'.$userid.'</a>';
@@ -1219,6 +1257,7 @@ EOF;
 <p><a class="btn btn-default" href="{$backList}">&larr; Όλοι οι πελάτες</a></p>
 <h2>{$name}{$clientBadge}</h2>
 {$flashHtml}
+{$afmCollisionNotice}
 <h3>Επαφές (δικαιούχοι τιμολόγησης) <a class="btn btn-sm btn-success" href="{$newContactUrl}">+ Νέα επαφή</a></h3>
 <table class="table table-striped">
     <thead><tr><th>Επωνυμία</th><th>ΑΦΜ</th><th>ΔΟΥ</th><th>Email</th><th>Πόλη</th><th></th></tr></thead>
@@ -1900,6 +1939,27 @@ EOF;
     }
 
     /**
+     * WHMCS client custom fields that plausibly hold a ΑΦΜ / VAT number, matched by
+     * name. Shared by clientVatCustomField() (per-client value read) and the ΑΦΜ
+     * collision scan, so the detection rule lives in ONE place.
+     *
+     * @return \Illuminate\Support\Collection<int, object>  rows of {id, fieldname}
+     */
+    private function vatClientFieldCandidates()
+    {
+        return Capsule::table('tblcustomfields')
+            ->where('type', 'client')
+            ->where(function ($q): void {
+                $q->where('fieldname', 'like', '%ΑΦΜ%')
+                    ->orWhere('fieldname', 'like', '%VAT%')
+                    ->orWhere('fieldname', 'like', '%ΦΠΑ%')
+                    ->orWhere('fieldname', 'like', '%Vies%');
+            })
+            ->orderBy('id')
+            ->get(['id', 'fieldname']);
+    }
+
+    /**
      * The client's ΑΦΜ from their WHMCS custom field. This install never used
      * the native tblclients.tax_id (VAT was never enabled at WHMCS setup), so
      * the ΑΦΜ lives in a client custom field. We resolve the field by name —
@@ -1918,16 +1978,7 @@ EOF;
     private function clientVatCustomField(int $userid): string
     {
         try {
-            $candidates = Capsule::table('tblcustomfields')
-                ->where('type', 'client')
-                ->where(function ($q): void {
-                    $q->where('fieldname', 'like', '%ΑΦΜ%')
-                        ->orWhere('fieldname', 'like', '%VAT%')
-                        ->orWhere('fieldname', 'like', '%ΦΠΑ%')
-                        ->orWhere('fieldname', 'like', '%Vies%');
-                })
-                ->orderBy('id')
-                ->get(['id', 'fieldname']);
+            $candidates = $this->vatClientFieldCandidates();
 
             $best = null;       // ['id' => int, 'score' => int]
             foreach ($candidates as $field) {
@@ -1982,6 +2033,109 @@ EOF;
     private function digits(string $value): string
     {
         return preg_replace('/\D+/', '', $value) ?? '';
+    }
+
+    /**
+     * Read-only ΑΦΜ collision map: which NORMAL WHMCS clients carry the same ΑΦΜ as
+     * one of THIS client's third-party beneficiaries. A heads-up only — the operator
+     * decides whether it's a duplicate record or a service that should be re-pointed;
+     * we never move/transfer/delete anything.
+     *
+     * Matches on the canonical (digits-only) ΑΦΜ so an `EL` prefix / spaces don't
+     * hide a collision. Excludes THIS client (a reseller is not their own duplicate)
+     * and fails closed to an empty map — a warning must never break the admin page.
+     *
+     * @param  array<string, true>  $contactAfms  set of normalized ΑΦΜ (digits)
+     * @return array<string, array<int, string>>  normalized ΑΦΜ => ["Name (#id)", …]
+     */
+    private function contactAfmClientCollisions(int $currentUserid, array $contactAfms): array
+    {
+        if ($contactAfms === []) {
+            return [];
+        }
+
+        try {
+            // Scored ΑΦΜ/VAT client custom fields (same detection rule as
+            // clientVatCustomField, via the shared candidate query).
+            $scored = [];   // fieldid => score
+            foreach ($this->vatClientFieldCandidates() as $field) {
+                $score = $this->vatFieldScore((string) $field->fieldname);
+                if ($score > 0) {
+                    $scored[(int) $field->id] = $score;
+                }
+            }
+            if ($scored === []) {
+                return [];
+            }
+
+            // Per client, take the ΑΦΜ from their BEST-scored POPULATED VAT field —
+            // mirrors clientVatCustomField's per-client preference. This neither
+            // misses a client whose ΑΦΜ sits in a lower tier (top-tier field empty)
+            // nor lets a stale secondary field's coincidental digits flag the wrong
+            // client. (One scan of the base — an occasionally-viewed admin page;
+            // values are stored un-normalized so the digits() match is done in PHP.)
+            $bestByClient = [];   // relid => ['score' => int, 'afm' => digits]
+            foreach (Capsule::table('tblcustomfieldsvalues')
+                ->whereIn('fieldid', array_keys($scored))
+                ->where('value', '!=', '')
+                ->orderBy('fieldid')   // deterministic tie-break (lowest id wins), like clientVatCustomField
+                ->get(['fieldid', 'relid', 'value']) as $row) {
+                $uid = (int) $row->relid;
+                if ($uid === $currentUserid) {
+                    continue;
+                }
+                $afm = $this->digits((string) $row->value);
+                if ($afm === '') {
+                    continue;
+                }
+                $sc = $scored[(int) $row->fieldid] ?? 0;
+                if (! isset($bestByClient[$uid]) || $sc > $bestByClient[$uid]['score']) {
+                    $bestByClient[$uid] = ['score' => $sc, 'afm' => $afm];
+                }
+            }
+
+            $matches = [];  // afm => [userid => true]
+            foreach ($bestByClient as $uid => $info) {
+                if (isset($contactAfms[$info['afm']])) {
+                    $matches[$info['afm']][$uid] = true;
+                }
+            }
+            if ($matches === []) {
+                return [];
+            }
+
+            // Resolve display names for the colliding client ids (one query).
+            $ids = [];
+            foreach ($matches as $uids) {
+                foreach (array_keys($uids) as $uid) {
+                    $ids[$uid] = true;
+                }
+            }
+            $names = [];
+            foreach (Capsule::table('tblclients')
+                ->whereIn('id', array_keys($ids))
+                ->get(['id', 'firstname', 'lastname', 'companyname']) as $cl) {
+                $nm = trim((string) $cl->companyname) !== ''
+                    ? (string) $cl->companyname
+                    : trim($cl->firstname.' '.$cl->lastname);
+                $names[(int) $cl->id] = ($nm !== '' ? $nm : ('#'.(int) $cl->id)).' (#'.(int) $cl->id.')';
+            }
+
+            $out = [];
+            foreach ($matches as $afm => $uids) {
+                foreach (array_keys($uids) as $uid) {
+                    // Skip a stale/orphaned value whose client row is gone — a phantom
+                    // «#id» warning would be noise on a heads-up page.
+                    if (isset($names[$uid])) {
+                        $out[(string) $afm][] = $names[$uid];
+                    }
+                }
+            }
+
+            return $out;
+        } catch (\Throwable $e) {
+            return [];
+        }
     }
 
     /** Greek state badge from the two ekdosi statuses (no pending status here). */
