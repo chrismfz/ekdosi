@@ -135,7 +135,15 @@ class GuardedDeleteAction
 
                         continue;
                     }
-                    $delete($record);
+                    try {
+                        $delete($record);
+                    } catch (\RuntimeException) {
+                        // a model-level guard refused it (e.g. Customer::forceDeleting,
+                        // a blocker that appeared after the pre-check) — skip, don't 500
+                        $skipped++;
+
+                        continue;
+                    }
                     $deleted++;
                 }
 

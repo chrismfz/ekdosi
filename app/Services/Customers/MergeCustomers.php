@@ -33,6 +33,7 @@ class MergeCustomers
     public const FOREIGN_KEYS = [
         'invoices' => 'customer_id',
         'payments' => 'customer_id',
+        'payment_intents' => 'customer_id',   // else the loser's forceDelete is refused (hardDeleteBlockers)
         'quotes' => 'customer_id',
         'customer_contacts' => 'customer_id',
         'delivery_notes' => 'customer_id',
@@ -40,6 +41,8 @@ class MergeCustomers
         'pending_whmcs_invoices' => 'customer_id',
         'ai_pending_actions' => 'customer_id',
         'cmr_notes' => 'customer_id',
+        'domains' => 'customer_id',            // RESTRICT FK: a loser with a domain could never merge
+        'tickets' => 'customer_id',            // SET NULL FK: the loser's tickets lost their customer
         'invoice_types' => 'default_customer_id',
         'customers' => 'referred_by_customer_id',
         'leads' => 'referred_by_customer_id',

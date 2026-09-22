@@ -35,6 +35,24 @@ class ReverseChargeHelperTest extends TestCase
         $this->assertTrue(ReverseCharge::appliesTo($euAfm));
     }
 
+    public function test_applies_to_a_legacy_free_text_country_label(): void
+    {
+        // Legacy/imported rows carry the country as free text («ΙΤΑΛΙΑ»), not ISO:
+        // the predicate must read the normalised country, or an EU B2B customer
+        // silently defaults to 24% on a filed document.
+        $tenant = Company::factory()->create();
+
+        $it = Customer::create(['company_id' => $tenant->id, 'name' => 'IT legacy', 'country' => 'ΙΤΑΛΙΑ', 'vat_vies' => 'IT12345678901']);
+        $this->assertTrue(ReverseCharge::appliesTo($it));
+
+        $gr = Customer::create(['company_id' => $tenant->id, 'name' => 'GR legacy', 'country' => 'ΕΛΛΑΔΑ', 'afm' => '090000045']);
+        $this->assertFalse(ReverseCharge::appliesTo($gr));
+
+        // A code the ISO normaliser doesn't know (XI = Northern Ireland) still counts.
+        $xi = Customer::create(['company_id' => $tenant->id, 'name' => 'NI Co', 'country' => 'XI', 'vat_vies' => 'XI123456789']);
+        $this->assertTrue(ReverseCharge::appliesTo($xi));
+    }
+
     public function test_does_not_apply_to_greek_or_vatless_or_non_eu(): void
     {
         $tenant = Company::factory()->create();
