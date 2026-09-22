@@ -5,6 +5,8 @@ namespace Tests\Feature\Customers;
 use App\Filament\Resources\Customers\Pages\ListCustomers;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Domain;
+use App\Models\DomainTld;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\Payment;
@@ -13,6 +15,7 @@ use App\Models\User;
 use App\Services\Customers\MergeCustomers;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use RuntimeException;
@@ -131,10 +134,22 @@ class CustomerHardDeleteGuardTest extends TestCase
             'amount' => 10, 'currency' => 'EUR', 'status' => PaymentIntent::STATUS_PENDING, 'reference' => 'ΠΛ-'.uniqid(),
         ]);
 
+        $tld = DomainTld::create(['company_id' => $this->tenant->id, 'tld' => 'gr', 'is_active' => true]);
+        $domain = Domain::create([
+            'company_id' => $this->tenant->id, 'domain_tld_id' => $tld->id, 'customer_id' => $drop->id,
+            'sld' => 'example', 'tld' => 'gr', 'fqdn' => 'example.gr', 'status' => 'active',
+        ]);
+        $ticketId = DB::table('tickets')->insertGetId([
+            'company_id' => $this->tenant->id, 'customer_id' => $drop->id, 'reference' => 'T-'.uniqid(),
+            'subject' => 'Βοήθεια', 'created_at' => now(), 'updated_at' => now(),
+        ]);
+
         app(MergeCustomers::class)($keep, $drop);
 
         $this->assertDatabaseMissing('customers', ['id' => $drop->id]);
         $this->assertSame($keep->id, $intent->fresh()->customer_id, 'the payment intent followed the keeper');
+        $this->assertSame($keep->id, $domain->fresh()->customer_id, 'the domain followed the keeper (RESTRICT FK)');
+        $this->assertSame($keep->id, (int) DB::table('tickets')->where('id', $ticketId)->value('customer_id'), 'the ticket was not orphaned');
     }
 
     public function test_the_bulk_force_delete_skips_customers_in_use_and_deletes_the_rest(): void

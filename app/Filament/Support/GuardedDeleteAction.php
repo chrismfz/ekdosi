@@ -2,6 +2,7 @@
 
 namespace App\Filament\Support;
 
+use App\Exceptions\DeletionBlocked;
 use Closure;
 use Filament\Actions\BulkAction;
 use Filament\Actions\DeleteAction;
@@ -136,10 +137,14 @@ class GuardedDeleteAction
                         continue;
                     }
                     try {
-                        $delete($record);
-                    } catch (\RuntimeException) {
+                        $done = $delete($record);
+                    } catch (DeletionBlocked) {
                         // a model-level guard refused it (e.g. Customer::forceDeleting,
-                        // a blocker that appeared after the pre-check) — skip, don't 500
+                        // a blocker that appeared after the pre-check) — skip, don't 500.
+                        // Anything else (a DB error) still propagates and gets reported.
+                        $done = false;
+                    }
+                    if ($done === false) {   // refused, or a listener returned false
                         $skipped++;
 
                         continue;

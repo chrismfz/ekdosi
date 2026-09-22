@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Exceptions\DeletionBlocked;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
@@ -167,7 +168,7 @@ class Customer extends Model
             if ($blockers !== []) {
                 $parts = array_map(fn (string $label, int $n): string => "{$label}: {$n}", array_keys($blockers), $blockers);
 
-                throw new \RuntimeException("Ο πελάτης #{$customer->id} δεν διαγράφεται οριστικά — έχει ".implode(' · ', $parts).'.');
+                throw new DeletionBlocked("Ο πελάτης #{$customer->id} δεν διαγράφεται οριστικά — έχει ".implode(' · ', $parts).'.');
             }
         });
     }
