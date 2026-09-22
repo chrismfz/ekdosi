@@ -121,6 +121,110 @@ class WhmcsCustomerCreatorTest extends TestCase
         $this->assertSame(793, $c->whmcs_client_id);              // operator-confirmed link
     }
 
+    /** A resolve.php third-party contact array. */
+    private function contact(?string $afm, array $over = []): array
+    {
+        return array_merge([
+            'id' => 5, 'company_name' => 'ΤΡΙΤΟΣ ΟΕ', 'gr_vatno' => $afm,
+            'vies_vatno' => '', 'tax_office' => 'ΚΑΒΑΛΑΣ', 'address1' => 'Οδός Τρίτου 2',
+            'address2' => '', 'city' => 'Καβάλα', 'postal_code' => '65000', 'country' => 'GR',
+            'description' => 'ΛΕΥΚΑ ΕΙΔΗ', 'email' => 'third@e.test', 'telephone' => '2510000000',
+        ], $over);
+    }
+
+    public function test_create_from_contact_uses_aade_and_keeps_contact_email_and_referral(): void
+    {
+        $t = $this->tenant();
+        $this->mockGsis($this->aadeRecord());
+        $reseller = Customer::create(['company_id' => $t->id, 'name' => 'Reseller', 'afm' => '700700700']);
+
+        $result = app(WhmcsCustomerCreator::class)->createFromContact($t, $this->contact('123456789'), $reseller->id);
+
+        $this->assertTrue($result->created);
+        $this->assertSame('aade', $result->source);
+        $c = $result->customer;
+        $this->assertSame('123456789', $c->afm);
+        $this->assertSame('ΟΦΙΣΙΑΛ ΑΑΔΕ ΕΠΕ', $c->name);            // AADE wins over the contact
+        $this->assertSame('Α ΑΘΗΝΩΝ', $c->tax_office);
+        $this->assertSame('third@e.test', $c->email);               // contact email kept (GSIS has none)
+        $this->assertSame($reseller->id, $c->referred_by_customer_id);  // «συστήθηκε από» ο reseller
+        $this->assertNull($c->whmcs_client_id);                     // a third party is NOT the WHMCS client
+    }
+
+    public function test_create_from_contact_falls_back_to_contact_fields_when_gsis_fails(): void
+    {
+        $t = $this->tenant();
+        $this->mockGsis(null, new AadeAfmNotFound('x'));
+
+        $result = app(WhmcsCustomerCreator::class)->createFromContact($t, $this->contact('999999998'));
+
+        $this->assertTrue($result->created);
+        $this->assertSame('whmcs', $result->source);
+        $c = $result->customer;
+        $this->assertSame('ΤΡΙΤΟΣ ΟΕ', $c->name);
+        $this->assertSame('ΚΑΒΑΛΑΣ', $c->tax_office);
+        $this->assertSame('Καβάλα', $c->city);
+        $this->assertSame('third@e.test', $c->email);
+        $this->assertNull($c->referred_by_customer_id);
+    }
+
+    public function test_create_from_contact_without_afm_returns_no_afm(): void
+    {
+        $t = $this->tenant();
+
+        $result = app(WhmcsCustomerCreator::class)->createFromContact($t, $this->contact(null));
+
+        $this->assertNull($result->customer);
+        $this->assertSame('no_afm', $result->source);
+        $this->assertSame(0, Customer::where('company_id', $t->id)->count());
+    }
+
+    public function test_create_from_contact_is_idempotent_and_gap_fills_existing(): void
+    {
+        $t = $this->tenant();
+        $reseller = Customer::create(['company_id' => $t->id, 'name' => 'Reseller', 'afm' => '700700700']);
+        $existing = Customer::create(['company_id' => $t->id, 'name' => 'ΤΡΙΤΟΣ ΟΕ', 'afm' => '123456789']);
+        $this->mockGsis($this->aadeRecord());   // not consumed — found by ΑΦΜ first
+
+        $result = app(WhmcsCustomerCreator::class)->createFromContact($t, $this->contact('123456789'), $reseller->id);
+
+        $this->assertFalse($result->created);
+        $this->assertSame('existing', $result->source);
+        $this->assertSame($existing->id, $result->customer->id);
+        $existing->refresh();
+        $this->assertSame('third@e.test', $existing->email);                  // gap-filled
+        $this->assertSame($reseller->id, $existing->referred_by_customer_id); // gap-filled
+    }
+
+    public function test_create_from_contact_caps_a_long_occupation(): void
+    {
+        // GSIS unavailable → occupation falls back to the reseller-typed contact
+        // `description`, which is free text and must be capped to the column width.
+        $t = $this->tenant();
+        $this->mockGsis(null, new AadeAfmNotFound('x'));
+
+        app(WhmcsCustomerCreator::class)
+            ->createFromContact($t, $this->contact('999999998', ['description' => str_repeat('Δ', 200)]));
+
+        $c = Customer::where('company_id', $t->id)->first();
+        $this->assertNotNull($c);
+        $this->assertLessThanOrEqual(120, mb_strlen((string) $c->occupation));
+    }
+
+    public function test_create_from_contact_never_overwrites_an_existing_email(): void
+    {
+        $t = $this->tenant();
+        $existing = Customer::create([
+            'company_id' => $t->id, 'name' => 'ΤΡΙΤΟΣ', 'afm' => '123456789', 'email' => 'kept@e.test',
+        ]);
+        $this->mockGsis($this->aadeRecord());
+
+        app(WhmcsCustomerCreator::class)->createFromContact($t, $this->contact('123456789', ['email' => 'new@e.test']));
+
+        $existing->refresh();
+        $this->assertSame('kept@e.test', $existing->email);   // never overwritten
+    }
+
     public function test_falls_back_to_whmcs_data_when_gsis_fails(): void
     {
         $t = $this->tenant();

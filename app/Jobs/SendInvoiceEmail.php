@@ -70,6 +70,14 @@ class SendInvoiceEmail implements ShouldQueue
         public Invoice $invoice,
         public string $trigger = 'auto',
         public ?int $triggeredByUserId = null,
+        /**
+         * Optional recipient override — a MANUAL copy to someone other than the
+         * invoice's customer (e.g. the reseller/συστήσαντα, or a one-off address the
+         * operator types). Null → the normal path (invoice->customer->email). When
+         * set, the customer's secondary_email CC is skipped (this is a targeted
+         * copy); the tenant audit BCC still applies.
+         */
+        public ?string $toOverride = null,
     ) {
         $this->sendKey = (string) Str::uuid();
     }
@@ -93,7 +101,16 @@ class SendInvoiceEmail implements ShouldQueue
         }
 
         $tenant = $invoice->company;
-        $email = trim((string) ($invoice->customer?->email ?? ''));
+        // Recipient: an explicit override (manual copy to the reseller/συστήσαντα or
+        // a typed address) wins; a blank/whitespace override falls back to the
+        // invoice's customer email — i.e. the normal path. $isOverride is the single
+        // predicate both the recipient AND the CC gate below read, so a blank
+        // override behaves exactly like no override (customer email + its CC).
+        $override = $this->toOverride !== null ? trim($this->toOverride) : '';
+        $isOverride = $override !== '';
+        $email = $isOverride
+            ? $override
+            : trim((string) ($invoice->customer?->email ?? ''));
 
         // OPS-12: best-effort idempotency. If a PRIOR attempt of this same
         // dispatch (same send_key) is either a clean 'sent' or a 'sending' left
@@ -178,7 +195,9 @@ class SendInvoiceEmail implements ShouldQueue
             'company_id'           => $invoice->company_id,
             'invoice_id'           => $invoice->id,
             'recipient'            => $email ?: '(no customer email)',
-            'cc_list'              => $invoice->customer?->secondary_email
+            // A targeted override copy goes ONLY to the override address (don't CC
+            // the customer's secondary email); the normal path keeps the CC.
+            'cc_list'              => (! $isOverride && $invoice->customer?->secondary_email)
                 ? [$invoice->customer->secondary_email]
                 : null,
             'bcc_list'             => $tenant?->auditBccList() ?: null,
@@ -215,7 +234,7 @@ class SendInvoiceEmail implements ShouldQueue
                 // (non-custom) invoice body + subject + MARK section render in that
                 // language (MailTemplateRenderer); a tenant's CUSTOM template stays in
                 // its own language. The PDF stays frozen (a separate slice).
-                ->send((new InvoiceIssuedMail($invoice, $pdfBytes))->locale(CustomerLanguage::forDocumentMail($invoice)));
+                ->send((new InvoiceIssuedMail($invoice, $pdfBytes, suppressCustomerCc: $isOverride))->locale(CustomerLanguage::forDocumentMail($invoice)));
 
             $log->update([
                 'status'  => 'sent',
@@ -246,14 +265,17 @@ class SendInvoiceEmail implements ShouldQueue
      * (verified at vendor/laravel/framework/.../CallQueuedHandler.php
      * → unserialize(...) before invoking failed). Properties mutated
      * by handle() — like a captured log row id — are GONE by the time
-     * failed() runs. So we look up the row by stable identifiers
-     * available on the deserialized instance: invoice_id +
-     * triggered_by_user_id, taking the most-recent. This is correct
-     * because handle() creates exactly one row per attempt, all rows
-     * for this invoice + trigger share a logical sequence, and we
-     * want to reconcile the most recent regardless of its current
-     * state (the catch block in handle() already wrote 'failed' with
-     * the transient error; we overwrite with "gave up").
+     * failed() runs. So we look up the row by the ONE stable per-dispatch
+     * identifier that IS restored on the deserialized instance: send_key
+     * (set in the constructor — not handle() — and serialized with the
+     * job, same value across every retry of THIS dispatch; see OPS-12).
+     * Every row handle() writes carries this send_key, so keying on it
+     * reconciles exactly THIS dispatch's row — never a sibling dispatch's
+     * (e.g. the operator resending to the customer AND to the referrer
+     * for the same invoice both run trigger='manual' with the same user,
+     * so the older invoice+trigger+user heuristic could stamp the wrong
+     * row). We take the most-recent match (a retry past a 'failed' row
+     * creates a fresh row with the same send_key).
      *
      * Does NOT help the kill-9 / DI-threw scenarios — those skip
      * Laravel's failure pipeline entirely. Orphaned 'queued' or
@@ -263,12 +285,7 @@ class SendInvoiceEmail implements ShouldQueue
     public function failed(Throwable $e): void
     {
         $latest = InvoiceMailLog::query()
-            ->where('invoice_id', $this->invoice->getKey())
-            ->where('trigger', $this->trigger)
-            // Match on user attribution too — distinguishes a manual
-            // re-send by operator B from an auto-dispatch attempt
-            // running concurrently for the same invoice.
-            ->where('triggered_by_user_id', $this->triggeredByUserId)
+            ->where('send_key', $this->sendKey)
             ->orderByDesc('id')
             ->first();
 

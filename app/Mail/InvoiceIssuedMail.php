@@ -59,6 +59,15 @@ class InvoiceIssuedMail extends Mailable
     public function __construct(
         public Invoice $invoice,
         string $pdfBytes,
+        /**
+         * #7: when this is a TARGETED copy to a non-customer recipient (the
+         * reseller/συστήσαντα, or a one-off address the operator typed), the
+         * customer's secondary_email CC must be suppressed — the copy is meant
+         * for the override recipient only, not the customer's accountant. The
+         * tenant audit BCC still applies. Default false = the normal
+         * customer-send path keeps its CC.
+         */
+        public bool $suppressCustomerCc = false,
     ) {
         $this->pdfBytes = $pdfBytes;
     }
@@ -73,7 +82,7 @@ class InvoiceIssuedMail extends Mailable
         $fromName = $tenant->mail_from_name    ?: ($tenant->name ?: config('mail.from.name'));
 
         $cc = [];
-        if ($customer?->secondary_email) {
+        if (! $this->suppressCustomerCc && $customer?->secondary_email) {
             $cc[] = new Address($customer->secondary_email);
         }
 

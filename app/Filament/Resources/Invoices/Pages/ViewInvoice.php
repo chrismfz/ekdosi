@@ -1200,6 +1200,60 @@ class ViewInvoice extends ViewRecord
                         ->success()->send();
                 }),
 
+            // #7: manual copy to the reseller/συστήσαντα (or a one-off address).
+            // For a WHMCS third-party or a converted lead the customer carries
+            // `referred_by_customer_id` («ήρθε από …»); this lets the operator send
+            // the issued PDF THERE too — under manual control, pre-filled with the
+            // referrer's email but editable (custom recipient). Visible only when a
+            // referrer exists (and the doc is issued), so it doesn't clutter plain
+            // invoices. Uses the same SendInvoiceEmail machinery via a recipient
+            // override (targeted copy; audit-logged in «Ιστορικό αποστολών»).
+            Action::make('send_to_referrer')
+                ->label('Αποστολή σε συστήσαντα/άλλον')
+                ->icon('heroicon-o-user-plus')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $record->isPubliclyViewable()
+                    && filled($record->customer?->referredBy?->email))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
+                ->modalHeading('Αποστολή παραστατικού σε άλλον παραλήπτη')
+                ->modalDescription(fn (Invoice $record) => 'Στέλνει το PDF του εκδοθέντος παραστατικού σε άλλον παραλήπτη (π.χ. τον reseller/συστήσαντα). Προσυμπληρωμένο με το email του συστήσαντα — άλλαξέ το αν θέλεις.')
+                ->schema([
+                    TextInput::make('email')
+                        ->label('Email παραλήπτη')
+                        ->email()
+                        ->required()
+                        ->default(fn (Invoice $record) => $record->customer?->referredBy?->email)
+                        ->helperText(fn (Invoice $record) => filled($record->customer?->referredBy?->name)
+                            ? 'Συστήθηκε από: '.$record->customer->referredBy->name
+                            : null),
+                ])
+                ->modalSubmitActionLabel('Αποστολή')
+                ->action(function (Invoice $record, array $data) {
+                    if (! $record->isPubliclyViewable()) {
+                        Notification::make()->title('Δεν στάλθηκε')
+                            ->body('Μόνο εκδοθέντα (ενεργά, μη ακυρωμένα) παραστατικά αποστέλλονται.')
+                            ->warning()->send();
+
+                        return;
+                    }
+                    $to = trim((string) ($data['email'] ?? ''));
+                    if ($to === '') {
+                        Notification::make()->title('Δεν στάλθηκε')->body('Λείπει το email παραλήπτη.')->warning()->send();
+
+                        return;
+                    }
+
+                    SendInvoiceEmail::dispatch(
+                        $record,
+                        trigger: 'manual',
+                        triggeredByUserId: auth()->id(),
+                        toOverride: $to,
+                    );
+                    Notification::make()->title('Το email μπήκε στην ουρά')
+                        ->body('Παραλήπτης: '.$to.'. Δες το «Ιστορικό αποστολών» για την κατάσταση.')
+                        ->success()->send();
+                }),
+
             // ---- Combined ΤΔΑ movement lifecycle (Slice 3d-b) -------------------
             // A ΤΔΑ (is_delivery_note, tracking ON) drives the SAME issuer lifecycle as a
             // 9.x δελτίο, via the contract-typed DeliveryLifecycleService (§4-A1). These

@@ -149,6 +149,22 @@ class CustomersTable
                     ->boolean()
                     ->sortable(),
 
+                // #8: AADE/GSIS registry status of the ΑΦΜ. «—» until first checked
+                // (on-demand «Διασταύρωση» or the periodic customers:refresh-aade-status).
+                TextColumn::make('aade_active')
+                    ->label('ΑΦΜ ΑΑΔΕ')
+                    ->badge()
+                    ->state(fn ($record): string => $record->aade_status_checked_at === null
+                        ? '—'
+                        : ($record->aade_active === false ? 'Ανενεργό' : 'Ενεργό'))
+                    ->color(fn ($record): string => match (true) {
+                        $record->aade_status_checked_at === null => 'gray',
+                        $record->aade_active === false => 'danger',
+                        default => 'success',
+                    })
+                    ->tooltip(fn ($record): ?string => $record->aade_status_checked_at?->format('d/m/Y'))
+                    ->toggleable(),
+
                 IconColumn::make('needs_immediate_invoice')
                     ->label('Άμεσο')
                     ->tooltip('Άμεση τιμολόγηση — έκδοση αμέσως μετά την πληρωμή')
