@@ -66,4 +66,35 @@ return [
         ],
     ],
 
+    // Payment reminders (App\Services\Reminders\ReminderMessage). {placeholders}
+    // are filled by the renderer (NOT Laravel :params); a tenant may override each
+    // stage's subject/body in «Ρυθμίσεις εταιρείας».
+    'reminder' => [
+        'kind' => [
+            'invoice' => 'τιμολόγιο',
+            'proforma' => 'προτιμολόγιο',
+        ],
+        'pay_section' => 'Μπορείτε να εξοφλήσετε online εδώ: {pay_url}',
+        'pre_due' => [
+            'subject' => '{tenant_name} — Υπενθύμιση: το {document_kind} {invoice_code} λήγει στις {due_date}',
+            'body' => "Αγαπητέ/ή {customer_name},\n\nσας υπενθυμίζουμε ότι το {document_kind} {invoice_code} (υπόλοιπο {balance}) λήγει στις {due_date}.\n\n{pay_section}\n\nΑν έχετε ήδη πληρώσει, αγνοήστε αυτό το μήνυμα.\n\nΜε εκτίμηση,\n{tenant_name}",
+        ],
+        'first' => [
+            'subject' => '{tenant_name} — Υπενθύμιση πληρωμής: {document_kind} {invoice_code}',
+            'body' => "Αγαπητέ/ή {customer_name},\n\nτο {document_kind} {invoice_code} έληξε στις {due_date} και παραμένει ανεξόφλητο (υπόλοιπο {balance}).\n\n{pay_section}\n\nΑν έχετε ήδη πληρώσει, αγνοήστε αυτό το μήνυμα.\n\nΜε εκτίμηση,\n{tenant_name}",
+        ],
+        'second' => [
+            'subject' => '{tenant_name} — 2η υπενθύμιση πληρωμής: {document_kind} {invoice_code}',
+            'body' => "Αγαπητέ/ή {customer_name},\n\nτο {document_kind} {invoice_code} είναι ληξιπρόθεσμο εδώ και {days_overdue} ημέρες (λήξη {due_date}, υπόλοιπο {balance}). Παρακαλούμε για την εξόφλησή του.\n\n{pay_section}\n\nΑν έχετε ήδη πληρώσει, αγνοήστε αυτό το μήνυμα.\n\nΜε εκτίμηση,\n{tenant_name}",
+        ],
+        'final' => [
+            'subject' => '{tenant_name} — Τελευταία υπενθύμιση: {document_kind} {invoice_code}',
+            'body' => "Αγαπητέ/ή {customer_name},\n\nπαρά τις προηγούμενες υπενθυμίσεις, το {document_kind} {invoice_code} παραμένει ανεξόφλητο εδώ και {days_overdue} ημέρες (λήξη {due_date}, υπόλοιπο {balance}). Παρακαλούμε να το τακτοποιήσετε άμεσα ή να επικοινωνήσετε μαζί μας.\n\n{pay_section}\n\nΜε εκτίμηση,\n{tenant_name}",
+        ],
+        'manual' => [
+            'subject' => '{tenant_name} — Υπενθύμιση πληρωμής: {document_kind} {invoice_code}',
+            'body' => "Αγαπητέ/ή {customer_name},\n\nσας υπενθυμίζουμε ότι το {document_kind} {invoice_code} (λήξη {due_date}) έχει ανεξόφλητο υπόλοιπο {balance}.\n\n{pay_section}\n\nΑν έχετε ήδη πληρώσει, αγνοήστε αυτό το μήνυμα.\n\nΜε εκτίμηση,\n{tenant_name}",
+        ],
+    ],
+
 ];

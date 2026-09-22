@@ -374,6 +374,18 @@ $trackSchedule(
     'overdue_notifications'
 );
 
+// invoices:send-reminders — WHMCS-style payment reminders for tenants that
+// switched them on (per-tenant setting); review mode records them «προς έγκριση»,
+// auto mode queues the emails.
+$trackSchedule(
+    Schedule::command('invoices:send-reminders')
+        ->dailyAt($scheduleTime('invoice_reminders_time', '09:00'))
+        ->name('invoices-send-reminders')
+        ->when(fn () => $scheduleEnabled('invoice_reminders_enabled'))
+        ->withoutOverlapping(60),
+    'invoice_reminders'
+);
+
 // leads:notify-due — daily «bell» digest of leads whose «επόμενο βήμα» is due
 // today / overdue, per tenant (assigned → its operator, unassigned → everyone).
 // Read-only, NO email; default OFF (opt-in per deploy).

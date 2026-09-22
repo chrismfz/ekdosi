@@ -64,4 +64,34 @@ return [
         ],
     ],
 
+    // Payment reminders (App\Services\Reminders\ReminderMessage). {placeholders}
+    // are filled by the renderer (NOT Laravel :params).
+    'reminder' => [
+        'kind' => [
+            'invoice' => 'invoice',
+            'proforma' => 'proforma invoice',
+        ],
+        'pay_section' => 'You can pay online here: {pay_url}',
+        'pre_due' => [
+            'subject' => '{tenant_name} — Reminder: {document_kind} {invoice_code} is due on {due_date}',
+            'body' => "Dear {customer_name},\n\nthis is a friendly reminder that {document_kind} {invoice_code} (balance {balance}) is due on {due_date}.\n\n{pay_section}\n\nIf you have already paid, please disregard this message.\n\nKind regards,\n{tenant_name}",
+        ],
+        'first' => [
+            'subject' => '{tenant_name} — Payment reminder: {document_kind} {invoice_code}',
+            'body' => "Dear {customer_name},\n\n{document_kind} {invoice_code} was due on {due_date} and is still unpaid (balance {balance}).\n\n{pay_section}\n\nIf you have already paid, please disregard this message.\n\nKind regards,\n{tenant_name}",
+        ],
+        'second' => [
+            'subject' => '{tenant_name} — Second payment reminder: {document_kind} {invoice_code}',
+            'body' => "Dear {customer_name},\n\n{document_kind} {invoice_code} is {days_overdue} days overdue (due {due_date}, balance {balance}). Please arrange payment.\n\n{pay_section}\n\nIf you have already paid, please disregard this message.\n\nKind regards,\n{tenant_name}",
+        ],
+        'final' => [
+            'subject' => '{tenant_name} — Final reminder: {document_kind} {invoice_code}',
+            'body' => "Dear {customer_name},\n\ndespite our previous reminders, {document_kind} {invoice_code} remains unpaid {days_overdue} days after its due date ({due_date}, balance {balance}). Please settle it promptly or contact us.\n\n{pay_section}\n\nKind regards,\n{tenant_name}",
+        ],
+        'manual' => [
+            'subject' => '{tenant_name} — Payment reminder: {document_kind} {invoice_code}',
+            'body' => "Dear {customer_name},\n\na reminder that {document_kind} {invoice_code} (due {due_date}) has an outstanding balance of {balance}.\n\n{pay_section}\n\nIf you have already paid, please disregard this message.\n\nKind regards,\n{tenant_name}",
+        ],
+    ],
+
 ];

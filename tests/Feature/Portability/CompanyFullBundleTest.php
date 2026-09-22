@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
+use App\Models\InvoiceReminder;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Models\Payment;
@@ -66,6 +67,13 @@ class CompanyFullBundleTest extends TestCase
             'company_id' => $src->id, 'customer_id' => $cust->id, 'invoice_id' => $inv->id,
             'payment_method_id' => $pm->id, 'amount' => 124, 'paid_at' => now(),
         ]);
+        // A sent dunning stage — must travel, or the target VM would re-send it.
+        InvoiceReminder::create([
+            'company_id' => $src->id, 'invoice_id' => $inv->id, 'customer_id' => $cust->id,
+            'stage' => InvoiceReminder::STAGE_FIRST, 'auto_stage' => InvoiceReminder::STAGE_FIRST,
+            'document_kind' => InvoiceReminder::KIND_INVOICE, 'balance' => 124,
+            'status' => InvoiceReminder::STATUS_SENT, 'sent_at' => now(),
+        ]);
         // A credit note pointing back at the original (self-reference).
         $credit = Invoice::create([
             'company_id' => $src->id, 'invcode' => 'PIS1', 'code' => 1,
@@ -106,6 +114,9 @@ class CompanyFullBundleTest extends TestCase
         $this->assertSame(1, MyDataMark::where('invoice_id', $newInv->id)->count());
         $newPay = Payment::where('invoice_id', $newInv->id)->firstOrFail();
         $this->assertSame($newCust->id, $newPay->customer_id);
+        $newReminder = InvoiceReminder::where('invoice_id', $newInv->id)->firstOrFail();
+        $this->assertSame($newCust->id, $newReminder->customer_id);
+        $this->assertSame(InvoiceReminder::STAGE_FIRST, $newReminder->auto_stage);
 
         // The credit note's self-reference resolves to the NEW original invoice id.
         $this->assertSame($newInv->id, $newCredit->credited_invoice_id);

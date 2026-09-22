@@ -14,7 +14,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
 1. **Delivery notes (ΔΑ)** — πλήρη **9.1 / 9.2** (το inbound inbox 4b είναι ήδη χτισμένο).
-2. **Migration / money tooling:** Dunning ladder → Bank-statement import → CSV εξόδων (αν χρειαστεί) → Cashflow /
+2. **Migration / money tooling:** Dunning PR B (insights + «Υπενθύμιση τώρα») → Bank-statement import → CSV εξόδων (αν χρειαστεί) → Cashflow /
    recurring-expenses (accountant-gated).
 3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
    Portal transactional surfaces (largely greenfield).
@@ -34,9 +34,11 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Payment connectors — IRIS + card-POS** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά).
 - **Bank-statement import → match πληρωμών** — ανέβασμα κίνησης (CSV/MT940) → auto-match σε ανοιχτά τιμολόγια
   (ποσό/ημερομηνία/ΑΦΜ) → προτεινόμενες `Payment` εγγραφές προς έγκριση.
-- **Dunning ladder (τιμολόγια — σήμερα υπάρχει μόνο το `ServiceDunning`)** — κλιμακωτές υπενθυμίσεις 3/7/15/30 ημ.
-  πάνω στο auto-email + `InvoiceBalance` (templates ανά σκαλί, opt-out ανά πελάτη)· ενέργεια→task με ημ/νία+υπεύθυνο
-  + ιστορικό επαφών στην Καρτέλα· κλιμάκωση με το `send_customer_statement`.
+- **Dunning — PR B (το PR A, ρυθμίσεις + μηχανή + σελίδα «Υπενθυμίσεις», είναι χτισμένο → `FEATURES.md §8`).**
+  Εμπλουτισμός «Ηλικίωση οφειλών»: ληξιπρόθεσμο με βάση τη λήξη, τελευταία υπενθύμιση ανά παραστατικό, κουμπί
+  «Υπενθύμιση τώρα» (stage `manual`, `auto_stage` NULL — δεν «καίει» την αυτόματη βαθμίδα), insight «εξοφλήθηκαν μετά
+  από υπενθύμιση». Insights για ό,τι ΔΕΝ υπενθυμίζεται: πρόχειρα που δεν στάλθηκαν ποτέ, WHMCS-origin, legacy.
+  Αργότερα: ενέργεια→task με ημ/νία+υπεύθυνο + ιστορικό επαφών στην Καρτέλα· κλιμάκωση με `send_customer_statement`.
 - **Ταμειακή εικόνα / cashflow — «τα έξοδα που δεν έρχονται μόνα τους»** _(ιδέα 2026-07-12· **θα το δει με τον
   λογιστή πρώτα**)._ Διοικητική/ταμειακή εικόνα, **ΟΧΙ τα βιβλία του λογιστή**. Κουβάδες εξόδων: **Α.** myDATA GR
   (λυμένο, `ExpenseImporter`) · **Β.** foreign B2B (AWS/Hetzner/cPanel…, ορατά μόνο αν αυτο-δηλώνονται 14.x) ·

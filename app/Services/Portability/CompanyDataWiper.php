@@ -28,7 +28,7 @@ class CompanyDataWiper
 {
     /** Documents + their children + audit/inbox — always wiped. */
     public const DOC_TABLES = [
-        'return_invoice_extras', 'invoice_mail_log', 'whmcs_invoice_log', 'mydata_marks', 'payments', 'invoice_lines',
+        'return_invoice_extras', 'invoice_mail_log', 'invoice_reminders', 'whmcs_invoice_log', 'mydata_marks', 'payments', 'invoice_lines',
         'quote_mail_logs', 'quote_lines', 'expense_marks', 'expense_lines',
         'delivery_marks', 'delivery_note_lines', 'stock_movements', 'service_contracts',
         'pending_whmcs_invoices', 'delivery_notes', 'quotes', 'expenses', 'invoices',

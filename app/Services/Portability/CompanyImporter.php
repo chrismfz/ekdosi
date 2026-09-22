@@ -89,6 +89,7 @@ class CompanyImporter
         'leads', 'lead_activities',
         'products', 'product_price_tiers', 'product_billing_prices',
         'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
+        'invoice_reminders',
         'payments',
         'quotes', 'quote_lines', 'quote_mail_logs',
         'expenses', 'expense_lines', 'expense_marks',
@@ -156,6 +157,7 @@ class CompanyImporter
         'mydata_marks' => ['invoice_id' => 'invoices'],
         'return_invoice_extras' => ['invoice_line_id' => 'invoice_lines'],
         'invoice_mail_log' => ['invoice_id' => 'invoices', 'triggered_by_user_id' => 'users'],
+        'invoice_reminders' => ['invoice_id' => 'invoices', 'customer_id' => 'customers', 'triggered_by_user_id' => 'users'],
         'payments' => ['customer_id' => 'customers', 'invoice_id' => 'invoices', 'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts'],
         'quotes' => [
             'customer_id' => 'customers', 'lead_id' => 'leads', 'converted_invoice_id' => 'invoices',

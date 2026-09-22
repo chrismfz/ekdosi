@@ -85,6 +85,7 @@ class ScheduleSettings extends Page implements HasForms
         'company_backups_enabled' => ['Backup ανά εταιρία', 'Per-tenant pipeline (Phase 4) — τρέχει ωριαία, κάθε εταιρία στη δική της συχνότητα.', false],
         // Υπηρεσίες & ειδοποιήσεις
         'overdue_notifications_enabled' => ['Ειδοποιήσεις ληξιπρόθεσμων', 'Καθημερινό «καμπανάκι» για ληξιπρόθεσμα τιμολόγια (χωρίς email).', false],
+        'invoice_reminders_enabled' => ['Υπενθυμίσεις πληρωμής (email)', 'Καθημερινές υπενθυμίσεις προς πελάτες, μόνο για εταιρείες που τις έχουν ενεργοποιήσει στις «Ρυθμίσεις εταιρείας».', false],
         'leads_notify_due_enabled' => ['Leads — υπενθύμιση επόμενου βήματος', 'Καθημερινό «καμπανάκι» στον χειριστή για leads με επόμενο βήμα σήμερα ή ληξιπρόθεσμο (χωρίς email).', false],
         'service_renewals_enabled' => ['Ανανεώσεις υπηρεσιών (πρόχειρα)', 'Δημιουργεί ΠΡΟΧΕΙΡΑ τιμολόγια ανανέωσης για συμβόλαια που λήγουν. ΔΕΝ δηλώνει αυτόματα.', true],
         'service_dunning_enabled' => ['Dunning υπηρεσιών', 'Auto suspend/terminate ληξιπρόθεσμων συμβολαίων. Πραγματικός διακόπτης = το per-product dunning_enabled.', false],
@@ -109,7 +110,7 @@ class ScheduleSettings extends Page implements HasForms
         'Ψηφιακή Διακίνηση (ΔΑ)' => ['delivery_fetch_inbound_enabled'],
         'myDATA — μητρώα (προμηθευτές/πελάτες)' => ['suppliers_sync_enabled', 'customers_sync_enabled', 'aade_status_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
-        'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled', 'intent_expiry_enabled', 'ai_reminders_enabled'],
+        'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'invoice_reminders_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled', 'intent_expiry_enabled', 'ai_reminders_enabled'],
         'Υποστήριξη & domains' => ['tickets_poll_imap_enabled', 'domain_sync_enabled'],
         'Αναφορές' => ['dashboard_metrics_enabled'],
     ];
@@ -139,6 +140,7 @@ class ScheduleSettings extends Page implements HasForms
         'aade_status_refresh_cron' => ['ΑΑΔΕ — έλεγχος κατάστασης ΑΦΜ πελατών', 'cron'],
         'intent_expiry_cron' => ['Πληρωμές — λήξη εκκρεμών intents', 'cron'],
         'overdue_notifications_time' => ['Ειδοποιήσεις ληξιπρόθεσμων', 'time'],
+        'invoice_reminders_time' => ['Υπενθυμίσεις πληρωμής', 'time'],
         'leads_notify_due_time' => ['Leads — υπενθύμιση επόμενου βήματος', 'time'],
         'service_renewals_time' => ['Ανανεώσεις υπηρεσιών', 'time'],
         'service_dunning_time' => ['Dunning υπηρεσιών', 'time'],
