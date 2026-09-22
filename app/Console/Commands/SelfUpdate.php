@@ -492,9 +492,10 @@ class SelfUpdate extends Command
 
     /**
      * Would `checkout --force <target>` FAIL? Ask git itself: `read-tree -n -u
-     * --reset` is a dry run of the same reset and refuses exactly when the real one
-     * would (verified across the flag / stat / deletion cases), with no side
-     * effects. The case that matters: a skip-worktree (cPanel's public/.htaccess,
+     * --reset` is a dry run of the same reset: it refuses when the index/worktree
+     * state would make the real one fail (verified across the flag / stat / deletion
+     * cases), with no side effects — not filesystem-level failures (permissions,
+     * disk, hooks), which it cannot foresee. The case that matters: a skip-worktree (cPanel's public/.htaccess,
      * flagged by deploy/update.sh) or assume-unchanged file the environment edited —
      * git decides by STAT, not content — makes the checkout die with «Entry …
      * not uptodate. Cannot merge.» after maintenance is already ON. Refuse up front
@@ -505,7 +506,8 @@ class SelfUpdate extends Command
      */
     private function assertCheckoutWouldSucceed(string $target, string $label): void
     {
-        $dry = new Process(['git', 'read-tree', '-n', '-u', '--reset', $target], base_path(), null, null, 120);
+        // LC_ALL=C: the per-file hint below matches git's English message.
+        $dry = new Process(['git', 'read-tree', '-n', '-u', '--reset', $target], base_path(), ['LC_ALL' => 'C'], null, 120);
         $dry->run();
         if ($dry->isSuccessful()) {
             return;
@@ -514,7 +516,7 @@ class SelfUpdate extends Command
         $error = trim($dry->getErrorOutput()) ?: trim($dry->getOutput());
         preg_match_all("/Entry '(.+?)' not uptodate/", $error, $m);
         $fixes = array_map(
-            fn (string $path) => "`git update-index --no-skip-worktree --no-assume-unchanged {$path} && git checkout -- {$path}`",
+            fn (string $path) => '`git update-index --no-skip-worktree --no-assume-unchanged '.escapeshellarg($path).' && git checkout -- '.escapeshellarg($path).'`',
             $m[1],
         );
 

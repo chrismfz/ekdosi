@@ -102,23 +102,28 @@ if [[ -n "$(git status --porcelain --untracked-files=no)" ]]; then
 fi
 
 # Would the forced checkout FAIL? Ask git itself: a dry run of the same reset
-# refuses exactly when the real one would — notably on a skip-worktree (the list
-# above) or assume-unchanged file the environment edited (git decides by stat, not
-# content), which the checkout then cannot overwrite («Entry … not uptodate.
-# Cannot merge.», exit 128) — with the site already down. Refuse now instead. It
-# does NOT refuse the untracked/ignored collisions below (the checkout overwrites
-# those — hence the copies). Same check as update.sh and SelfUpdate. (NUL lists
+# refuses when the index/worktree state would make the real one fail — notably a
+# skip-worktree (the list above) or assume-unchanged file the environment edited
+# (git decides by stat, not content), which the checkout then cannot overwrite
+# («Entry … not uptodate. Cannot merge.», exit 128) — with the site already down.
+# Refuse now instead. (It can't foresee filesystem-level failures — permissions,
+# disk, hooks.) It does NOT refuse the untracked/ignored collisions below (the
+# checkout overwrites those — hence the copies). Same check as update.sh and
+# SelfUpdate; LC_ALL=C because the hint matches git's English message. (NUL lists
 # are read via temp files: CloudLinux CageFS has no /dev/fd, so process
 # substitution dies there.)
 _list="$(mktemp)"
-if ! git read-tree -n -u --reset "$TARGET_SHA" >/dev/null 2>"$_list"; then
+if ! LC_ALL=C git read-tree -n -u --reset "$TARGET_SHA" >/dev/null 2>"$_list"; then
   echo "✗ The checkout of $REF would fail — refusing before maintenance. Nothing was changed." >&2
   sed 's/^/    /' "$_list" >&2
-  sed -n "s/^.*Entry '\\(.*\\)' not uptodate.*\$/\\1/p" "$_list" | while IFS= read -r _f; do
-    echo "  $_f was edited here while flagged skip-worktree/assume-unchanged. Keep a copy, then:" >&2
-    echo "    git update-index --no-skip-worktree --no-assume-unchanged $_f && git checkout -- $_f" >&2
-  done
-  echo "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)." >&2
+  _flagged="$(sed -n "s/^.*Entry '\\(.*\\)' not uptodate.*\$/\\1/p" "$_list")"
+  if [[ -n "$_flagged" ]]; then
+    while IFS= read -r _f; do
+      echo "  $_f was edited here while flagged skip-worktree/assume-unchanged. Keep a copy, then:" >&2
+      echo "    git update-index --no-skip-worktree --no-assume-unchanged '$_f' && git checkout -- '$_f'" >&2
+    done <<< "$_flagged"
+    echo "  Re-run, then re-apply the environment's edit (cPanel: re-save the PHP handler)." >&2
+  fi
   rm -f "$_list"
   exit 1
 fi

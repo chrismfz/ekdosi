@@ -1377,6 +1377,15 @@ status-capture + inbox badge + unpaid-default-type + status-aware draft· (Φ2) 
     το επαναφέρει σιωπηλά — DECLINED (P2).** Κανείς σε αυτό το workflow δεν βάζει assume-unchanged (το
     `update.sh` βάζει σκόπιμα skip-worktree, που ΚΡΑΤΑ την τροποποίηση)· είναι η τεκμηριωμένη συμπεριφορά του
     git για assume-unchanged, όχι κάτι που εισάγαμε. Αν χρειαστεί: αντιμετώπιση ενός edited `h` ως dirty tree.
+  - **Τελικό review (κανένα P0/P1) — P2 που μένουν:** (α) το dry run δεν προβλέπει filesystem αποτυχίες
+    (δικαιώματα — π.χ. in-app ως PHP user που δεν κατέχει όλα τα tracked αρχεία — δίσκο, hooks)· ένα τέτοιο
+    checkout αποτυγχάνει μισό μετά το maintenance (προϋπήρχε). (β) Παράθυρο dry run → checkout (drain +
+    snapshot): αν το περιβάλλον ξαναγγίξει το flagged αρχείο ενδιάμεσα, exit 128 στο checkout — φθηνό fix:
+    ξανά dry run αμέσως πριν το checkout + clean `up`/exit. (γ) Αμφίσημο όνομα (tag ΚΑΙ local branch ίδιο
+    όνομα): οι guards ελέγχουν το `TARGET_SHA`, το checkout κάνει `"$REF"` → fix: `checkout --detach
+    $TARGET_SHA` στο tag/sha path (αγγίζει το ίδιο το deploy checkout — ξεχωριστή αλλαγή). (δ) Το git σταματά
+    στο πρώτο «not uptodate», άρα ονομάζεται ένα αρχείο ανά run. Fixed στο ίδιο round: `LC_ALL=C`, hint μόνο
+    όταν το git ονόμασε αρχείο, quoted paths, stderr στο `update.sh`, ακριβέστερη διατύπωση.
 - **Το tab του link είναι χοντρότερη κοπή από τον αριθμό δίπλα του** (ημερολόγιο leads): το
   `overdueBeforeGrid()` μετράει μόνο τα ΠΡΙΝ το πλέγμα αλλά ανοίγει ΟΛΑ τα ληξιπρόθεσμα, και το
   `withoutNextStep()` ανοίγει `tab=open` (που περιέχει κυρίως leads που ΕΧΟΥΝ επόμενο βήμα). Η

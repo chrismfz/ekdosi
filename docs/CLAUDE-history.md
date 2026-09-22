@@ -2342,9 +2342,10 @@ too narrow. Verified behaviour of `git checkout --force <ref>` (git 2.43, scratc
   Git decides «untouched» by **stat, not content** — two review rounds each found a case a hand-rolled
   rule got wrong (content vs missing, then identical bytes with a new mtime). So the pre-flight no
   longer predicts: it asks git. `git read-tree -n -u --reset <ref>` is a dry run of the same reset —
-  it refused exactly when `checkout --force` failed in all 22 scenarios tried (flag × edited / touched /
+  it refused exactly when `checkout --force` failed in all 22 index/worktree scenarios tried (flag × edited / touched /
   new inode / missing / untouched × target changes / leaves / deletes, plus every untracked-collision
-  kind, which it does NOT refuse), and leaves index, worktree and HEAD untouched.
+  kind, which it does NOT refuse), and leaves index, worktree and HEAD untouched. It cannot foresee
+  filesystem-level failures (permissions, disk, hooks) — see BACKLOG.
 - **Ordering rule:** every refuse-check → then the copies → then maintenance. A refused run (or a
   copy failing midway) leaves no copies; an abort changes nothing.
 - Tests run the real scripts in a throwaway repo with a stub `php` that fails `artisan down`, and the

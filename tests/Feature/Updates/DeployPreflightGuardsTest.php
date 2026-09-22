@@ -115,7 +115,7 @@ class DeployPreflightGuardsTest extends TestCase
 
         $this->assertFalse($reachedMaintenance, 'refused before maintenance');
         $this->assertStringContainsString('public/.htaccess', $out);
-        $this->assertStringContainsString('--no-skip-worktree --no-assume-unchanged public/.htaccess', $out);
+        $this->assertStringContainsString("--no-skip-worktree --no-assume-unchanged 'public/.htaccess'", $out);
         $this->assertSame([], $this->backedUp(), 'a refused run leaves no copies');
     }
 
@@ -132,7 +132,7 @@ class DeployPreflightGuardsTest extends TestCase
         [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
 
         $this->assertFalse($reachedMaintenance, 'refused before maintenance');
-        $this->assertStringContainsString('--no-skip-worktree --no-assume-unchanged public/.htaccess', $out);
+        $this->assertStringContainsString("--no-skip-worktree --no-assume-unchanged 'public/.htaccess'", $out);
     }
 
     #[DataProvider('entryPoints')]
@@ -147,7 +147,7 @@ class DeployPreflightGuardsTest extends TestCase
         [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
 
         $this->assertFalse($reachedMaintenance, 'refused before maintenance');
-        $this->assertStringContainsString('--no-assume-unchanged c.txt', $out, 'the instruction clears THIS flag too');
+        $this->assertStringContainsString("--no-assume-unchanged 'c.txt'", $out, 'the instruction clears THIS flag too');
         $this->assertSame([], $this->backedUp());
     }
 
