@@ -89,10 +89,13 @@
   προσπάθεια καταγράφεται (`invoice_mail_log`: παραλήπτης/θέμα/κατάσταση/χρόνοι/ποιος). Ιστορικό
   **per-invoice** (ViewInvoice), **per-customer** (tab «Ιστορικό email»), και **γενικό tenant-wide**
   (`InvoiceMailLogResource`, read-only, φίλτρα). Idempotent (OPS-12 `send_key` — όχι διπλό email σε
-  retry)· markdown-safe body (DOC-8). Πέρα από το «Αποστολή PDF στον πελάτη», χειροκίνητη **«Αποστολή
-  σε συστήσαντα/άλλον»** στέλνει αντίγραφο στον reseller που σύστησε τον πελάτη
-  (`referred_by_customer_id`) ή σε custom email — ίδια μηχανή, recipient override (targeted αντίγραφο:
-  χωρίς το CC λογιστή, με το audit BCC), ορατό μόνο όταν υπάρχει συστήσας με email.
+  retry)· markdown-safe body (DOC-8). Το «**Αποστολή PDF στον πελάτη**» έχει **προαιρετικό πεδίο
+  παραλήπτη**: κενό → στον πελάτη (κανονική ροή)· συμπληρωμένο → στοχευμένο αντίγραφο σε **custom
+  διεύθυνση** (π.χ. λογιστή), διαθέσιμο σε **κάθε** εκδοθέν παραστατικό (ακόμη κι όταν ο πελάτης δεν
+  έχει email — τότε το πεδίο απαιτείται). Επιπλέον η **«Αποστολή σε συστήσαντα/άλλον»** (shortcut,
+  ορατή μόνο όταν υπάρχει συστήσας με email) προσυμπληρώνει τον reseller που σύστησε τον πελάτη
+  (`referred_by_customer_id`). Και οι δύο μέσω της ίδιας μηχανής recipient override (targeted
+  αντίγραφο: χωρίς το CC λογιστή του πελάτη, με το audit BCC· ο παραλήπτης καταγράφεται στο log).
 - **«Υπόλοιπο πελάτη» στο PDF** (legacy «ΝΕΟ ΥΠΟΛΟΙΠΟ») — Προηγούμενο + αυτό το παραστατικό
   = Νέο υπόλοιπο, **snapshot τη στιγμή έκδοσης** (`invoices.customer_balance_snapshot`,
   σταθερό σε reprint)· opt-in ανά εταιρεία (`show_customer_balance_on_pdf`) με override ανά

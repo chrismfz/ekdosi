@@ -1167,16 +1167,33 @@ class ViewInvoice extends ViewRecord
                 // DOC-6: only an ISSUED, non-cancelled document may be emailed —
                 // the mail body asserts «…που εκδόθηκε…» (that it was issued), so
                 // sending a draft or a cancelled invoice would state a falsehood.
-                // Same fail-closed predicate as the public PDF route.
-                ->visible(fn (Invoice $record) => $record->customer?->email !== null
-                    && $record->customer?->email !== ''
-                    && $record->isPubliclyViewable())
+                // Same fail-closed predicate as the public PDF route. Visible on ANY
+                // issued invoice (even one whose customer has no email on file): the
+                // modal below lets the operator type a recipient, so a custom copy
+                // (π.χ. σε λογιστή) is always reachable — the customer email is just
+                // the default when the field is left blank.
+                ->visible(fn (Invoice $record) => $record->isPubliclyViewable())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
-                ->requiresConfirmation()
-                ->modalHeading('Send invoice PDF to the customer')
-                ->modalDescription(fn (Invoice $record) => 'Queues a mail with the current PDF attached. To: '.($record->customer?->email ?? '—').'. BCC: tenant audit list (if configured). See the Send history section below for the lifecycle.')
-                ->modalSubmitActionLabel('Queue email')
-                ->action(function (Invoice $record) {
+                ->modalHeading('Αποστολή παραστατικού με email')
+                ->modalDescription('Στέλνει το PDF του εκδοθέντος παραστατικού. Άφησε το πεδίο κενό για αποστολή στον πελάτη· συμπλήρωσε άλλη διεύθυνση (π.χ. λογιστή) για στοχευμένο αντίγραφο. BCC: λίστα ελέγχου του tenant (αν έχει οριστεί). Δες το «Ιστορικό αποστολών» πιο κάτω για την κατάσταση.')
+                ->schema([
+                    TextInput::make('to_override')
+                        ->label('Αποστολή σε άλλο email (προαιρετικό)')
+                        ->email()
+                        // Empty → the customer (the normal path, keeping their secondary_email
+                        // CC). Filled → a targeted copy ONLY to this address (no customer CC;
+                        // the SendInvoiceEmail toOverride machinery handles both). When the
+                        // customer has NO email on file there is no default recipient, so a
+                        // typed address is required — otherwise the send would just log «no
+                        // email» and do nothing.
+                        ->placeholder(fn (Invoice $record) => $record->customer?->email ?: 'π.χ. logistis@example.gr')
+                        ->required(fn (Invoice $record) => blank($record->customer?->email))
+                        ->helperText(fn (Invoice $record) => filled($record->customer?->email)
+                            ? 'Κενό → στον πελάτη ('.$record->customer->email.'). Συμπληρωμένο → μόνο σε αυτή τη διεύθυνση (χωρίς CC στον πελάτη).'
+                            : 'Ο πελάτης δεν έχει καταχωρημένο email — συμπλήρωσε διεύθυνση παραλήπτη.'),
+                ])
+                ->modalSubmitActionLabel('Αποστολή')
+                ->action(function (Invoice $record, array $data) {
                     // Defence-in-depth: the invoice could have been cancelled
                     // between page render and click (visible() is not re-checked
                     // on submit). Never email a non-issued document.
@@ -1189,14 +1206,22 @@ class ViewInvoice extends ViewRecord
                         return;
                     }
 
+                    // Blank/whitespace → null → the customer path (SendInvoiceEmail
+                    // treats a blank override as "no override" too, so this is
+                    // belt-and-braces). A real value → targeted copy.
+                    $override = trim((string) ($data['to_override'] ?? ''));
+
                     SendInvoiceEmail::dispatch(
                         $record,
                         trigger: 'manual',
                         triggeredByUserId: auth()->id(),
+                        toOverride: $override !== '' ? $override : null,
                     );
                     Notification::make()
-                        ->title('Email queued')
-                        ->body('The mail is in the queue; check the Send history section in a moment for status.')
+                        ->title('Το email μπήκε στην ουρά')
+                        ->body($override !== ''
+                            ? 'Παραλήπτης: '.$override.'. Δες το «Ιστορικό αποστολών» για την κατάσταση.'
+                            : 'Παραλήπτης: ο πελάτης ('.($record->customer?->email ?: '—').'). Δες το «Ιστορικό αποστολών» για την κατάσταση.')
                         ->success()->send();
                 }),
 
