@@ -94,6 +94,11 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 ### 🌐 Domains (Πυλώνας A — `docs/domains/README.md`)
 - **A4 — grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — **το κύριο κομμάτι: ~75% του portfolio**
   (1381 από 1833 active, `domains/whmcs-baseline.md`).
+- **⚠ Guard «ανανέωση domain μόνο εξοφλημένη» — money, πριν ανοίξει ζωντανή ανανέωση σε registrar.** Απόφαση:
+  πάντα με την πληρωμή (χωρίς undo). Σήμερα το `InvoiceObserver::renewDomainOnIssue` ανανεώνει στην
+  οριστικοποίηση — σωστό όσο η ανανέωση μένει προτιμολόγιο ως την πληρωμή, λάθος αν οριστικοποιηθεί απλήρωτη.
+  Guard: απλήρωτο → «σε αναμονή πληρωμής» + ανανέωση όταν εξοφληθεί· τα μετρητοίς (`due_days=0`, «paid at issue»)
+  δεν μετράνε ως πληρωμή. `domains/README.md` §6.1.
 - **Υπενθυμίσεις λήξης domain (60/30/15/10/5 ημέρες) — cutover blocker.** Η WHMCS έχει στείλει 34.296· στο ekdosi
   δεν υπάρχουν (README §3.8 δεν χτίστηκε).
 - **CNIC: 226 active ακόμα στο CentralNic** → **απόφαση: «χωρίς API»** (manual σύνδεση, σταδιακά όλα στο OP·

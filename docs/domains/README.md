@@ -337,8 +337,15 @@ public .gr WHOIS auto-redacts natural-person data υπό GDPR (το «no privacy
 
 ### 6.1 Money timing (per operation)
 - **`register` = post-payment** (νέο domain, ρίσκο): invoice → πληρωμή → `$registrar->register()`.
-- **`renew` = on-issue** (υπάρχον domain, μη λήξει): ο operator οριστικοποιεί το πρόχειρο → myDATA →
-  `InvoiceObserver` προωθεί τον cursor → domain post-issue hook → `$registrar->renew()`.
+- **`renew` = ΜΕΤΑ ΤΗΝ ΠΛΗΡΩΜΗ — ΚΛΕΙΔΩΜΕΝΟ** (ιδιοκτήτης 2026-09-23: «πάντα με την πληρωμή»· η ανανέωση στον
+  registrar δεν έχει undo — αν δεν πληρώσει ο πελάτης, η MyIP χρεώνεται και ο πελάτης κρατά το domain δώρο).
+  Η ροή, ίδια με τις υπηρεσίες: staging → **πρόχειρο / προτιμολόγιο** (`offered_at`: όχι απαίτηση, χωρίς ΑΑ/myDATA)
+  → πληρωμή → οριστικοποίηση (myDATA) → `InvoiceObserver` domain post-issue hook → `$registrar->renew()`. Στη ροή
+  αυτή η έκδοση έρχεται μετά την πληρωμή, οπότε το on-issue hook ισοδυναμεί με «με την πληρωμή».
+  **⚠ Δεν επιβάλλεται ακόμα:** αν οριστικοποιηθεί **απλήρωτο** παραστατικό ανανέωσης (επί πιστώσει, ή κατά λάθος),
+  το hook ανανεώνει ήδη στην έκδοση. Χρειάζεται guard: ανανέωση μόνο αν είναι εξοφλημένο, αλλιώς «σε αναμονή
+  πληρωμής» και ανανέωση όταν έρθει η πληρωμή. Παγίδα: το `InvoiceBalance` θεωρεί τα μετρητοίς (`due_days=0`)
+  «πληρωμένα στην έκδοση» — για το guard μετράει μόνο πραγματική πληρωμή. (BACKLOG)
 - **Ποτέ auto-file** στην ΑΑΔΕ — τα renewals είναι πρόχειρα (ίδια πειθαρχία με WHMCS inbox / SC).
 
 ### 6.2 Renewals (reuse `ServiceContract` 100%) — **1:1 ΚΛΕΙΔΩΜΕΝΟ** (ιδιοκτήτης 2026-09-07)
