@@ -178,13 +178,13 @@ class VatExemptionGuidance
         ['code' => 14, 'types' => ['1.1', '2.1', '1.3', '2.3'], 'level' => self::CONFLICT_BLOCK,
             'why' => 'η 14 (άρθρο 33) είναι ενδοκοινοτική παράδοση αγαθών — θέλει αντισυμβαλλόμενο σε άλλη χώρα ΕΕ (τύπος 1.2)'],
         ['code' => 14, 'types' => ['2.2'], 'level' => self::CONFLICT_WARN,
-            'why' => 'η 14 (άρθρο 33) αφορά ΑΓΑΘΑ, όχι υπηρεσίες'],
+            'why' => 'η 14 (άρθρο 33) αφορά ΑΓΑΘΑ — η ενδοκοινοτική ΥΠΗΡΕΣΙΑ είναι 4 (άρθρο 18)· κράτα την 14 μόνο για γραμμή αγαθού'],
         ['code' => 4, 'types' => ['1.1', '2.1'], 'level' => self::CONFLICT_WARN,
             'why' => 'η 4 (άρθρο 18) σημαίνει τόπο παροχής υπηρεσίας εκτός Ελλάδας — σπάνιο με Έλληνα αντισυμβαλλόμενο (π.χ. ακίνητο στο εξωτερικό)'],
         ['code' => 4, 'types' => ['1.2', '1.3'], 'level' => self::CONFLICT_WARN,
             'why' => 'η 4 (άρθρο 18) αφορά ΥΠΗΡΕΣΙΕΣ — σε τιμολόγιο αγαθών ταιριάζει μόνο σε γραμμή υπηρεσίας'],
         ['code' => 8, 'types' => ['2.2'], 'level' => self::CONFLICT_WARN,
-            'why' => 'η 8 (άρθρο 29) αφορά εξαγωγή εκτός ΕΕ'],
+            'why' => 'η 8 (άρθρο 29) αφορά εξαγωγή εκτός ΕΕ — η ενδοκοινοτική υπηρεσία είναι συνήθως 4 (άρθρο 18)'],
         ['code' => 30, 'types' => ['1.2', '2.2', '1.3', '2.3'], 'level' => self::CONFLICT_WARN,
             'why' => 'η 30 (OSS ενωσιακό) αφορά πωλήσεις σε ΙΔΙΩΤΕΣ άλλης χώρας ΕΕ — όχι σε επιχείρηση ΕΕ (αντιστροφή) ούτε σε πελάτη εκτός ΕΕ'],
         ['code' => 31, 'types' => ['2.1', '2.2', '2.3'], 'level' => self::CONFLICT_WARN,
@@ -208,8 +208,10 @@ class VatExemptionGuidance
         foreach (self::TYPE_CONFLICTS as $rule) {
             if ($rule['code'] === $code && in_array($type, $rule['types'], true)) {
                 $message = "Αιτία {$code} σε τύπο {$type}: {$rule['why']}.";
+                // Only a BLOCK names «the» reason: a warning's current reason may be
+                // the right one (a service line on a goods invoice), so it only explains.
                 $better = self::recommendForType($type);
-                if ($better !== null) {
+                if ($better !== null && $rule['level'] === self::CONFLICT_BLOCK) {
                     $message .= " Για τύπο {$type} η αιτία είναι {$better} (".self::labelForCode($better).').';
                 }
 

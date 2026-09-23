@@ -364,6 +364,51 @@ class WhmcsInvoiceFilerTest extends TestCase
         );
     }
 
+    public function test_file_refuses_zero_vat_lines_for_a_provider_tenant_whose_mydata_mode_is_off(): void
+    {
+        // A provider tenant files through the provider with mydata_mode «off» — the
+        // pre-check must still run (it used to key off mydata_mode and skip it).
+        $this->tenant->update([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_key' => 'invosign',
+            'einvoice_provider_mode' => 'production', 'mydata_mode' => MyDataMode::Off->value,
+        ]);
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ['description' => 'Δωρεάν υπηρεσία', 'amount' => '20.00', 'taxed' => '0'],
+        ], total: '144.00');
+
+        try {
+            app(WhmcsInvoiceFiler::class)->file($this->tenant, $pending, $this->customer, $this->invoiceType);
+            $this->fail('A provider tenant must not file a 0% line without an exemption reason.');
+        } catch (LogicException $e) {
+            $this->assertStringContainsString('no 0%-rate VAT category has a vat_exemption_category', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::count());
+        $this->assertNull($pending->fresh()->invoice_id);
+    }
+
+    public function test_file_refuses_a_tenant_wide_exemption_reason_that_contradicts_the_type(): void
+    {
+        // The single 0% category carries 16 (domestic reverse charge) — impossible on
+        // an intra-EU 2.2. Refused BEFORE the persist, like the other 0% refusals.
+        $this->tenant->update(['mydata_mode' => MyDataMode::Sandbox->value]);
+        VatCategory::query()->where('company_id', $this->tenant->id)->where('rate', 0)->update(['vat_exemption_category' => 16]);
+        $this->invoiceType->forceFill(['mydata_type' => '2.2'])->save();
+        $pending = $this->makePending([
+            ['description' => 'Hosting', 'amount' => '124.00', 'taxed' => '1'],
+            ['description' => 'Δωρεάν υπηρεσία', 'amount' => '20.00', 'taxed' => '0'],
+        ], total: '144.00');
+
+        try {
+            app(WhmcsInvoiceFiler::class)->file($this->tenant, $pending, $this->customer, $this->invoiceType->fresh());
+            $this->fail('A 16 on a 2.2 must be refused before persisting.');
+        } catch (LogicException $e) {
+            $this->assertStringContainsString('Αιτία 16 σε τύπο 2.2', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::count());
+        $this->assertNull($pending->fresh()->invoice_id);
+    }
+
     public function test_file_tolerates_zero_vat_lines_for_off_mode_tenants(): void
     {
         // Off-mode (NullSubmitter) tolerates 0%-VAT fine; the refusal

@@ -713,12 +713,14 @@ class AadeInvoiceDocument
         }
 
         $fromTenant = $line->vat_exemption_category === null || $line->vat_exemption_category === '';
+        // Only a draft is editable — an issued-but-unfiled one goes back to draft first.
+        $edit = $invoice->local_status === 'draft' ? 'επεξεργασία παραστατικού' : '«Επαναφορά σε πρόχειρο» και επεξεργασία';
         throw new RuntimeException(
             "Invoice {$invoice->invcode}, γραμμή {$lineNo}: {$conflict['message']} "
             .($fromTenant
                 ? 'Η γραμμή δεν έχει δική της αιτία — πήρε αυτή της κατηγορίας ΦΠΑ 0% της εταιρείας. '
-                    .'Όρισε την αιτία στη γραμμή (επεξεργασία παραστατικού) ή διόρθωσέ την στις Κατηγορίες ΦΠΑ.'
-                : 'Διόρθωσε την αιτία απαλλαγής της γραμμής ή τον τύπο παραστατικού.')
+                    ."Όρισε την αιτία στη γραμμή ({$edit}) ή διόρθωσέ την στις Κατηγορίες ΦΠΑ."
+                : "Διόρθωσε την αιτία απαλλαγής της γραμμής ή τον τύπο παραστατικού ({$edit}).")
         );
     }
 

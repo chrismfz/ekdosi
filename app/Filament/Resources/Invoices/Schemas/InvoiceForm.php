@@ -113,7 +113,7 @@ class InvoiceForm
                         // without a hardcoded global default — set it once on
                         // the type. Only writes the fields the type actually
                         // configures; never blanks an operator's choice.
-                        ->afterStateUpdated(function ($state, callable $set) {
+                        ->afterStateUpdated(function ($state, $old, callable $set, Get $get) {
                             if (! $state) {
                                 return;
                             }
@@ -123,6 +123,11 @@ class InvoiceForm
                             if (! $type) {
                                 return;
                             }
+                            // The 0% lines' §8.3 reasons follow the type (MYD-007): a reason
+                            // the OLD type suggested, or one impossible for the new type,
+                            // must not linger into a validation error on a field the
+                            // operator never touched.
+                            self::resyncLineExemptions($get, $set, self::mydataTypeOf($old), $type->mydata_type);
                             if ($type->distribution_aim_id) {
                                 $set('distribution_aim_id', $type->distribution_aim_id);
                             }
@@ -510,7 +515,7 @@ class InvoiceForm
                                     if ((float) $vat === 0.0) {
                                         if (blank($get('vat_exemption_category'))) {
                                             $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
-                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                                self::mydataTypeOf($get('../../invoice_type_id'))
                                             ));
                                         }
                                     } else {
@@ -627,7 +632,7 @@ class InvoiceForm
                                     if ((float) ($state ?? 0) === 0.0) {
                                         if (blank($get('vat_exemption_category'))) {
                                             $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
-                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                                self::mydataTypeOf($get('../../invoice_type_id'))
                                             ));
                                         }
                                     } else {
@@ -964,10 +969,46 @@ class InvoiceForm
             return null;
         }
 
-        return VatExemptionGuidance::typeConflict(
-            InvoiceType::query()->where('company_id', Filament::getTenant()?->getKey())->whereKey($typeId)->value('mydata_type'),
-            (int) $code,
-        );
+        return VatExemptionGuidance::typeConflict(self::mydataTypeOf($typeId), (int) $code);
+    }
+
+    /**
+     * The myDATA type of an invoice type id — the ONE lookup behind the lines'
+     * §8.3 suggestion and conflict check, memoized per request (the hint, its
+     * tooltip and colour ask for every 0% line on every render).
+     */
+    private static function mydataTypeOf(mixed $typeId): ?string
+    {
+        if (blank($typeId)) {
+            return null;
+        }
+        $tenantId = Filament::getTenant()?->getKey();
+
+        return once(fn () => InvoiceType::query()->where('company_id', $tenantId)->whereKey($typeId)->value('mydata_type'));
+    }
+
+    /**
+     * After an invoice-type change, re-derive each 0% line's §8.3 reason that came
+     * from the OLD type (blank, or the old type's suggestion) or can never be right
+     * for the new one. A deliberate reason that still fits is left alone.
+     */
+    private static function resyncLineExemptions(Get $get, callable $set, ?string $oldType, ?string $newType): void
+    {
+        $oldSuggestion = VatExemptionGuidance::recommendForType($oldType);
+        $newSuggestion = VatExemptionGuidance::recommendForType($newType);
+
+        foreach ((array) $get('lines') as $key => $line) {
+            if ((float) ($line['vat_percent'] ?? 0) !== 0.0) {
+                continue;
+            }
+            $reason = $line['vat_exemption_category'] ?? null;
+            $replace = blank($reason)
+                || ($newSuggestion !== null && (int) $reason === $oldSuggestion)
+                || (VatExemptionGuidance::typeConflict($newType, $reason)['level'] ?? null) === VatExemptionGuidance::CONFLICT_BLOCK;
+            if ($replace) {
+                $set("lines.{$key}.vat_exemption_category", $newSuggestion);
+            }
+        }
     }
 
     /**

@@ -8,6 +8,7 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\VatCategory;
 use App\Support\MyData\Codes;
+use App\Support\MyData\VatExemptionGuidance;
 
 /**
  * Read-only configuration audit for myDATA filing — the single source of truth
@@ -27,18 +28,18 @@ class MyDataConfigAudit
     /** Full audit for a tenant: readiness + every invoice type + every VAT category. */
     public function audit(Company $company): ConfigAuditResult
     {
-        $invoiceTypes = InvoiceType::query()
+        $types = InvoiceType::query()
             ->where('company_id', $company->getKey())
             ->orderBy('code')
-            ->get()
-            ->map(fn (InvoiceType $t) => $this->auditInvoiceType($t))
-            ->all();
+            ->get();
+        $invoiceTypes = $types->map(fn (InvoiceType $t) => $this->auditInvoiceType($t))->all();
+        $mydataTypes = $types->pluck('mydata_type')->filter()->unique()->values()->all();
 
         $vatCategories = VatCategory::query()
             ->where('company_id', $company->getKey())
             ->orderBy('rate')
             ->get()
-            ->map(fn (VatCategory $v) => $this->auditVatCategory($v))
+            ->map(fn (VatCategory $v) => $this->auditVatCategory($v, $mydataTypes))
             ->all();
 
         return new ConfigAuditResult(
@@ -200,8 +201,13 @@ class MyDataConfigAudit
         );
     }
 
-    /** Audit a single VAT category's rate→AADE-category mapping. */
-    public function auditVatCategory(VatCategory $vat): ConfigAuditRow
+    /**
+     * Audit a single VAT category's rate→AADE-category mapping.
+     *
+     * @param  list<string>  $mydataTypes  the tenant's invoice types — a 0% reason
+     *                                     impossible for one of them is flagged
+     */
+    public function auditVatCategory(VatCategory $vat, array $mydataTypes = []): ConfigAuditRow
     {
         $findings = [];
         $rate = (float) $vat->rate;
@@ -220,6 +226,18 @@ class MyDataConfigAudit
                     '0% χωρίς έγκυρη αιτία απαλλαγής §8.3 — η ΑΑΔΕ απορρίπτει [217]. '
                     .'Όρισε αιτία: ενδοκοιν. υπηρεσία→4 (άρθρο 18), ενδοκοιν. αγαθά→14 (άρθρο 33), '
                     .'εξαγωγή→8 (άρθρο 29), εγχώριο reverse-charge→16 (άρθρο 45).', '217');
+            } else {
+                // The category's reason is what a 0% line WITHOUT its own reason
+                // (WHMCS, imports) files with — refused at issue on a type it can
+                // never fit (VatExemptionGuidance::TYPE_CONFLICTS).
+                $clashes = array_values(array_filter($mydataTypes, fn (string $type): bool => (VatExemptionGuidance::typeConflict($type, (int) $reason)['level'] ?? null)
+                    === VatExemptionGuidance::CONFLICT_BLOCK));
+                if ($clashes !== []) {
+                    $findings[] = new ConfigAuditFinding('warn',
+                        VatExemptionGuidance::typeConflict($clashes[0], (int) $reason)['message']
+                        .' Γραμμές 0% χωρίς δική τους αιτία (π.χ. από WHMCS) σε τύπο '.implode('/', $clashes)
+                        .' θα μπλοκάρουν στην έκδοση — όρισε την αιτία στη γραμμή ή διόρθωσε την κατηγορία.');
+                }
             }
         } elseif (empty($matches)) {
             $findings[] = new ConfigAuditFinding('error',

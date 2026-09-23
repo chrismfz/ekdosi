@@ -64,7 +64,20 @@ class VatExemptionTypeConflictTest extends TestCase
             // Names the right reason for the type, and points at the LINE.
             $this->assertStringContainsString('η αιτία είναι 4', $e->getMessage());
             $this->assertStringContainsString('αιτία απαλλαγής της γραμμής', $e->getMessage());
+            // A draft is editable as is.
+            $this->assertStringNotContainsString('Επαναφορά σε πρόχειρο', $e->getMessage());
         }
+    }
+
+    public function test_an_issued_invoice_is_told_to_go_back_to_draft_first(): void
+    {
+        $invoice = $this->invoiceOfType('2.2', exemption: 16);
+        $invoice->forceFill(['local_status' => 'active'])->save();
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('«Επαναφορά σε πρόχειρο»');
+
+        (new MyDataSubmitter($this->tenant))->previewXml($invoice->fresh('lines'));
     }
 
     public function test_the_correct_reason_on_the_same_invoice_files(): void
@@ -153,6 +166,37 @@ class VatExemptionTypeConflictTest extends TestCase
         $this->assertSame(14, (int) InvoiceLine::query()->withoutGlobalScopes()->value('vat_exemption_category'));
     }
 
+    public function test_switching_the_invoice_type_re_derives_the_reasons_it_suggested(): void
+    {
+        $goods = $this->loginWithType('1.2');
+        $service = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ENY', 'name' => 'Ενδ. υπηρ.', 'invcount' => 1, 'mydata_type' => '2.2']);
+        $domestic = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1, 'mydata_type' => '2.1']);
+        $thirdCountry = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'TPT', 'name' => 'Τρίτες', 'invcount' => 1, 'mydata_type' => '2.3']);
+        $reason = fn ($component) => collect($component->get('data.lines'))->first()['vat_exemption_category'] ?? null;
+
+        $component = Livewire::test(CreateInvoice::class)->fillForm($this->formData($goods, exemption: 14));
+        $this->assertSame(14, (int) $reason($component));
+
+        // 1.2 → 2.2: the goods suggestion (14) becomes the service one (4).
+        $component->fillForm(['invoice_type_id' => $service->id]);
+        $this->assertSame(4, (int) $reason($component));
+
+        // 2.2 → 2.3: 4 still fits a third-country service → a deliberate/valid reason stays.
+        $component->fillForm(['invoice_type_id' => $thirdCountry->id]);
+        $this->assertSame(4, (int) $reason($component));
+
+        // A 14 that is impossible on a domestic 2.1 is cleared (no suggestion exists
+        // there → the operator picks), never left to fail validation on its own.
+        $component->fillForm(['invoice_type_id' => $goods->id]);
+        $component->set('data.lines.'.array_key_first($component->get('data.lines')).'.vat_exemption_category', 14);
+        $component->fillForm(['invoice_type_id' => $domestic->id]);
+        $this->assertNull($reason($component));
+
+        // …and a blank reason picks up the next type's suggestion.
+        $component->fillForm(['invoice_type_id' => $service->id]);
+        $this->assertSame(4, (int) $reason($component));
+    }
+
     private function invoiceOfType(string $mydataType, ?int $exemption, int $code = 1, ?Invoice $creditOf = null): Invoice
     {
         $type = InvoiceType::firstOrCreate(
@@ -160,7 +204,7 @@ class VatExemptionTypeConflictTest extends TestCase
             ['name' => 'Τύπος '.$mydataType, 'invcount' => 1, 'mydata_type' => $mydataType, 'is_credit' => $creditOf !== null],
         );
         $invoice = Invoice::create([
-            'company_id' => $this->tenant->id, 'invcode' => $type->code.$code, 'code' => $code,
+            'company_id' => $this->tenant->id, 'invcode' => $type->code.$code, 'code' => $code, 'local_status' => 'draft',
             'invoice_type_id' => $type->id, 'customer_id' => $this->customer->id,
             'issued_at' => now(), 'header_discount_percent' => 0,
             'credited_invoice_id' => $creditOf?->id,

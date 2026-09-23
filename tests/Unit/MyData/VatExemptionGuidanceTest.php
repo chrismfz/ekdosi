@@ -119,6 +119,9 @@ class VatExemptionGuidanceTest extends TestCase
         $this->assertStringContainsString('η αιτία είναι 4 ('.Codes::VAT_EXEMPTION_LABELS[4].')', VatExemptionGuidance::typeConflict('2.2', 16)['message']);
         // 2.3 has no single right reason → no «η αιτία είναι» suggestion.
         $this->assertStringNotContainsString('η αιτία είναι', VatExemptionGuidance::typeConflict('2.3', 16)['message']);
+        // A warning never tells the operator to change a reason that may be right
+        // (a service line with 4 on a mixed 1.2 invoice).
+        $this->assertStringNotContainsString('η αιτία είναι', VatExemptionGuidance::typeConflict('1.2', 4)['message']);
     }
 
     public function test_types_outside_the_sales_classes_are_not_judged(): void

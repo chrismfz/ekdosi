@@ -144,6 +144,30 @@ class MyDataConfigAuditTest extends TestCase
         $this->assertSame('ok', $std->status());
     }
 
+    public function test_a_zero_reason_impossible_for_one_of_the_tenants_types_warns(): void
+    {
+        // The old MYD-007 default: the single 0% category carries 16 (domestic reverse
+        // charge) while the tenant issues intra-EU services (2.2) — lines without their
+        // own reason would be refused at issue. Flag it before that happens.
+        $c = $this->tenant();
+        InvoiceType::create(['company_id' => $c->id, 'code' => 'ENY', 'name' => 'Ενδ. υπηρ.', 'invcount' => 1, 'mydata_type' => '2.2']);
+        InvoiceType::create(['company_id' => $c->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1, 'mydata_type' => '2.1']);
+        VatCategory::create([
+            'company_id' => $c->id, 'description' => '0% ενδοκοιν.', 'rate' => 0,
+            'vat_exemption_category' => 16, 'is_default' => false,
+        ]);
+
+        $row = collect(app(MyDataConfigAudit::class)->audit($c)->vatCategories)->first();
+
+        $this->assertSame('warn', $row->status());
+        $this->assertStringContainsString('Αιτία 16 σε τύπο 2.2', $row->messages()[0]);
+        $this->assertStringContainsString('σε τύπο 2.2 θα μπλοκάρουν', $row->messages()[0]);
+
+        // The same 16 on a purely domestic tenant is exactly right → clean.
+        InvoiceType::query()->where('company_id', $c->id)->where('mydata_type', '2.2')->delete();
+        $this->assertSame('ok', collect(app(MyDataConfigAudit::class)->audit($c)->vatCategories)->first()->status());
+    }
+
     public function test_empty_config_warns_on_the_readiness_row(): void
     {
         // A freshly-provisioned tenant with no invoice types / VAT categories must
