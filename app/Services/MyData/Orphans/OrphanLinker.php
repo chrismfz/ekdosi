@@ -9,17 +9,23 @@ use App\Models\Note;
 use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\Money;
 use App\Support\MyData\Codes;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
- * «Σύνδεση με υπάρχον»: the operator says this myDATA orphan IS that local
- * invoice (filed, but its MARK never made it onto the record). We record the
- * MARK exactly as a filing would — the INSERT audit row in mydata_marks (the
- * source of truth) + the invoices.mydata_* mirror, in one transaction — without
- * re-sending anything to AADE and without emailing the customer (it is an old
- * document, not a new filing).
+ * «Σύνδεση με υπάρχον»: this myDATA orphan IS that local invoice — issued here
+ * under the same series/ΑΑ, but its MARK never made it onto the record (a lost
+ * response, a restored backup). We record the MARK exactly as a filing would —
+ * the INSERT audit row in mydata_marks (the source of truth) + the
+ * invoices.mydata_* mirror, in one transaction — without re-sending anything to
+ * AADE and without emailing the customer.
+ *
+ * Only the SAME document can be linked: our issue, an issued (non-draft,
+ * non-cancelled) local invoice with the same series & ΑΑ, the same counterpart
+ * and the same amount. Anything else is a different legal document — a likely
+ * double issue to look at, never a link.
  */
 final class OrphanLinker
 {
@@ -34,16 +40,24 @@ final class OrphanLinker
     {
         $mark = (string) ($doc['mark'] ?? '');
         $type = (string) ($doc['invoiceType'] ?? '');
+        $series = trim((string) ($doc['series'] ?? ''));
+        $aa = trim((string) ($doc['aa'] ?? ''));
+        $counterparty = filled($doc['counterpartVat'] ?? null);
 
         return match (true) {
             (int) $invoice->company_id !== (int) $company->getKey() => 'Το παραστατικό δεν ανήκει σε αυτή την εταιρεία.',
             $mark === '' => 'Λείπει το ΜΑΡΚ.',
-            ($doc['direction'] ?? null) === 'inbound' => 'Είναι παραστατικό εξόδου — καταχωρίζεται από τα Έξοδα.',
+            ! OrphanParty::issuedByUs($company, $doc) => 'Δεν εκδόθηκε με το ΑΦΜ μας — δεν είναι δική μας πώληση.',
             ($doc['state'] ?? 'VALID') !== 'VALID' => 'Είναι ακυρωμένο στο myDATA — δεν συνδέεται με ενεργό παραστατικό (μπορείς να το καταχωρίσεις ως ακυρωμένο).',
             filled($invoice->mydata_mark) => 'Το τοπικό παραστατικό έχει ήδη ΜΑΡΚ ('.$invoice->mydata_mark.').',
+            $invoice->local_status === 'draft' => 'Το τοπικό είναι πρόχειρο (δεν έχει εκδοθεί) — δεν μπορεί να είναι το ίδιο παραστατικό.',
             $invoice->local_status === 'cancelled' => 'Το τοπικό παραστατικό είναι ακυρωμένο — επανέφερέ το πρώτα.',
+            (string) $invoice->code !== $aa || trim((string) $invoice->filedSeries()) !== $series => 'Άλλη σειρά/ΑΑ ('.$invoice->invcode.' ≠ '.($doc['invcode'] ?? '—').') — είναι άλλο παραστατικό.',
             Codes::isCreditNoteType($type) !== $invoice->isCreditNote() => 'Το ένα είναι πιστωτικό και το άλλο όχι.',
-            $this->markTaken($company, $mark) => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε άλλο τοπικό παραστατικό.',
+            $counterparty && ! OrphanParty::isCounterpart($doc, $invoice->vat_no) && ! OrphanParty::isCounterpart($doc, $invoice->customer?->afm) => 'Άλλος αντισυμβαλλόμενος (ΑΦΜ '.$doc['counterpartVat'].' στο myDATA).',
+            Money::differsByCent((float) $invoice->gross_total, (float) ($doc['grossTotal'] ?? 0)) => 'Άλλο σύνολο (τοπικά '
+                .number_format((float) $invoice->gross_total, 2, ',', '.').' € / myDATA '.number_format((float) ($doc['grossTotal'] ?? 0), 2, ',', '.').' €).',
+            OrphanParty::markTaken($company, $mark) => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε άλλο τοπικό παραστατικό.',
             default => null,
         };
     }
@@ -53,19 +67,25 @@ final class OrphanLinker
      */
     public function link(Company $company, Invoice $invoice, array $doc, ?int $userId): MyDataMark
     {
-        $invoice->loadMissing(['customer', 'invoiceType', 'paymentMethod']);
-        $mark = (string) $doc['mark'];
+        $mark = (string) ($doc['mark'] ?? '');
 
         $row = DB::transaction(function () use ($company, $invoice, $doc, $mark, $userId): MyDataMark {
-            // Re-check under a lock: two operators can't link the same MARK twice.
-            Invoice::query()->withoutGlobalScope(CompanyScope::class)->whereKey($invoice->getKey())->lockForUpdate()->first();
-            if (($why = $this->blocker($company, $invoice->fresh(['customer', 'invoiceType']) ?? $invoice, $doc)) !== null) {
+            // Serialise per tenant, then re-check on fresh data: two operators
+            // can't record one MARK twice.
+            OrphanParty::lockTenant($company);
+            $fresh = Invoice::query()->withoutGlobalScope(CompanyScope::class)
+                ->with(['customer', 'invoiceType', 'paymentMethod'])
+                ->whereKey($invoice->getKey())->lockForUpdate()->first();
+            if ($fresh === null) {
+                throw new RuntimeException('Το παραστατικό δεν βρέθηκε.');
+            }
+            if (($why = $this->blocker($company, $fresh, $doc)) !== null) {
                 throw new RuntimeException($why);
             }
 
             $row = MyDataMark::create([
                 'company_id' => $company->getKey(),
-                'invoice_id' => $invoice->getKey(),
+                'invoice_id' => $fresh->getKey(),
                 'mark' => $mark,
                 'mydata_action' => 'INSERT',
                 'invoice_url' => $doc['qrCodeUrl'] ?? null,
@@ -75,23 +95,23 @@ final class OrphanLinker
                 'mark_time' => now()->toTimeString(),
             ]);
 
-            $invoice->forceFill(array_merge($invoice->frozenPartyColumns(), [
+            // local_status stays «active» (a draft can't be linked), so none of
+            // the first-issue side effects (stock, service renewal) re-fire.
+            $fresh->forceFill(array_merge($fresh->frozenPartyColumns(), [
                 'mydata_sent' => true,
                 'mydata_state' => 'VALID',
-                'mydata_url' => ($doc['qrCodeUrl'] ?? null) ?: $invoice->mydata_url,
-                'local_status' => $invoice->local_status === 'draft' ? 'active' : $invoice->local_status,
+                'mydata_url' => ($doc['qrCodeUrl'] ?? null) ?: $fresh->mydata_url,
                 'mydata_mark' => $mark,
                 'mydata_pending_since' => null,
                 // What AADE holds is the filed type — freeze it, like a filing.
-                'mydata_type' => ($doc['invoiceType'] ?? null) ?: $invoice->invoiceType?->mydata_type,
+                'mydata_type' => ($doc['invoiceType'] ?? null) ?: $fresh->invoiceType?->mydata_type,
             ]))->save();
 
             Note::create([
                 'company_id' => $company->getKey(),
                 'notable_type' => Invoice::class,
-                'notable_id' => $invoice->getKey(),
-                'body' => 'Συνδέθηκε με το ΜΑΡΚ '.$mark.' από τα αδέσποτα του myDATA'
-                    .(filled($doc['invcode'] ?? null) ? ' (στο myDATA: '.$doc['invcode'].')' : '').'.',
+                'notable_id' => $fresh->getKey(),
+                'body' => 'Συνδέθηκε με το ΜΑΡΚ '.$mark.' από τα αδέσποτα του myDATA.',
                 'author_user_id' => $userId,
             ]);
 
@@ -102,14 +122,6 @@ final class OrphanLinker
         app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice->fresh(), $mark);
 
         return $row;
-    }
-
-    private function markTaken(Company $company, string $mark): bool
-    {
-        return Invoice::query()->withoutGlobalScope(CompanyScope::class)
-            ->where('company_id', $company->getKey())
-            ->where('mydata_mark', $mark)
-            ->exists();
     }
 
     /** The AADE document we relied on, kept as the audit evidence. */

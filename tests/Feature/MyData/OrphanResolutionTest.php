@@ -15,11 +15,14 @@ use App\Models\User;
 use App\Services\MyData\Orphans\OrphanImporter;
 use App\Services\MyData\Orphans\OrphanLinker;
 use App\Services\MyData\Orphans\OrphanMatcher;
+use App\Services\MyData\TransmittedDocReader;
 use App\Services\RecomputeInvoiceTotals;
+use Carbon\Carbon;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Mail;
+use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
 use Livewire\Livewire;
 use RuntimeException;
 use Tests\TestCase;
@@ -139,38 +142,43 @@ class OrphanResolutionTest extends TestCase
 
     public function test_linking_records_the_mark_as_a_filing_without_resending_or_emailing(): void
     {
-        $draft = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90', 'local_status' => 'draft']);
+        $issued = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90']);   // issued here, MARK lost
 
-        app(OrphanLinker::class)->link($this->tenant, $draft, $this->doc(), null);
+        app(OrphanLinker::class)->link($this->tenant, $issued, $this->doc(), null);
 
-        $draft->refresh();
-        $this->assertSame('400012824290573', $draft->mydata_mark);
-        $this->assertSame('VALID', $draft->mydata_state);
-        $this->assertSame('active', $draft->local_status, 'it was filed — no longer a draft');
-        $this->assertSame('https://mydataapi.aade.gr/qr/abc', $draft->mydata_url);
-        $this->assertSame('11.2', $draft->mydata_type);
-        $row = MyDataMark::where('invoice_id', $draft->id)->sole();
+        $issued->refresh();
+        $this->assertSame('400012824290573', $issued->mydata_mark);
+        $this->assertSame(['VALID', 'active'], [$issued->mydata_state, $issued->local_status]);
+        $this->assertSame('https://mydataapi.aade.gr/qr/abc', $issued->mydata_url);
+        $this->assertSame('11.2', $issued->mydata_type);
+        $row = MyDataMark::where('invoice_id', $issued->id)->sole();
         $this->assertSame(['INSERT', '400012824290573'], [$row->mydata_action, $row->mark]);
         $this->assertStringContainsString('<Invoice/>', (string) $row->response, 'the AADE document is the evidence');
-        $this->assertSame(1, Note::where('notable_id', $draft->id)->where('notable_type', Invoice::class)->count());
+        $this->assertSame(1, Note::where('notable_id', $issued->id)->where('notable_type', Invoice::class)->count());
         Mail::assertNothingSent();
     }
 
-    public function test_linking_is_refused_where_it_would_be_wrong(): void
+    public function test_only_the_same_document_can_be_linked(): void
     {
         $linker = app(OrphanLinker::class);
-        $plain = $this->local([]);
+        $twin = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90']);
+        $this->assertNull($linker->blocker($this->tenant, $twin, $this->doc()));
 
-        $this->assertStringContainsString('ήδη ΜΑΡΚ', $linker->blocker($this->tenant, $this->local(['mydata_mark' => '4001']), $this->doc()));
-        $this->assertStringContainsString('ακυρωμένο στο myDATA', $linker->blocker($this->tenant, $plain, $this->doc(['state' => 'CANCELLED'])));
-        $this->assertStringContainsString('ακυρωμένο', $linker->blocker($this->tenant, $this->local(['local_status' => 'cancelled']), $this->doc()));
-        $this->assertStringContainsString('πιστωτικό', $linker->blocker($this->tenant, $plain, $this->doc(['invoiceType' => '5.1'])));
-        $this->assertStringContainsString('εξόδου', $linker->blocker($this->tenant, $plain, $this->doc(['direction' => 'inbound'])));
+        $why = fn (array $attrs, array $doc = []): ?string => $linker->blocker($this->tenant, $this->local($attrs + ['code' => 90, 'invcode' => 'ΑΠΥ9'.uniqid()]), $this->doc($doc));
+        $this->assertStringContainsString('πρόχειρο', $why(['local_status' => 'draft']), 'a draft was never issued (and linking it would fire first-issue side effects)');
+        $this->assertStringContainsString('ακυρωμένο', $why(['local_status' => 'cancelled']));
+        $this->assertStringContainsString('ήδη ΜΑΡΚ', $why(['mydata_mark' => '4001']));
+        $this->assertStringContainsString('Άλλη σειρά/ΑΑ', $linker->blocker($this->tenant, $this->local([]), $this->doc()), 'a lookalike under another number is another document');
+        $this->assertStringContainsString('Άλλο σύνολο', $linker->blocker($this->tenant, $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90b'], 99), $this->doc()));
+        $this->assertStringContainsString('Άλλος αντισυμβαλλόμενος', $linker->blocker($this->tenant, $twin, $this->doc(['counterpartVat' => '090000045'])));
+        $this->assertStringContainsString('ακυρωμένο στο myDATA', $linker->blocker($this->tenant, $twin, $this->doc(['state' => 'CANCELLED'])));
+        $this->assertStringContainsString('πιστωτικό', $linker->blocker($this->tenant, $twin, $this->doc(['invoiceType' => '5.1'])));
+        $this->assertStringContainsString('ΑΦΜ μας', $linker->blocker($this->tenant, $twin, $this->doc(['issuerVat' => '099999999', 'direction' => 'unknown'])));
         $this->local(['mydata_mark' => '400012824290573']);
-        $this->assertStringContainsString('άλλο τοπικό', $linker->blocker($this->tenant, $plain, $this->doc()));
+        $this->assertStringContainsString('άλλο τοπικό', $linker->blocker($this->tenant, $twin, $this->doc()));
 
         $this->expectException(RuntimeException::class);
-        $linker->link($this->tenant, $plain, $this->doc(), null);
+        $linker->link($this->tenant, $twin, $this->doc(), null);
     }
 
     /* ───────────── «Καταχώριση τοπικά» ───────────── */
@@ -191,6 +199,19 @@ class OrphanResolutionTest extends TestCase
         Mail::assertNothingSent();
     }
 
+    public function test_a_document_filed_under_our_series_goes_under_that_series_type_only(): void
+    {
+        $other = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ', 'invcount' => 5, 'mydata_type' => '11.2']);
+
+        try {
+            app(OrphanImporter::class)->import($this->tenant, $this->doc(), $other, null, $this->cash, null);
+            $this->fail('another type would leave the ΑΠΥ counter behind');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('ανήκει στον τύπο', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::count());
+    }
+
     public function test_an_imported_number_ahead_of_our_counter_moves_the_counter_past_it(): void
     {
         $this->apy->forceFill(['invcount' => 50])->save();
@@ -205,7 +226,8 @@ class OrphanResolutionTest extends TestCase
         $tpy = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ', 'invcount' => 7, 'mydata_type' => '2.2']);
         $nixpal = Customer::create(['company_id' => $this->tenant->id, 'name' => 'NIXPAL OU', 'afm' => 'EE102019025', 'country' => 'EE']);
         $doc = $this->doc([
-            'series' => '0', 'aa' => '62', 'invcode' => '0 62', 'invoiceType' => '2.2', 'counterpartVat' => '102019025',
+            'series' => '0', 'aa' => '62', 'invcode' => '0 62', 'invoiceType' => '2.2',
+            'counterpartVat' => '102019025', 'counterpartCountry' => 'EE',   // AADE: foreign VAT without its prefix
             'netTotal' => 2300, 'vatTotal' => 0, 'grossTotal' => 2300,
             'lines' => [['lineNumber' => 1, 'netValue' => 2300, 'vatCategory' => 7, 'vatExemptionCategory' => 4, 'vatAmount' => 0, 'classifications' => []]],
         ]);
@@ -223,6 +245,7 @@ class OrphanResolutionTest extends TestCase
         $this->assertSame(7, (int) $tpy->fresh()->invcount, 'another series never moves our counter');
         $this->assertSame(4, (int) $invoice->lines()->sole()->vat_exemption_category);
         $this->assertSame('unpaid', (string) ($invoice->payment_status instanceof \BackedEnum ? $invoice->payment_status->value : $invoice->payment_status), 'credit terms → a receivable, like any issued invoice');
+        $this->assertSame('2300.00', number_format((float) $invoice->customer_balance_snapshot, 2, '.', ''), 'issued only once complete — the balance block counts this document');
     }
 
     public function test_a_cancelled_orphan_is_imported_as_cancelled(): void
@@ -241,8 +264,15 @@ class OrphanResolutionTest extends TestCase
         $this->assertStringContainsString('παρακρατήσεις', $importer->blocker($this->tenant, $this->doc(['grossTotal' => 18.0])));
         $this->assertStringContainsString('αριθμός', $importer->blocker($this->tenant, $this->doc(['aa' => 'A-90'])));
         $this->assertStringContainsString('εξόδου', $importer->blocker($this->tenant, $this->doc(['direction' => 'inbound'])));
+        $this->assertStringContainsString('ΑΦΜ μας', $importer->blocker($this->tenant, $this->doc(['issuerVat' => '099999999', 'direction' => 'unknown'])), 'only OUR issue becomes our sale');
         $this->assertStringContainsString('πώλησης', $importer->blocker($this->tenant, $this->doc(['invoiceType' => '17.1'])));
         $this->assertStringContainsString('κατηγορία ΦΠΑ', $importer->blocker($this->tenant, $this->doc(['lines' => [['netValue' => 16.5, 'vatCategory' => 8, 'vatAmount' => 0]]])));
+
+        // A deleted invoice still holding the MARK blocks it too (no duplicate MARK).
+        $holder = $this->local(['mydata_mark' => '400012824290573']);
+        $holder->delete();
+        $this->assertStringContainsString('ΜΑΡΚ', $importer->blocker($this->tenant, $this->doc()));
+        $holder->forceDelete();
 
         // Same local number already there (even deleted) → «use Σύνδεση».
         $existing = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90']);
@@ -260,7 +290,7 @@ class OrphanResolutionTest extends TestCase
             $importer->import($this->tenant, $this->doc(['aa' => '95', 'vatTotal' => 3.0, 'grossTotal' => 19.5]), $this->apy, null, $this->cash, null);
             $this->fail('a totals mismatch must be refused');
         } catch (RuntimeException $e) {
-            $this->assertStringContainsString('σύνολα', $e->getMessage());
+            $this->assertStringContainsString('«ΦΠΑ»', $e->getMessage(), 'net, VAT and gross each to the cent');
         }
         $this->assertSame($before, Invoice::withTrashed()->count());
         $this->assertSame(92, (int) $this->apy->fresh()->invcount);
@@ -273,16 +303,27 @@ class OrphanResolutionTest extends TestCase
         Gate::before(fn () => true);
         $this->actingAs(User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]));
         Filament::setTenant($this->tenant);
+        // The page reads the orphan from AADE itself — the fake stands in for the network.
+        $this->app->bind(TransmittedDocReader::class, fn ($app, array $params) => new class($params['tenant'], $doc) extends TransmittedDocReader
+        {
+            public function __construct(Company $tenant, private array $fake)
+            {
+                parent::__construct($tenant);
+            }
 
-        return Livewire::test(MyDataMarkDetail::class)
-            ->set('mark', $doc['mark'])
-            ->set('doc', $doc)
-            ->set('isOrphan', true);
+            public function fetchDetailByMark(string $mark, Carbon $from, Carbon $to): ?array
+            {
+                return $this->fake;
+            }
+        });
+
+        return Livewire::withQueryParams(['mark' => $doc['mark']])->test(MyDataMarkDetail::class);
     }
 
     public function test_the_page_imports_an_orphan_and_opens_the_new_invoice(): void
     {
         $this->page($this->doc())
+            ->assertSet('isOrphan', true)
             ->callAction('import_local', data: ['invoice_type_id' => $this->apy->id, 'payment_method_id' => $this->cash->id])
             ->assertHasNoActionErrors()
             ->assertRedirect();
@@ -296,16 +337,28 @@ class OrphanResolutionTest extends TestCase
             ->assertActionDisabled('import_local');
     }
 
-    public function test_the_page_links_only_a_suggested_invoice(): void
+    public function test_the_page_suggests_and_links_only_the_same_document(): void
     {
         $twin = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90']);
-        $other = $this->local([]);
+        $lookalike = $this->local([]);   // same date & amount, another number
 
-        $page = $this->page($this->doc())->set('candidates', [['id' => $twin->id, 'invcode' => 'ΑΠΥ90', 'date' => null, 'customer' => null, 'gross' => 20.46, 'score' => 190, 'reasons' => '', 'url' => '#']]);
-        $page->mountAction('link', ['invoice' => $other->id])->callMountedAction();
-        $this->assertNull($other->fresh()->mydata_mark, 'an id that was not suggested is never linked');
+        $page = $this->page($this->doc());
+        $candidates = collect($page->get('candidates'))->keyBy('id');
+        $this->assertTrue($candidates[$twin->id]['linkable']);
+        $this->assertFalse($candidates[$lookalike->id]['linkable'], 'shown as a possible double issue, not linkable');
+
+        $page->mountAction('link', ['invoice' => $lookalike->id])->callMountedAction();
+        $this->assertNull($lookalike->fresh()->mydata_mark);
 
         $page->mountAction('link', ['invoice' => $twin->id])->callMountedAction();
         $this->assertSame('400012824290573', $twin->fresh()->mydata_mark);
+    }
+
+    public function test_the_document_the_actions_trust_cannot_be_rewritten_from_the_browser(): void
+    {
+        $page = $this->page($this->doc());
+
+        $this->expectException(CannotUpdateLockedPropertyException::class);
+        $page->set('doc.mark', '400099999999999');
     }
 }

@@ -13,6 +13,7 @@ use App\Models\PaymentMethod;
 use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeInvoiceTotals;
+use App\Support\Money;
 use App\Support\MyData\Codes;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -26,9 +27,11 @@ use RuntimeException;
  * its net value at its VAT rate (+ the §8.3 exemption and the E3 income
  * classification it was filed with), described «Γραμμή Ν (από myDATA)». The
  * document keeps its AADE series/ΑΑ, MARK and QR, is recorded as already filed
- * (never re-sent), and its totals must agree with AADE's or nothing is written.
- * Deliberately out of scope (refused with the reason): credit notes (they need
- * the original), documents with withholding/fees/other taxes, a non-numeric ΑΑ.
+ * (never re-sent), and its net, VAT and gross must each agree with AADE's to the
+ * cent (the reconciler's own tolerance) or nothing is written. Filed under one
+ * of OUR series, it must go under that series' own type, and that counter moves
+ * past its ΑΑ. Deliberately out of scope (refused with the reason): credit notes
+ * (they need the original), withholding/fees/other taxes, a non-numeric ΑΑ.
  */
 final class OrphanImporter
 {
@@ -53,16 +56,29 @@ final class OrphanImporter
         return match (true) {
             blank($doc['mark'] ?? null) => 'Λείπει το ΜΑΡΚ.',
             ($doc['direction'] ?? null) === 'inbound' => 'Είναι παραστατικό εξόδου — καταχωρίζεται από τα Έξοδα.',
+            ! OrphanParty::issuedByUs($company, $doc) => 'Δεν εκδόθηκε με το ΑΦΜ μας — δεν είναι δική μας πώληση.',
             Codes::transmittedDocBucket($type) !== 'income' => 'Δεν είναι παραστατικό πώλησης ('.($type ?: '—').').',
             Codes::isCreditNoteType($type) => 'Τα πιστωτικά καταχωρίζονται χειροκίνητα (χρειάζονται το αρχικό παραστατικό).',
             $aa === '' || ! ctype_digit($aa) => 'Ο ΑΑ «'.$aa.'» δεν είναι αριθμός — καταχώρισέ το χειροκίνητα.',
-            abs(round($net + $vat, 2) - round($gross, 2)) > 0.02 => 'Έχει παρακρατήσεις / τέλη / λοιπούς φόρους — καταχώρισέ το χειροκίνητα.',
+            Money::differsByCent($net + $vat, $gross) => 'Έχει παρακρατήσεις / τέλη / λοιπούς φόρους — καταχώρισέ το χειροκίνητα.',
             ($doc['lines'] ?? []) === [] => 'Δεν έχει γραμμές.',
             ($bad = $this->unsupportedLine($doc)) !== null => $bad,
-            Invoice::query()->withoutGlobalScope(CompanyScope::class)->where('company_id', $company->getKey())
-                ->where('mydata_mark', (string) $doc['mark'])->exists() => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε τοπικό παραστατικό.',
+            OrphanParty::markTaken($company, (string) $doc['mark']) => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε τοπικό παραστατικό.',
+            ($dup = $this->existingNumber($company, $doc)) !== null => "Υπάρχει ήδη τοπικό {$dup->invcode} με την ίδια σειρά/ΑΑ — αν είναι το ίδιο, χρησιμοποίησε «Σύνδεση».",
             default => null,
         };
+    }
+
+    /**
+     * The tenant's type that OWNS the document's series (its code = the series),
+     * if any — such a document must be imported under it.
+     */
+    public static function seriesType(Company $company, array $doc): ?InvoiceType
+    {
+        $series = trim((string) ($doc['series'] ?? ''));
+
+        return $series === '' ? null : InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $company->getKey())->where('code', $series)->first();
     }
 
     /** The local code the document gets: «ΑΠΥ90» under its own series, else «0 62». */
@@ -79,46 +95,51 @@ final class OrphanImporter
      */
     public function import(Company $company, array $doc, InvoiceType $type, ?Customer $customer, PaymentMethod $paymentMethod, ?int $userId): Invoice
     {
-        if (($why = $this->blocker($company, $doc)) !== null) {
-            throw new RuntimeException($why);
-        }
         foreach ([$type, $paymentMethod, $customer] as $owned) {
             if ($owned !== null && (int) $owned->company_id !== (int) $company->getKey()) {
                 throw new RuntimeException('Άκυρη επιλογή.');
             }
         }
-        $counterpartVat = self::normalVat($doc['counterpartVat'] ?? null);
-        if ($counterpartVat !== null && ($customer === null || self::normalVat($customer->afm) !== $counterpartVat)) {
+        $owner = self::seriesType($company, $doc);
+        if ($owner !== null && (int) $owner->getKey() !== (int) $type->getKey()) {
+            throw new RuntimeException('Η σειρά «'.$owner->code.'» ανήκει στον τύπο «'.$owner->code.' — '.$owner->name.'» — διάλεξέ τον.');
+        }
+        if (OrphanParty::counterpartKeys($doc) !== [] && ! OrphanParty::isCounterpart($doc, $customer?->afm)) {
             throw new RuntimeException('Διάλεξε τον πελάτη με ΑΦΜ '.$doc['counterpartVat'].' (τον αντισυμβαλλόμενο του myDATA).');
         }
 
-        $invcode = self::invcodeFor($doc, $type);
         $series = trim((string) ($doc['series'] ?? ''));
-        $aa = (int) $doc['aa'];
+        $aa = (int) ($doc['aa'] ?? 0);
         $cancelled = ($doc['state'] ?? 'VALID') === 'CANCELLED';
-        $mark = (string) $doc['mark'];
+        $mark = (string) ($doc['mark'] ?? '');
 
-        $invoice = DB::transaction(function () use ($company, $doc, $type, $customer, $paymentMethod, $userId, $invcode, $series, $aa, $cancelled, $mark): Invoice {
-            $lockedType = InvoiceType::query()->withoutGlobalScope(CompanyScope::class)->whereKey($type->getKey())->lockForUpdate()->firstOrFail();
-            if (Invoice::query()->withoutGlobalScope(CompanyScope::class)->withTrashed()
-                ->where('company_id', $company->getKey())->where('invcode', $invcode)->exists()) {
-                throw new RuntimeException("Υπάρχει ήδη τοπικό παραστατικό {$invcode} — αν είναι το ίδιο, χρησιμοποίησε «Σύνδεση».");
+        $invoice = DB::transaction(function () use ($company, $doc, $type, $customer, $paymentMethod, $userId, $series, $aa, $cancelled, $mark): Invoice {
+            // Serialise per tenant, then re-check everything on fresh data: two
+            // imports of one orphan can't both write its MARK or its number.
+            OrphanParty::lockTenant($company);
+            if (($why = $this->blocker($company, $doc)) !== null) {
+                throw new RuntimeException($why);
             }
-            // Filed under OUR series: the counter must never hand this ΑΑ out again.
+
+            $lockedType = InvoiceType::query()->withoutGlobalScope(CompanyScope::class)->whereKey($type->getKey())->lockForUpdate()->firstOrFail();
+            // Filed under OUR series (invcount = the NEXT number): never hand this ΑΑ out again.
             if ($series !== '' && $series === (string) $lockedType->code && (int) $lockedType->invcount <= $aa) {
                 $lockedType->forceFill(['invcount' => $aa + 1])->save();
             }
 
+            // Created as a DRAFT and issued only once its lines and totals are in
+            // place — so everything that reacts to an issue (balance snapshot, …)
+            // sees the finished document, not an empty one.
             $invoice = Invoice::create([
                 'company_id' => $company->getKey(),
                 'invoice_type_id' => $type->getKey(),
                 'customer_id' => $customer?->getKey(),
                 'payment_method_id' => $paymentMethod->getKey(),
-                'invcode' => $invcode,
+                'invcode' => self::invcodeFor($doc, $type),
                 'series' => $series !== '' ? $series : null,
                 'code' => $aa,
                 'issued_at' => OrphanMatcher::issueDate($doc) ?? now(),
-                'local_status' => $cancelled ? 'cancelled' : 'active',
+                'local_status' => 'draft',
                 'header_discount_percent' => 0,
             ]);
 
@@ -143,14 +164,18 @@ final class OrphanImporter
 
             ($this->totals)($invoice);
             $invoice->refresh();
-            $gross = round((float) ($doc['grossTotal'] ?? 0), 2);
-            if (abs((float) $invoice->gross_total - $gross) > 0.02) {
-                throw new RuntimeException('Τα σύνολα δεν συμφωνούν με το myDATA (τοπικά '.number_format((float) $invoice->gross_total, 2, ',', '.')
-                    .' € / myDATA '.number_format($gross, 2, ',', '.').' €) — καταχώρισέ το χειροκίνητα.');
+            $local = ['net' => (float) $invoice->net_total, 'vat' => (float) $invoice->gross_total - (float) $invoice->net_total, 'gross' => (float) $invoice->gross_total];
+            $aade = ['net' => (float) ($doc['netTotal'] ?? 0), 'vat' => (float) ($doc['vatTotal'] ?? 0), 'gross' => (float) ($doc['grossTotal'] ?? 0)];
+            foreach (['net' => 'Καθαρή αξία', 'vat' => 'ΦΠΑ', 'gross' => 'Σύνολο'] as $k => $label) {
+                if (Money::differsByCent($local[$k], $aade[$k])) {
+                    throw new RuntimeException('Διαφορά με το myDATA στο «'.$label.'» (τοπικά '.number_format($local[$k], 2, ',', '.')
+                        .' € / myDATA '.number_format($aade[$k], 2, ',', '.').' €) — καταχώρισέ το χειροκίνητα.');
+                }
             }
 
             $invoice->loadMissing(['customer', 'invoiceType']);
             $invoice->forceFill(array_merge($invoice->frozenPartyColumns(), [
+                'local_status' => $cancelled ? 'cancelled' : 'active',
                 'mydata_sent' => true,
                 'mydata_state' => $cancelled ? 'CANCELLED' : 'VALID',
                 'mydata_mark' => $mark,
@@ -198,6 +223,27 @@ final class OrphanImporter
         return $invoice->fresh();
     }
 
+    /**
+     * A local invoice (deleted too) already carrying this series/ΑΑ — under
+     * either code form («ΑΠΥ90» / «ΑΠΥ 90») or its filed series + number.
+     */
+    private function existingNumber(Company $company, array $doc): ?Invoice
+    {
+        $series = trim((string) ($doc['series'] ?? ''));
+        $aa = trim((string) ($doc['aa'] ?? ''));
+        if ($aa === '' || ! ctype_digit($aa)) {
+            return null;
+        }
+
+        return Invoice::query()->withoutGlobalScope(CompanyScope::class)->withTrashed()
+            ->where('company_id', $company->getKey())
+            ->where(fn ($q) => $q->whereIn('invcode', array_unique([$series.$aa, trim($series.' '.$aa)]))->orWhere('code', (int) $aa))
+            ->with('invoiceType:id,code')
+            ->get()
+            ->first(fn (Invoice $i): bool => in_array((string) $i->invcode, [$series.$aa, trim($series.' '.$aa)], true)
+                || ((string) $i->code === $aa && trim((string) $i->filedSeries()) === $series));
+    }
+
     /** A line we can't reproduce locally (unknown VAT category / no-VAT record). */
     private function unsupportedLine(array $doc): ?string
     {
@@ -209,14 +255,5 @@ final class OrphanImporter
         }
 
         return null;
-    }
-
-    /** ΑΦΜ / VAT number compared without spaces, dots or a country prefix. */
-    public static function normalVat(mixed $vat): ?string
-    {
-        $v = strtoupper(preg_replace('/[^A-Za-z0-9]/', '', (string) ($vat ?? '')) ?? '');
-        $v = preg_replace('/^(EL|GR|[A-Z]{2})(?=\d)/', '', $v) ?? $v;
-
-        return $v === '' ? null : $v;
     }
 }

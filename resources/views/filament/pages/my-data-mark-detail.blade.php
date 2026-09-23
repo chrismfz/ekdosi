@@ -65,8 +65,9 @@
             <x-filament::section>
                 <x-slot name="heading">Ποιο τοπικό παραστατικό μπορεί να είναι;</x-slot>
                 <x-slot name="description">
-                    Το myDATA δεν κρατά περιγραφές γραμμών — ψάχνουμε με σειρά/ΑΑ, ποσό, ΑΦΜ και ημερομηνία
-                    ανάμεσα στα τοπικά παραστατικά που δεν έχουν ΜΑΡΚ. Αν δεν ταιριάζει κανένα, «Καταχώριση τοπικά».
+                    Το myDATA δεν κρατά περιγραφές γραμμών — ψάχνουμε με σειρά/ΑΑ, ποσό, ΑΦΜ και ημερομηνία ανάμεσα στα
+                    εκδοθέντα τοπικά χωρίς ΜΑΡΚ. «Σύνδεση» μόνο με το ίδιο παραστατικό (ίδια σειρά/ΑΑ, αντισυμβαλλόμενος, ποσό)·
+                    κάτι που απλώς μοιάζει με άλλον αριθμό είναι πιθανή διπλή έκδοση — έλεγξέ το. Αν δεν είναι κανένα, «Καταχώριση τοπικά».
                 </x-slot>
 
                 @if ($sameNumber)
@@ -102,11 +103,13 @@
                                         <td class="py-2 pr-4 text-right whitespace-nowrap">{{ \App\Support\Money::eur($c['gross']) }}</td>
                                         <td class="py-2 pr-4 text-xs text-gray-600">{{ $c['reasons'] }}</td>
                                         <td class="py-2 text-right">
-                                            @if ($this->canResolveOrphans())
-                                                <x-filament::button size="xs" color="gray" icon="heroicon-m-link"
+                                            @if ($c['linkable'] && $this->canResolveOrphans())
+                                                <x-filament::button size="xs" color="primary" icon="heroicon-m-link"
                                                     wire:click="mountAction('link', { invoice: {{ $c['id'] }} })">
                                                     Σύνδεση
                                                 </x-filament::button>
+                                            @elseif (! $c['linkable'])
+                                                <span class="text-xs text-warning-700">{{ $c['blocker'] }}</span>
                                             @endif
                                         </td>
                                     </tr>

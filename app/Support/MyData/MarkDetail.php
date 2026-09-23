@@ -188,6 +188,9 @@ final class MarkDetail
             'currency' => $header?->getCurrency() ?: 'EUR',
             'counterpartName' => $counterpart?->getName(),
             'counterpartVat' => $counterVat,
+            // AADE sends a foreign VAT without its country prefix — the country
+            // completes the identity (orphan import/link match the customer by it).
+            'counterpartCountry' => $counterpart?->getCountry(),
             'issuerName' => $issuer instanceof Issuer ? $issuer->getName() : null,
             'issuerVat' => $issuerVat,
             'netTotal' => self::toFloat($summary?->getTotalNetValue()),

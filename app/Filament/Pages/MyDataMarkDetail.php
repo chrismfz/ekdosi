@@ -13,6 +13,7 @@ use App\Services\MyData\EnrichInvoiceFromAade;
 use App\Services\MyData\Orphans\OrphanImporter;
 use App\Services\MyData\Orphans\OrphanLinker;
 use App\Services\MyData\Orphans\OrphanMatcher;
+use App\Services\MyData\Orphans\OrphanParty;
 use App\Services\MyData\SyncInvoiceStateFromAade;
 use App\Services\MyData\TransmittedDocReader;
 use App\Support\MyData\MarkDetail;
@@ -29,6 +30,7 @@ use Filament\Pages\Page;
 use Filament\Schemas\Components\Component;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use RuntimeException;
 use Throwable;
@@ -80,10 +82,13 @@ class MyDataMarkDetail extends Page
     public ?string $to = null;
 
     /** Livewire-safe detail array (App\Support\MyData\MarkDetail shape). */
+    #[Locked]
     public ?array $doc = null;
 
+    #[Locked]
     public ?int $invoiceId = null;
 
+    #[Locked]
     public bool $isOrphan = false;
 
     public ?string $error = null;
@@ -95,6 +100,7 @@ class MyDataMarkDetail extends Page
      *
      * @var array<string,mixed>|null
      */
+    #[Locked]
     public ?array $enrichReport = null;
 
     /**
@@ -102,6 +108,7 @@ class MyDataMarkDetail extends Page
      * «Συγχρονισμός κατάστασης» action can apply AADE's truth to the invoice.
      * Reset on every load() (must not outlive the document it described).
      */
+    #[Locked]
     public ?string $aadeState = null;
 
     /**
@@ -109,17 +116,20 @@ class MyDataMarkDetail extends Page
      * `$aadeState` — the evidence «Συγχρονισμός κατάστασης» persists so the
      * adopted terminal state can say WHICH cancellation caused it (MYD-023).
      */
+    #[Locked]
     public ?string $aadeCancelledByMark = null;
 
     /**
      * Orphan only: the local invoices without a MARK that could be its twin
      * (OrphanMatcher), Livewire-safe rows for the «Πιθανά τοπικά» panel.
      *
-     * @var list<array{id: int, invcode: string, date: ?string, customer: ?string, gross: float, score: int, reasons: string, url: string}>
+     * @var list<array{linkable: bool, blocker: ?string, id: int, invcode: string, date: ?string, customer: ?string, gross: float, score: int, reasons: string, url: string}>
      */
+    #[Locked]
     public array $candidates = [];
 
     /** Orphan only: a local invoice with the same series/ΑΑ but ANOTHER MARK. */
+    #[Locked]
     public ?array $sameNumber = null;
 
     public static function shouldRegisterNavigation(): bool
@@ -372,10 +382,16 @@ class MyDataMarkDetail extends Page
     {
         $tenant = Filament::getTenant();
         $doc = $this->doc ?? [];
-        $types = InvoiceType::query()->where('company_id', $tenant->getKey())->where('is_credit', false)->orderBy('code')->get();
-        $defaultType = $types->first(fn (InvoiceType $t): bool => (string) $t->code === (string) ($doc['series'] ?? ''))
+        $owner = OrphanImporter::seriesType($tenant, $doc);
+        // Filed under one of OUR series → only that series' own type (its counter
+        // must move past the ΑΑ); otherwise any non-credit type.
+        $types = $owner !== null
+            ? collect([$owner])
+            : InvoiceType::query()->where('company_id', $tenant->getKey())->where('is_credit', false)->orderBy('code')->get();
+        $defaultType = $owner
             ?? $types->first(fn (InvoiceType $t): bool => (string) $t->mydata_type === (string) ($doc['invoiceType'] ?? ''));
-        $customer = $this->customerByVat($doc['counterpartVat'] ?? null) ?? $defaultType?->defaultCustomer;
+        $counterpart = $this->counterpartCustomer($doc);
+        $customer = $counterpart ?? $defaultType?->defaultCustomer;
 
         return [
             Select::make('invoice_type_id')
@@ -383,7 +399,9 @@ class MyDataMarkDetail extends Page
                 ->options($types->mapWithKeys(fn (InvoiceType $t): array => [$t->getKey() => $t->code.' — '.$t->name.($t->mydata_type ? ' ('.$t->mydata_type.')' : '')])->all())
                 ->default($defaultType?->getKey())
                 ->required()
-                ->helperText('Προεπιλογή: ο τύπος με την ίδια σειρά ή τον ίδιο τύπο myDATA ('.($doc['invoiceType'] ?? '—').').'),
+                ->helperText($owner !== null
+                    ? 'Η σειρά «'.$owner->code.'» είναι δική μας — καταχωρίζεται στον τύπο της και ο μετρητής της προχωρά πέρα από τον ΑΑ.'
+                    : 'Άλλη σειρά από τις δικές μας — κρατά τη σειρά/ΑΑ του myDATA. Προεπιλογή: ίδιος τύπος myDATA ('.($doc['invoiceType'] ?? '—').').'),
             Select::make('customer_id')
                 ->label('Πελάτης')
                 ->searchable()
@@ -395,7 +413,7 @@ class MyDataMarkDetail extends Page
                 ->default($customer?->getKey())
                 ->required(filled($doc['counterpartVat'] ?? null))
                 ->helperText(filled($doc['counterpartVat'] ?? null)
-                    ? ($this->customerByVat($doc['counterpartVat']) !== null
+                    ? ($counterpart !== null
                         ? 'Βρέθηκε με το ΑΦΜ '.$doc['counterpartVat'].'.'
                         : 'Δεν υπάρχει πελάτης με ΑΦΜ '.$doc['counterpartVat'].' — δημιούργησέ τον πρώτα από τους Πελάτες.')
                     : 'Λιανική — προαιρετικό.'),
@@ -408,18 +426,15 @@ class MyDataMarkDetail extends Page
         ];
     }
 
-    private function customerByVat(mixed $vat): ?Customer
+    /** The customer who IS the document's counterpart — by the indexed ΑΦΜ identity (afm_key). */
+    private function counterpartCustomer(array $doc): ?Customer
     {
-        $normal = OrphanImporter::normalVat($vat);
-        if ($normal === null) {
-            return null;
-        }
+        $keys = OrphanParty::counterpartKeys($doc);
 
-        return Customer::query()
+        return $keys === [] ? null : Customer::query()
             ->where('company_id', Filament::getTenant()?->getKey())
-            ->whereNotNull('afm')
-            ->get(['id', 'name', 'afm', 'payment_method_id'])
-            ->first(fn (Customer $c): bool => OrphanImporter::normalVat($c->afm) === $normal);
+            ->whereIn('afm_key', $keys)
+            ->first(['id', 'name', 'afm', 'payment_method_id']);
     }
 
     private function importOrphan(array $data): void
@@ -527,7 +542,7 @@ class MyDataMarkDetail extends Page
         [$from, $to] = $this->resolveWindow();
 
         try {
-            $detail = (new TransmittedDocReader($tenant))->fetchDetailByMark($mark, $from, $to);
+            $detail = app(TransmittedDocReader::class, ['tenant' => $tenant])->fetchDetailByMark($mark, $from, $to);
 
             if ($detail === null) {
                 $this->error = 'Το ΜΑΡΚ δεν βρέθηκε στο myDATA για το διάστημα '
@@ -561,9 +576,13 @@ class MyDataMarkDetail extends Page
             return;   // an expense — the Έξοδα console's job
         }
         $matcher = app(OrphanMatcher::class);
+        $linker = app(OrphanLinker::class);
         foreach ($matcher->candidates($tenant, $detail) as $c) {
             $invoice = $c['invoice'];
+            $why = $linker->blocker($tenant, $invoice, $detail);
             $this->candidates[] = [
+                'linkable' => $why === null,
+                'blocker' => $why,
                 'id' => (int) $invoice->getKey(),
                 'invcode' => (string) $invoice->invcode,
                 'date' => $invoice->issued_at?->format('d/m/Y'),
@@ -617,7 +636,7 @@ class MyDataMarkDetail extends Page
         [$from, $to] = $this->windowForInvoice($invoice);
 
         try {
-            $detail = (new TransmittedDocReader($tenant))->fetchDetailByMark((string) $this->mark, $from, $to);
+            $detail = app(TransmittedDocReader::class, ['tenant' => $tenant])->fetchDetailByMark((string) $this->mark, $from, $to);
         } catch (RuntimeException $e) {
             Notification::make()->title('Αποτυχία')->danger()->body($e->getMessage())->send();
 

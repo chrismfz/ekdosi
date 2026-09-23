@@ -9,13 +9,14 @@ use Carbon\CarbonImmutable;
 
 /**
  * «Ποιο τοπικό παραστατικό μπορεί να είναι;» — for a myDATA orphan (a document
- * filed under our ΑΦΜ with no local invoice carrying its MARK), the local
- * invoices WITHOUT a MARK that could be its twin, strongest first.
+ * filed under our ΑΦΜ with no local invoice carrying its MARK), the ISSUED local
+ * invoices WITHOUT a MARK that resemble it, strongest first.
  *
  * myDATA carries no line descriptions, but it does carry what identifies a
  * document: series/ΑΑ, issue date, net/VAT/gross and the counterpart's ΑΦΜ. Each
- * matching signal scores; the operator decides — nothing is ever linked
- * automatically (a legal link is never guessed).
+ * matching signal scores. Only the same series/ΑΑ + counterpart + amount can be
+ * LINKED (OrphanLinker decides, the operator confirms — a legal link is never
+ * guessed); a lookalike under another number is shown as a possible double issue.
  */
 final class OrphanMatcher
 {
@@ -41,6 +42,8 @@ final class OrphanMatcher
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $company->getKey())
             ->where(fn ($q) => $q->whereNull('mydata_mark')->orWhere('mydata_mark', ''))
+            // A draft was never issued — it can't be a document myDATA holds.
+            ->where('local_status', '!=', 'draft')
             ->where(function ($q) use ($date, $aa): void {
                 if ($date !== null) {
                     $q->whereBetween('issued_at', [
@@ -123,8 +126,7 @@ final class OrphanMatcher
             $reasons[] = 'ίδια καθαρή αξία';
         }
 
-        $vat = self::str($doc['counterpartVat'] ?? null);
-        if ($vat !== null && in_array($vat, [self::str($invoice->vat_no), self::str($invoice->customer?->afm)], true)) {
+        if (OrphanParty::isCounterpart($doc, $invoice->vat_no) || OrphanParty::isCounterpart($doc, $invoice->customer?->afm)) {
             $score += 30;
             $reasons[] = 'ίδιο ΑΦΜ αντισυμβαλλόμενου';
         }
