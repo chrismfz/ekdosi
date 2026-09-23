@@ -3,6 +3,7 @@
 namespace Tests\Feature\Reminders;
 
 use App\Filament\Pages\AgedReceivables;
+use App\Mail\InvoiceReminderMail;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -16,6 +17,7 @@ use App\Services\RecomputeInvoiceTotals;
 use App\Services\Reminders\ReminderInsights;
 use App\Services\Reminders\ReminderPlanner;
 use App\Services\Reminders\ReminderRunner;
+use App\Services\Reminders\ReminderSender;
 use Carbon\CarbonImmutable;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -152,6 +154,54 @@ class ReceivablesInsightsTest extends TestCase
         $this->assertSame(['TPY'.$other->code => 'Υπάρχει ήδη υπενθύμιση σε αποστολή.'], $r['skipped']);
     }
 
+    public function test_a_partly_covered_invoice_is_chased_only_for_what_the_customer_really_owes(): void
+    {
+        $this->tenant->update(['reminders_mode' => 'auto']);
+        $inv = $this->invoice(34);   // €124 open
+        Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => null,
+            'kind' => 'payment', 'amount' => 100, 'pay_date' => now()]);   // €100 on account, not allocated
+
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+
+        $row = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+        $this->assertSame('24.00', (string) $row->balance, 'the aged report says €24 — so does the email');
+        Mail::assertSent(InvoiceReminderMail::class, fn (InvoiceReminderMail $m) => str_contains($m->bodyText, '24,00 €') && ! str_contains($m->bodyText, '124,00 €'));
+    }
+
+    public function test_a_failed_reminder_is_not_resent_the_day_a_manual_one_went_out(): void
+    {
+        $inv = $this->invoice(34);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
+        $auto = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+        $auto->forceFill(['status' => InvoiceReminder::STATUS_FAILED, 'attempts' => 1])->save();
+
+        app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$inv], $this->user->id);
+        $this->assertSame('Αντικαταστάθηκε από χειροκίνητη υπενθύμιση.', $auto->fresh()->reason, 'the failed one is retired');
+
+        // Even a row that slipped through (another screen) never makes it a second email today.
+        $stray = InvoiceReminder::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id, 'customer_id' => $this->customer->id,
+            'stage' => 'second', 'auto_stage' => 'second', 'document_kind' => 'invoice', 'balance' => 124,
+            'status' => InvoiceReminder::STATUS_QUEUED, 'trigger' => 'auto',
+        ]);
+        app(ReminderSender::class)->send($stray->id);
+
+        $this->assertSame('Στάλθηκε ήδη υπενθύμιση σήμερα.', $stray->fresh()->reason);
+        Mail::assertSentCount(1);
+    }
+
+    public function test_a_manual_send_that_may_have_arrived_still_holds_the_automatic_ladder(): void
+    {
+        $inv = $this->invoice(34);
+        InvoiceReminder::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $inv->id, 'customer_id' => $this->customer->id,
+            'stage' => InvoiceReminder::STAGE_MANUAL, 'document_kind' => 'invoice', 'balance' => 124,
+            'status' => InvoiceReminder::STATUS_FAILED, 'trigger' => 'manual', 'attempts' => 1,   // died mid-send
+        ]);
+
+        $this->assertSame([], app(ReminderPlanner::class)->plan($this->tenant->fresh(), CarbonImmutable::today()));
+    }
+
     public function test_an_invoice_covered_by_on_account_money_is_never_chased(): void
     {
         $inv = $this->invoice(34);
@@ -215,6 +265,7 @@ class ReceivablesInsightsTest extends TestCase
             'stage' => InvoiceReminder::STAGE_MANUAL, 'document_kind' => 'invoice', 'balance' => 124,
             'status' => InvoiceReminder::STATUS_FAILED, 'trigger' => 'manual', 'attempts' => 1,
         ]);
+        InvoiceReminder::whereKey($manual->id)->update(['updated_at' => now()->subDays(ReminderPlanner::MANUAL_GAP_DAYS + 1)]);   // past the wait
 
         app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
 

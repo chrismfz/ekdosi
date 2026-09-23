@@ -186,10 +186,8 @@ final class ReminderInsights
                 ->whereNull('whmcs_invoice_id')->whereDoesntHave('whmcsPending'))
                 ->get()->filter(fn (Invoice $i): bool => ReminderPlanner::dueDateOf($i) !== null)->values(),
             // Ours and owed, but the customer can't receive a reminder.
-            self::GAP_BLOCKED => $this->planner->candidates($company)
-                ->filter(fn (Invoice $i): bool => ReminderPlanner::dueDateOf($i) !== null
-                    && self::openAmount($i) > 0.005
-                    && self::customerUnreachable($i))
+            self::GAP_BLOCKED => $this->owedCandidates($company)
+                ->filter(fn (Invoice $i): bool => self::customerUnreachable($i))
                 ->values(),
             // Ours, reachable, but outside the automatic ladder's criteria.
             self::GAP_EXCLUDED => $this->excluded($company),
@@ -210,14 +208,28 @@ final class ReminderInsights
             return collect();   // switched off: the page says so instead
         }
 
-        return $this->planner->candidates($company)
-            ->filter(function (Invoice $i) use ($settings): bool {
-                $due = ReminderPlanner::dueDateOf($i);
-                $open = self::openAmount($i);
+        return $this->owedCandidates($company)
+            ->filter(fn (Invoice $i): bool => ! self::customerUnreachable($i)
+                && (ReminderPlanner::dueDateOf($i)->lt($settings->since) || $i->getAttribute('chaseable') < $settings->minBalance))
+            ->values();
+    }
 
-                return $due !== null && $open > 0.005 && ! self::customerUnreachable($i)
-                    && ($due->lt($settings->since) || $open < $settings->minBalance);
-            })
+    /**
+     * Our credit-term candidates that are really owed — the planner's rules: an
+     * open amount, and (for an invoice) capped at what the customer owes overall
+     * (on-account money not yet allocated covers it). Tagged with `chaseable`.
+     *
+     * @return Collection<int, Invoice>
+     */
+    private function owedCandidates(Company $company)
+    {
+        $candidates = $this->planner->candidates($company)
+            ->filter(fn (Invoice $i): bool => ReminderPlanner::dueDateOf($i) !== null && self::openAmount($i) > 0.005);
+        $net = $this->planner->customerOutstanding($company, $candidates->pluck('customer_id')->unique()->values()->all());
+
+        return $candidates
+            ->each(fn (Invoice $i) => $i->setAttribute('chaseable', $this->planner->chaseableBalance($i, self::openAmount($i), $net[$i->customer_id] ?? 0.0)))
+            ->filter(fn (Invoice $i): bool => $i->getAttribute('chaseable') > 0.005)
             ->values();
     }
 

@@ -214,10 +214,11 @@ class AgedReceivables extends Page
         foreach ($docs as $invoice) {
             $due = ReminderPlanner::dueDateOf($invoice);
             $balance = $invoice->balanceData()->balance;
-            $blocker = $planner->manualBlocker($invoice, $settings, $balance);
             if ($due === null || $balance <= 0.005) {
                 continue;   // cash-term / settled — nothing to chase
             }
+            $blocker = $planner->manualBlocker($invoice, $settings, $balance);
+            $balance = $planner->chaseableBalance($invoice, $balance);
             $days = (int) $due->diffInDays($today, false);
             $label = $invoice->invcode
                 .(ReminderPlanner::kindOf($invoice) === InvoiceReminder::KIND_PROFORMA ? ' (προτιμολόγιο)' : '')

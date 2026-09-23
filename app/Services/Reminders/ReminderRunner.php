@@ -104,9 +104,9 @@ final class ReminderRunner
      * «Υπενθύμιση τώρα»: one manual reminder per chosen document, queued for
      * sending straight away (works whether or not automatic reminders are on).
      * Documents that can't be reminded (paid, no email, opted out, one already on
-     * its way or sent today) are skipped with the reason. An automatic reminder
-     * of the same document still waiting for approval is retired — the manual
-     * one replaces it (its stage counts as done). Check + insert run under a lock
+     * its way or sent today) are skipped with the reason. What the document still
+     * had waiting (approval, or a failed send) is retired — the manual one
+     * replaces it (an automatic stage counts as done). Check + insert run under a lock
      * on the document, so a double submit can't queue two.
      *
      * @param  iterable<Invoice>  $invoices  the tenant's documents (caller-scoped)
@@ -133,9 +133,11 @@ final class ReminderRunner
                     return null;
                 }
 
+                // What was waiting (approval, or a failed send) is replaced — no
+                // «Ξανά αποστολή» of it right after the manual one.
                 InvoiceReminder::query()->withoutGlobalScope(CompanyScope::class)
                     ->where('invoice_id', $invoice->getKey())
-                    ->where('status', InvoiceReminder::STATUS_AWAITING)
+                    ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_FAILED])
                     ->update(['status' => InvoiceReminder::STATUS_CANCELLED, 'reason' => 'Αντικαταστάθηκε από χειροκίνητη υπενθύμιση.', 'updated_at' => now()]);
 
                 $due = ReminderPlanner::dueDateOf($invoice);
@@ -149,7 +151,7 @@ final class ReminderRunner
                     'document_kind' => ReminderPlanner::kindOf($invoice),
                     'due_date' => $due?->toDateString(),
                     'days_overdue' => $due !== null ? (int) $due->diffInDays(CarbonImmutable::today(), false) : null,
-                    'balance' => $balance,
+                    'balance' => $this->planner->chaseableBalance($invoice, $balance),
                     'status' => InvoiceReminder::STATUS_QUEUED,
                     'trigger' => 'manual',
                     'triggered_by_user_id' => $userId,

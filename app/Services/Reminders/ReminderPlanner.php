@@ -109,15 +109,25 @@ final class ReminderPlanner
         // days rather than land in the customer's inbox next to it: it resumes
         // MANUAL_GAP_DAYS after the manual one went out (still in flight = today).
         $resumeOn = [];
+        // A FAILED one that was attempted counts too: it may have reached the
+        // customer (a worker that died after SMTP accepted it).
+        $cutoff = $today->subDays(self::MANUAL_GAP_DAYS)->endOfDay();
         InvoiceReminder::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $company->getKey())
             ->where('trigger', 'manual')
-            ->whereIn('status', [InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_SENDING, InvoiceReminder::STATUS_SENT])
-            ->where(fn ($q) => $q->whereNull('sent_at')->orWhere('sent_at', '>', $today->subDays(self::MANUAL_GAP_DAYS)->endOfDay()))
-            ->get(['invoice_id', 'sent_at'])
+            ->where(fn ($q) => $q
+                ->whereIn('status', [InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_SENDING])
+                ->orWhere(fn ($s) => $s->where('status', InvoiceReminder::STATUS_SENT)->where('sent_at', '>', $cutoff))
+                ->orWhere(fn ($f) => $f->where('status', InvoiceReminder::STATUS_FAILED)->where('attempts', '>', 0)->where('updated_at', '>', $cutoff)))
+            ->get(['invoice_id', 'status', 'sent_at', 'updated_at'])
             ->each(function (InvoiceReminder $r) use (&$resumeOn, $today): void {
-                $from = $r->sent_at !== null ? CarbonImmutable::parse($r->sent_at)->startOfDay() : $today->startOfDay();
+                $at = match ($r->status) {
+                    InvoiceReminder::STATUS_SENT => $r->sent_at,
+                    InvoiceReminder::STATUS_FAILED => $r->updated_at,
+                    default => null,
+                };
+                $from = $at !== null ? CarbonImmutable::parse($at)->startOfDay() : $today->startOfDay();
                 $resume = $from->addDays(self::MANUAL_GAP_DAYS);
                 $current = $resumeOn[$r->invoice_id] ?? null;
                 $resumeOn[$r->invoice_id] = $current === null || $resume->gt($current) ? $resume : $current;
@@ -137,11 +147,13 @@ final class ReminderPlanner
                 continue;
             }
             $balance = $this->balances->for($invoice)->balance;
-            if ($this->blocker($invoice, $settings, $balance, customerOutstanding: $outstanding[$invoice->customer_id] ?? 0.0) !== null) {
+            $net = $outstanding[$invoice->customer_id] ?? 0.0;
+            if ($this->blocker($invoice, $settings, $balance, customerOutstanding: $net) !== null) {
                 continue;
             }
 
-            yield [$invoice, $due, $done->get($invoice->getKey().'|'.self::kindOf($invoice), []), $settings->stages, $balance, $resumeOn[$invoice->getKey()] ?? null];
+            yield [$invoice, $due, $done->get($invoice->getKey().'|'.self::kindOf($invoice), []), $settings->stages,
+                $this->chaseableBalance($invoice, $balance, $net), $resumeOn[$invoice->getKey()] ?? null];
         }
     }
 
@@ -206,26 +218,52 @@ final class ReminderPlanner
             $invoice->isCreditNote() => 'Πιστωτικό.',
             $invoice->legacy_id !== null || $invoice->whmcs_invoice_id !== null => 'Εκτός υπενθυμίσεων (εισαγωγή/WHMCS).',
             self::dueDateOf($invoice) === null => 'Τοις μετρητοίς — δεν οφείλεται.',
-            default => $this->balanceBlocker($balance ?? $this->balances->for($invoice)->balance, $manual ? 0.0 : $settings->minBalance)
-                ?? $this->netBalanceBlocker($invoice, $customerOutstanding),
+            default => $this->moneyBlocker($invoice, $balance ?? $this->balances->for($invoice)->balance, $manual ? 0.0 : $settings->minBalance, $customerOutstanding),
         };
     }
 
-    /**
-     * An invoice is never chased while the customer owes nothing OVERALL — an
-     * on-account payment or credit not yet allocated to it already covers it
-     * (the aged-receivables row shows no debt). Not for a προτιμολόγιο: unpaid
-     * drafts stay out of the customer's balance by design (MON-5).
-     */
-    private function netBalanceBlocker(Invoice $invoice, ?float $customerOutstanding): ?string
+    private function moneyBlocker(Invoice $invoice, float $documentBalance, float $minBalance, ?float $customerOutstanding): ?string
     {
-        if (self::kindOf($invoice) === InvoiceReminder::KIND_PROFORMA || $invoice->customer_id === null) {
-            return null;
+        if ($documentBalance <= 0.005) {
+            return 'Εξοφλήθηκε.';
         }
-        $net = $customerOutstanding
-            ?? ($this->customerOutstanding($invoice->company ?? Company::query()->find($invoice->company_id), [(int) $invoice->customer_id])[$invoice->customer_id] ?? 0.0);
+        $chaseable = $this->chaseableBalance($invoice, $documentBalance, $customerOutstanding);
+        if ($chaseable <= 0.005) {
+            return 'Ο πελάτης δεν χρωστάει συνολικά (έχει έναντι / πίστωση).';
+        }
 
-        return $net <= 0.005 ? 'Ο πελάτης δεν χρωστάει συνολικά (έχει έναντι / πίστωση).' : null;
+        return $chaseable < $minBalance ? 'Υπόλοιπο κάτω από το ελάχιστο.' : null;
+    }
+
+    /**
+     * The amount a reminder may ask for: the document's own balance — for an
+     * invoice capped at what the customer owes OVERALL, so an on-account payment
+     * or credit not yet allocated to it is never dunned for again (≤ 0 = nothing
+     * to chase; the aged-receivables row agrees). A προτιμολόγιο is not capped:
+     * unpaid drafts stay out of the customer's balance by design (MON-5).
+     */
+    public function chaseableBalance(Invoice $invoice, ?float $documentBalance = null, ?float $customerOutstanding = null): float
+    {
+        $documentBalance ??= $this->balances->for($invoice)->balance;
+        if (self::kindOf($invoice) === InvoiceReminder::KIND_PROFORMA || $invoice->customer_id === null) {
+            return $documentBalance;
+        }
+
+        return round(min($documentBalance, $customerOutstanding ?? $this->netOf($invoice)), 2);
+    }
+
+    /** @var array<string, float> company:customer => overall outstanding, per planner instance */
+    private array $netMemo = [];
+
+    private function netOf(Invoice $invoice): float
+    {
+        $key = $invoice->company_id.':'.$invoice->customer_id;
+        if (! array_key_exists($key, $this->netMemo)) {
+            $company = $invoice->company ?? Company::query()->find($invoice->company_id);
+            $this->netMemo[$key] = $this->customerOutstanding($company, [(int) $invoice->customer_id])[$invoice->customer_id] ?? 0.0;
+        }
+
+        return $this->netMemo[$key];
     }
 
     /**
@@ -288,7 +326,26 @@ final class ReminderPlanner
             $row->auto_stage === InvoiceReminder::STAGE_PRE_DUE
                 && ($due = self::dueDateOf($invoice)) !== null && $due->lte(CarbonImmutable::today()) => 'Έληξε — ισχύει πλέον η επόμενη βαθμίδα.',
             $this->laterStageExists($row) => 'Αντικαταστάθηκε από νεότερη βαθμίδα.',
+            ($sibling = $this->siblingBlocker($row)) !== null => $sibling,
             default => $this->blocker($invoice, $settings, manual: $row->trigger === 'manual'),
+        };
+    }
+
+    /**
+     * The per-document send rule, whatever started it (daily run, «Αποστολή»,
+     * «Ξανά αποστολή», «Υπενθύμιση τώρα»): never while another reminder of the
+     * document is being sent, never a second one the same day.
+     */
+    private function siblingBlocker(InvoiceReminder $row): ?string
+    {
+        $others = fn () => InvoiceReminder::query()->withoutGlobalScope(CompanyScope::class)
+            ->where('invoice_id', $row->invoice_id)
+            ->whereKeyNot($row->getKey());
+
+        return match (true) {
+            $others()->where('status', InvoiceReminder::STATUS_SENDING)->exists() => 'Υπάρχει ήδη υπενθύμιση σε αποστολή.',
+            $others()->where('status', InvoiceReminder::STATUS_SENT)->where('sent_at', '>=', CarbonImmutable::today())->exists() => 'Στάλθηκε ήδη υπενθύμιση σήμερα.',
+            default => null,
         };
     }
 
@@ -307,18 +364,6 @@ final class ReminderPlanner
             ->whereIn('auto_stage', array_slice(InvoiceReminder::AUTO_STAGES, $at + 1))
             ->whereKeyNot($row->getKey())
             ->exists();
-    }
-
-    private function balanceBlocker(float $balance, float $minBalance): ?string
-    {
-        if ($balance <= 0.005) {
-            return 'Εξοφλήθηκε.';
-        }
-        if ($balance < $minBalance) {
-            return 'Υπόλοιπο κάτω από το ελάχιστο.';
-        }
-
-        return null;
     }
 
     /**
