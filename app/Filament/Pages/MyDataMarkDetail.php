@@ -388,13 +388,10 @@ class MyDataMarkDetail extends Page
         $tenant = Filament::getTenant();
         $doc = $this->doc ?? [];
         $owner = OrphanImporter::seriesType($tenant, $doc);
-        // Filed under one of OUR series → only that series' own type (its counter
-        // must move past the ΑΑ); otherwise any non-credit type.
-        $types = $owner !== null
-            ? collect([$owner])
-            : InvoiceType::query()->where('company_id', $tenant->getKey())->where('is_credit', false)
-                ->where('mydata_type', (string) ($doc['invoiceType'] ?? ''))->orderBy('code')->get();
-        $defaultType = $owner ?? $types->first();
+        // The same rule the importer enforces (the button is disabled, with the
+        // reason, when no type qualifies).
+        $types = OrphanImporter::eligibleTypes($tenant, $doc);
+        $defaultType = $types->first();
         $counterpart = $this->counterpartCustomer($doc);
         $customer = $counterpart ?? $defaultType?->defaultCustomer;
 

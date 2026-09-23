@@ -173,6 +173,8 @@ class OrphanResolutionTest extends TestCase
         $this->assertStringContainsString('Άλλη σειρά/ΑΑ', $linker->blocker($this->tenant, $this->local([]), $this->doc()), 'a lookalike under another number is another document');
         $this->assertStringContainsString('Άλλο ποσό', $linker->blocker($this->tenant, $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90b'], 99), $this->doc()));
         $this->assertStringContainsString('Άλλο ποσό', $linker->blocker($this->tenant, $twin, $this->doc(['netTotal' => 18.1, 'vatTotal' => 2.36])), 'same gross, another VAT split = another document');
+        $placeholder = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90d', 'vat_no' => '0']);   // legacy placeholder ΑΦΜ
+        $this->assertNull($linker->blocker($this->tenant, $placeholder, $this->doc(['counterpartVat' => '094014201'])), 'a placeholder falls back to the customer');
         $frozen = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90c', 'vat_no' => '090000045']);   // issued to 090000045, customer edited since
         $this->assertStringContainsString('Άλλος αντισυμβαλλόμενος', $linker->blocker($this->tenant, $frozen, $this->doc(['counterpartVat' => '094014201'])), 'the frozen counterpart decides');
         $this->assertStringContainsString('Άλλος αντισυμβαλλόμενος', $linker->blocker($this->tenant, $twin, $this->doc(['counterpartVat' => '090000045'])));
@@ -263,6 +265,18 @@ class OrphanResolutionTest extends TestCase
             $this->assertStringContainsString('«ΦΠΑ»', $e->getMessage());
         }
         $this->assertSame(0, Invoice::count());
+    }
+
+    public function test_import_never_dead_ends_on_the_type_and_says_why_up_front(): void
+    {
+        // Our series' type not yet set to a myDATA type: accepted (the document keeps the filed type).
+        $this->apy->forceFill(['mydata_type' => null])->save();
+        $invoice = app(OrphanImporter::class)->import($this->tenant, $this->doc(), $this->apy, null, $this->cash, null);
+        $this->assertSame('11.2', $invoice->mydata_type);
+
+        // Another series and no local type of the filed kind: the reason shows before any click.
+        $this->assertStringContainsString('Δεν υπάρχει τύπος παραστατικού με τύπο myDATA «1.1»',
+            app(OrphanImporter::class)->blocker($this->tenant, $this->doc(['mark' => '400077', 'series' => 'Ζ', 'invcode' => 'Ζ 1', 'aa' => '1', 'invoiceType' => '1.1'])));
     }
 
     public function test_an_imported_number_ahead_of_our_counter_moves_the_counter_past_it(): void

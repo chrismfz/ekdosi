@@ -14,6 +14,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeInvoiceTotals;
 use App\Support\MyData\Codes;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -62,6 +63,7 @@ final class OrphanImporter
             self::cents($net + $vat) !== self::cents($gross) => 'Έχει παρακρατήσεις / τέλη / λοιπούς φόρους — καταχώρισέ το χειροκίνητα.',
             ($doc['lines'] ?? []) === [] => 'Δεν έχει γραμμές.',
             ($bad = $this->unsupportedLine($doc)) !== null => $bad,
+            self::eligibleTypes($company, $doc)->isEmpty() => self::noTypeReason($company, $doc),
             OrphanParty::markTaken($company, (string) $doc['mark']) => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε τοπικό παραστατικό.',
             ($dup = $this->existingNumber($company, $doc)) !== null => "Υπάρχει ήδη τοπικό {$dup->invcode} με την ίδια σειρά/ΑΑ — αν είναι το ίδιο, χρησιμοποίησε «Σύνδεση».",
             default => null,
@@ -78,6 +80,45 @@ final class OrphanImporter
 
         return $series === '' ? null : InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $company->getKey())->where('code', $series)->first();
+    }
+
+    /**
+     * The local types the document may be imported under — it must BE the filed
+     * kind (the invoice logic reads the type: counterpart freeze, credit sign):
+     *   - filed under one of OUR series → only that series' own type (its counter
+     *     moves past the ΑΑ), unless it is a credit type or set to ANOTHER myDATA
+     *     type (an unset one is accepted — the document keeps the filed type);
+     *   - another series → our non-credit types with the same myDATA type.
+     *
+     * @return Collection<int, InvoiceType>
+     */
+    public static function eligibleTypes(Company $company, array $doc): Collection
+    {
+        $filed = (string) ($doc['invoiceType'] ?? '');
+        $owner = self::seriesType($company, $doc);
+        if ($owner !== null) {
+            return ! $owner->is_credit && (blank($owner->mydata_type) || (string) $owner->mydata_type === $filed)
+                ? collect([$owner])
+                : collect();
+        }
+
+        return InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $company->getKey())
+            ->where('is_credit', false)
+            ->where('mydata_type', $filed)
+            ->orderBy('code')
+            ->get();
+    }
+
+    private static function noTypeReason(Company $company, array $doc): string
+    {
+        $filed = (string) ($doc['invoiceType'] ?? '—');
+        $owner = self::seriesType($company, $doc);
+
+        return $owner !== null
+            ? 'Η σειρά «'.$owner->code.'» είναι του τύπου «'.$owner->code.' — '.$owner->name.'» ('.($owner->is_credit ? 'πιστωτικός' : 'myDATA '.$owner->mydata_type)
+                .'), όχι '.$filed.' — διόρθωσε τον τύπο πρώτα.'
+            : 'Δεν υπάρχει τύπος παραστατικού με τύπο myDATA «'.$filed.'» — δημιούργησέ τον πρώτα (Τύποι παραστατικών).';
     }
 
     /** The local code the document gets: «ΑΠΥ90» under its own series, else «0 62». */
@@ -107,14 +148,11 @@ final class OrphanImporter
                 throw new RuntimeException('Άκυρη επιλογή.');
             }
         }
-        $owner = self::seriesType($company, $doc);
-        if ($owner !== null && (int) $owner->getKey() !== (int) $type->getKey()) {
-            throw new RuntimeException('Η σειρά «'.$owner->code.'» ανήκει στον τύπο «'.$owner->code.' — '.$owner->name.'» — διάλεξέ τον.');
-        }
-        // The local type must BE the filed kind of document (retail vs B2B, credit…):
-        // the invoice logic reads it (counterpart freeze, credit sign).
-        if ($type->is_credit || (string) $type->mydata_type !== (string) ($doc['invoiceType'] ?? '')) {
-            throw new RuntimeException('Ο τύπος «'.$type->code.'» ('.($type->mydata_type ?: '—').') δεν είναι ο τύπος που δηλώθηκε ('.($doc['invoiceType'] ?? '—').').');
+        if (! self::eligibleTypes($company, $doc)->contains(fn (InvoiceType $t): bool => (int) $t->getKey() === (int) $type->getKey())) {
+            $owner = self::seriesType($company, $doc);
+            throw new RuntimeException($owner !== null && (int) $owner->getKey() !== (int) $type->getKey()
+                ? 'Η σειρά «'.$owner->code.'» ανήκει στον τύπο «'.$owner->code.' — '.$owner->name.'» — διάλεξέ τον.'
+                : 'Ο τύπος «'.$type->code.'» ('.($type->mydata_type ?: '—').') δεν είναι ο τύπος που δηλώθηκε ('.($doc['invoiceType'] ?? '—').').');
         }
         if (OrphanParty::counterpartKeys($doc) !== [] && ! OrphanParty::isCounterpart($doc, $customer?->afm)) {
             throw new RuntimeException('Διάλεξε τον πελάτη με ΑΦΜ '.$doc['counterpartVat'].' (τον αντισυμβαλλόμενο του myDATA).');

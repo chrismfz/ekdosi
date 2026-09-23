@@ -61,9 +61,9 @@ final class OrphanLinker
             $date === null || $invoice->issued_at === null || ! $invoice->issued_at->isSameDay($date) => 'Άλλη ημερομηνία έκδοσης ('
                 .($invoice->issued_at?->format('d/m/Y') ?? '—').' τοπικά / '.($doc['issuedAtHuman'] ?? '—').' στο myDATA).',
             $invoice->mydata_pending_since !== null => 'Εκκρεμεί υποβολή του τοπικού στο myDATA — περίμενε να ολοκληρωθεί.',
-            // The FROZEN counterpart decides when there is one (the live customer
-            // may have been edited since the issue).
-            $counterparty && ! OrphanParty::isCounterpart($doc, filled($invoice->vat_no) ? $invoice->vat_no : $invoice->customer?->afm) => 'Άλλος αντισυμβαλλόμενος (ΑΦΜ '.$doc['counterpartVat'].' στο myDATA).',
+            // The invoice's own counterpart rule: the FROZEN ΑΦΜ when it is a real
+            // one (the live customer may have been edited since), else the customer.
+            $counterparty && ! OrphanParty::isCounterpart($doc, $invoice->counterpartAfm()) => 'Άλλος αντισυμβαλλόμενος (ΑΦΜ '.$doc['counterpartVat'].' στο myDATA).',
             ($diff = self::amountDiff($invoice, $doc)) !== null => $diff,
             OrphanParty::markTaken($company, $mark) => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε άλλο τοπικό παραστατικό.',
             default => null,
