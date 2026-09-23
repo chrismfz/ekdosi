@@ -214,7 +214,7 @@ class AgedReceivables extends Page
         foreach ($docs as $invoice) {
             $due = ReminderPlanner::dueDateOf($invoice);
             $balance = $invoice->balanceData()->balance;
-            $blocker = $planner->blocker($invoice, $settings, $balance, manual: true);
+            $blocker = $planner->manualBlocker($invoice, $settings, $balance);
             if ($due === null || $balance <= 0.005) {
                 continue;   // cash-term / settled — nothing to chase
             }
@@ -272,7 +272,7 @@ class AgedReceivables extends Page
                 .'<td style="text-align:right;'.$cell.'">'.($r['age'] !== null ? e($r['age'].' ημ.') : '—').'</td>'
                 .'</tr>';
         }
-        $total = app(ReminderInsights::class)->gaps($tenant)[$gap] ?? ['count' => 0];
+        $total = $this->getInsights()['gaps'][$gap] ?? ['count' => 0];
         $html .= '</tbody></table>';
         if ($total['count'] > count($rows)) {
             $html .= '<p style="margin-top:.5rem;opacity:.75">Εμφανίζονται τα '.count($rows).' μεγαλύτερα από '.$total['count'].'.</p>';

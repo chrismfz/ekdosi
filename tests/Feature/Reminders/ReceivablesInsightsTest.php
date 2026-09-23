@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceReminder;
 use App\Models\InvoiceType;
+use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\User;
 use App\Services\RecomputeInvoiceTotals;
@@ -106,20 +107,61 @@ class ReceivablesInsightsTest extends TestCase
         $this->assertSame($this->user->id, $rows->first()->triggered_by_user_id);
     }
 
-    public function test_a_manual_reminder_is_the_operators_call_but_still_needs_an_email_and_a_balance(): void
+    public function test_a_manual_reminder_works_with_automatic_ones_off_but_respects_the_customer(): void
     {
-        $this->tenant->update(['reminders_enabled' => false]);
-        $this->customer->update(['reminders_enabled' => false]);   // opted out of the automatic ones
+        $this->tenant->update(['reminders_enabled' => false, 'reminder_min_balance' => 500]);
         $inv = $this->invoice(40);
 
         $r = app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$inv], $this->user->id);
-        $this->assertSame(1, $r['queued'], 'automatic switches off + customer opt-out do not stop a deliberate manual reminder');
+        $this->assertSame(1, $r['queued'], 'the tenant switch and the minimum balance are about the automatic ladder');
         Mail::assertSentCount(1);
 
-        $this->customer->update(['email' => null]);
-        $r = app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$inv->fresh()], $this->user->id);
-        $this->assertSame(0, $r['queued']);
-        $this->assertSame(['TPY'.$inv->code => 'Ο πελάτης δεν έχει email.'], $r['skipped']);
+        $again = app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$inv->fresh()], $this->user->id);
+        $this->assertSame(['TPY'.$inv->code => 'Στάλθηκε ήδη υπενθύμιση σήμερα.'], $again['skipped'], 'never twice in a day');
+
+        $this->customer->update(['reminders_enabled' => false]);
+        $other = $this->invoice(40);
+        $r = app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$other], $this->user->id);
+        $this->assertSame(['TPY'.$other->code => 'Ο πελάτης έχει απενεργοποιημένες υπενθυμίσεις.'], $r['skipped']);
+
+        $this->customer->update(['reminders_enabled' => true, 'email' => null]);
+        $r = app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$other->fresh()], $this->user->id);
+        $this->assertSame(['TPY'.$other->code => 'Ο πελάτης δεν έχει email.'], $r['skipped']);
+        Mail::assertSentCount(1);
+    }
+
+    public function test_a_manual_reminder_replaces_an_automatic_one_and_never_joins_one_in_flight(): void
+    {
+        $inv = $this->invoice(34);
+        app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());   // review mode → awaiting 1st
+        $auto = InvoiceReminder::where('invoice_id', $inv->id)->sole();
+
+        app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$inv], $this->user->id);
+
+        $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $auto->fresh()->status);
+        $this->assertSame('first', $auto->fresh()->auto_stage, 'the manual one covered that stage');
+        Mail::assertSentCount(1);
+
+        $other = $this->invoice(34);
+        InvoiceReminder::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $other->id, 'customer_id' => $this->customer->id,
+            'stage' => 'first', 'auto_stage' => 'first', 'document_kind' => 'invoice', 'balance' => 124,
+            'status' => InvoiceReminder::STATUS_SENDING, 'trigger' => 'auto',
+        ]);
+        $r = app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$other], $this->user->id);
+        $this->assertSame(['TPY'.$other->code => 'Υπάρχει ήδη υπενθύμιση σε αποστολή.'], $r['skipped']);
+    }
+
+    public function test_an_invoice_covered_by_on_account_money_is_never_chased(): void
+    {
+        $inv = $this->invoice(34);
+        Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => null,
+            'kind' => 'payment', 'amount' => 200, 'pay_date' => now()]);   // on account, not allocated
+
+        $this->assertSame([], app(ReminderPlanner::class)->plan($this->tenant->fresh(), CarbonImmutable::today()));
+        $r = app(ReminderRunner::class)->sendManual($this->tenant->fresh(), [$inv], $this->user->id);
+        $this->assertSame(['TPY'.$inv->code => 'Ο πελάτης δεν χρωστάει συνολικά (έχει έναντι / πίστωση).'], $r['skipped']);
+        Mail::assertNothingSent();
     }
 
     /** Two layers: the checkbox options reject a foreign id, and the action re-scopes to the customer's own candidates. */
@@ -159,9 +201,13 @@ class ReceivablesInsightsTest extends TestCase
         $this->assertSame([], $planned(0), 'not on the same day as the manual one');
         $this->assertSame([], $planned(ReminderPlanner::MANUAL_GAP_DAYS - 1));
         $this->assertSame([$inv->id], $planned(ReminderPlanner::MANUAL_GAP_DAYS));
+        // …and the «Επόμενες» preview shows it on the day the ladder resumes, not never.
+        $upcoming = app(ReminderPlanner::class)->upcoming($this->tenant->fresh(), CarbonImmutable::today(), 14);
+        $this->assertSame([[$inv->id, CarbonImmutable::today()->addDays(ReminderPlanner::MANUAL_GAP_DAYS)->toDateString()]],
+            array_map(fn (array $u): array => [$u['invoice']->id, $u['date']->toDateString()], $upcoming));
     }
 
-    public function test_a_new_automatic_stage_leaves_the_operators_failed_manual_reminder_alone(): void
+    public function test_a_new_automatic_stage_retires_a_stale_failed_manual_reminder(): void
     {
         $inv = $this->invoice(34);
         $manual = InvoiceReminder::create([
@@ -172,7 +218,7 @@ class ReceivablesInsightsTest extends TestCase
 
         app(ReminderRunner::class)->run($this->tenant->fresh(), CarbonImmutable::today());
 
-        $this->assertSame(InvoiceReminder::STATUS_FAILED, $manual->fresh()->status);
+        $this->assertSame(InvoiceReminder::STATUS_CANCELLED, $manual->fresh()->status, 'no «Ξανά αποστολή» of a stale manual one after the newer stage');
         $this->assertSame(1, InvoiceReminder::where('invoice_id', $inv->id)->where('trigger', 'auto')->count());
     }
 
@@ -204,12 +250,16 @@ class ReceivablesInsightsTest extends TestCase
     public function test_the_blind_spots_list_what_the_reminders_never_chase(): void
     {
         $draft = $this->invoice(3, ['local_status' => 'draft']);                          // never offered
+        $whmcsDraft = $this->invoice(3, ['local_status' => 'draft']);
+        $whmcsDraft->forceFill(['whmcs_invoice_id' => 556])->save();                       // the WHMCS inbox's
+        $old = $this->invoice(40);
+        $this->tenant->update(['reminders_since' => now()->subDays(5)->toDateString()]);  // due before «από»
         $whmcs = $this->invoice(40);
         $whmcs->forceFill(['whmcs_invoice_id' => 555])->save();   // not mass-assignable
         $legacy = $this->invoice(400, ['legacy_id' => 77]);
         $noEmail = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Χωρίς email']);
         $blocked = $this->invoice(40, customer: $noEmail);
-        $ours = $this->invoice(40);                                                        // reminded → in no gap
+        $ours = $this->invoice(34);                                                        // due 4 days ago, after «από» → in no gap
 
         $gaps = app(ReminderInsights::class)->gaps($this->tenant);
         $ids = fn (string $gap): array => collect(app(ReminderInsights::class)->gapList($this->tenant, $gap))->pluck('invoice.id')->all();
@@ -218,6 +268,8 @@ class ReceivablesInsightsTest extends TestCase
         $this->assertSame([$whmcs->id], $ids(ReminderInsights::GAP_WHMCS));
         $this->assertSame([$legacy->id], $ids(ReminderInsights::GAP_LEGACY));
         $this->assertSame([$blocked->id], $ids(ReminderInsights::GAP_BLOCKED));
+        $this->assertSame([$old->id], $ids(ReminderInsights::GAP_EXCLUDED), 'due before the «από» date: never reminded automatically');
+        $this->assertNotContains($whmcsDraft->id, $ids(ReminderInsights::GAP_DRAFTS));
         $this->assertSame(['count' => 1, 'amount' => 124.0], $gaps[ReminderInsights::GAP_WHMCS]);
         foreach (array_keys(ReminderInsights::GAP_LABELS) as $gap) {
             $this->assertNotContains($ours->id, $ids($gap));

@@ -16,6 +16,13 @@
         <x-slot name="heading">Υπενθυμίσεις πληρωμής</x-slot>
         <x-slot name="description">Πώς πάνε οι υπενθυμίσεις — και τι ανοιχτό ΔΕΝ καλύπτουν.</x-slot>
 
+        @unless ($summary['enabled'])
+            <div class="mb-3 text-sm text-warning-700">
+                Οι αυτόματες υπενθυμίσεις είναι ανενεργές — δεν στέλνεται τίποτα αυτόματα (ενεργοποίηση στις «Ρυθμίσεις εταιρείας»).
+                Η «Υπενθύμιση τώρα» δουλεύει κανονικά.
+            </div>
+        @endunless
+
         <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
             <div class="rounded-lg border border-gray-200 p-3">
                 <div class="text-xs text-gray-500">Προς έγκριση</div>
@@ -45,7 +52,7 @@
         </div>
 
         <div class="mt-4 text-sm font-medium">Δεν υπενθυμίζονται</div>
-        <div class="grid grid-cols-1 gap-4 md:grid-cols-4 mt-2">
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-5 mt-2">
             @foreach (\App\Services\Reminders\ReminderInsights::GAP_LABELS as $gap => $label)
                 @php $g = $insights['gaps'][$gap] ?? ['count' => 0, 'amount' => 0]; @endphp
                 @if ($g['count'] > 0)
