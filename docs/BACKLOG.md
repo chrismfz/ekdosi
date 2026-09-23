@@ -92,7 +92,12 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Multi-party SPLIT write-back στο WHMCS** — ένα MARK ≠ N invoices.
 
 ### 🌐 Domains (Πυλώνας A — `docs/domains/README.md`)
-- **A4 — 2ος registrar grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — αποδεικνύει το abstraction.
+- **A4 — grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — **το κύριο κομμάτι: ~75% του portfolio**
+  (1381 από 1833 active, `domains/whmcs-baseline.md`).
+- **Υπενθυμίσεις λήξης domain (60/30/15/10/5 ημέρες) — cutover blocker.** Η WHMCS έχει στείλει 34.296· στο ekdosi
+  δεν υπάρχουν (README §3.8 δεν χτίστηκε).
+- **CNIC: 226 active ακόμα στο CentralNic** (μετάβαση στην ανανέωση) — το registrar-first import δεν τα βλέπει·
+  απόφαση: manual/CSV «χωρίς API» ή read-only adapter.
 - **A5 — polish + registrar↔local reconciliation** (mirror του myDATA reconcile): bulk availability, portfolio
   dashboard· **cross-tenant guard και στο READ path** (`DomainSyncService::sync` by-name adopt σε κοινό reseller
   account)· reconciler inputs: renew logs με `short_of_target=null`/κάτω από `target_expiry`, orphan unconsumed renewals.
