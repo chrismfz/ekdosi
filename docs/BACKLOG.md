@@ -33,7 +33,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   Μέχρι τότε card/vPOS/PayPal → §8.12 **1**, 3, 6 ή 8.
 - **Payment connectors — IRIS + card-POS** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά).
 - **Bank-statement import → match πληρωμών** — ανέβασμα κίνησης (CSV/MT940) → auto-match σε ανοιχτά τιμολόγια
-  (ποσό/ημερομηνία/ΑΦΜ) → προτεινόμενες `Payment` εγγραφές προς έγκριση.
+  (ποσό/ημερομηνία/ΑΦΜ) → προτεινόμενες `Payment` εγγραφές προς έγκριση. **DEFERRED (owner, 2026-09-23)** — θέλει
+  πρώτα δείγμα export από την τράπεζα (format/στήλες) για να σχεδιαστεί ο parser.
 - **Dunning — επόμενα βήματα** (οι υπενθυμίσεις + insights + «Υπενθύμιση τώρα» είναι χτισμένα → `FEATURES.md §8`):
   ενέργεια→task με ημ/νία+υπεύθυνο + ιστορικό επαφών στην Καρτέλα· κλιμάκωση με `send_customer_statement`.
 - **Ταμειακή εικόνα / cashflow — «τα έξοδα που δεν έρχονται μόνα τους»** _(ιδέα 2026-07-12· **θα το δει με τον
@@ -70,8 +71,6 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Υποβολή χαρακτηρισμών για λογαριασμό τρίτου (λογιστής, `entityVatNumber` [323])** — το ekdosi **ετοιμάζει**
   τους χαρακτηρισμούς (rules-engine ✅), ο λογιστής (δικό του login + ΑΦΜ + έγκριση) τους **στέλνει**· θέλει
   διερεύνηση ρόλων/δικαιωμάτων. (+ `RequestMyExpenses` sanity totals.)
-- **Type↔reason cross-check στην έκδοση** — warn/block αν η §8.3 αιτία γραμμής αντιφάσκει με τον τύπο (π.χ. αιτία 4
-  σε εγχώριο 1.1)· αντίστοιχο του `assertCounterpartCountryMatchesType`.
 - **Κατηγορίες εσόδων/εξόδων** — backfill ιστορικών WHMCS γραμμών (description→package→group→category) · bulk-assign
   κατηγορίας/tags στη λίστα ειδών · ίδιο report + widget για **έξοδα**.
 
@@ -126,6 +125,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Κεντρικός editor κειμένων/ετικετών (ζητήθηκε 2026-09-19)** — «Ρυθμίσεις → Κείμενα/Ετικέτες» για όλα τα
   customer-facing strings (`PdfLabels::MAP`, `lang/{el,en}/mail.php`, `lang/{el,en}/portal.php`)· πίνακας
   `label_overrides` (`company_id` nullable=global) + override-layer με **fallback στα code defaults**.
+  **DEFERRED (owner, 2026-09-23).** Όταν χτιστεί: ΑΠΟΡΡΟΦΑ ή ρητά ΕΞΑΙΡΕΙ τα ήδη editable κείμενα (`MailTemplateFields`,
+  τα `reminder_templates` των υπενθυμίσεων) — ποτέ δεύτερη πηγή για το ίδιο κείμενο.
 - **Multi-currency invoicing** — `currency` υπάρχει (EUR hardcoded)· FX + στρογγυλοποίηση + εμφάνιση (myDATA θέλει EUR ισοτιμία).
 - **Επαφές (shared CRM)** — κοινή `Contact` ↔ many customers με ρόλους (π.χ. λογιστής πολλών πελατών). DEFERRED —
   να μη σπάσει το per-customer `customer_contacts` που χρησιμοποιεί ο Sendable statement.

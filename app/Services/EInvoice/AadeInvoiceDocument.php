@@ -11,6 +11,7 @@ use App\Services\InvoiceVatBreakdown;
 use App\Support\Afm;
 use App\Support\MyData\Codes;
 use App\Support\MyData\IncomeClassResolver;
+use App\Support\MyData\VatExemptionGuidance;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
 use Firebed\AadeMyData\Enums\CurrencyCode;
@@ -267,7 +268,9 @@ class AadeInvoiceDocument
             // code AADE requires ([217] forbids category 7 without it). The
             // reason lives on the tenant's 0%-rate VatCategory; resolve once.
             if (abs($rate) < 0.01) {
-                $detail->setVatExemptionCategory(VatExemption::from($this->resolveVatExemptionCategory($line)));
+                $exemption = $this->resolveVatExemptionCategory($line);
+                $this->assertExemptionMatchesType($invoice, $type, $line, $exemption, $i + 1);
+                $detail->setVatExemptionCategory(VatExemption::from($exemption));
             }
 
             [$lineClass, $lineCat] = $this->resolveIncomeClass($line, $typeClass, $typeCat);
@@ -694,6 +697,29 @@ class AadeInvoiceDocument
                 '(1.1/2.1=εγχώριο, 1.2/2.2=ενδοκοινοτικό, 1.3/2.3=τρίτες χώρες).'
             );
         }
+    }
+
+    /**
+     * Refuse a 0% line whose §8.3 reason can never be right for this invoice type
+     * (16 on a foreign-counterpart type, 14 outside intra-EU goods — see
+     * VatExemptionGuidance::TYPE_CONFLICTS). AADE accepts such a document, so the
+     * wrong legal reason would otherwise file silently; warnings stay in the form.
+     */
+    private function assertExemptionMatchesType(Invoice $invoice, string $type, InvoiceLine $line, int $code, int $lineNo): void
+    {
+        $conflict = VatExemptionGuidance::typeConflict($type, $code);
+        if ($conflict === null || $conflict['level'] !== VatExemptionGuidance::CONFLICT_BLOCK) {
+            return;
+        }
+
+        $fromTenant = $line->vat_exemption_category === null || $line->vat_exemption_category === '';
+        throw new RuntimeException(
+            "Invoice {$invoice->invcode}, γραμμή {$lineNo}: {$conflict['message']} "
+            .($fromTenant
+                ? 'Η γραμμή δεν έχει δική της αιτία — πήρε αυτή της κατηγορίας ΦΠΑ 0% της εταιρείας. '
+                    .'Όρισε την αιτία στη γραμμή (επεξεργασία παραστατικού) ή διόρθωσέ την στις Κατηγορίες ΦΠΑ.'
+                : 'Διόρθωσε την αιτία απαλλαγής της γραμμής ή τον τύπο παραστατικού.')
+        );
     }
 
     /**

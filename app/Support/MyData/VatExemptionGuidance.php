@@ -19,6 +19,9 @@ namespace App\Support\MyData;
  *
  * WHAT IS WIRED TODAY: `recommendForType()` drives the invoice form's per-line
  * auto-suggestion, and the VatCategory-form helper text summarises the mapping.
+ * `typeConflict()` (rules in `TYPE_CONFLICTS`) flags a reason that contradicts the
+ * invoice type — a warning on the form's line, and for the impossible pairs a
+ * form validation error + a refusal at filing (AadeInvoiceDocument).
  * `SCENARIOS` (+ `scenarioOptions()` / `INTRO` / `labelForCode()`) is the encoded,
  * comprehensive reference — kept deliberately «για clarity» and guarded by
  * VatExemptionGuidanceTest; a scenario-PICKER UI that reads `scenarioOptions()`
@@ -146,6 +149,75 @@ class VatExemptionGuidance
             '1.3' => 8,   // εξαγωγή αγαθών → άρθρο 29
             default => null, // 1.1/2.1 (domestic), 2.3 (third-country service) → operator decides
         };
+    }
+
+    public const CONFLICT_BLOCK = 'block';
+
+    public const CONFLICT_WARN = 'warn';
+
+    /**
+     * A 0% line's §8.3 reason that CONTRADICTS the invoice type. The type already
+     * says who the counterpart is (1.1/2.1 Greece, 1.2/2.2 another EU state, 1.3/2.3
+     * outside the EU — enforced by the country↔type check at filing), and some
+     * reasons legally need a specific one.
+     *
+     * BLOCK only what can never be right: 16 (άρθρο 45, domestic reverse charge —
+     * both parties Greek) on a foreign-counterpart type, the exact MYD-007 defect;
+     * and 14 (άρθρο 33, intra-EU goods — the buyer is identified in ANOTHER EU
+     * state) on anything but an EU type. Everything else is WARN only: a mixed
+     * goods+services invoice legitimately carries a service reason on a goods
+     * type, and art. 18 covers place-of-supply exceptions (a property abroad) that
+     * can involve a Greek counterpart. Types not listed (credit notes, retail,
+     * self-billing) get no opinion.
+     *
+     * @var list<array{code: int, types: list<string>, level: string, why: string}>
+     */
+    public const TYPE_CONFLICTS = [
+        ['code' => 16, 'types' => ['1.2', '2.2', '1.3', '2.3'], 'level' => self::CONFLICT_BLOCK,
+            'why' => 'η 16 (άρθρο 45) είναι ΕΓΧΩΡΙΑ αντιστροφή επιβάρυνσης — ισχύει μόνο με Έλληνα αντισυμβαλλόμενο (1.1/2.1)'],
+        ['code' => 14, 'types' => ['1.1', '2.1', '1.3', '2.3'], 'level' => self::CONFLICT_BLOCK,
+            'why' => 'η 14 (άρθρο 33) είναι ενδοκοινοτική παράδοση αγαθών — θέλει αντισυμβαλλόμενο σε άλλη χώρα ΕΕ (τύπος 1.2)'],
+        ['code' => 14, 'types' => ['2.2'], 'level' => self::CONFLICT_WARN,
+            'why' => 'η 14 (άρθρο 33) αφορά ΑΓΑΘΑ, όχι υπηρεσίες'],
+        ['code' => 4, 'types' => ['1.1', '2.1'], 'level' => self::CONFLICT_WARN,
+            'why' => 'η 4 (άρθρο 18) σημαίνει τόπο παροχής υπηρεσίας εκτός Ελλάδας — σπάνιο με Έλληνα αντισυμβαλλόμενο (π.χ. ακίνητο στο εξωτερικό)'],
+        ['code' => 4, 'types' => ['1.2', '1.3'], 'level' => self::CONFLICT_WARN,
+            'why' => 'η 4 (άρθρο 18) αφορά ΥΠΗΡΕΣΙΕΣ — σε τιμολόγιο αγαθών ταιριάζει μόνο σε γραμμή υπηρεσίας'],
+        ['code' => 8, 'types' => ['2.2'], 'level' => self::CONFLICT_WARN,
+            'why' => 'η 8 (άρθρο 29) αφορά εξαγωγή εκτός ΕΕ'],
+        ['code' => 30, 'types' => ['1.2', '2.2', '1.3', '2.3'], 'level' => self::CONFLICT_WARN,
+            'why' => 'η 30 (OSS ενωσιακό) αφορά πωλήσεις σε ΙΔΙΩΤΕΣ άλλης χώρας ΕΕ — όχι σε επιχείρηση ΕΕ (αντιστροφή) ούτε σε πελάτη εκτός ΕΕ'],
+        ['code' => 31, 'types' => ['2.1', '2.2', '2.3'], 'level' => self::CONFLICT_WARN,
+            'why' => 'η 31 (IOSS) αφορά εισαγωγή ΑΓΑΘΩΝ, όχι υπηρεσίες'],
+    ];
+
+    /**
+     * Does this §8.3 reason contradict the invoice's myDATA type? null = no
+     * opinion (no known conflict, or a type we don't judge).
+     *
+     * @return array{level: string, message: string}|null
+     */
+    public static function typeConflict(?string $mydataType, int|string|null $code): ?array
+    {
+        $type = trim((string) $mydataType);
+        if ($code === null || $code === '' || $type === '') {
+            return null;
+        }
+        $code = (int) $code;
+
+        foreach (self::TYPE_CONFLICTS as $rule) {
+            if ($rule['code'] === $code && in_array($type, $rule['types'], true)) {
+                $message = "Αιτία {$code} σε τύπο {$type}: {$rule['why']}.";
+                $better = self::recommendForType($type);
+                if ($better !== null) {
+                    $message .= " Για τύπο {$type} η αιτία είναι {$better} (".self::labelForCode($better).').';
+                }
+
+                return ['level' => $rule['level'], 'message' => $message];
+            }
+        }
+
+        return null;
     }
 
     /**
