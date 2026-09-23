@@ -478,6 +478,12 @@ Design + gates: `docs/archive/leads-mini-crm.md`. **Χτισμένο (L0):**
   συναλλαγής.
 - **Ληξιπρόθεσμα** — due date, badge/filter, dashboard widget, ημερήσιες ειδοποιήσεις
   (`invoices:notify-overdue`).
+- **Υπενθυμίσεις πληρωμής (dunning, στυλ WHMCS)** — «πριν τη λήξη» + 1η/2η/3η βαθμίδα σε ημέρες μετά τη
+  λήξη, ανά εταιρεία (`CompanySettings`), προς έγκριση ή αυτόματα· ένα email ανά παραστατικό (τιμολόγια επί
+  πιστώσει + προτιμολόγια που στάλθηκαν· όχι WHMCS/legacy/μετρητοίς), opt-out ανά πελάτη, δικά σου κείμενα,
+  PDF συνημμένο, online-πληρωμή link όταν υπάρχει gateway. Σελίδα **Υπενθυμίσεις** (log: εστάλη/απέτυχε/
+  παραλείφθηκε/ακυρώθηκε + γιατί, «Επόμενες 14 ημ.»). `invoices:send-reminders` (`ReminderPlanner` →
+  `ReminderRunner` → `SendInvoiceReminder`)· DB-unique ανά βαθμίδα + claim πριν την αποστολή = ποτέ διπλό email.
 - **Πρόχειρα εκτός money totals + ορατότητα** (MON-5) — τα unissued sale-drafts δεν μετρούν σε
   τζίρο/εισπρακτέα/ΦΠΑ/Καρτέλα (`InvoiceScope::excludeUnissuedDrafts`, συνεπές σε όλα τα surfaces·
   credit-note & legacy drafts κρατιούνται)· πλακίδιο dashboard **«Πρόχειρα (προτιμολόγια)»**

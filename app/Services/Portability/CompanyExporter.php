@@ -63,6 +63,9 @@ class CompanyExporter
         'leads', 'lead_activities',
         'products', 'product_price_tiers', 'product_billing_prices',
         'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
+        // Dunning log — travels so the target knows which stages already went
+        // out (else its first run would re-send them).
+        'invoice_reminders',
         'payments',
         'quotes', 'quote_lines', 'quote_mail_logs',
         'expenses', 'expense_lines', 'expense_marks',

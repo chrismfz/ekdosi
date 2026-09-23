@@ -72,6 +72,9 @@ class TenantRoleProvisioner
         'LeadsCalendar' => ['View'],
         'Product' => ['ViewAny', 'View', 'Create', 'Update'],
         'Payment' => ['ViewAny', 'View', 'Create', 'Update'],
+        // Payment reminders: approving/sending/skipping them is daily AR work, like
+        // emailing an invoice. No Create:* (rows come from the daily run only).
+        'InvoiceReminder' => ['ViewAny', 'View', 'Update'],
         'Expense' => ['ViewAny', 'View', 'Create', 'Update'],
         'Supplier' => ['ViewAny', 'View', 'Create', 'Update'],
         // WHMCS inbox: daily operator work (review/file staged invoices). No

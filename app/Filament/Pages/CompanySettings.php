@@ -6,11 +6,17 @@ use App\Filament\Clusters\SettingsCluster;
 use App\Filament\Support\MailTemplateFields;
 use App\Models\Company;
 use App\Models\CompanyBackupSetting;
+use App\Models\InvoiceReminder;
+use App\Services\Reminders\ReminderMessage;
+use App\Services\Reminders\ReminderSettings;
 use App\Support\MyData\ClassificationGuidance;
 use BackedEnum;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
+use Filament\Forms\Components\Radio;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -20,6 +26,7 @@ use Filament\Forms\Contracts\HasForms;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Section;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
 
@@ -89,6 +96,17 @@ class CompanySettings extends Page implements HasForms
         // a credential → safe to self-serve.
         'default_language',
         'mydata_auto_fetch_expenses',
+        // Payment reminders (dunning).
+        'reminders_enabled',
+        'reminders_mode',
+        'reminders_since',
+        'reminder_pre_due_days',
+        'reminder_first_days',
+        'reminder_second_days',
+        'reminder_final_days',
+        'reminder_min_balance',
+        'reminder_attach_pdf',
+        'reminder_templates',
     ];
 
     /**
@@ -108,6 +126,7 @@ class CompanySettings extends Page implements HasForms
         foreach (self::COMPANY_FIELDS as $field) {
             $state[$field] = $company->{$field};
         }
+        $state['reminders_mode'] = $company->reminders_mode ?: 'review';   // required radio; the column's own default
         $state['backup_enabled'] = (bool) ($backup->enabled ?? false);
         $state['backup_frequency'] = $backup->frequency ?? 'off';
         $state['backup_run_at_time'] = $backup->run_at_time ?? '02:00';
@@ -218,6 +237,8 @@ class CompanySettings extends Page implements HasForms
                     ])
                     ->columns(2),
 
+                $this->remindersSection(),
+
                 Section::make('Αυτόματη άντληση εξόδων (myDATA)')
                     ->description('Read-only ανανέωση της λίστας «αδέσποτων εξόδων» για ΑΥΤΗ την εταιρεία, ανά λίγες ώρες. Δεν δημιουργεί εγγραφές — η καταχώριση παραμένει χειροκίνητη.')
                     ->visible(fn (): bool => $this->tenant()->canReadMyData())
@@ -277,6 +298,107 @@ class CompanySettings extends Page implements HasForms
                 ->icon('heroicon-o-check')
                 ->action(fn () => $this->save()),
         ];
+    }
+
+    /**
+     * «Υπενθυμίσεις πληρωμής» — WHMCS-style: an optional reminder before the due
+     * date, then 1st / 2nd / final after it, each N days from the due date (blank =
+     * that stage is off), each with its own subject/body (blank = the default text,
+     * in the customer's language).
+     */
+    private function remindersSection(): Section
+    {
+        // The after-due stages escalate: each set one must come later than the set
+        // ones before it (equal/inverted days would send the «2η» before the «1η»).
+        $afterDue = ['reminder_first_days', 'reminder_second_days', 'reminder_final_days'];
+        $stageDays = fn (string $name, string $label, string $help): TextInput => TextInput::make($name)
+            ->label($label)
+            ->numeric()->integer()->minValue(0)->maxValue(365)
+            ->suffix('ημέρες')
+            ->placeholder('ανενεργή')
+            ->helperText($help)
+            ->rule(fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($name, $afterDue, $get): void {
+                $at = array_search($name, $afterDue, true);
+                if ($at === false || blank($value)) {
+                    return;
+                }
+                foreach (array_slice($afterDue, 0, $at) as $earlier) {
+                    if (filled($get($earlier)) && (int) $value <= (int) $get($earlier)) {
+                        $fail('Πρέπει να είναι περισσότερες ημέρες από την προηγούμενη υπενθύμιση ('.(int) $get($earlier).').');
+
+                        return;
+                    }
+                }
+            });
+        $templateLocale = ReminderSettings::templateLocaleOf($this->tenant());
+
+        $templates = [];
+        foreach (InvoiceReminder::STAGE_LABELS as $stage => $label) {
+            if ($stage === InvoiceReminder::STAGE_MANUAL) {
+                continue;
+            }
+            $templates[] = TextInput::make("reminder_templates.{$stage}.subject")
+                ->label("{$label} — θέμα")
+                ->maxLength(191)
+                ->placeholder(fn (): string => trans("mail.reminder.{$stage}.subject", [], $templateLocale))
+                ->columnSpanFull();
+            $templates[] = Textarea::make("reminder_templates.{$stage}.body")
+                ->label("{$label} — κείμενο")
+                ->rows(5)
+                ->placeholder(fn (): string => trans("mail.reminder.{$stage}.body", [], $templateLocale))
+                ->columnSpanFull();
+        }
+
+        return Section::make('Υπενθυμίσεις πληρωμής')
+            ->description('Email υπενθύμισης στον πελάτη για ανεξόφλητα τιμολόγια επί πιστώσει και για προτιμολόγια που του έχουν προσφερθεί (όχι για όσα προέρχονται από WHMCS). Όπως στο WHMCS: προαιρετικά μία πριν τη λήξη και μετά 1η / 2η / τελευταία. Τι στάλθηκε και τι περιμένει: «Υπενθυμίσεις».')
+            ->collapsible()
+            ->schema([
+                Toggle::make('reminders_enabled')
+                    ->label('Ενεργές υπενθυμίσεις')
+                    ->dehydrateStateUsing(fn ($state): bool => (bool) $state)
+                    ->live()
+                    ->afterStateUpdated(function (bool $state, $set, $get): void {
+                        if ($state && blank($get('reminders_since'))) {
+                            $set('reminders_since', now()->toDateString());
+                        }
+                    })
+                    ->columnSpanFull(),
+                Radio::make('reminders_mode')
+                    ->label('Αποστολή')
+                    ->options([
+                        'review' => 'Προς έγκριση — μπαίνουν στη σελίδα «Υπενθυμίσεις» και τις στέλνεις εσύ',
+                        'auto' => 'Αυτόματα — φεύγουν μόνες τους',
+                    ])
+                    ->default('review')
+                    ->required()
+                    ->columnSpanFull(),
+                DatePicker::make('reminders_since')
+                    ->label('Για παραστατικά που λήγουν από')
+                    ->native(false)
+                    ->displayFormat('d/m/Y')
+                    ->requiredIf('reminders_enabled', true)
+                    ->helperText('Ό,τι έληγε νωρίτερα δεν παίρνει υπενθύμιση — ώστε η ενεργοποίηση να μη στείλει «τελευταία υπενθύμιση» για παλιές οφειλές.'),
+                TextInput::make('reminder_min_balance')
+                    ->label('Ελάχιστο υπόλοιπο')
+                    ->numeric()->minValue(0)
+                    ->suffix('€')
+                    ->dehydrateStateUsing(fn ($state) => filled($state) ? $state : 0)   // blank = no minimum (NOT NULL column)
+                    ->helperText('Κάτω από αυτό δεν στέλνεται υπενθύμιση.'),
+                $stageDays('reminder_pre_due_days', 'Πριν τη λήξη', 'Ημέρες ΠΡΙΝ τη λήξη (φιλική υπενθύμιση).'),
+                $stageDays('reminder_first_days', '1η υπενθύμιση', 'Ημέρες μετά τη λήξη.'),
+                $stageDays('reminder_second_days', '2η υπενθύμιση', 'Ημέρες μετά τη λήξη.'),
+                $stageDays('reminder_final_days', '3η (τελευταία)', 'Ημέρες μετά τη λήξη.'),
+                Toggle::make('reminder_attach_pdf')
+                    ->label('Επισύναψη του PDF του παραστατικού')
+                    ->dehydrateStateUsing(fn ($state): bool => (bool) $state)
+                    ->columnSpanFull(),
+                Section::make('Κείμενα email')
+                    ->description('Κενό = το προεπιλεγμένο κείμενο (φαίνεται αχνά). Τα δικά σου κείμενα πάνε σε πελάτες στη γλώσσα της εταιρείας· οι υπόλοιποι παίρνουν το προεπιλεγμένο στη γλώσσα τους. Placeholders: '.ReminderMessage::PLACEHOLDERS.'. Το {pay_section} γίνεται «πληρώστε online: …» μόνο αν η εταιρεία δέχεται online πληρωμές.')
+                    ->collapsed()
+                    ->schema($templates)
+                    ->columnSpanFull(),
+            ])
+            ->columns(2);
     }
 
     public function save(): void

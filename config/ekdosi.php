@@ -305,6 +305,13 @@ return [
         'overdue_notifications_enabled' => env('EKDOSI_SCHEDULE_OVERDUE_NOTIFICATIONS', false),
         'overdue_notifications_time' => env('EKDOSI_OVERDUE_NOTIFICATIONS_TIME', '07:30'),
 
+        // invoices:send-reminders — daily payment reminders (dunning). Default ON
+        // here because the real switch is PER TENANT («Ρυθμίσεις εταιρείας →
+        // Υπενθυμίσεις πληρωμής», default off): this only lets tenants that opted
+        // in actually run. HH:MM (server time).
+        'invoice_reminders_enabled' => env('EKDOSI_SCHEDULE_INVOICE_REMINDERS', true),
+        'invoice_reminders_time' => env('EKDOSI_INVOICE_REMINDERS_TIME', '09:00'),
+
         // services:stage-renewals — stage DRAFT renewal invoices for due
         // service contracts, per tenant. Default OFF: it creates real draft
         // documents, so enable per deploy once the catalogue + contracts are
