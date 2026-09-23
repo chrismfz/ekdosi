@@ -96,8 +96,9 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   (1381 από 1833 active, `domains/whmcs-baseline.md`).
 - **Υπενθυμίσεις λήξης domain (60/30/15/10/5 ημέρες) — cutover blocker.** Η WHMCS έχει στείλει 34.296· στο ekdosi
   δεν υπάρχουν (README §3.8 δεν χτίστηκε).
-- **CNIC: 226 active ακόμα στο CentralNic** (μετάβαση στην ανανέωση) — το registrar-first import δεν τα βλέπει·
-  απόφαση: manual/CSV «χωρίς API» ή read-only adapter.
+- **CNIC: 226 active ακόμα στο CentralNic** → **απόφαση: «χωρίς API»** (manual σύνδεση, σταδιακά όλα στο OP·
+  ~155 φεύγουν μόνα τους ως 2027-02 μέσω της WHMCS). Λείπει: `domains:import-csv --connection=` ώστε τα CNIC
+  domains να πάρουν ρητή manual σύνδεση (αλλιώς κληρονομούν το OP του .com) — `domains/whmcs-baseline.md` §9.
 - **A5 — polish + registrar↔local reconciliation** (mirror του myDATA reconcile): bulk availability, portfolio
   dashboard· **cross-tenant guard και στο READ path** (`DomainSyncService::sync` by-name adopt σε κοινό reseller
   account)· reconciler inputs: renew logs με `short_of_target=null`/κάτω από `target_expiry`, orphan unconsumed renewals.
