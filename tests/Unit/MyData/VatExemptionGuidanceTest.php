@@ -95,6 +95,8 @@ class VatExemptionGuidanceTest extends TestCase
         $this->assertNull(VatExemptionGuidance::typeConflict('1.2', 14));
         // A services 2.2 may still carry a goods line (mixed invoice) → warn only.
         $this->assertSame(VatExemptionGuidance::CONFLICT_WARN, VatExemptionGuidance::typeConflict('2.2', 14)['level']);
+        // An EU buyer's goods exported outside the EU → 8 on a 1.2 is possible → warn only.
+        $this->assertSame(VatExemptionGuidance::CONFLICT_WARN, VatExemptionGuidance::typeConflict('1.2', 8)['level']);
     }
 
     public function test_the_recommended_reason_for_each_type_is_never_a_conflict(): void

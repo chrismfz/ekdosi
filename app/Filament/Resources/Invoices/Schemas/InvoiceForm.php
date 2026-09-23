@@ -990,23 +990,35 @@ class InvoiceForm
      * After an invoice-type change: a 0% line with no reason gets the new type's
      * suggestion, and a reason that can never be right for the new type is
      * replaced by it (or cleared, so the operator picks). Any other reason stays —
-     * we can't tell an auto-suggested 4 from a deliberate one on a service line,
-     * and a suspicious pair keeps its warning icon.
+     * we can't tell an auto-suggested 4 from a deliberate one on a service line —
+     * but a now-suspicious one is called out in a notification, not just the icon.
      */
     private static function resyncLineExemptions(Get $get, callable $set, ?string $newType): void
     {
         $newSuggestion = VatExemptionGuidance::recommendForType($newType);
+        $suspicious = [];
 
+        $lineNo = 0;
         foreach ((array) $get('lines') as $key => $line) {
+            $lineNo++;
             if ((float) ($line['vat_percent'] ?? 0) !== 0.0) {
                 continue;
             }
             $reason = $line['vat_exemption_category'] ?? null;
-            $replace = blank($reason)
-                || (VatExemptionGuidance::typeConflict($newType, $reason)['level'] ?? null) === VatExemptionGuidance::CONFLICT_BLOCK;
-            if ($replace) {
+            $conflict = VatExemptionGuidance::typeConflict($newType, $reason);
+            if (blank($reason) || ($conflict['level'] ?? null) === VatExemptionGuidance::CONFLICT_BLOCK) {
                 $set("lines.{$key}.vat_exemption_category", $newSuggestion);
+            } elseif ($conflict !== null) {
+                $suspicious[$conflict['message']][] = $lineNo;
             }
+        }
+
+        foreach ($suspicious as $message => $lineNumbers) {
+            Notification::make()
+                ->title('Έλεγξε την αιτία απαλλαγής — γραμμή '.implode(', ', $lineNumbers))
+                ->body($message)
+                ->warning()
+                ->send();
         }
     }
 

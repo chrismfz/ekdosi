@@ -194,6 +194,22 @@ class VatExemptionTypeConflictTest extends TestCase
         $this->assertSame(4, (int) $reason($component));
     }
 
+    public function test_a_reason_that_turns_suspicious_on_a_type_switch_is_called_out_not_rewritten(): void
+    {
+        // 1.2 → 2.2 with the goods suggestion 14 still on a line: it may be a real
+        // goods line on a mixed invoice, so it stays — but the operator is told,
+        // loudly, instead of relying on a small hint icon.
+        $goods = $this->loginWithType('1.2');
+        $service = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ENY', 'name' => 'Ενδ. υπηρ.', 'invcount' => 1, 'mydata_type' => '2.2']);
+
+        $component = Livewire::test(CreateInvoice::class)
+            ->fillForm($this->formData($goods, exemption: 14))
+            ->fillForm(['invoice_type_id' => $service->id]);
+
+        $this->assertSame(14, (int) (collect($component->get('data.lines'))->first()['vat_exemption_category'] ?? 0));
+        $component->assertNotified('Έλεγξε την αιτία απαλλαγής — γραμμή 1');
+    }
+
     private function invoiceOfType(string $mydataType, ?int $exemption, int $code = 1, ?Invoice $creditOf = null): Invoice
     {
         $type = InvoiceType::firstOrCreate(
