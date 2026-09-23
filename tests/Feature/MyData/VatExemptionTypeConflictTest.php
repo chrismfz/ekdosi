@@ -166,7 +166,7 @@ class VatExemptionTypeConflictTest extends TestCase
         $this->assertSame(14, (int) InvoiceLine::query()->withoutGlobalScopes()->value('vat_exemption_category'));
     }
 
-    public function test_switching_the_invoice_type_re_derives_the_reasons_it_suggested(): void
+    public function test_switching_the_invoice_type_fixes_only_blank_or_impossible_reasons(): void
     {
         $goods = $this->loginWithType('1.2');
         $service = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ENY', 'name' => 'Ενδ. υπηρ.', 'invcount' => 1, 'mydata_type' => '2.2']);
@@ -174,20 +174,17 @@ class VatExemptionTypeConflictTest extends TestCase
         $thirdCountry = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'TPT', 'name' => 'Τρίτες', 'invcount' => 1, 'mydata_type' => '2.3']);
         $reason = fn ($component) => collect($component->get('data.lines'))->first()['vat_exemption_category'] ?? null;
 
-        $component = Livewire::test(CreateInvoice::class)->fillForm($this->formData($goods, exemption: 14));
-        $this->assertSame(14, (int) $reason($component));
+        $component = Livewire::test(CreateInvoice::class)->fillForm($this->formData($service, exemption: 4));
 
-        // 1.2 → 2.2: the goods suggestion (14) becomes the service one (4).
-        $component->fillForm(['invoice_type_id' => $service->id]);
-        $this->assertSame(4, (int) $reason($component));
-
-        // 2.2 → 2.3: 4 still fits a third-country service → a deliberate/valid reason stays.
+        // 2.2 → 2.3 and 2.2 → 1.2: a 4 still fits (a third-country service; a service
+        // line on a mixed goods invoice) — never silently rewritten to another reason.
         $component->fillForm(['invoice_type_id' => $thirdCountry->id]);
         $this->assertSame(4, (int) $reason($component));
-
-        // A 14 that is impossible on a domestic 2.1 is cleared (no suggestion exists
-        // there → the operator picks), never left to fail validation on its own.
         $component->fillForm(['invoice_type_id' => $goods->id]);
+        $this->assertSame(4, (int) $reason($component));
+
+        // A 14 impossible on a domestic 2.1 is cleared (no suggestion exists there →
+        // the operator picks), never left to fail validation on its own.
         $component->set('data.lines.'.array_key_first($component->get('data.lines')).'.vat_exemption_category', 14);
         $component->fillForm(['invoice_type_id' => $domestic->id]);
         $this->assertNull($reason($component));

@@ -2,6 +2,7 @@
 
 namespace App\Services\WhmcsInbox;
 
+use App\Enums\MyDataMode;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -10,10 +11,8 @@ use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
 use App\Services\EInvoiceSubmitterFactory;
-use App\Services\NullSubmitter;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\Whmcs\WhmcsWritebackService;
-use App\Support\MyData\VatExemptionGuidance;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use LogicException;
@@ -119,7 +118,7 @@ class WhmcsInvoiceFiler
             // from any other negative line item — never auto-file one unreviewed.
             WhmcsFilingGuard::assertNoFoldedDiscountForUnattendedIssue($mapped, $pending);
         }
-        $this->refuseProblematicZeroVatLines($tenant, $mapped, $pending, $invoiceType);
+        $this->refuseProblematicZeroVatLines($tenant, $mapped, $pending);
         // WH-1/WH-4: non-EUR or negative (promo/credit) lines → HOLD.
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
         // WH-2/WH-5: recomputed gross must reconcile with the WHMCS total, and
@@ -404,7 +403,7 @@ class WhmcsInvoiceFiler
 
     /**
      * Refuse to file an invoice whose mapped lines contain 0% VAT
-     * UNLESS the tenant does not really file (NullSubmitter tolerates 0%
+     * UNLESS the tenant is in Off mode (NullSubmitter tolerates 0%
      * for testing / training / pre-production paths).
      *
      * Why this check happens BEFORE the transactional persist:
@@ -419,17 +418,14 @@ class WhmcsInvoiceFiler
         Company $tenant,
         array $mapped,
         PendingWhmcsInvoice $pending,
-        InvoiceType $invoiceType,
     ): void {
         $zero = $mapped['totals']['zero_vat_lines'] ?? [];
         if ($zero === []) {
             return;
         }
-        // Only a tenant that really files builds the AADE payload. The submitter
-        // factory is the one definition of that — `mydata_mode` alone is not: a
-        // provider tenant files with mydata_mode «off».
-        if ($this->submitterFactory->for($tenant) instanceof NullSubmitter) {
-            return;
+        $tenantMode = $tenant->mydata_mode ?? MyDataMode::Off->value;
+        if ($tenantMode === MyDataMode::Off->value) {
+            return;   // off-mode tenants don't hit the submitter validation
         }
 
         // G4: a 0% line is now fileable IF the tenant has exactly one 0%-rate
@@ -443,24 +439,12 @@ class WhmcsInvoiceFiler
             ->whereNotNull('vat_exemption_category')
             ->distinct()
             ->pluck('vat_exemption_category');
-        $sample = implode('", "', array_slice($zero, 0, 3));
-        $more = count($zero) > 3 ? ' (+'.(count($zero) - 3).' more)' : '';
-
         if ($exemptions->count() === 1) {
-            // Resolvable — unless that reason can never be right for this type
-            // (the same refusal AadeInvoiceDocument makes at build).
-            $conflict = VatExemptionGuidance::typeConflict($invoiceType->mydata_type, (int) $exemptions->first());
-            if ($conflict === null || $conflict['level'] !== VatExemptionGuidance::CONFLICT_BLOCK) {
-                return;   // let the submitter file it
-            }
-
-            throw new LogicException(
-                'WHMCS invoice #'.$pending->whmcs_invoice_id.' has '.count($zero).' untaxed line(s) '
-                .'("'.$sample.'"'.$more.') and the 0%-rate VAT category\'s exemption reason contradicts the '
-                .'invoice type — '.$conflict['message'].' Fix the reason (Setup → VAT Categories) or hold this row.'
-            );
+            return;   // resolvable — let the submitter file it
         }
 
+        $sample = implode('", "', array_slice($zero, 0, 3));
+        $more = count($zero) > 3 ? ' (+'.(count($zero) - 3).' more)' : '';
         $reason = $exemptions->count() > 1
             ? 'multiple 0%-rate VAT categories define different exemption reasons (ambiguous — keep one).'
             : 'no 0%-rate VAT category has a vat_exemption_category set (Setup → VAT Categories).';

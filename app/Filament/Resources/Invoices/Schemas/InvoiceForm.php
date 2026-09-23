@@ -113,7 +113,7 @@ class InvoiceForm
                         // without a hardcoded global default — set it once on
                         // the type. Only writes the fields the type actually
                         // configures; never blanks an operator's choice.
-                        ->afterStateUpdated(function ($state, $old, callable $set, Get $get) {
+                        ->afterStateUpdated(function ($state, callable $set, Get $get) {
                             if (! $state) {
                                 return;
                             }
@@ -124,10 +124,9 @@ class InvoiceForm
                                 return;
                             }
                             // The 0% lines' §8.3 reasons follow the type (MYD-007): a reason
-                            // the OLD type suggested, or one impossible for the new type,
-                            // must not linger into a validation error on a field the
-                            // operator never touched.
-                            self::resyncLineExemptions($get, $set, self::mydataTypeOf($old), $type->mydata_type);
+                            // impossible for the new type must not linger into a validation
+                            // error on a field the operator never touched.
+                            self::resyncLineExemptions($get, $set, $type->mydata_type);
                             if ($type->distribution_aim_id) {
                                 $set('distribution_aim_id', $type->distribution_aim_id);
                             }
@@ -988,13 +987,14 @@ class InvoiceForm
     }
 
     /**
-     * After an invoice-type change, re-derive each 0% line's §8.3 reason that came
-     * from the OLD type (blank, or the old type's suggestion) or can never be right
-     * for the new one. A deliberate reason that still fits is left alone.
+     * After an invoice-type change: a 0% line with no reason gets the new type's
+     * suggestion, and a reason that can never be right for the new type is
+     * replaced by it (or cleared, so the operator picks). Any other reason stays —
+     * we can't tell an auto-suggested 4 from a deliberate one on a service line,
+     * and a suspicious pair keeps its warning icon.
      */
-    private static function resyncLineExemptions(Get $get, callable $set, ?string $oldType, ?string $newType): void
+    private static function resyncLineExemptions(Get $get, callable $set, ?string $newType): void
     {
-        $oldSuggestion = VatExemptionGuidance::recommendForType($oldType);
         $newSuggestion = VatExemptionGuidance::recommendForType($newType);
 
         foreach ((array) $get('lines') as $key => $line) {
@@ -1003,7 +1003,6 @@ class InvoiceForm
             }
             $reason = $line['vat_exemption_category'] ?? null;
             $replace = blank($reason)
-                || ($newSuggestion !== null && (int) $reason === $oldSuggestion)
                 || (VatExemptionGuidance::typeConflict($newType, $reason)['level'] ?? null) === VatExemptionGuidance::CONFLICT_BLOCK;
             if ($replace) {
                 $set("lines.{$key}.vat_exemption_category", $newSuggestion);
