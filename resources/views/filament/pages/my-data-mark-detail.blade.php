@@ -61,6 +61,63 @@
             </x-filament::section>
         @endif
 
+        @if ($isOrphan && ($doc['direction'] ?? null) !== 'inbound')
+            <x-filament::section>
+                <x-slot name="heading">Ποιο τοπικό παραστατικό μπορεί να είναι;</x-slot>
+                <x-slot name="description">
+                    Το myDATA δεν κρατά περιγραφές γραμμών — ψάχνουμε με σειρά/ΑΑ, ποσό, ΑΦΜ και ημερομηνία
+                    ανάμεσα στα τοπικά παραστατικά που δεν έχουν ΜΑΡΚ. Αν δεν ταιριάζει κανένα, «Καταχώριση τοπικά».
+                </x-slot>
+
+                @if ($sameNumber)
+                    <div class="mb-3 text-sm text-warning-700">
+                        ⚠ Υπάρχει ήδη τοπικό
+                        <a href="{{ $sameNumber['url'] }}" class="hover:underline font-medium">{{ $sameNumber['invcode'] }}</a>
+                        με άλλο ΜΑΡΚ ({{ $sameNumber['mark'] }}) — αυτό εδώ είναι πιθανότατα δεύτερη υποβολή του ίδιου αριθμού
+                        (π.χ. ακύρωση και επανυποβολή από άλλο σύστημα).
+                    </div>
+                @endif
+
+                @if ($candidates === [])
+                    <div class="text-sm text-gray-500">Δεν βρέθηκε πιθανό τοπικό παραστατικό.</div>
+                @else
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <thead>
+                                <tr class="border-b border-gray-200 text-left text-gray-500">
+                                    <th class="py-2 pr-4">Παραστατικό</th>
+                                    <th class="py-2 pr-4">Ημ/νία</th>
+                                    <th class="py-2 pr-4">Πελάτης</th>
+                                    <th class="py-2 pr-4 text-right">Σύνολο</th>
+                                    <th class="py-2 pr-4">Ταιριάζει σε</th>
+                                    <th class="py-2"></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach ($candidates as $c)
+                                    <tr class="border-b border-gray-100">
+                                        <td class="py-2 pr-4 whitespace-nowrap"><a href="{{ $c['url'] }}" class="text-primary-600 hover:underline font-medium">{{ $c['invcode'] }}</a></td>
+                                        <td class="py-2 pr-4 whitespace-nowrap">{{ $c['date'] ?? '—' }}</td>
+                                        <td class="py-2 pr-4">{{ $c['customer'] ?? '—' }}</td>
+                                        <td class="py-2 pr-4 text-right whitespace-nowrap">{{ \App\Support\Money::eur($c['gross']) }}</td>
+                                        <td class="py-2 pr-4 text-xs text-gray-600">{{ $c['reasons'] }}</td>
+                                        <td class="py-2 text-right">
+                                            @if ($this->canResolveOrphans())
+                                                <x-filament::button size="xs" color="gray" icon="heroicon-m-link"
+                                                    wire:click="mountAction('link', { invoice: {{ $c['id'] }} })">
+                                                    Σύνδεση
+                                                </x-filament::button>
+                                            @endif
+                                        </td>
+                                    </tr>
+                                @endforeach
+                            </tbody>
+                        </table>
+                    </div>
+                @endif
+            </x-filament::section>
+        @endif
+
         {{-- Header / document identity --}}
         <x-filament::section>
             <x-slot name="heading">Στοιχεία παραστατικού</x-slot>
