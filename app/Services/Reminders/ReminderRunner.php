@@ -9,6 +9,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceReminder;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
+use App\Services\InvoiceBalance;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -27,7 +28,10 @@ final class ReminderRunner
     /** A row stuck in «sending» (or «queued») this long was interrupted / lost. */
     private const STALE_SENDING_MINUTES = 30;
 
-    public function __construct(private readonly ReminderPlanner $planner) {}
+    public function __construct(
+        private readonly ReminderPlanner $planner,
+        private readonly InvoiceBalance $balances,
+    ) {}
 
     /**
      * @return array{planned: int, created: int, cancelled: int}
@@ -97,6 +101,73 @@ final class ReminderRunner
     }
 
     /**
+     * «Υπενθύμιση τώρα»: one manual reminder per chosen document, queued for
+     * sending straight away (works whether or not automatic reminders are on).
+     * Documents that can't be reminded (paid, no email, opted out, one already on
+     * its way or sent today) are skipped with the reason. What the document still
+     * had waiting (approval, or a failed send) is retired — the manual one
+     * replaces it (an automatic stage counts as done). Check + insert run under a lock
+     * on the document, so a double submit can't queue two.
+     *
+     * @param  iterable<Invoice>  $invoices  the tenant's documents (caller-scoped)
+     * @return array{queued: int, skipped: array<string, string>} skipped: invcode => reason
+     */
+    public function sendManual(Company $company, iterable $invoices, ?int $userId): array
+    {
+        $settings = ReminderSettings::for($company);
+        $queued = 0;
+        $skipped = [];
+
+        foreach ($invoices as $invoice) {
+            if ((int) $invoice->company_id !== (int) $company->getKey()) {
+                continue;
+            }
+
+            $row = DB::transaction(function () use ($invoice, $company, $settings, $userId, &$skipped): ?InvoiceReminder {
+                Invoice::query()->withoutGlobalScope(CompanyScope::class)->whereKey($invoice->getKey())->lockForUpdate()->first();
+                $invoice->loadMissing(['customer', 'paymentMethod', 'invoiceType']);
+                $balance = $this->balances->for($invoice)->balance;
+                if (($blocker = $this->planner->manualBlocker($invoice, $settings, $balance)) !== null) {
+                    $skipped[(string) $invoice->invcode] = $blocker;
+
+                    return null;
+                }
+
+                // What was waiting (approval, or a failed send) is replaced — no
+                // «Ξανά αποστολή» of it right after the manual one.
+                InvoiceReminder::query()->withoutGlobalScope(CompanyScope::class)
+                    ->where('invoice_id', $invoice->getKey())
+                    ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_FAILED])
+                    ->update(['status' => InvoiceReminder::STATUS_CANCELLED, 'reason' => 'Αντικαταστάθηκε από χειροκίνητη υπενθύμιση.', 'updated_at' => now()]);
+
+                $due = ReminderPlanner::dueDateOf($invoice);
+
+                return InvoiceReminder::create([
+                    'company_id' => $company->getKey(),
+                    'invoice_id' => $invoice->getKey(),
+                    'customer_id' => $invoice->customer_id,
+                    'stage' => InvoiceReminder::STAGE_MANUAL,
+                    'auto_stage' => null,
+                    'document_kind' => ReminderPlanner::kindOf($invoice),
+                    'due_date' => $due?->toDateString(),
+                    'days_overdue' => $due !== null ? (int) $due->diffInDays(CarbonImmutable::today(), false) : null,
+                    'balance' => $this->planner->chaseableBalance($invoice, $balance),
+                    'status' => InvoiceReminder::STATUS_QUEUED,
+                    'trigger' => 'manual',
+                    'triggered_by_user_id' => $userId,
+                ]);
+            });
+
+            if ($row !== null) {
+                SendInvoiceReminder::dispatch($row->getKey());   // after commit — the job must see the row
+                $queued++;
+            }
+        }
+
+        return ['queued' => $queued, 'skipped' => $skipped];
+    }
+
+    /**
      * Cancel reminders still waiting for a document that no longer qualifies
      * (paid, cancelled, opted out, reminders switched off…), and release rows
      * interrupted mid-send so the operator can decide to send them again.
@@ -148,7 +219,12 @@ final class ReminderRunner
             ->withoutGlobalScope(CompanyScope::class)
             ->where('invoice_id', $row->invoice_id)
             ->whereKeyNot($row->getKey())
-            ->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_FAILED])
+            // Automatic rows not yet sent; of the operator's manual ones only a
+            // FAILED one (stale once a newer reminder is recorded) — a manual one
+            // in flight is theirs.
+            ->where(fn ($q) => $q
+                ->where(fn ($a) => $a->where('trigger', 'auto')->whereIn('status', [InvoiceReminder::STATUS_AWAITING, InvoiceReminder::STATUS_QUEUED, InvoiceReminder::STATUS_FAILED]))
+                ->orWhere('status', InvoiceReminder::STATUS_FAILED))
             ->update([
                 'status' => InvoiceReminder::STATUS_CANCELLED,
                 'reason' => 'Αντικαταστάθηκε από «'.(InvoiceReminder::STAGE_LABELS[$row->stage] ?? $row->stage).'».',

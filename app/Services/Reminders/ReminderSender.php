@@ -66,7 +66,7 @@ final class ReminderSender
         try {
             $due = ReminderPlanner::dueDateOf($invoice);
             $days = $due !== null ? (int) $due->diffInDays(CarbonImmutable::today(), false) : null;
-            $balance = $this->balances->for($invoice)->balance;
+            $balance = $this->planner->chaseableBalance($invoice);   // never more than the customer owes overall
             $locale = CustomerLanguage::forDocumentMail($invoice);
             $message = $this->message->build($invoice, $row->stage, $due, $days, $balance, $settings, $locale);
             $subject = $message['subject'];
