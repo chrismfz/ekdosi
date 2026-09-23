@@ -230,6 +230,13 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
+     * `origin` of a document NOT issued by this app (NULL = issued here): a sale
+     * imported from the myDATA orphans. History, not a new issue — no balance
+     * snapshot, no automatic reminders (not mass-assignable; set by the importer).
+     */
+    public const ORIGIN_MYDATA_ORPHAN = 'mydata_orphan';
+
+    /**
      * Mass-assignable columns. The myDATA cache columns
      * (mydata_sent / mydata_state / mydata_mark / mydata_url) are
      * INTENTIONALLY OMITTED — they're written ONLY by the future

@@ -4,9 +4,16 @@ namespace App\Filament\Pages;
 
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\Invoice;
+use App\Models\InvoiceType;
 use App\Models\MyDataMark;
+use App\Models\PaymentMethod;
 use App\Services\MyData\EnrichInvoiceFromAade;
+use App\Services\MyData\Orphans\OrphanImporter;
+use App\Services\MyData\Orphans\OrphanLinker;
+use App\Services\MyData\Orphans\OrphanMatcher;
+use App\Services\MyData\Orphans\OrphanParty;
 use App\Services\MyData\SyncInvoiceStateFromAade;
 use App\Services\MyData\TransmittedDocReader;
 use App\Support\MyData\MarkDetail;
@@ -15,10 +22,16 @@ use Carbon\Carbon;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Field;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Filament\Schemas\Components\Component;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\HtmlString;
+use Livewire\Attributes\Locked;
 use Livewire\Attributes\Url;
 use RuntimeException;
 use Throwable;
@@ -35,7 +48,10 @@ use UnitEnum;
  *     mydata_marks, with a link straight to the invoice.
  *   - ORPHAN: no local record → fetch the full document from AADE
  *     (RequestTransmittedDocs, line-level) within the date window and show
- *     it read-only. "Καταχώριση τοπικά" is the (future) hook to import it.
+ *     it, with the local invoices WITHOUT a MARK that could be its twin
+ *     (OrphanMatcher: series/ΑΑ, amount, ΑΦΜ, date) → «Σύνδεση» records the
+ *     MARK on the chosen one (OrphanLinker); if none fits, «Καταχώριση
+ *     τοπικά» imports it as filed (OrphanImporter).
  *
  * mark / from / to ride in the query string (#[Url]) so the page is
  * bookmarkable and the "change window" action just rewrites them. Not in
@@ -67,10 +83,13 @@ class MyDataMarkDetail extends Page
     public ?string $to = null;
 
     /** Livewire-safe detail array (App\Support\MyData\MarkDetail shape). */
+    #[Locked]
     public ?array $doc = null;
 
+    #[Locked]
     public ?int $invoiceId = null;
 
+    #[Locked]
     public bool $isOrphan = false;
 
     public ?string $error = null;
@@ -82,6 +101,7 @@ class MyDataMarkDetail extends Page
      *
      * @var array<string,mixed>|null
      */
+    #[Locked]
     public ?array $enrichReport = null;
 
     /**
@@ -89,6 +109,7 @@ class MyDataMarkDetail extends Page
      * «Συγχρονισμός κατάστασης» action can apply AADE's truth to the invoice.
      * Reset on every load() (must not outlive the document it described).
      */
+    #[Locked]
     public ?string $aadeState = null;
 
     /**
@@ -96,7 +117,25 @@ class MyDataMarkDetail extends Page
      * `$aadeState` — the evidence «Συγχρονισμός κατάστασης» persists so the
      * adopted terminal state can say WHICH cancellation caused it (MYD-023).
      */
+    #[Locked]
     public ?string $aadeCancelledByMark = null;
+
+    /** The invoice `$aadeState` was read for — sync applies it to that one only. */
+    #[Locked]
+    public ?int $aadeStateInvoiceId = null;
+
+    /**
+     * Orphan only: the local invoices without a MARK that could be its twin
+     * (OrphanMatcher), Livewire-safe rows for the «Πιθανά τοπικά» panel.
+     *
+     * @var list<array{linkable: bool, blocker: ?string, id: int, invcode: string, date: ?string, customer: ?string, gross: float, score: int, reasons: string, url: string}>
+     */
+    #[Locked]
+    public array $candidates = [];
+
+    /** Orphan only: a local invoice with the same series/ΑΑ but ANOTHER MARK. */
+    #[Locked]
+    public ?array $sameNumber = null;
 
     public static function shouldRegisterNavigation(): bool
     {
@@ -236,19 +275,199 @@ class MyDataMarkDetail extends Page
                     $this->load();
                 }),
 
-            // Placeholder for the income-side mirror of ExpenseImporter.
-            // Intentionally does nothing yet — it only documents the next
-            // step so operators know orphans aren't silently importable.
+            // The income-side mirror of ExpenseImporter: the orphan becomes a
+            // local invoice AS FILED (AADE series/ΑΑ, MARK, QR, one line per AADE
+            // line) — never re-sent. Refused, with the reason, where it can't be
+            // reproduced faithfully (credit notes, withholding, …).
             Action::make('import_local')
                 ->label('Καταχώριση τοπικά')
                 ->icon('heroicon-o-arrow-down-on-square')
-                ->color('gray')
-                ->visible(fn (): bool => $this->isOrphan && $this->doc !== null)
+                ->color('primary')
+                ->visible(fn (): bool => $this->isOrphan && $this->doc !== null && $this->canResolveOrphans())
+                ->disabled(fn (): bool => $this->importBlocker() !== null)
+                ->tooltip(fn (): ?string => $this->importBlocker())
                 ->modalHeading('Καταχώριση αδέσποτου ως τοπικό παραστατικό')
-                ->modalDescription('Η αυτόματη καταχώριση αδέσποτων πωλήσεων στο ekdosi δεν είναι ακόμη διαθέσιμη (έπεται — ο αντίστοιχος μηχανισμός υπάρχει ήδη για τα Έξοδα). Προς το παρόν καταχωρίστε το χειροκίνητα ή αγνοήστε το.')
-                ->modalSubmitAction(false)
-                ->modalCancelActionLabel('Κλείσιμο'),
+                ->modalDescription(fn (): string => $this->importDescription())
+                ->modalSubmitActionLabel('Καταχώριση')
+                ->schema(fn (): array => $this->importSchema())
+                ->action(fn (array $data) => $this->importOrphan($data)),
         ];
+    }
+
+    /**
+     * «Σύνδεση» on a suggested local invoice: this orphan IS that invoice — record
+     * the MARK on it as a filing would (no resend, no customer email).
+     */
+    public function linkAction(): Action
+    {
+        return Action::make('link')
+            ->label('Σύνδεση')
+            ->icon('heroicon-o-link')
+            ->authorize(fn (): bool => $this->canResolveOrphans())
+            ->requiresConfirmation()
+            ->modalIcon('heroicon-o-link')
+            ->modalHeading('Σύνδεση με τοπικό παραστατικό')
+            ->modalDescription(fn (array $arguments): string => $this->linkDescription((int) ($arguments['invoice'] ?? 0)))
+            ->modalSubmitActionLabel('Σύνδεση')
+            ->action(function (array $arguments): void {
+                $tenant = Filament::getTenant();
+                $invoice = $this->candidateInvoice((int) ($arguments['invoice'] ?? 0));
+                if ($invoice === null || $this->doc === null) {
+                    Notification::make()->title('Δεν βρέθηκε το παραστατικό')->danger()->send();
+
+                    return;
+                }
+                try {
+                    app(OrphanLinker::class)->link($tenant, $invoice, $this->doc, auth()->id());
+                } catch (RuntimeException $e) {
+                    Notification::make()->title('Δεν έγινε η σύνδεση')->body($e->getMessage())->danger()->send();
+
+                    return;
+                }
+                Notification::make()->title('Συνδέθηκε — το '.$invoice->invcode.' έχει πλέον το ΜΑΡΚ '.$this->mark)->success()->send();
+                $this->load();   // now resolves locally
+            });
+    }
+
+    /** Resolving an orphan writes a legal record: invoices + the live console right. */
+    public function canResolveOrphans(): bool
+    {
+        $user = auth()->user();
+
+        return (bool) $user?->can('View:MyDataConsole') && (bool) $user?->can('Create:Invoice');
+    }
+
+    /** One of THIS orphan's suggested candidates (never an arbitrary id). */
+    private function candidateInvoice(int $id): ?Invoice
+    {
+        if (! in_array($id, array_column($this->candidates, 'id'), true)) {
+            return null;
+        }
+
+        return Invoice::query()->where('company_id', Filament::getTenant()?->getKey())->whereKey($id)->first();
+    }
+
+    private function linkDescription(int $invoiceId): HtmlString
+    {
+        $invoice = $this->candidateInvoice($invoiceId);
+        if ($invoice === null || $this->doc === null) {
+            return new HtmlString('');
+        }
+        $why = app(OrphanLinker::class)->blocker(Filament::getTenant(), $invoice, $this->doc);
+        $money = fn ($v): string => number_format((float) $v, 2, ',', '.').' €';
+
+        return new HtmlString(nl2br(e(($why !== null ? '⚠ '.$why."\n\n" : '')
+            .'myDATA: '.($this->doc['invcode'] ?? '—').' · '.($this->doc['issuedAtHuman'] ?? '—').' · '.$money($this->doc['grossTotal'] ?? 0)
+            .' · ΑΦΜ '.($this->doc['counterpartVat'] ?? '—')."\n"
+            .'Τοπικό: '.$invoice->invcode.' · '.$invoice->issued_at?->format('d/m/Y').' · '.$money($invoice->gross_total)
+            .' · ΑΦΜ '.($invoice->vat_no ?: $invoice->customer?->afm ?: '—')."\n\n"
+            .'Το ΜΑΡΚ, το QR και η κατάσταση «έγκυρο στο myDATA» γράφονται στο τοπικό παραστατικό. Δεν στέλνεται τίποτα ξανά στο ΑΑΔΕ ούτε στον πελάτη.')));
+    }
+
+    private function importBlocker(): ?string
+    {
+        return $this->doc === null ? 'Δεν υπάρχει έγγραφο.' : app(OrphanImporter::class)->blocker(Filament::getTenant(), $this->doc);
+    }
+
+    private function importDescription(): string
+    {
+        if ($this->doc === null) {
+            return '';
+        }
+        $lines = count($this->doc['lines'] ?? []);
+
+        return 'Δημιουργείται τοπικό παραστατικό όπως δηλώθηκε στο myDATA: σειρά/ΑΑ '.($this->doc['invcode'] ?? '—')
+            .', '.$lines.' '.($lines === 1 ? 'γραμμή' : 'γραμμές').' (καθαρή αξία + ΦΠΑ ανά γραμμή, χωρίς περιγραφές — το myDATA δεν τις κρατά), '
+            .'με το ΜΑΡΚ και το QR του, ως '.(($this->doc['state'] ?? 'VALID') === 'CANCELLED' ? 'ακυρωμένο' : 'ήδη διαβιβασμένο')
+            .'. Δεν στέλνεται ξανά στο ΑΑΔΕ. Αν μοιάζει με υπάρχον τοπικό, προτίμησε τη «Σύνδεση».';
+    }
+
+    /** @return list<Component|Field> */
+    private function importSchema(): array
+    {
+        $tenant = Filament::getTenant();
+        $doc = $this->doc ?? [];
+        $owner = OrphanImporter::seriesType($tenant, $doc);
+        // The same rule the importer enforces (the button is disabled, with the
+        // reason, when no type qualifies).
+        $types = OrphanImporter::eligibleTypes($tenant, $doc);
+        $defaultType = $types->first();
+        $counterpart = $this->counterpartCustomer($doc);
+        $customer = $counterpart ?? $defaultType?->defaultCustomer;
+
+        return [
+            Select::make('invoice_type_id')
+                ->label('Τύπος παραστατικού')
+                ->options($types->mapWithKeys(fn (InvoiceType $t): array => [$t->getKey() => $t->code.' — '.$t->name.($t->mydata_type ? ' ('.$t->mydata_type.')' : '')])->all())
+                ->default($defaultType?->getKey())
+                ->required()
+                ->helperText($owner !== null
+                    ? 'Η σειρά «'.$owner->code.'» είναι δική μας — καταχωρίζεται στον τύπο της και ο μετρητής της προχωρά πέρα από τον ΑΑ.'
+                    : 'Άλλη σειρά από τις δικές μας — κρατά τη σειρά/ΑΑ του myDATA. Τύποι με τον ίδιο τύπο myDATA ('.($doc['invoiceType'] ?? '—').').'),
+            Select::make('customer_id')
+                ->label('Πελάτης')
+                ->searchable()
+                ->getSearchResultsUsing(fn (string $search): array => Customer::query()
+                    ->where('company_id', $tenant->getKey())
+                    ->where(fn ($q) => $q->where('name', 'like', "%{$search}%")->orWhere('afm', 'like', "%{$search}%"))
+                    ->orderBy('name')->limit(50)->pluck('name', 'id')->all())
+                ->getOptionLabelUsing(fn ($value): ?string => Customer::query()->where('company_id', $tenant->getKey())->whereKey($value)->value('name'))
+                ->default($customer?->getKey())
+                ->required(filled($doc['counterpartVat'] ?? null))
+                ->helperText(filled($doc['counterpartVat'] ?? null)
+                    ? ($counterpart !== null
+                        ? 'Βρέθηκε με το ΑΦΜ '.$doc['counterpartVat'].'.'
+                        : 'Δεν υπάρχει πελάτης με ΑΦΜ '.$doc['counterpartVat'].' — δημιούργησέ τον πρώτα από τους Πελάτες.')
+                    : 'Λιανική — προαιρετικό.'),
+            Select::make('payment_method_id')
+                ->label('Τρόπος πληρωμής')
+                ->options(PaymentMethod::query()->where('company_id', $tenant->getKey())->orderBy('description')->pluck('description', 'id')->all())
+                // No default on purpose: «already settled» and «still owed» are both
+                // common for an orphan, and a wrong guess either hides a real debt or
+                // invents one. The operator decides.
+                ->required()
+                ->helperText('Διάλεξε συνειδητά: «τοις μετρητοίς» = εξοφλημένο· επί πιστώσει = απαίτηση στην Καρτέλα (χωρίς αυτόματες υπενθυμίσεις για εισαγωγές).'),
+        ];
+    }
+
+    /** The customer who IS the document's counterpart — by the indexed ΑΦΜ identity (afm_key). */
+    private function counterpartCustomer(array $doc): ?Customer
+    {
+        $keys = OrphanParty::counterpartKeys($doc);
+
+        return $keys === [] ? null : Customer::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->whereIn('afm_key', $keys)
+            ->first(['id', 'name', 'afm', 'payment_method_id']);
+    }
+
+    private function importOrphan(array $data): void
+    {
+        $tenant = Filament::getTenant();
+        if ($this->doc === null || ! $this->canResolveOrphans()) {
+            return;
+        }
+        $type = InvoiceType::query()->where('company_id', $tenant->getKey())->whereKey($data['invoice_type_id'] ?? 0)->first();
+        $pm = PaymentMethod::query()->where('company_id', $tenant->getKey())->whereKey($data['payment_method_id'] ?? 0)->first();
+        $customer = filled($data['customer_id'] ?? null)
+            ? Customer::query()->where('company_id', $tenant->getKey())->whereKey($data['customer_id'])->first()
+            : null;
+        if ($type === null || $pm === null) {
+            Notification::make()->title('Άκυρη επιλογή')->danger()->send();
+
+            return;
+        }
+
+        try {
+            $invoice = app(OrphanImporter::class)->import($tenant, $this->doc, $type, $customer, $pm, auth()->id());
+        } catch (RuntimeException|UniqueConstraintViolationException $e) {
+            Notification::make()->title('Δεν έγινε η καταχώριση')->body($e->getMessage())->danger()->send();
+
+            return;
+        }
+
+        Notification::make()->title('Καταχωρίστηκε ως '.$invoice->invcode)->success()->send();
+        $this->redirect(InvoiceResource::getUrl('view', ['record' => $invoice, 'tenant' => $tenant]));
     }
 
     /**
@@ -263,7 +482,10 @@ class MyDataMarkDetail extends Page
         // described (enrichFromAade re-sets it right after its own load()).
         $this->enrichReport = null;
         $this->aadeState = null;
+        $this->aadeStateInvoiceId = null;
         $this->aadeCancelledByMark = null;
+        $this->candidates = [];
+        $this->sameNumber = null;
 
         $tenant = Filament::getTenant();
         $mark = (string) $this->mark;
@@ -325,7 +547,7 @@ class MyDataMarkDetail extends Page
         [$from, $to] = $this->resolveWindow();
 
         try {
-            $detail = (new TransmittedDocReader($tenant))->fetchDetailByMark($mark, $from, $to);
+            $detail = app(TransmittedDocReader::class, ['tenant' => $tenant])->fetchDetailByMark($mark, $from, $to);
 
             if ($detail === null) {
                 $this->error = 'Το ΜΑΡΚ δεν βρέθηκε στο myDATA για το διάστημα '
@@ -336,6 +558,7 @@ class MyDataMarkDetail extends Page
             }
 
             $this->doc = $detail;
+            $this->suggestTwins($tenant, $detail);
         } catch (RuntimeException $e) {
             // Our own guard messages (provider/mode/credentials) — safe Greek.
             $this->error = $e->getMessage();
@@ -348,6 +571,40 @@ class MyDataMarkDetail extends Page
             ]);
 
             $this->error = 'Η σύνδεση με το AADE απέτυχε. Ελέγξτε τα διαπιστευτήρια και προσπαθήστε ξανά.';
+        }
+    }
+
+    /** The orphan's possible local twins + a same-number-other-MARK warning. */
+    private function suggestTwins(Company $tenant, array $detail): void
+    {
+        if (($detail['direction'] ?? null) === 'inbound') {
+            return;   // an expense — the Έξοδα console's job
+        }
+        $matcher = app(OrphanMatcher::class);
+        $linker = app(OrphanLinker::class);
+        foreach ($matcher->candidates($tenant, $detail) as $c) {
+            $invoice = $c['invoice'];
+            $why = $linker->blocker($tenant, $invoice, $detail);
+            $this->candidates[] = [
+                'linkable' => $why === null,
+                'blocker' => $why,
+                'id' => (int) $invoice->getKey(),
+                'invcode' => (string) $invoice->invcode,
+                'date' => $invoice->issued_at?->format('d/m/Y'),
+                'customer' => $invoice->customer?->name ?? $invoice->company_name,
+                'gross' => (float) $invoice->gross_total,
+                'score' => $c['score'],
+                'reasons' => implode(' · ', $c['reasons']),
+                'url' => InvoiceResource::getUrl('view', ['record' => $invoice, 'tenant' => $tenant]),
+            ];
+        }
+        $same = $matcher->sameNumberWithOtherMark($tenant, $detail);
+        if ($same !== null) {
+            $this->sameNumber = [
+                'invcode' => (string) $same->invcode,
+                'mark' => (string) $same->mydata_mark,
+                'url' => InvoiceResource::getUrl('view', ['record' => $same, 'tenant' => $tenant]),
+            ];
         }
     }
 
@@ -384,7 +641,8 @@ class MyDataMarkDetail extends Page
         [$from, $to] = $this->windowForInvoice($invoice);
 
         try {
-            $detail = (new TransmittedDocReader($tenant))->fetchDetailByMark((string) $this->mark, $from, $to);
+            // By the INVOICE's own MARK — never the URL's, which the browser can change.
+            $detail = app(TransmittedDocReader::class, ['tenant' => $tenant])->fetchDetailByMark((string) $invoice->mydata_mark, $from, $to);
         } catch (RuntimeException $e) {
             Notification::make()->title('Αποτυχία')->danger()->body($e->getMessage())->send();
 
@@ -402,6 +660,14 @@ class MyDataMarkDetail extends Page
             return;
         }
 
+        if ($detail !== null && (string) ($detail['mark'] ?? '') !== (string) $invoice->mydata_mark) {
+            Notification::make()->title('Άλλο παραστατικό')->danger()
+                ->body('Το myDATA επέστρεψε άλλο ΜΑΡΚ από αυτό του παραστατικού — δεν έγινε καμία αλλαγή.')
+                ->send();
+
+            return;
+        }
+
         if ($detail === null) {
             Notification::make()->title('Δεν βρέθηκε στο myDATA')->warning()
                 ->body('Το ΜΑΡΚ δεν βρέθηκε για το διάστημα '.$from->format('d/m/Y').' – '.$to->format('d/m/Y')
@@ -413,9 +679,12 @@ class MyDataMarkDetail extends Page
 
         $report = app(EnrichInvoiceFromAade::class)->enrich($invoice, $detail);
         $aadeState = is_string($detail['state'] ?? null) ? $detail['state'] : null;
+        // Reload THIS invoice — by its own MARK, not whatever the URL says now.
+        $this->mark = (string) $invoice->mydata_mark;
         $this->load(); // refresh the local doc (QR now shows); clears stale report
         $this->enrichReport = $report; // set AFTER load(), which nulls it
         $this->aadeState = $aadeState; // ditto — enables «Συγχρονισμός κατάστασης»
+        $this->aadeStateInvoiceId = (int) $invoice->getKey(); // …for this invoice only
         $this->aadeCancelledByMark = is_string($detail['cancelledByMark'] ?? null)
             ? $detail['cancelledByMark']
             : null;
@@ -472,6 +741,7 @@ class MyDataMarkDetail extends Page
     {
         return $this->invoiceId !== null
             && $this->aadeState !== null
+            && $this->aadeStateInvoiceId === $this->invoiceId   // the state was read for THIS invoice
             && (bool) auth()->user()?->can('View:MyDataConsole')
             && $this->stateDiffRow() !== null;
     }

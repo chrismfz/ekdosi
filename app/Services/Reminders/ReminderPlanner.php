@@ -167,6 +167,7 @@ final class ReminderPlanner
     {
         return $this->openDocuments($company)
             ->whereNull('legacy_id')
+            ->whereNull('origin')   // imported from the myDATA orphans — history, like legacy
             ->whereNull('whmcs_invoice_id')
             ->whereDoesntHave('whmcsPending')
             ->when($customerId !== null, fn ($q) => $q->where('customer_id', $customerId))
@@ -216,7 +217,7 @@ final class ReminderPlanner
             $invoice->local_status === 'cancelled' || $invoice->mydata_state === 'CANCELLED' => 'Το παραστατικό ακυρώθηκε.',
             $invoice->local_status === 'draft' && $invoice->offered_at === null => 'Η προσφορά ανακλήθηκε.',
             $invoice->isCreditNote() => 'Πιστωτικό.',
-            $invoice->legacy_id !== null || $invoice->whmcs_invoice_id !== null => 'Εκτός υπενθυμίσεων (εισαγωγή/WHMCS).',
+            $invoice->legacy_id !== null || $invoice->origin !== null || $invoice->whmcs_invoice_id !== null => 'Εκτός υπενθυμίσεων (εισαγωγή/WHMCS).',
             self::dueDateOf($invoice) === null => 'Τοις μετρητοίς — δεν οφείλεται.',
             default => $this->moneyBlocker($invoice, $balance ?? $this->balances->for($invoice)->balance, $manual ? 0.0 : $settings->minBalance, $customerOutstanding),
         };
