@@ -28,6 +28,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Component;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
 use Livewire\Attributes\Locked;
@@ -118,6 +119,10 @@ class MyDataMarkDetail extends Page
      */
     #[Locked]
     public ?string $aadeCancelledByMark = null;
+
+    /** The invoice `$aadeState` was read for — sync applies it to that one only. */
+    #[Locked]
+    public ?int $aadeStateInvoiceId = null;
 
     /**
      * Orphan only: the local invoices without a MARK that could be its twin
@@ -387,9 +392,9 @@ class MyDataMarkDetail extends Page
         // must move past the ΑΑ); otherwise any non-credit type.
         $types = $owner !== null
             ? collect([$owner])
-            : InvoiceType::query()->where('company_id', $tenant->getKey())->where('is_credit', false)->orderBy('code')->get();
-        $defaultType = $owner
-            ?? $types->first(fn (InvoiceType $t): bool => (string) $t->mydata_type === (string) ($doc['invoiceType'] ?? ''));
+            : InvoiceType::query()->where('company_id', $tenant->getKey())->where('is_credit', false)
+                ->where('mydata_type', (string) ($doc['invoiceType'] ?? ''))->orderBy('code')->get();
+        $defaultType = $owner ?? $types->first();
         $counterpart = $this->counterpartCustomer($doc);
         $customer = $counterpart ?? $defaultType?->defaultCustomer;
 
@@ -401,7 +406,7 @@ class MyDataMarkDetail extends Page
                 ->required()
                 ->helperText($owner !== null
                     ? 'Η σειρά «'.$owner->code.'» είναι δική μας — καταχωρίζεται στον τύπο της και ο μετρητής της προχωρά πέρα από τον ΑΑ.'
-                    : 'Άλλη σειρά από τις δικές μας — κρατά τη σειρά/ΑΑ του myDATA. Προεπιλογή: ίδιος τύπος myDATA ('.($doc['invoiceType'] ?? '—').').'),
+                    : 'Άλλη σειρά από τις δικές μας — κρατά τη σειρά/ΑΑ του myDATA. Τύποι με τον ίδιο τύπο myDATA ('.($doc['invoiceType'] ?? '—').').'),
             Select::make('customer_id')
                 ->label('Πελάτης')
                 ->searchable()
@@ -420,12 +425,11 @@ class MyDataMarkDetail extends Page
             Select::make('payment_method_id')
                 ->label('Τρόπος πληρωμής')
                 ->options(PaymentMethod::query()->where('company_id', $tenant->getKey())->orderBy('description')->pluck('description', 'id')->all())
-                // An orphan filed elsewhere is most likely already settled there:
-                // default to a cash-term method (not a new receivable).
-                ->default(PaymentMethod::query()->where('company_id', $tenant->getKey())->where('due_days', 0)->orderBy('id')->value('id')
-                    ?? $customer?->payment_method_id ?? $defaultType?->payment_method_id)
+                // No default on purpose: «already settled» and «still owed» are both
+                // common for an orphan, and a wrong guess either hides a real debt or
+                // invents one. The operator decides.
                 ->required()
-                ->helperText('Προεπιλογή «τοις μετρητοίς» (εξοφλημένο) — αν ο πελάτης το χρωστάει ακόμη, διάλεξε τρόπο επί πιστώσει (θα φαίνεται ως απαίτηση· αυτόματες υπενθυμίσεις δεν στέλνονται για εισαγωγές).'),
+                ->helperText('Διάλεξε συνειδητά: «τοις μετρητοίς» = εξοφλημένο· επί πιστώσει = απαίτηση στην Καρτέλα (χωρίς αυτόματες υπενθυμίσεις για εισαγωγές).'),
         ];
     }
 
@@ -459,7 +463,7 @@ class MyDataMarkDetail extends Page
 
         try {
             $invoice = app(OrphanImporter::class)->import($tenant, $this->doc, $type, $customer, $pm, auth()->id());
-        } catch (RuntimeException $e) {
+        } catch (RuntimeException|UniqueConstraintViolationException $e) {
             Notification::make()->title('Δεν έγινε η καταχώριση')->body($e->getMessage())->danger()->send();
 
             return;
@@ -481,6 +485,7 @@ class MyDataMarkDetail extends Page
         // described (enrichFromAade re-sets it right after its own load()).
         $this->enrichReport = null;
         $this->aadeState = null;
+        $this->aadeStateInvoiceId = null;
         $this->aadeCancelledByMark = null;
         $this->candidates = [];
         $this->sameNumber = null;
@@ -677,9 +682,12 @@ class MyDataMarkDetail extends Page
 
         $report = app(EnrichInvoiceFromAade::class)->enrich($invoice, $detail);
         $aadeState = is_string($detail['state'] ?? null) ? $detail['state'] : null;
+        // Reload THIS invoice — by its own MARK, not whatever the URL says now.
+        $this->mark = (string) $invoice->mydata_mark;
         $this->load(); // refresh the local doc (QR now shows); clears stale report
         $this->enrichReport = $report; // set AFTER load(), which nulls it
         $this->aadeState = $aadeState; // ditto — enables «Συγχρονισμός κατάστασης»
+        $this->aadeStateInvoiceId = (int) $invoice->getKey(); // …for this invoice only
         $this->aadeCancelledByMark = is_string($detail['cancelledByMark'] ?? null)
             ? $detail['cancelledByMark']
             : null;
@@ -736,6 +744,7 @@ class MyDataMarkDetail extends Page
     {
         return $this->invoiceId !== null
             && $this->aadeState !== null
+            && $this->aadeStateInvoiceId === $this->invoiceId   // the state was read for THIS invoice
             && (bool) auth()->user()?->can('View:MyDataConsole')
             && $this->stateDiffRow() !== null;
     }

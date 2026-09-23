@@ -9,7 +9,6 @@ use App\Models\Note;
 use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Services\Whmcs\WhmcsWritebackService;
-use App\Support\Money;
 use App\Support\MyData\Codes;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -62,9 +61,10 @@ final class OrphanLinker
             $date === null || $invoice->issued_at === null || ! $invoice->issued_at->isSameDay($date) => 'Άλλη ημερομηνία έκδοσης ('
                 .($invoice->issued_at?->format('d/m/Y') ?? '—').' τοπικά / '.($doc['issuedAtHuman'] ?? '—').' στο myDATA).',
             $invoice->mydata_pending_since !== null => 'Εκκρεμεί υποβολή του τοπικού στο myDATA — περίμενε να ολοκληρωθεί.',
-            $counterparty && ! OrphanParty::isCounterpart($doc, $invoice->vat_no) && ! OrphanParty::isCounterpart($doc, $invoice->customer?->afm) => 'Άλλος αντισυμβαλλόμενος (ΑΦΜ '.$doc['counterpartVat'].' στο myDATA).',
-            Money::differsByCent((float) $invoice->gross_total, (float) ($doc['grossTotal'] ?? 0)) => 'Άλλο σύνολο (τοπικά '
-                .number_format((float) $invoice->gross_total, 2, ',', '.').' € / myDATA '.number_format((float) ($doc['grossTotal'] ?? 0), 2, ',', '.').' €).',
+            // The FROZEN counterpart decides when there is one (the live customer
+            // may have been edited since the issue).
+            $counterparty && ! OrphanParty::isCounterpart($doc, filled($invoice->vat_no) ? $invoice->vat_no : $invoice->customer?->afm) => 'Άλλος αντισυμβαλλόμενος (ΑΦΜ '.$doc['counterpartVat'].' στο myDATA).',
+            ($diff = self::amountDiff($invoice, $doc)) !== null => $diff,
             OrphanParty::markTaken($company, $mark) => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε άλλο τοπικό παραστατικό.',
             default => null,
         };
@@ -146,6 +146,22 @@ final class OrphanLinker
 
             return $row;
         });
+    }
+
+    /** Net, VAT and gross must each be the same, to the cent — else another document. */
+    private static function amountDiff(Invoice $invoice, array $doc): ?string
+    {
+        $net = (float) $invoice->net_total;
+        $gross = (float) $invoice->gross_total;
+        $local = ['Καθαρή αξία' => $net, 'ΦΠΑ' => $gross - $net, 'Σύνολο' => $gross];
+        $aade = ['Καθαρή αξία' => (float) ($doc['netTotal'] ?? 0), 'ΦΠΑ' => (float) ($doc['vatTotal'] ?? 0), 'Σύνολο' => (float) ($doc['grossTotal'] ?? 0)];
+        foreach ($local as $label => $value) {
+            if (OrphanImporter::cents($value) !== OrphanImporter::cents($aade[$label])) {
+                return 'Άλλο ποσό — «'.$label.'»: τοπικά '.number_format($value, 2, ',', '.').' € / myDATA '.number_format($aade[$label], 2, ',', '.').' €.';
+            }
+        }
+
+        return null;
     }
 
     /** The AADE document we relied on, kept as the audit evidence. */

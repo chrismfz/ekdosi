@@ -13,7 +13,6 @@ use App\Models\PaymentMethod;
 use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeInvoiceTotals;
-use App\Support\Money;
 use App\Support\MyData\Codes;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
@@ -28,7 +27,7 @@ use RuntimeException;
  * classification it was filed with), described «Γραμμή Ν (από myDATA)». The
  * document keeps its AADE series/ΑΑ, MARK and QR, is recorded as already filed
  * (never re-sent), and its net, VAT and gross must each agree with AADE's to the
- * cent (the reconciler's own tolerance) or nothing is written. Filed under one
+ * cent — exactly — or nothing is written. Filed under one
  * of OUR series, it must go under that series' own type, and that counter moves
  * past its ΑΑ. Deliberately out of scope (refused with the reason): credit notes
  * (they need the original), withholding/fees/other taxes, a non-numeric ΑΑ.
@@ -60,7 +59,7 @@ final class OrphanImporter
             Codes::transmittedDocBucket($type) !== 'income' => 'Δεν είναι παραστατικό πώλησης ('.($type ?: '—').').',
             Codes::isCreditNoteType($type) => 'Τα πιστωτικά καταχωρίζονται χειροκίνητα (χρειάζονται το αρχικό παραστατικό).',
             $aa === '' || ! ctype_digit($aa) => 'Ο ΑΑ «'.$aa.'» δεν είναι αριθμός — καταχώρισέ το χειροκίνητα.',
-            Money::differsByCent($net + $vat, $gross) => 'Έχει παρακρατήσεις / τέλη / λοιπούς φόρους — καταχώρισέ το χειροκίνητα.',
+            self::cents($net + $vat) !== self::cents($gross) => 'Έχει παρακρατήσεις / τέλη / λοιπούς φόρους — καταχώρισέ το χειροκίνητα.',
             ($doc['lines'] ?? []) === [] => 'Δεν έχει γραμμές.',
             ($bad = $this->unsupportedLine($doc)) !== null => $bad,
             OrphanParty::markTaken($company, (string) $doc['mark']) => 'Το ΜΑΡΚ είναι ήδη καταχωρισμένο σε τοπικό παραστατικό.',
@@ -112,6 +111,11 @@ final class OrphanImporter
         if ($owner !== null && (int) $owner->getKey() !== (int) $type->getKey()) {
             throw new RuntimeException('Η σειρά «'.$owner->code.'» ανήκει στον τύπο «'.$owner->code.' — '.$owner->name.'» — διάλεξέ τον.');
         }
+        // The local type must BE the filed kind of document (retail vs B2B, credit…):
+        // the invoice logic reads it (counterpart freeze, credit sign).
+        if ($type->is_credit || (string) $type->mydata_type !== (string) ($doc['invoiceType'] ?? '')) {
+            throw new RuntimeException('Ο τύπος «'.$type->code.'» ('.($type->mydata_type ?: '—').') δεν είναι ο τύπος που δηλώθηκε ('.($doc['invoiceType'] ?? '—').').');
+        }
         if (OrphanParty::counterpartKeys($doc) !== [] && ! OrphanParty::isCounterpart($doc, $customer?->afm)) {
             throw new RuntimeException('Διάλεξε τον πελάτη με ΑΦΜ '.$doc['counterpartVat'].' (τον αντισυμβαλλόμενο του myDATA).');
         }
@@ -125,11 +129,12 @@ final class OrphanImporter
             // Serialise per tenant, then re-check everything on fresh data: two
             // imports of one orphan can't both write its MARK or its number.
             OrphanParty::lockTenant($company);
+            // Lock the type (the counter InvoiceNumberer allocates from) BEFORE the
+            // number re-check — a native issue can't take this ΑΑ in between.
+            $lockedType = InvoiceType::query()->withoutGlobalScope(CompanyScope::class)->whereKey($type->getKey())->lockForUpdate()->firstOrFail();
             if (($why = $this->blocker($company, $doc)) !== null) {
                 throw new RuntimeException($why);
             }
-
-            $lockedType = InvoiceType::query()->withoutGlobalScope(CompanyScope::class)->whereKey($type->getKey())->lockForUpdate()->firstOrFail();
             // Filed under OUR series (invcount = the NEXT number): never hand this ΑΑ out again.
             if ($series !== '' && $series === (string) $lockedType->code && (int) $lockedType->invcount <= $aa) {
                 $lockedType->forceFill(['invcount' => $aa + 1])->save();
@@ -175,7 +180,7 @@ final class OrphanImporter
             $local = ['net' => (float) $invoice->net_total, 'vat' => (float) $invoice->gross_total - (float) $invoice->net_total, 'gross' => (float) $invoice->gross_total];
             $aade = ['net' => (float) ($doc['netTotal'] ?? 0), 'vat' => (float) ($doc['vatTotal'] ?? 0), 'gross' => (float) ($doc['grossTotal'] ?? 0)];
             foreach (['net' => 'Καθαρή αξία', 'vat' => 'ΦΠΑ', 'gross' => 'Σύνολο'] as $k => $label) {
-                if (Money::differsByCent($local[$k], $aade[$k])) {
+                if (self::cents($local[$k]) !== self::cents($aade[$k])) {   // exactly, to the cent
                     throw new RuntimeException('Διαφορά με το myDATA στο «'.$label.'» (τοπικά '.number_format($local[$k], 2, ',', '.')
                         .' € / myDATA '.number_format($aade[$k], 2, ',', '.').' €) — καταχώρισέ το χειροκίνητα.');
                 }
@@ -252,6 +257,12 @@ final class OrphanImporter
             ->get()
             ->first(fn (Invoice $i): bool => in_array((string) $i->invcode, [$series.$aa, trim($series.' '.$aa)], true)
                 || ((string) $i->code === $aa && trim((string) $i->filedSeries()) === $series));
+    }
+
+    /** An amount in whole cents — legal totals are compared exactly. */
+    public static function cents(float $amount): int
+    {
+        return (int) round($amount * 100);
     }
 
     /** A line we can't reproduce locally (unknown VAT category / no-VAT record). */

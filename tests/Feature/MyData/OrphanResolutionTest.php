@@ -171,7 +171,10 @@ class OrphanResolutionTest extends TestCase
         $this->assertStringContainsString('ακυρωμένο', $why(['local_status' => 'cancelled']));
         $this->assertStringContainsString('ήδη ΜΑΡΚ', $why(['mydata_mark' => '4001']));
         $this->assertStringContainsString('Άλλη σειρά/ΑΑ', $linker->blocker($this->tenant, $this->local([]), $this->doc()), 'a lookalike under another number is another document');
-        $this->assertStringContainsString('Άλλο σύνολο', $linker->blocker($this->tenant, $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90b'], 99), $this->doc()));
+        $this->assertStringContainsString('Άλλο ποσό', $linker->blocker($this->tenant, $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90b'], 99), $this->doc()));
+        $this->assertStringContainsString('Άλλο ποσό', $linker->blocker($this->tenant, $twin, $this->doc(['netTotal' => 18.1, 'vatTotal' => 2.36])), 'same gross, another VAT split = another document');
+        $frozen = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90c', 'vat_no' => '090000045']);   // issued to 090000045, customer edited since
+        $this->assertStringContainsString('Άλλος αντισυμβαλλόμενος', $linker->blocker($this->tenant, $frozen, $this->doc(['counterpartVat' => '094014201'])), 'the frozen counterpart decides');
         $this->assertStringContainsString('Άλλος αντισυμβαλλόμενος', $linker->blocker($this->tenant, $twin, $this->doc(['counterpartVat' => '090000045'])));
         $this->assertStringContainsString('ακυρωμένο στο myDATA', $linker->blocker($this->tenant, $twin, $this->doc(['state' => 'CANCELLED'])));
         $this->assertStringContainsString('πιστωτικό', $linker->blocker($this->tenant, $twin, $this->doc(['invoiceType' => '5.1'])));
@@ -232,6 +235,32 @@ class OrphanResolutionTest extends TestCase
             $this->fail('another type would leave the ΑΠΥ counter behind');
         } catch (RuntimeException $e) {
             $this->assertStringContainsString('ανήκει στον τύπο', $e->getMessage());
+        }
+        $this->assertSame(0, Invoice::count());
+    }
+
+    public function test_import_needs_the_filed_kind_of_document_and_exact_cents(): void
+    {
+        $b2b = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ', 'invcount' => 5, 'mydata_type' => '2.1']);
+        $foreign = ['series' => 'Α', 'aa' => '7', 'invcode' => 'Α 7'];
+
+        try {
+            app(OrphanImporter::class)->import($this->tenant, $this->doc($foreign), $b2b, null, $this->cash, null);
+            $this->fail('a retail 11.2 must not become a local 2.1');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('δεν είναι ο τύπος', $e->getMessage());
+        }
+
+        $retail = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΛΙΑ', 'name' => 'Λιανική', 'invcount' => 5, 'mydata_type' => '11.2']);
+        try {
+            // Priced by gross elsewhere: 8,06 + 1,94 = 10,00 — our line math gives 1,93 VAT.
+            app(OrphanImporter::class)->import($this->tenant, $this->doc($foreign + [
+                'netTotal' => 8.06, 'vatTotal' => 1.94, 'grossTotal' => 10.0,
+                'lines' => [['lineNumber' => 1, 'netValue' => 8.06, 'vatCategory' => 1, 'vatAmount' => 1.94, 'classifications' => []]],
+            ]), $retail, null, $this->cash, null);
+            $this->fail('one cent off the filed document is not the filed document');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('«ΦΠΑ»', $e->getMessage());
         }
         $this->assertSame(0, Invoice::count());
     }
@@ -401,6 +430,19 @@ class OrphanResolutionTest extends TestCase
         $page->callAction('enrich_from_aade');
 
         $this->assertSame('https://qr/own', $filed->fresh()->mydata_url, 'another document\'s QR never lands on this invoice');
+    }
+
+    public function test_after_enrich_the_page_stays_on_the_same_invoice_whatever_the_url_says(): void
+    {
+        $a = $this->local(['code' => 77, 'invcode' => 'ΑΠΥ77', 'mydata_mark' => '400000000000077', 'mydata_state' => 'VALID']);
+        $b = $this->local(['code' => 78, 'invcode' => 'ΑΠΥ78', 'mydata_mark' => '400000000000078', 'mydata_state' => 'VALID']);
+        $page = $this->page($this->doc(['mark' => '400000000000077', 'state' => 'CANCELLED']));   // A is cancelled at AADE
+
+        $page->set('mark', '400000000000078')   // the URL now names B…
+            ->callAction('enrich_from_aade');      // …while A is enriched
+
+        $this->assertSame($a->id, $page->get('invoiceId'), 'reloaded by A\'s own MARK');
+        $this->assertSame('VALID', $b->fresh()->mydata_state, 'A\'s AADE state can never be synced onto B');
     }
 
     public function test_the_document_the_actions_trust_cannot_be_rewritten_from_the_browser(): void
