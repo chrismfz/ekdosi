@@ -42,7 +42,7 @@ final class ReminderInsights
     public const GAP_LABELS = [
         self::GAP_DRAFTS => 'Πρόχειρα που δεν στάλθηκαν ποτέ',
         self::GAP_WHMCS => 'Από WHMCS (ανεξόφλητα)',
-        self::GAP_LEGACY => 'Παλιά (από τη μετάπτωση)',
+        self::GAP_LEGACY => 'Παλιά / εισαγωγές',
         self::GAP_BLOCKED => 'Πελάτες χωρίς email / opt-out',
         self::GAP_EXCLUDED => 'Εκτός κριτηρίων (ημ/νία «από» / ελάχιστο)',
     ];
@@ -50,7 +50,7 @@ final class ReminderInsights
     public const GAP_HELP = [
         self::GAP_DRAFTS => 'Πρόχειρα που ο πελάτης δεν έχει δει — στείλ\'τα ή οριστικοποίησέ τα για να μπουν στις υπενθυμίσεις.',
         self::GAP_WHMCS => 'Το WHMCS στέλνει τις δικές του υπενθυμίσεις — εδώ δεν ξαναστέλνουμε.',
-        self::GAP_LEGACY => 'Εισαγωγές από το παλιό πρόγραμμα — δεν υπενθυμίζονται αυτόματα.',
+        self::GAP_LEGACY => 'Από το παλιό πρόγραμμα ή καταχωρισμένα από τα αδέσποτα του myDATA — δεν υπενθυμίζονται αυτόματα.',
         self::GAP_BLOCKED => 'Δικά μας ανεξόφλητα που δεν μπορούν να πάρουν υπενθύμιση (πελάτης χωρίς email ή με απενεργοποιημένες υπενθυμίσεις).',
         self::GAP_EXCLUDED => 'Δικά μας ανεξόφλητα που οι αυτόματες υπενθυμίσεις παρακάμπτουν: έληγαν πριν την ημερομηνία «από» των ρυθμίσεων, ή το υπόλοιπο είναι κάτω από το ελάχιστο. Μπορείς να τα στείλεις χειροκίνητα («Υπενθύμιση τώρα»).',
     ];
@@ -182,7 +182,7 @@ final class ReminderInsights
             self::GAP_WHMCS => $with($this->planner->openDocuments($company)
                 ->where(fn ($q) => $q->whereNotNull('whmcs_invoice_id')->orWhereHas('whmcsPending')))
                 ->get()->filter(fn (Invoice $i): bool => ReminderPlanner::dueDateOf($i) !== null)->values(),
-            self::GAP_LEGACY => $with($this->planner->openDocuments($company)->whereNotNull('legacy_id')
+            self::GAP_LEGACY => $with($this->planner->openDocuments($company)->where(fn ($q) => $q->whereNotNull('legacy_id')->orWhereNotNull('origin'))
                 ->whereNull('whmcs_invoice_id')->whereDoesntHave('whmcsPending'))
                 ->get()->filter(fn (Invoice $i): bool => ReminderPlanner::dueDateOf($i) !== null)->values(),
             // Ours and owed, but the customer can't receive a reminder.

@@ -11,6 +11,7 @@ use App\Services\InvoiceBalance;
 use App\Services\Whmcs\WhmcsWritebackService;
 use App\Support\Money;
 use App\Support\MyData\Codes;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -23,8 +24,8 @@ use RuntimeException;
  * AADE and without emailing the customer.
  *
  * Only the SAME document can be linked: our issue, an issued (non-draft,
- * non-cancelled) local invoice with the same series & ΑΑ, the same counterpart
- * and the same amount. Anything else is a different legal document — a likely
+ * non-cancelled) local invoice with the same series & ΑΑ, issue date, myDATA
+ * type, counterpart and amount, with no submission of it in flight. Anything else is a different legal document — a likely
  * double issue to look at, never a link.
  */
 final class OrphanLinker
@@ -41,8 +42,10 @@ final class OrphanLinker
         $mark = (string) ($doc['mark'] ?? '');
         $type = (string) ($doc['invoiceType'] ?? '');
         $series = trim((string) ($doc['series'] ?? ''));
-        $aa = trim((string) ($doc['aa'] ?? ''));
+        $aa = OrphanImporter::number($doc);
         $counterparty = filled($doc['counterpartVat'] ?? null);
+        $date = OrphanMatcher::issueDate($doc);
+        $localType = (string) ($invoice->mydata_type ?: $invoice->invoiceType?->mydata_type);
 
         return match (true) {
             (int) $invoice->company_id !== (int) $company->getKey() => 'Το παραστατικό δεν ανήκει σε αυτή την εταιρεία.',
@@ -53,7 +56,12 @@ final class OrphanLinker
             $invoice->local_status === 'draft' => 'Το τοπικό είναι πρόχειρο (δεν έχει εκδοθεί) — δεν μπορεί να είναι το ίδιο παραστατικό.',
             $invoice->local_status === 'cancelled' => 'Το τοπικό παραστατικό είναι ακυρωμένο — επανέφερέ το πρώτα.',
             (string) $invoice->code !== $aa || trim((string) $invoice->filedSeries()) !== $series => 'Άλλη σειρά/ΑΑ ('.$invoice->invcode.' ≠ '.($doc['invcode'] ?? '—').') — είναι άλλο παραστατικό.',
+            Codes::transmittedDocBucket($type) !== 'income' => 'Δεν είναι παραστατικό πώλησης ('.($type ?: '—').').',
             Codes::isCreditNoteType($type) !== $invoice->isCreditNote() => 'Το ένα είναι πιστωτικό και το άλλο όχι.',
+            $localType !== '' && $localType !== $type => 'Άλλος τύπος myDATA ('.$localType.' τοπικά / '.$type.' στο myDATA).',
+            $date === null || $invoice->issued_at === null || ! $invoice->issued_at->isSameDay($date) => 'Άλλη ημερομηνία έκδοσης ('
+                .($invoice->issued_at?->format('d/m/Y') ?? '—').' τοπικά / '.($doc['issuedAtHuman'] ?? '—').' στο myDATA).',
+            $invoice->mydata_pending_since !== null => 'Εκκρεμεί υποβολή του τοπικού στο myDATA — περίμενε να ολοκληρωθεί.',
             $counterparty && ! OrphanParty::isCounterpart($doc, $invoice->vat_no) && ! OrphanParty::isCounterpart($doc, $invoice->customer?->afm) => 'Άλλος αντισυμβαλλόμενος (ΑΦΜ '.$doc['counterpartVat'].' στο myDATA).',
             Money::differsByCent((float) $invoice->gross_total, (float) ($doc['grossTotal'] ?? 0)) => 'Άλλο σύνολο (τοπικά '
                 .number_format((float) $invoice->gross_total, 2, ',', '.').' € / myDATA '.number_format((float) ($doc['grossTotal'] ?? 0), 2, ',', '.').' €).',
@@ -69,7 +77,28 @@ final class OrphanLinker
     {
         $mark = (string) ($doc['mark'] ?? '');
 
-        $row = DB::transaction(function () use ($company, $invoice, $doc, $mark, $userId): MyDataMark {
+        // The submitter's own per-invoice lock: never while a real submission of
+        // this invoice is in flight (its response would write a second MARK).
+        $lock = Cache::lock('mydata-submit:'.$invoice->getKey(), 120);
+        if (! $lock->get()) {
+            throw new RuntimeException('Το παραστατικό υποβάλλεται αυτή τη στιγμή στο myDATA — δοκίμασε σε λίγο.');
+        }
+
+        try {
+            $row = $this->linkLocked($company, $invoice, $doc, $mark, $userId);
+        } finally {
+            $lock->release();
+        }
+
+        $this->balances->recompute($invoice->fresh());
+        app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice->fresh(), $mark);
+
+        return $row;
+    }
+
+    private function linkLocked(Company $company, Invoice $invoice, array $doc, string $mark, ?int $userId): MyDataMark
+    {
+        return DB::transaction(function () use ($company, $invoice, $doc, $mark, $userId): MyDataMark {
             // Serialise per tenant, then re-check on fresh data: two operators
             // can't record one MARK twice.
             OrphanParty::lockTenant($company);
@@ -117,11 +146,6 @@ final class OrphanLinker
 
             return $row;
         });
-
-        $this->balances->recompute($invoice->fresh());
-        app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice->fresh(), $mark);
-
-        return $row;
     }
 
     /** The AADE document we relied on, kept as the audit evidence. */

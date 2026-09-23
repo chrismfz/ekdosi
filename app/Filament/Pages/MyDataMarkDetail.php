@@ -420,9 +420,12 @@ class MyDataMarkDetail extends Page
             Select::make('payment_method_id')
                 ->label('Τρόπος πληρωμής')
                 ->options(PaymentMethod::query()->where('company_id', $tenant->getKey())->orderBy('description')->pluck('description', 'id')->all())
-                ->default($customer?->payment_method_id ?? $defaultType?->payment_method_id)
+                // An orphan filed elsewhere is most likely already settled there:
+                // default to a cash-term method (not a new receivable).
+                ->default(PaymentMethod::query()->where('company_id', $tenant->getKey())->where('due_days', 0)->orderBy('id')->value('id')
+                    ?? $customer?->payment_method_id ?? $defaultType?->payment_method_id)
                 ->required()
-                ->helperText('Ορίζει αν μετρά ως απαίτηση (επί πιστώσει) ή εξοφλημένο (μετρητοίς).'),
+                ->helperText('Προεπιλογή «τοις μετρητοίς» (εξοφλημένο) — αν ο πελάτης το χρωστάει ακόμη, διάλεξε τρόπο επί πιστώσει (θα φαίνεται ως απαίτηση· αυτόματες υπενθυμίσεις δεν στέλνονται για εισαγωγές).'),
         ];
     }
 
@@ -636,7 +639,8 @@ class MyDataMarkDetail extends Page
         [$from, $to] = $this->windowForInvoice($invoice);
 
         try {
-            $detail = app(TransmittedDocReader::class, ['tenant' => $tenant])->fetchDetailByMark((string) $this->mark, $from, $to);
+            // By the INVOICE's own MARK — never the URL's, which the browser can change.
+            $detail = app(TransmittedDocReader::class, ['tenant' => $tenant])->fetchDetailByMark((string) $invoice->mydata_mark, $from, $to);
         } catch (RuntimeException $e) {
             Notification::make()->title('Αποτυχία')->danger()->body($e->getMessage())->send();
 
@@ -649,6 +653,14 @@ class MyDataMarkDetail extends Page
             ]);
             Notification::make()->title('Αποτυχία')->danger()
                 ->body('Η σύνδεση με το AADE απέτυχε. Ελέγξτε τα διαπιστευτήρια και προσπαθήστε ξανά.')
+                ->send();
+
+            return;
+        }
+
+        if ($detail !== null && (string) ($detail['mark'] ?? '') !== (string) $invoice->mydata_mark) {
+            Notification::make()->title('Άλλο παραστατικό')->danger()
+                ->body('Το myDATA επέστρεψε άλλο ΜΑΡΚ από αυτό του παραστατικού — δεν έγινε καμία αλλαγή.')
                 ->send();
 
             return;

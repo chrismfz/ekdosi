@@ -106,7 +106,7 @@ final class OrphanMatcher
         $score = 0;
         $reasons = [];
 
-        if ($aa !== null && (string) $invoice->code === $aa) {
+        if ($aa !== null && ctype_digit($aa) && $invoice->code !== null && (int) $invoice->code === (int) $aa) {
             if ($series !== null && self::str($invoice->filedSeries()) === $series) {
                 $score += 100;
                 $reasons[] = 'ίδια σειρά & ΑΑ';

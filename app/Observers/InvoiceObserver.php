@@ -186,6 +186,7 @@ class InvoiceObserver
             || $invoice->customer_balance_snapshot !== null
             || $invoice->customer_id === null
             || $invoice->legacy_id !== null
+            || $invoice->origin !== null   // imported history (myDATA orphan) — today's balance was never its «Νέο υπόλοιπο»
             || ! $invoice->affectsCustomerBalance()) {
             return;
         }

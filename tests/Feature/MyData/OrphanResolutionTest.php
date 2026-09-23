@@ -17,9 +17,11 @@ use App\Services\MyData\Orphans\OrphanLinker;
 use App\Services\MyData\Orphans\OrphanMatcher;
 use App\Services\MyData\TransmittedDocReader;
 use App\Services\RecomputeInvoiceTotals;
+use App\Services\Reminders\ReminderPlanner;
 use Carbon\Carbon;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Mail;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
@@ -174,11 +176,33 @@ class OrphanResolutionTest extends TestCase
         $this->assertStringContainsString('ακυρωμένο στο myDATA', $linker->blocker($this->tenant, $twin, $this->doc(['state' => 'CANCELLED'])));
         $this->assertStringContainsString('πιστωτικό', $linker->blocker($this->tenant, $twin, $this->doc(['invoiceType' => '5.1'])));
         $this->assertStringContainsString('ΑΦΜ μας', $linker->blocker($this->tenant, $twin, $this->doc(['issuerVat' => '099999999', 'direction' => 'unknown'])));
+        $this->assertStringContainsString('ημερομηνία', $linker->blocker($this->tenant, $twin, $this->doc(['issueDate' => '2025-03-09'])), 'the same number a year apart is another document');
+        $this->assertStringContainsString('τύπος', $linker->blocker($this->tenant, $twin, $this->doc(['invoiceType' => '11.1'])));
+        $this->assertNull($linker->blocker($this->tenant, $twin, $this->doc(['aa' => '090'])), 'a zero-padded ΑΑ is the same number');
+        $pending = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90p', 'mydata_pending_since' => now()]);
+        $this->assertStringContainsString('Εκκρεμεί υποβολή', $linker->blocker($this->tenant, $pending, $this->doc()));
         $this->local(['mydata_mark' => '400012824290573']);
         $this->assertStringContainsString('άλλο τοπικό', $linker->blocker($this->tenant, $twin, $this->doc()));
 
         $this->expectException(RuntimeException::class);
         $linker->link($this->tenant, $twin, $this->doc(), null);
+    }
+
+    public function test_linking_waits_for_a_submission_of_the_same_invoice_in_flight(): void
+    {
+        $twin = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90']);
+        $lock = Cache::lock('mydata-submit:'.$twin->id, 120);
+        $this->assertTrue($lock->get());   // MyDataSubmitter is sending it right now
+
+        try {
+            app(OrphanLinker::class)->link($this->tenant, $twin, $this->doc(), null);
+            $this->fail('must not race a real submission');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('υποβάλλεται', $e->getMessage());
+        } finally {
+            $lock->release();
+        }
+        $this->assertNull($twin->fresh()->mydata_mark);
     }
 
     /* ───────────── «Καταχώριση τοπικά» ───────────── */
@@ -245,7 +269,9 @@ class OrphanResolutionTest extends TestCase
         $this->assertSame(7, (int) $tpy->fresh()->invcount, 'another series never moves our counter');
         $this->assertSame(4, (int) $invoice->lines()->sole()->vat_exemption_category);
         $this->assertSame('unpaid', (string) ($invoice->payment_status instanceof \BackedEnum ? $invoice->payment_status->value : $invoice->payment_status), 'credit terms → a receivable, like any issued invoice');
-        $this->assertSame('2300.00', number_format((float) $invoice->customer_balance_snapshot, 2, '.', ''), 'issued only once complete — the balance block counts this document');
+        $this->assertSame(Invoice::ORIGIN_MYDATA_ORPHAN, $invoice->origin);
+        $this->assertNull($invoice->customer_balance_snapshot, 'history: today\'s balance was never its «Νέο υπόλοιπο»');
+        $this->assertSame([], app(ReminderPlanner::class)->candidates($this->tenant)->modelKeys(), 'imported history is never chased by the automatic reminders');
     }
 
     public function test_a_cancelled_orphan_is_imported_as_cancelled(): void
@@ -273,6 +299,11 @@ class OrphanResolutionTest extends TestCase
         $holder->delete();
         $this->assertStringContainsString('ΜΑΡΚ', $importer->blocker($this->tenant, $this->doc()));
         $holder->forceDelete();
+
+        // A zero-padded ΑΑ is the same number as a local one.
+        $sixtyTwo = $this->local(['code' => 62, 'invcode' => 'ΑΠΥ62', 'issued_at' => '2025-06-01 10:00']);
+        $this->assertStringContainsString('ΑΠΥ62', $importer->blocker($this->tenant, $this->doc(['aa' => '062'])));
+        $sixtyTwo->forceDelete();
 
         // Same local number already there (even deleted) → «use Σύνδεση».
         $existing = $this->local(['code' => 90, 'invcode' => 'ΑΠΥ90']);
@@ -352,6 +383,24 @@ class OrphanResolutionTest extends TestCase
 
         $page->mountAction('link', ['invoice' => $twin->id])->callMountedAction();
         $this->assertSame('400012824290573', $twin->fresh()->mydata_mark);
+    }
+
+    public function test_enrich_reads_the_invoices_own_mark_never_the_urls(): void
+    {
+        $filed = $this->local(['code' => 77, 'invcode' => 'ΑΠΥ77', 'mydata_mark' => '400000000000077', 'mydata_url' => 'https://qr/own']);
+        // Whatever the reader returns for it, a document with ANOTHER mark is refused.
+        $page = $this->page($this->doc(['mark' => '400000000000077']));   // resolves locally
+        $this->app->bind(TransmittedDocReader::class, fn ($app, array $params) => new class($params['tenant']) extends TransmittedDocReader
+        {
+            public function fetchDetailByMark(string $mark, Carbon $from, Carbon $to): ?array
+            {
+                return ['mark' => '400012824290573', 'qrCodeUrl' => 'https://qr/someone-else', 'state' => 'VALID'];
+            }
+        });
+
+        $page->callAction('enrich_from_aade');
+
+        $this->assertSame('https://qr/own', $filed->fresh()->mydata_url, 'another document\'s QR never lands on this invoice');
     }
 
     public function test_the_document_the_actions_trust_cannot_be_rewritten_from_the_browser(): void

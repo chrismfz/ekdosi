@@ -85,9 +85,17 @@ final class OrphanImporter
     public static function invcodeFor(array $doc, InvoiceType $type): string
     {
         $series = trim((string) ($doc['series'] ?? ''));
-        $aa = trim((string) ($doc['aa'] ?? ''));
+        $aa = self::number($doc);
 
         return $series !== '' && $series === (string) $type->code ? $series.$aa : trim($series.' '.$aa);
+    }
+
+    /** The ΑΑ as the number it is («062» → «62», the way `code` stores it). */
+    public static function number(array $doc): string
+    {
+        $aa = trim((string) ($doc['aa'] ?? ''));
+
+        return ctype_digit($aa) ? (string) (int) $aa : $aa;
     }
 
     /**
@@ -181,6 +189,8 @@ final class OrphanImporter
                 'mydata_mark' => $mark,
                 'mydata_url' => $doc['qrCodeUrl'] ?? null,
                 'mydata_type' => $doc['invoiceType'] ?? null,
+                // History, not a new issue: no balance snapshot, no reminders.
+                'origin' => Invoice::ORIGIN_MYDATA_ORPHAN,
             ]))->save();
 
             MyDataMark::create([
@@ -230,7 +240,7 @@ final class OrphanImporter
     private function existingNumber(Company $company, array $doc): ?Invoice
     {
         $series = trim((string) ($doc['series'] ?? ''));
-        $aa = trim((string) ($doc['aa'] ?? ''));
+        $aa = self::number($doc);
         if ($aa === '' || ! ctype_digit($aa)) {
             return null;
         }
