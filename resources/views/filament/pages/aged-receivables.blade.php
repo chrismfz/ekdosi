@@ -4,7 +4,67 @@
         $result = $this->getResult();
         $tenant = \Filament\Facades\Filament::getTenant();
         $ledgerUrl = fn ($id) => \App\Filament\Resources\Customers\CustomerResource::getUrl('ledger', ['record' => $id, 'tenant' => $tenant]);
+        $insights = $this->getInsights();
+        $summary = $insights['summary'];
+        $canRemind = $this->canRemind();
+        $remindersUrl = auth()->user()?->can('viewAny', \App\Models\InvoiceReminder::class)
+            ? \App\Filament\Resources\InvoiceReminders\InvoiceReminderResource::getUrl('index')
+            : null;
     @endphp
+
+    <x-filament::section>
+        <x-slot name="heading">Υπενθυμίσεις πληρωμής</x-slot>
+        <x-slot name="description">Πώς πάνε οι υπενθυμίσεις — και τι ανοιχτό ΔΕΝ καλύπτουν.</x-slot>
+
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-4">
+            <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Προς έγκριση</div>
+                <div class="text-2xl font-bold {{ $summary['awaiting'] > 0 ? 'text-warning-600' : '' }}">
+                    @if ($remindersUrl && $summary['awaiting'] > 0)
+                        <a href="{{ $remindersUrl }}" class="hover:underline">{{ $summary['awaiting'] }}</a>
+                    @else
+                        {{ $summary['awaiting'] }}
+                    @endif
+                </div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Αποτυχίες αποστολής</div>
+                <div class="text-2xl font-bold {{ $summary['failed'] > 0 ? 'text-danger-600' : '' }}">{{ $summary['failed'] }}</div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Εστάλησαν (30 ημ.)</div>
+                <div class="text-2xl font-bold">{{ $summary['sent30'] }}</div>
+            </div>
+            <div class="rounded-lg border border-gray-200 p-3">
+                <div class="text-xs text-gray-500">Εξοφλήθηκαν μετά από υπενθύμιση ({{ \App\Services\Reminders\ReminderInsights::PAID_AFTER_DAYS }} ημ.)</div>
+                <div class="text-2xl font-bold text-success-600">{{ $summary['paid_after']['count'] }}</div>
+                @if ($summary['paid_after']['count'] > 0)
+                    <div class="text-xs text-gray-500">{{ $money($summary['paid_after']['amount']) }}</div>
+                @endif
+            </div>
+        </div>
+
+        <div class="mt-4 text-sm font-medium">Δεν υπενθυμίζονται</div>
+        <div class="grid grid-cols-1 gap-4 md:grid-cols-4 mt-2">
+            @foreach (\App\Services\Reminders\ReminderInsights::GAP_LABELS as $gap => $label)
+                @php $g = $insights['gaps'][$gap] ?? ['count' => 0, 'amount' => 0]; @endphp
+                @if ($g['count'] > 0)
+                    <button type="button"
+                            class="rounded-lg border border-gray-200 p-3 text-left w-full cursor-pointer hover:bg-gray-50"
+                            wire:click="mountAction('gap', { kind: '{{ $gap }}' })">
+                        <div class="text-xs text-gray-500">{{ $label }}</div>
+                        <div class="text-xl font-bold">{{ $g['count'] }}</div>
+                        <div class="text-xs text-gray-500">{{ $money($g['amount']) }} · προβολή</div>
+                    </button>
+                @else
+                    <div class="rounded-lg border border-gray-200 p-3">
+                        <div class="text-xs text-gray-500">{{ $label }}</div>
+                        <div class="text-xl font-bold text-gray-400">0</div>
+                    </div>
+                @endif
+            @endforeach
+        </div>
+    </x-filament::section>
 
     <x-filament::section>
         <x-slot name="heading">Ηλικίωση οφειλών</x-slot>
@@ -49,6 +109,7 @@
                             <th class="py-2 pr-4 text-right">Παλαιότερο</th>
                             <th class="py-2 pr-4">Επόμενο βήμα</th>
                             <th class="py-2 pr-4">Τελ. επαφή</th>
+                            <th class="py-2 pr-4">Τελ. υπενθύμιση</th>
                             <th class="py-2"></th>
                         </tr>
                     </thead>
@@ -82,7 +143,25 @@
                                     @endif
                                 </td>
                                 <td class="py-2 pr-4 whitespace-nowrap">{{ $row->collectionLastContactAt ?? '—' }}</td>
-                                <td class="py-2 text-right">
+                                @php $last = $this->lastReminder($row->customerId); @endphp
+                                <td class="py-2 pr-4 whitespace-nowrap">
+                                    @if ($last)
+                                        <div>{{ $last['sent_at']->format('d/m/Y') }}</div>
+                                        <div class="text-xs text-gray-500">{{ \App\Models\InvoiceReminder::STAGE_LABELS[$last['stage']] ?? $last['stage'] }}</div>
+                                    @else
+                                        <span class="text-gray-400">—</span>
+                                    @endif
+                                </td>
+                                <td class="py-2 text-right whitespace-nowrap">
+                                    @if ($canRemind)
+                                        <x-filament::icon-button
+                                            icon="heroicon-m-bell-alert"
+                                            color="gray"
+                                            size="sm"
+                                            label="Υπενθύμιση τώρα"
+                                            wire:click="mountAction('remind', { customer: {{ $row->customerId }} })"
+                                        />
+                                    @endif
                                     <x-filament::icon-button
                                         icon="heroicon-m-phone-arrow-up-right"
                                         color="gray"
@@ -102,6 +181,7 @@
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($result->total61_90()) }}</td>
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($result->total90plus()) }}</td>
                             <td class="py-2 pr-4 text-right whitespace-nowrap">{{ $money($result->grandTotal()) }}</td>
+                            <td></td>
                             <td></td>
                             <td></td>
                             <td></td>
