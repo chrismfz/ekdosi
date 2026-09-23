@@ -65,9 +65,10 @@ pricing slabs ανά client group (καλύπτεται από το υπάρχο
 κάθε TLD (= το «Auto Registration» dropdown της WHMCS οθόνης). Το ίδιο domain πάντα μέσω του TLD
 του → ο registrar προκύπτει ντετερμινιστικά.
 
-**CentralNic = legacy/out.** Το Admin-Notes log ενός domain δείχνει `[CNIC→OPENPROVIDER] migration`
-→ η MyIP **έφυγε** από CentralNic προς Openprovider. Δεν είναι v1 target (το capability model
-επιτρέπει να μπει αργότερα ως 3ος adapter, one class + one config line).
+**CentralNic = σε έξοδο, ΟΧΙ «έφυγε».** Η μετάβαση `[CNIC→OPENPROVIDER]` γίνεται **στην ανανέωση**
+(custom hooks της WHMCS)· τον 2026-09 **226 active** είναι ακόμα στο CNIC (`whmcs-baseline.md` §1/§7).
+Το registrar-first import από Openprovider δεν τα βλέπει → εκκρεμεί απόφαση (manual/CSV ως
+«χωρίς API», ή read-only CNIC adapter — το capability model το επιτρέπει: one class + one config line).
 
 **Capabilities (mirror του `App\Support\Billing\SourceCapabilities`):** ένα readonly value object
 `DomainRegistrarCapabilities` με flags — `supportsPricingSync`, `supportsPrivacy`, `supportsDnssec`,
@@ -183,7 +184,8 @@ convenience default, NOT hardwired· τα contacts μπορούν να αποκ�
 
 ### 3.8 `domain_reminders` — sent-log υπενθυμίσεων λήξης
 `company_id, domain_id, reminder`(π.χ. `15_days`/`10_days`/`5_days`)`, to_email, sent_at`. Reuse του
-auto-email infra. (WHMCS: 15/10/5-days-before-expiry με history.)
+auto-email infra. (WHMCS MyIP: **60/30/15/10/5** ημέρες, 34.296 αποστολές — `whmcs-baseline.md` §6.)
+**⚠ ΔΕΝ έχει χτιστεί** — cutover blocker.
 
 ### 3.9 `domain_registrar_logs` — API history («Bridge logs»-style)
 `company_id, domain_id`(nullable)`, registrar, operation, request`(json/text)`, response`(json/text)`,
@@ -335,8 +337,18 @@ public .gr WHOIS auto-redacts natural-person data υπό GDPR (το «no privacy
 
 ### 6.1 Money timing (per operation)
 - **`register` = post-payment** (νέο domain, ρίσκο): invoice → πληρωμή → `$registrar->register()`.
-- **`renew` = on-issue** (υπάρχον domain, μη λήξει): ο operator οριστικοποιεί το πρόχειρο → myDATA →
-  `InvoiceObserver` προωθεί τον cursor → domain post-issue hook → `$registrar->renew()`.
+- **`renew` = στην ΟΡΙΣΤΙΚΟΠΟΙΗΣΗ — που κανονικά έρχεται ΜΕΤΑ την πληρωμή — ΚΛΕΙΔΩΜΕΝΟ** (ιδιοκτήτης 2026-09-23).
+  Η ανανέωση στον registrar δεν έχει undo (απλήρωτη → η MyIP χρεώνεται, ο πελάτης κρατά το domain δώρο), γι' αυτό
+  η συνήθης ροή, ίδια με τις υπηρεσίες: staging → **πρόχειρο / προτιμολόγιο** (`offered_at`: όχι απαίτηση, χωρίς
+  ΑΑ/myDATA) → πληρωμή → οριστικοποίηση (myDATA) → `InvoiceObserver` domain post-issue hook → `$registrar->renew()`.
+  **Εξαίρεση κατά βούληση:** για έμπιστο πελάτη ο operator οριστικοποιεί νωρίτερα / επί πιστώσει → ανανέωση τώρα,
+  πληρωμή αργότερα. Άρα **όχι** guard «μόνο εξοφλημένο»: η οριστικοποίηση είναι η απόφαση.
+  **Αναλλοίωτο (το WHMCS bug — «δήλωσα την πληρωμή αργότερα και ανανεώθηκε 2η φορά»):** η καταχώριση πληρωμής
+  ΠΟΤΕ δεν ανανεώνει. Σήμερα: (1) καμία ανανέωση δεν ξεκινά από πληρωμή — μόνο η οριστικοποίηση και το κουμπί
+  «Ανανέωση στον registrar»· (2) μία ανανέωση ανά παραστατικό (`renewForInvoice`: ok/adopted log ⇒ τέλος)·
+  (3) §6.6 adopt-on-already-renewed. Αν ποτέ μπει «πληρωμή στην πύλη → αυτόματη οριστικοποίηση», περνά από το
+  ΙΔΙΟ `DomainRenewalService` (once-per-invoice + adopt), ποτέ ξεχωριστό renew. (Test που να κλειδώνει ότι η
+  πληρωμή μετά την έκδοση δεν ανανεώνει → με το επόμενο PR των domains.)
 - **Ποτέ auto-file** στην ΑΑΔΕ — τα renewals είναι πρόχειρα (ίδια πειθαρχία με WHMCS inbox / SC).
 
 ### 6.2 Renewals (reuse `ServiceContract` 100%) — **1:1 ΚΛΕΙΔΩΜΕΝΟ** (ιδιοκτήτης 2026-09-07)
@@ -576,7 +588,8 @@ company_admin/operator· `DomainRegistrarConnection` creds = **super_admin only*
 - **Multi-currency invoicing** — EUR settlement v1· USD = display.
 
 **Build-time unknowns (verify πριν το coding):**
-- Μέγεθος/σύνθεση portfolio (πόσα domains ανά TLD/registrar) — βγαίνει από `tbldomains` πριν το A1.
+- ~~Μέγεθος/σύνθεση portfolio~~ → **λύθηκε** (`whmcs-baseline.md`): 1833 active, ~75% .gr (grepp 1381 ·
+  cnic 226 · openprovider 224).
 - grEPP: **UAT credentials + IP whitelisting** στο Μητρώο (endpoints πλέον ΓΝΩΣΤΑ —
   `docs/domains/grepp/README.md` §1)· + τα `[ΕΠΙΒΕΒΑΙΩΣΗ]` εκείνου του οδηγού (contact-ID prefix
   μας, άρτια έτη 2–10 από τον Οδηγό v4.3, WHOIS REST doc, login χωρίς `<svcExtension>`).
