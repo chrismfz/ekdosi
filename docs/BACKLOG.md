@@ -94,10 +94,10 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 ### 🌐 Domains (Πυλώνας A — `docs/domains/README.md`)
 - **A4 — grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — **το κύριο κομμάτι: ~75% του portfolio**
   (1381 από 1833 active, `domains/whmcs-baseline.md`).
-- **Εσωτερικές / δικές μας υπηρεσίες & domains (ΣΥΖΗΤΗΣΗ — ανοιχτό).** Στη WHMCS γίνονται «mark paid» χωρίς
-  τιμολόγιο στον εαυτό μας. Στο ekdosi θέλουν άτυπο (μη φορολογικό) παραστατικό που να «εξοφλείται» χωρίς
-  χρήματα και να οδηγεί την ανανέωση — χωρίς να μπαίνει σε myDATA, ΦΠΑ ή υπόλοιπα. Βάση: ήδη υπάρχουν τύποι
-  παραστατικών χωρίς `mydata_type` (δεν υποβάλλονται)· το τι μετράνε στα σύνολα θέλει απόφαση.
+- **Υπηρεσίες/domains χωρίς χρέωση (δικές μας / φίλων / υπαλλήλων) — ΠΡΙΝ τη μεταφορά υπηρεσιών από WHMCS.**
+  Σχέδιο: `non-billable-services.md` — `billing_mode` στη σύμβαση (με προεπιλογή από τον πελάτη), «εσωτερική
+  ανανέωση» χωρίς παραστατικό, αναφορά αξίας για τον λογιστή. **Όχι** σειρά χωρίς myDATA (μετράει παντού στα
+  σύνολα) και **όχι** παραστατικά €0. Φορολογικά (6.2 ιδιοχρησιμοποίηση;) → λογιστής.
 - **Υπενθυμίσεις λήξης domain (60/30/15/10/5 ημέρες) — cutover blocker.** Η WHMCS έχει στείλει 34.296· στο ekdosi
   δεν υπάρχουν (README §3.8 δεν χτίστηκε).
 - **CNIC: 226 active ακόμα στο CentralNic** → **απόφαση: «χωρίς API»** (manual σύνδεση, σταδιακά όλα στο OP·
@@ -201,6 +201,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **`PLAN.md`** (root) — master roadmap «Ekdosi ως σταδιακή αντικατάσταση WHMCS» (Domains → Payment gateways →
   Provisioning → Portal, strangler-fig).
 - **`domains/README.md`** — Πυλώνας A design: data model + `DomainRegistrar` contract + Openprovider mapping + .gr/grEPP + phase gates.
+- **`domains/whmcs-baseline.md`** — τι δείχνει η παραγωγική WHMCS (portfolio, ρολόγια, ενέργειες, υπενθυμίσεις) + αποφάσεις.
+- **`non-billable-services.md`** — υπηρεσίες/domains χωρίς χρέωση (δικές μας/φίλων/υπαλλήλων) — σχέδιο.
 - **`paroxos/regulatory-blueprint.md`** + **`paroxos/implementation-plan.md`** — GR ΥΠΑΗΕΣ πάροχος + EU PEPPOL. Ο GR
   πάροχος είναι **LIVE στην παραγωγή (InvoSign)**· PEPPOL Phase 1 DONE· ανοιχτό μόνο το **PEPPOL Phase 2**.
 - **`payment-connectors.md`** — card-POS + IRIS design (NOT-STARTED, blueprint).
