@@ -21,6 +21,7 @@ use App\Support\MyData\DeliveryCodes;
 use App\Support\MyData\DeliveryGuidance;
 use App\Support\MyData\ReverseCharge;
 use App\Support\MyData\VatExemptionGuidance;
+use Closure;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
@@ -112,7 +113,7 @@ class InvoiceForm
                         // without a hardcoded global default — set it once on
                         // the type. Only writes the fields the type actually
                         // configures; never blanks an operator's choice.
-                        ->afterStateUpdated(function ($state, callable $set) {
+                        ->afterStateUpdated(function ($state, callable $set, Get $get) {
                             if (! $state) {
                                 return;
                             }
@@ -122,6 +123,10 @@ class InvoiceForm
                             if (! $type) {
                                 return;
                             }
+                            // The 0% lines' §8.3 reasons follow the type (MYD-007): a reason
+                            // impossible for the new type must not linger into a validation
+                            // error on a field the operator never touched.
+                            self::resyncLineExemptions($get, $set, $type->mydata_type);
                             if ($type->distribution_aim_id) {
                                 $set('distribution_aim_id', $type->distribution_aim_id);
                             }
@@ -202,7 +207,8 @@ class InvoiceForm
 
                             // Reverse-charge hint: EU non-GR customer with a VAT id →
                             // this is (almost certainly) an intra-community supply that
-                            // should be invoiced at 0% with §8.3 reason 16 (άρθρο 45).
+                            // should be invoiced at 0%; the §8.3 reason follows the type
+                            // (2.2 service → 4, 1.2 goods → 14 — MYD-007, never 16).
                             // We don't force it (the operator chooses the 0% VAT category
                             // per line) — just a one-time nudge so it isn't forgotten.
                             if (ReverseCharge::appliesTo($customer)) {
@@ -508,7 +514,7 @@ class InvoiceForm
                                     if ((float) $vat === 0.0) {
                                         if (blank($get('vat_exemption_category'))) {
                                             $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
-                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                                self::mydataTypeOf($get('../../invoice_type_id'))
                                             ));
                                         }
                                     } else {
@@ -625,7 +631,7 @@ class InvoiceForm
                                     if ((float) ($state ?? 0) === 0.0) {
                                         if (blank($get('vat_exemption_category'))) {
                                             $set('vat_exemption_category', VatExemptionGuidance::recommendForType(
-                                                InvoiceType::find($get('../../invoice_type_id'))?->mydata_type
+                                                self::mydataTypeOf($get('../../invoice_type_id'))
                                             ));
                                         }
                                     } else {
@@ -661,10 +667,30 @@ class InvoiceForm
                                 // narrow table cell a long helperText wraps and inflates the whole
                                 // 0% row; the icon keeps the «ποια αιτία, πότε» hint one hover away
                                 // and the dropdown's own §8.3 legal labels guide regardless.
+                                // A reason that contradicts the invoice type turns the icon into a
+                                // warning with the explanation (VatExemptionGuidance::typeConflict);
+                                // the two impossible pairs also fail validation below.
                                 ->hintIcon(
-                                    'heroicon-m-question-mark-circle',
-                                    tooltip: 'Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).',
+                                    fn (Get $get): string => self::lineExemptionConflict($get, $get('vat_exemption_category')) !== null
+                                        ? 'heroicon-m-exclamation-triangle'
+                                        : 'heroicon-m-question-mark-circle',
+                                    tooltip: fn (Get $get): string => self::lineExemptionConflict($get, $get('vat_exemption_category'))['message']
+                                        ?? 'Υποχρεωτικό για 0%. Ενδοκοιν. υπηρεσία→4 (άρθρο 18), αγαθά→14 (33), εξαγωγή→8 (29), εγχώριο reverse-charge→16 (45).',
                                 )
+                                ->hintColor(fn (Get $get): ?string => match (self::lineExemptionConflict($get, $get('vat_exemption_category'))['level'] ?? null) {
+                                    VatExemptionGuidance::CONFLICT_BLOCK => 'danger',
+                                    VatExemptionGuidance::CONFLICT_WARN => 'warning',
+                                    default => null,
+                                })
+                                ->live()
+                                ->rules([
+                                    fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                                        $conflict = self::lineExemptionConflict($get, $value);
+                                        if ($conflict !== null && $conflict['level'] === VatExemptionGuidance::CONFLICT_BLOCK) {
+                                            $fail($conflict['message']);
+                                        }
+                                    },
+                                ])
                                 ->dehydrated()
                                 ->dehydrateStateUsing(fn ($state, Get $get) => (float) ($get('vat_percent') ?? 0) === 0.0 ? $state : null),
                         ])
@@ -928,6 +954,72 @@ class InvoiceForm
     private static function numOrNull(mixed $value): ?float
     {
         return ($value === null || $value === '') ? null : (float) $value;
+    }
+
+    /**
+     * A 0% line's §8.3 reason against the invoice's myDATA type (the parent
+     * form's invoice_type_id, read from inside the lines repeater).
+     *
+     * @return array{level: string, message: string}|null
+     */
+    private static function lineExemptionConflict(Get $get, mixed $code): ?array
+    {
+        if ((float) ($get('vat_percent') ?? 0) !== 0.0 || blank($code) || blank($typeId = $get('../../invoice_type_id'))) {
+            return null;
+        }
+
+        return VatExemptionGuidance::typeConflict(self::mydataTypeOf($typeId), (int) $code);
+    }
+
+    /**
+     * The myDATA type of an invoice type id — the ONE lookup behind the lines'
+     * §8.3 suggestion and conflict check, memoized per request (the hint, its
+     * tooltip and colour ask for every 0% line on every render).
+     */
+    private static function mydataTypeOf(mixed $typeId): ?string
+    {
+        if (blank($typeId)) {
+            return null;
+        }
+        $tenantId = Filament::getTenant()?->getKey();
+
+        return once(fn () => InvoiceType::query()->where('company_id', $tenantId)->whereKey($typeId)->value('mydata_type'));
+    }
+
+    /**
+     * After an invoice-type change: a 0% line with no reason gets the new type's
+     * suggestion, and a reason that can never be right for the new type is
+     * replaced by it (or cleared, so the operator picks). Any other reason stays —
+     * we can't tell an auto-suggested 4 from a deliberate one on a service line —
+     * but a now-suspicious one is called out in a notification, not just the icon.
+     */
+    private static function resyncLineExemptions(Get $get, callable $set, ?string $newType): void
+    {
+        $newSuggestion = VatExemptionGuidance::recommendForType($newType);
+        $suspicious = [];
+
+        $lineNo = 0;
+        foreach ((array) $get('lines') as $key => $line) {
+            $lineNo++;
+            if ((float) ($line['vat_percent'] ?? 0) !== 0.0) {
+                continue;
+            }
+            $reason = $line['vat_exemption_category'] ?? null;
+            $conflict = VatExemptionGuidance::typeConflict($newType, $reason);
+            if (blank($reason) || ($conflict['level'] ?? null) === VatExemptionGuidance::CONFLICT_BLOCK) {
+                $set("lines.{$key}.vat_exemption_category", $newSuggestion);
+            } elseif ($conflict !== null) {
+                $suspicious[$conflict['message']][] = $lineNo;
+            }
+        }
+
+        foreach ($suspicious as $message => $lineNumbers) {
+            Notification::make()
+                ->title('Έλεγξε την αιτία απαλλαγής — γραμμή '.implode(', ', $lineNumbers))
+                ->body($message)
+                ->warning()
+                ->send();
+        }
     }
 
     /**

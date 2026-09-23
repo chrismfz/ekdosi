@@ -111,7 +111,6 @@ class ReverseChargeHelperTest extends TestCase
         $this->assertCount(31, $opts);
         $this->assertArrayHasKey(16, $opts);
         $this->assertStringContainsString('άρθρο 45', $opts[16]);
-        $this->assertSame(16, Codes::VAT_EXEMPTION_INTRACOMMUNITY);
         // Every advertised category has a label (no bare "Κατηγορία N").
         foreach (Codes::VAT_EXEMPTION_CATEGORIES as $code) {
             $this->assertArrayHasKey($code, Codes::VAT_EXEMPTION_LABELS, "missing label for §8.3 code {$code}");

@@ -271,8 +271,9 @@ final class Codes
      * exemption-reason picker so the operator picks the RIGHT reason instead of
      * a meaningless "Κατηγορία 16". Do NOT paraphrase — these are legal citations.
      *
-     * For an EU intra-community supply (reverse charge) the reason is
-     * **code 16 — άρθρο 45** (ex-«άρθρο 39α»).
+     * Which reason fits which case (MYD-007: intra-EU service 4, intra-EU goods
+     * 14, export 8 — code 16/άρθρο 45 is DOMESTIC reverse charge, never the
+     * intra-community one) lives in VatExemptionGuidance, incl. the type check.
      *
      * @var array<int, string>
      */
@@ -309,13 +310,6 @@ final class Codes
         30 => 'Χωρίς ΦΠΑ – άρθρο 57 του Κώδικα ΦΠΑ (OSS_ενωσιακό καθεστώς)',
         31 => 'Χωρίς ΦΠΑ – άρθρο 58 του Κώδικα ΦΠΑ (IOSS)',
     ];
-
-    /**
-     * §8.3 exemption reason that AADE expects for an EU intra-community supply
-     * (reverse charge): code 16 (άρθρο 45, ex-«άρθρο 39α»). Surfaced as the
-     * recommended default in the VAT-category form's 0% helper.
-     */
-    public const VAT_EXEMPTION_INTRACOMMUNITY = 16;
 
     /**
      * Options for an exemption-reason picker: "16 — Χωρίς ΦΠΑ - άρθρο 45 …".

@@ -76,4 +76,80 @@ class VatExemptionGuidanceTest extends TestCase
     {
         $this->assertSame(Codes::VAT_EXEMPTION_LABELS[4], VatExemptionGuidance::labelForCode(4));
     }
+
+    public function test_domestic_reverse_charge_on_a_foreign_counterpart_type_is_blocked(): void
+    {
+        foreach (['1.2', '2.2', '1.3', '2.3'] as $type) {
+            $this->assertSame(VatExemptionGuidance::CONFLICT_BLOCK, VatExemptionGuidance::typeConflict($type, 16)['level'] ?? null, "16 on {$type}");
+        }
+        // …and is exactly right on a domestic one.
+        $this->assertNull(VatExemptionGuidance::typeConflict('1.1', 16));
+        $this->assertNull(VatExemptionGuidance::typeConflict('2.1', 16));
+    }
+
+    public function test_intra_eu_goods_reason_outside_intra_eu_is_blocked(): void
+    {
+        foreach (['1.1', '2.1', '1.3', '2.3'] as $type) {
+            $this->assertSame(VatExemptionGuidance::CONFLICT_BLOCK, VatExemptionGuidance::typeConflict($type, 14)['level'] ?? null, "14 on {$type}");
+        }
+        $this->assertNull(VatExemptionGuidance::typeConflict('1.2', 14));
+        // A services 2.2 may still carry a goods line (mixed invoice) → warn only.
+        $this->assertSame(VatExemptionGuidance::CONFLICT_WARN, VatExemptionGuidance::typeConflict('2.2', 14)['level']);
+        // An EU buyer's goods exported outside the EU → 8 on a 1.2 is possible → warn only.
+        $this->assertSame(VatExemptionGuidance::CONFLICT_WARN, VatExemptionGuidance::typeConflict('1.2', 8)['level']);
+    }
+
+    public function test_the_recommended_reason_for_each_type_is_never_a_conflict(): void
+    {
+        foreach (['2.2', '1.2', '1.3'] as $type) {
+            $this->assertNull(VatExemptionGuidance::typeConflict($type, VatExemptionGuidance::recommendForType($type)), $type);
+        }
+        // Art. 18 on a third-country service is the normal case.
+        $this->assertNull(VatExemptionGuidance::typeConflict('2.3', 4));
+    }
+
+    public function test_place_of_supply_on_a_domestic_type_is_only_a_warning(): void
+    {
+        $conflict = VatExemptionGuidance::typeConflict('1.1', 4);
+
+        $this->assertSame(VatExemptionGuidance::CONFLICT_WARN, $conflict['level']);
+        $this->assertStringContainsString('Αιτία 4 σε τύπο 1.1', $conflict['message']);
+    }
+
+    public function test_the_message_names_the_right_reason_when_the_type_has_one(): void
+    {
+        $this->assertStringContainsString('η αιτία είναι 4 ('.Codes::VAT_EXEMPTION_LABELS[4].')', VatExemptionGuidance::typeConflict('2.2', 16)['message']);
+        // 2.3 has no single right reason → no «η αιτία είναι» suggestion.
+        $this->assertStringNotContainsString('η αιτία είναι', VatExemptionGuidance::typeConflict('2.3', 16)['message']);
+        // A warning never tells the operator to change a reason that may be right
+        // (a service line with 4 on a mixed 1.2 invoice).
+        $this->assertStringNotContainsString('η αιτία είναι', VatExemptionGuidance::typeConflict('1.2', 4)['message']);
+    }
+
+    public function test_types_outside_the_sales_classes_are_not_judged(): void
+    {
+        foreach (['5.1', '5.2', '11.1', '11.2', '3.1', '', null] as $type) {
+            foreach (Codes::VAT_EXEMPTION_CATEGORIES as $code) {
+                $this->assertNull(VatExemptionGuidance::typeConflict($type, $code), "{$code} on ".var_export($type, true));
+            }
+        }
+        $this->assertNull(VatExemptionGuidance::typeConflict('2.2', null));
+        $this->assertNull(VatExemptionGuidance::typeConflict('2.2', ''));
+    }
+
+    public function test_every_conflict_rule_uses_real_codes_and_types(): void
+    {
+        $seen = [];
+        foreach (VatExemptionGuidance::TYPE_CONFLICTS as $rule) {
+            $this->assertContains($rule['code'], Codes::VAT_EXEMPTION_CATEGORIES);
+            $this->assertContains($rule['level'], [VatExemptionGuidance::CONFLICT_BLOCK, VatExemptionGuidance::CONFLICT_WARN]);
+            foreach ($rule['types'] as $type) {
+                // Only the types whose counterpart class is fixed are judged.
+                $this->assertNotNull(Codes::counterpartCountryClass($type), $type);
+                // One verdict per (code, type) — a later rule would be dead.
+                $this->assertArrayNotHasKey($rule['code'].'@'.$type, $seen, "duplicate {$rule['code']} on {$type}");
+                $seen[$rule['code'].'@'.$type] = true;
+            }
+        }
+    }
 }
