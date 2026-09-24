@@ -262,7 +262,11 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Οριστικοποίηση παραστατικού')
-                ->modalDescription('Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
+                ->modalDescription(fn (Invoice $record) => match (true) {
+                    $record->isInformal() => 'Γίνεται «Ενεργό» και παίρνει αριθμό (άτυπη σειρά — δεν διαβιβάζεται). Μπορείτε να το επαναφέρετε σε πρόχειρο για αλλαγές.',
+                    $record->isIssuedAtFinalize() => 'Γίνεται «Ενεργό» και παίρνει οριστικό αριθμό — αυτή είναι η έκδοσή του (δεν διαβιβάζεται). Μετά δεν επιστρέφει σε πρόχειρο: για διόρθωση, ακύρωση και νέο παραστατικό.',
+                    default => 'Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.',
+                })
                 ->action(function (Invoice $record) {
                     // Gapless-at-send: a tenant that does NOT transmit to AADE has no
                     // submission event, so finalisation IS its issuance — allocate the
@@ -277,12 +281,10 @@ class ViewInvoice extends ViewRecord
                     // unnumbered (no UI path to a number), and not numbered-but-draft (a
                     // reserved ΑΑ the operator could abandon into a gap). A retry re-runs
                     // cleanly (assign no-ops once the invoice carries a code).
-                    // An INFORMAL (non-fiscal) series is never transmitted, so its
-                    // finalisation is its issuance on EVERY tenant — number it here too
-                    // (otherwise a provider tenant would leave it «ΠΡΟΣ-…» forever).
+                    // An INFORMAL series is never transmitted, so it is issued here on
+                    // EVERY tenant too (else «ΠΡΟΣ-…» forever) — isIssuedAtFinalize().
                     DB::transaction(function () use ($record): void {
-                        if ($record->code === null
-                            && (! $record->company->submitsElectronically() || $record->isInformal())) {
+                        if ($record->code === null && $record->isIssuedAtFinalize()) {
                             app(InvoiceNumberer::class)->assign($record);
                         }
 
@@ -322,7 +324,16 @@ class ViewInvoice extends ViewRecord
                 ->label('Επαναφορά σε πρόχειρο')
                 ->icon('heroicon-o-arrow-uturn-left')
                 ->color('gray')
-                ->visible(fn (Invoice $record) => $record->local_status === 'active' && $record->mydata_state === null)
+                // Never for a fiscal document issued with its number at finalize
+                // (Nixpal — already with the customer or accountant: cancel and
+                // reissue; an informal one stays free), and never mid-send on a filing
+                // tenant (in-doubt: it may already hold a MARK — resubmit reconciles).
+                // A filing tenant's fiscal document that was definitively rejected
+                // may still revert, be fixed and resubmitted.
+                ->visible(fn (Invoice $record) => $record->local_status === 'active'
+                    && $record->mydata_state === null
+                    && $record->mydata_pending_since === null
+                    && ! $record->isIssuedWithNumber())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->action(function (Invoice $record) {
@@ -400,10 +411,12 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Επαναφορά ακυρωμένου')
-                ->modalDescription('Επαναφέρεται σε «Ενεργό» αν είχε υποβληθεί στο myDATA, αλλιώς σε «Πρόχειρο». Πληρωμές που έγιναν πιστωτικό υπόλοιπο ΔΕΝ επανασυνδέονται αυτόματα.')
+                ->modalDescription('Επαναφέρεται σε «Ενεργό» αν είχε υποβληθεί στο myDATA ή είχε εκδοθεί με αριθμό, αλλιώς σε «Πρόχειρο». Πληρωμές που έγιναν πιστωτικό υπόλοιπο ΔΕΝ επανασυνδέονται αυτόματα.')
                 ->action(function (Invoice $record) {
                     $record->update([
-                        'local_status' => $record->mydata_state === 'VALID' ? 'active' : 'draft',
+                        // An issued-with-number document comes back as issued, never as
+                        // an editable draft under its number (isIssuedWithNumber()).
+                        'local_status' => $record->mydata_state === 'VALID' || $record->isIssuedWithNumber() ? 'active' : 'draft',
                         // Same stale-offer trap as revert_to_draft: without this a
                         // cancelled-then-revived proforma comes back OFFERED — visible
                         // and payable in the portal again with no operator decision,

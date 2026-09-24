@@ -130,6 +130,42 @@ class Invoice extends Model implements MovableDocument
         return (bool) (self::informalTypeLookup($this->invoice_type_id, $loaded)?->is_informal ?? false);
     }
 
+    /**
+     * Is this document ISSUED at finalize — i.e. does it get its real ΑΑ there,
+     * because no submission event will ever come? True on a tenant that doesn't
+     * file (Nixpal: no e-invoicing, or mode off) and for an informal series on any
+     * tenant. A filing tenant's fiscal series is numbered at the send instead
+     * (gapless-at-send). The one rule behind finalize's numbering and its wording.
+     *
+     * Deliberately NOT «the series has no myDATA type»: on a filing tenant that is a
+     * config error to fix (red «λείπει» in the types list, the submit refuses and
+     * hands the ΑΑ back) — treating it as «never sent» would issue an unfiled
+     * fiscal document silently. «Not sent by design» is the informal flag.
+     */
+    public function isIssuedAtFinalize(): bool
+    {
+        return ! $this->company?->submitsElectronically() || $this->isInformal();
+    }
+
+    /**
+     * A FISCAL document issued with its number at finalize — a tenant that doesn't
+     * file (Nixpal): already with the customer / accountant, so it never goes back
+     * to draft; correcting it means cancel and reissue. Gated in the only two
+     * runtime paths that move an existing document back to draft: ViewInvoice's
+     * «Επαναφορά σε πρόχειρο» and «Επαναφορά» (revive brings it back ACTIVE).
+     *
+     * NOT an informal document: internal, it never leaves us, so it stays freely
+     * editable (revert → edit → re-finalize keeps its number; a re-issue never
+     * re-advances the service contract — InvoiceObserver — and a domain renews at
+     * most once per invoice, by its registrar log — DomainRenewalService). NOT a filing tenant's numbered fiscal
+     * document either: it isn't issued until its MARK — after a definitive
+     * rejection it may still revert, be fixed and resubmitted.
+     */
+    public function isIssuedWithNumber(): bool
+    {
+        return $this->code !== null && ! $this->isInformal() && ! $this->company?->submitsElectronically();
+    }
+
     private ?InvoiceType $informalTypeMemo = null;
 
     /**
