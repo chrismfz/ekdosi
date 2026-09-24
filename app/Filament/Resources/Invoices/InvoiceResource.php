@@ -92,7 +92,12 @@ class InvoiceResource extends Resource
         // soft-deleted referenced rows.
         return parent::getEloquentQuery()
             ->withoutGlobalScopes([SoftDeletingScope::class])
-            ->with(['customer' => fn ($q) => $q->withTrashed(), 'latestMailLog']);
+            ->with([
+                'customer' => fn ($q) => $q->withTrashed(),
+                // The list's «Άτυπο» marker reads the series per row: load it once.
+                'invoiceType',
+                'latestMailLog',
+            ]);
     }
 
     public static function getGlobalSearchEloquentQuery(): Builder

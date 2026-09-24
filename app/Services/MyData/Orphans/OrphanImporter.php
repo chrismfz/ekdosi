@@ -97,7 +97,10 @@ final class OrphanImporter
         $filed = (string) ($doc['invoiceType'] ?? '');
         $owner = self::seriesType($company, $doc);
         if ($owner !== null) {
-            return ! $owner->is_credit && (blank($owner->mydata_type) || (string) $owner->mydata_type === $filed)
+            // An informal series has no myDATA type either — but a FILED document is
+            // never informal (it would vanish from VAT / receivables).
+            return ! $owner->is_credit && ! $owner->is_informal
+                && (blank($owner->mydata_type) || (string) $owner->mydata_type === $filed)
                 ? collect([$owner])
                 : collect();
         }
@@ -114,6 +117,10 @@ final class OrphanImporter
     {
         $filed = (string) ($doc['invoiceType'] ?? '—');
         $owner = self::seriesType($company, $doc);
+
+        if ($owner?->is_informal) {
+            return 'Η σειρά «'.$owner->code.'» είναι άτυπη (μη φορολογική) — ένα διαβιβασμένο παραστατικό δεν μπαίνει σε άτυπη σειρά.';
+        }
 
         return $owner !== null
             ? 'Η σειρά «'.$owner->code.'» είναι του τύπου «'.$owner->code.' — '.$owner->name.'» ('.($owner->is_credit ? 'πιστωτικός' : 'myDATA '.$owner->mydata_type)

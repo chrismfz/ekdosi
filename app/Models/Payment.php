@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\TracksActivity;
+use App\Models\Scopes\CompanyScope;
 use App\Observers\PaymentObserver;
 use App\Services\Payments\PaymentGatewayRegistry;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
@@ -95,6 +96,20 @@ class Payment extends Model
             if ((float) $payment->amount <= 0) {
                 throw new \InvalidArgumentException(
                     'Το ποσό πληρωμής/επιστροφής πρέπει να είναι θετικό — η κατεύθυνση ορίζεται από το «kind» (payment/refund).'
+                );
+            }
+            // An informal (non-fiscal) document drops out of every balance, so money
+            // pointed at it would turn into unexplained customer credit. Refused here,
+            // on every path, behind the forms/pickers that already hide it.
+            // Resolved by the (dirty) key in ONE query — never the relation cache, which
+            // Eloquent doesn't reset when invoice_id changes.
+            if ($payment->isDirty('invoice_id') && $payment->invoice_id !== null
+                && Invoice::query()->withoutGlobalScope(CompanyScope::class)->withTrashed()
+                    ->whereKey($payment->invoice_id)
+                    ->whereIn('invoice_type_id', fn ($q) => $q->select('id')->from('invoice_types')->where('is_informal', true))
+                    ->exists()) {
+                throw new \InvalidArgumentException(
+                    'Άτυπο παραστατικό (μη φορολογική σειρά) — δεν δέχεται πληρωμή. Καταχώρισέ την έναντι λογαριασμού και έκδωσε φορολογικό.'
                 );
             }
         });

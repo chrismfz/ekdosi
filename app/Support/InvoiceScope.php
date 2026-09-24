@@ -6,7 +6,8 @@ use App\Models\Invoice;
 
 /**
  * The single definition of a "live" invoice for money/reporting purposes:
- * NOT cancelled locally AND NOT cancelled at myDATA. Centralised so the
+ * NOT cancelled locally AND NOT cancelled at myDATA AND NOT of an informal
+ * (non-fiscal) series. Centralised so the
  * AADE-state + local-status semantics live in ONE place — a future
  * terminal state (or a change to the null=draft convention) is a one-line
  * edit, not a hunt across InvoiceBalance / DashboardMetrics / the ledger
@@ -39,6 +40,9 @@ class InvoiceScope
         $local = $prefix.'local_status';
         $offered = $prefix.'offered_at';
 
+        // An informal (non-fiscal) document is never a payment target.
+        self::excludeInformal($query, $prefix);
+
         return $query
             // Carried here, not left to the call sites: this helper exists precisely
             // to stop «one site missed part of the predicate» drift, and its PHP twin
@@ -56,11 +60,33 @@ class InvoiceScope
         $state = $prefix.'mydata_state';
         $local = $prefix.'local_status';
 
-        return $query
+        return self::excludeInformal($query
             ->where($local, '!=', 'cancelled')
             ->where(fn ($q) => $q
                 ->whereNull($state)
-                ->orWhere($state, '!=', 'CANCELLED'));
+                ->orWhere($state, '!=', 'CANCELLED')), $prefix);
+    }
+
+    /**
+     * Drop documents of an INFORMAL (non-fiscal) series — tests and our own internal
+     * services (docs/non-billable-services.md). They are not tax documents, so they
+     * never count as a sale, VAT, a receivable, a reminder/dunning target or a
+     * payment target. Carried by live() so every money/report site gets it at once;
+     * the PHP twin is Invoice::isInformal().
+     *
+     * Uncorrelated `NOT IN (informal type ids)` rather than a correlated EXISTS on
+     * `invoices.invoice_type_id`: it keeps working under a table alias (a whereHas
+     * on a self-relation aliases `invoices`), and the explicit NULL branch keeps an
+     * invoice without a type counted (a bare NOT IN would silently drop it). The
+     * subquery reads trashed types too — a deleted series is still informal.
+     */
+    public static function excludeInformal($query, string $prefix = '')
+    {
+        $type = $prefix.'invoice_type_id';
+
+        return $query->where(fn ($q) => $q
+            ->whereNull($type)
+            ->orWhereNotIn($type, fn ($sub) => $sub->select('id')->from('invoice_types')->where('is_informal', true)));
     }
 
     /**

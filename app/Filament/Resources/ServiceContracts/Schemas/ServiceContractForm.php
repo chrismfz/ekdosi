@@ -12,6 +12,7 @@ use App\Models\ProductBillingPrice;
 use App\Models\Server;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -50,7 +51,30 @@ class ServiceContractForm
                             ->all())
                         ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
-                            ->find($value))->name),
+                            ->find($value))->name)
+                        ->live()
+                        // The customer's default series (e.g. our own company → the
+                        // informal «ΕΣΩ») pre-fills the renewal type — never clobbers
+                        // a type the operator picked, but a type that is still the
+                        // PREVIOUS customer's default follows the switch (a mis-click on
+                        // our own company must not leave a client's renewals informal).
+                        ->afterStateUpdated(function ($state, callable $set, Get $get): void {
+                            $current = $get('invoice_type_id');
+                            $auto = $get('customer_default_type_id');
+                            if (blank($state) || (filled($current) && (blank($auto) || (int) $current !== (int) $auto))) {
+                                return;
+                            }
+                            $type = Customer::query()
+                                ->where('company_id', Filament::getTenant()?->getKey())
+                                ->find($state)
+                                ?->usableDefaultInvoiceType();
+                            $set('invoice_type_id', $type?->id);
+                            $set('customer_default_type_id', $type?->id);
+                        }),
+
+                    // The series the customer's default put into invoice_type_id (null once
+                    // the operator picks one) — form-only state, never saved.
+                    Hidden::make('customer_default_type_id')->dehydrated(false),
 
                     Select::make('product_id')
                         ->label('Προϊόν/Υπηρεσία (προαιρετικό)')
@@ -176,11 +200,14 @@ class ServiceContractForm
                             ->monetary()
                             ->orderBy('code')
                             ->get()
-                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->pickerLabel()])
                             ->all())
                         ->searchable()
                         ->preload()
-                        ->helperText('Απαιτείται για να εκδοθεί ανανέωση. Χωρίς αυτόν η έκδοση μπλοκάρει.'),
+                        ->live()
+                        // The operator's own pick — a later customer switch keeps it.
+                        ->afterStateUpdated(fn (callable $set) => $set('customer_default_type_id', null))
+                        ->helperText('Απαιτείται για να εκδοθεί ανανέωση. Χωρίς αυτόν η έκδοση μπλοκάρει. Άτυπη σειρά (π.χ. «ΕΣΩ») = δική μας υπηρεσία: ανανεώνεται κανονικά, χωρίς myDATA και εκτός υπολοίπων.'),
 
                     Select::make('payment_method_id')
                         ->label('Τρόπος πληρωμής')

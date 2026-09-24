@@ -101,7 +101,87 @@ class Invoice extends Model implements MovableDocument
     public function isPubliclyViewable(): bool
     {
         return $this->local_status === 'active'
-            && $this->mydata_state !== 'CANCELLED';
+            && $this->mydata_state !== 'CANCELLED'
+            // An informal (non-fiscal) document is not a «παραστατικό» — never on the
+            // public PDF route, the issued-for-client list or the invoice e-mail.
+            && ! $this->isInformal();
+    }
+
+    public const INFORMAL_NOT_FILEABLE = 'Άτυπο παραστατικό (μη φορολογική σειρά) — δεν διαβιβάζεται στο myDATA ούτε σε πάροχο.';
+
+    /**
+     * A document of an INFORMAL (non-fiscal) series — tests and our own internal
+     * services (docs/non-billable-services.md): never filed at myDATA, never in any
+     * money/VAT total, printed «ΑΤΥΠΟ». The PHP twin of InvoiceScope::excludeInformal().
+     */
+    public function isInformal(): bool
+    {
+        $loaded = $this->invoiceType;
+        if ($loaded === null && filled($this->invoice_type_id)) {
+            // A soft-deleted series: memoised on a private slot (one lookup, not one
+            // per call) — NOT via setRelation, which would change what every other
+            // $invoice->invoiceType reader sees depending on call order.
+            if ((int) $this->informalTypeMemo?->getKey() !== (int) $this->invoice_type_id) {
+                $this->informalTypeMemo = self::informalTypeLookup($this->invoice_type_id);
+            }
+            $loaded = $this->informalTypeMemo;
+        }
+
+        return (bool) (self::informalTypeLookup($this->invoice_type_id, $loaded)?->is_informal ?? false);
+    }
+
+    private ?InvoiceType $informalTypeMemo = null;
+
+    /**
+     * Why re-typing this document to $newTypeId must be refused (null = allowed).
+     * Crossing the informal/fiscal line is refused once the document is COMMITTED —
+     * numbered (its ΑΑ belongs to the series it was drawn from: a reverted «ΕΣΩ5»
+     * would be filed under ΕΣΩ/5) or holding customer money (an informal document
+     * drops out of every balance, so the payment would turn into unexplained
+     * credit) — and a credit note never becomes informal (the original's credit
+     * would silently vanish). An unnumbered, unpaid sale draft is free to change
+     * series. Shared by the model guard and the edit form's rule.
+     */
+    public function informalTypeChangeBlocker(int|string|null $newTypeId): ?string
+    {
+        if (! $this->exists) {
+            return null;
+        }
+        $was = (bool) self::informalTypeLookup($this->getOriginal('invoice_type_id'))?->is_informal;
+        $now = (bool) self::informalTypeLookup($newTypeId)?->is_informal;
+        if ($was === $now) {
+            return null;
+        }
+        if ($this->getOriginal('code') !== null || $this->hasRecordedPayments()) {
+            return self::INFORMAL_LINE_LOCKED;
+        }
+
+        return $now && $this->credited_invoice_id !== null ? self::INFORMAL_NOT_CREDIT : null;
+    }
+
+    public const INFORMAL_LINE_LOCKED = 'Το παραστατικό έχει ήδη αριθμό ή πληρωμή — δεν αλλάζει από άτυπη σε φορολογική σειρά (ή ανάποδα). Ακύρωσέ το και φτιάξε νέο.';
+
+    public const INFORMAL_NOT_CREDIT = 'Ένα πιστωτικό δεν μπαίνει σε άτυπη σειρά.';
+
+    public const INFORMAL_NEVER_FILED = 'Ένα διαβιβασμένο (με ΜΑΡΚ / κατάσταση myDATA) παραστατικό δεν μπαίνει σε άτυπη σειρά.';
+
+    /**
+     * The series behind an invoice_type_id, TRASHED INCLUDED: a series deleted after
+     * issue still made its documents informal, exactly as the SQL twin
+     * (excludeInformal) reads trashed types. The plain belongsTo drops a trashed
+     * type, so fall back to a direct lookup only in that (rare) case.
+     */
+    private static function informalTypeLookup(int|string|null $typeId, ?InvoiceType $loaded = null): ?InvoiceType
+    {
+        if (blank($typeId)) {
+            return null;
+        }
+        $typeId = (int) $typeId;
+        if ($loaded !== null && (int) $loaded->getKey() === $typeId) {
+            return $loaded;
+        }
+
+        return InvoiceType::query()->withoutGlobalScope(CompanyScope::class)->withTrashed()->find($typeId);
     }
 
     /**
@@ -129,7 +209,7 @@ class Invoice extends Model implements MovableDocument
      */
     public function isCustomerVisible(): bool
     {
-        return $this->isPubliclyViewable() || $this->isOffered();
+        return ($this->isPubliclyViewable() || $this->isOffered()) && ! $this->isInformal();
     }
 
     /**
@@ -191,7 +271,8 @@ class Invoice extends Model implements MovableDocument
     public function isCustomerPayable(): bool
     {
         return $this->mydata_state !== 'CANCELLED'
-            && ($this->local_status === 'active' || $this->isOffered());
+            && ($this->local_status === 'active' || $this->isOffered())
+            && ! $this->isInformal();
     }
 
     /**
@@ -428,6 +509,26 @@ class Invoice extends Model implements MovableDocument
             if ($model->code === null && blank($model->invcode)) {
                 $model->invcode = ProvisionalCode::make($model->invoiceType?->code, $model->getKey());
                 $model->saveQuietly();
+            }
+        });
+
+        // The informal invariants, on EVERY write path (the edit form validates the
+        // same rules for a friendly message; orphan import/link, sync and any future
+        // path hit this):
+        //  - a committed document never crosses the informal/fiscal line
+        //    (informalTypeChangeBlocker);
+        //  - an informal document never carries an AADE identity (MARK / state) and is
+        //    never a credit note — a filed sale or a credit filed under an informal
+        //    series would silently drop out of VAT / receivables / the original's credit.
+        static::saving(function (self $model): void {
+            if ($model->exists && $model->isDirty('invoice_type_id')
+                && ($why = $model->informalTypeChangeBlocker($model->invoice_type_id)) !== null) {
+                throw new RuntimeException($why);
+            }
+            if ($model->isDirty(['invoice_type_id', 'mydata_mark', 'mydata_state', 'credited_invoice_id'])
+                && (filled($model->mydata_mark) || filled($model->mydata_state) || $model->credited_invoice_id !== null)
+                && $model->isInformal()) {
+                throw new RuntimeException($model->credited_invoice_id !== null ? self::INFORMAL_NOT_CREDIT : self::INFORMAL_NEVER_FILED);
             }
         });
     }
@@ -1329,7 +1430,10 @@ class Invoice extends Model implements MovableDocument
             return false;
         }
 
-        return $due->lt($asOf ?? Carbon::today());
+        // Informal (non-fiscal): never a receivable — so never overdue, never dunned
+        // (a renewal of our own internal service must not suspend it). Checked last:
+        // it may cost a type lookup, the column checks above are free.
+        return $due->lt($asOf ?? Carbon::today()) && ! $this->isInformal();
     }
 
     /**
@@ -1435,8 +1539,8 @@ class Invoice extends Model implements MovableDocument
     {
         $company = $this->company;
 
-        if ($company === null) {
-            return false;
+        if ($company === null || $this->isInformal()) {
+            return false; // an informal document is never e-mailed to the customer
         }
 
         $channel = SendChannel::fromCompany($company);

@@ -216,13 +216,15 @@ class DashboardMetrics
      */
     public function unfiledCount(): int
     {
-        return (int) DB::table('invoices')
+        $query = DB::table('invoices')
             ->where('company_id', $this->tenant->id)
             ->whereNull('deleted_at')
             ->whereNull('mydata_state')
             ->whereNull('legacy_id')
-            ->where('local_status', '!=', 'cancelled')   // a cancelled draft is not a filing backlog
-            ->count();
+            ->where('local_status', '!=', 'cancelled');   // a cancelled draft is not a filing backlog
+
+        // An informal document is never filed — it is not a backlog, it is the design.
+        return (int) InvoiceScope::excludeInformal($query)->count();
     }
 
     /**

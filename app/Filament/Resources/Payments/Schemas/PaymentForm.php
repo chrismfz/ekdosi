@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
+use App\Support\InvoiceScope;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
@@ -62,14 +63,29 @@ class PaymentForm
                     // to it would understate the balance (phantom credit); the
                     // operator finalises first, then pays. Mirrors PaymentAllocator /
                     // openInvoiceOptions, which already gate on local_status='active'.
-                    ->options(fn (Get $get) => $get('customer_id')
-                        ? Invoice::query()
+                    // Only a LIVE document is a payment target — not a cancelled / AADE-
+                    // cancelled one, and not an informal (non-fiscal) one (live() carries
+                    // both), nor a credit note (MON-9).
+                    ->options(function (Get $get, ?Payment $record) {
+                        if (! $get('customer_id')) {
+                            return [];
+                        }
+                        $options = InvoiceScope::excludeCreditNotes(InvoiceScope::live(Invoice::query()))
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->where('customer_id', $get('customer_id'))
                             ->where('local_status', '!=', 'draft')
                             ->orderByDesc('issued_at')
-                            ->pluck('invcode', 'id')
-                        : [])
+                            ->pluck('invcode', 'id');
+                        // Editing: the payment's CURRENT link stays selectable (an AADE
+                        // cancel doesn't detach payments) — else the edit can't be saved
+                        // without silently turning it into on-account credit.
+                        if ($record?->invoice_id !== null && ! $options->has($record->invoice_id)
+                            && ($current = Invoice::query()->withTrashed()->find($record->invoice_id))) {
+                            $options->put($current->id, $current->invcode);
+                        }
+
+                        return $options;
+                    })
                     ->searchable()
                     ->placeholder('Έναντι λογαριασμού')
                     ->helperText('Κενό = έναντι λογαριασμού (πιστωτικό υπόλοιπο πελάτη, δεν εξοφλεί συγκεκριμένο παραστατικό).'),

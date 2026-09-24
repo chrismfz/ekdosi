@@ -39,7 +39,9 @@ class InvoicesTable
                     ->label('Code')
                     ->searchable()
                     ->sortable()
-                    ->copyable(),
+                    ->copyable()
+                    // Informal (non-fiscal) series — visibly not a tax document.
+                    ->description(fn (Invoice $record): ?string => $record->isInformal() ? 'Άτυπο' : null),
 
                 TextColumn::make('issued_at')
                     ->label('Issued')
@@ -366,7 +368,7 @@ class InvoicesTable
                         ))
                         ->requiresConfirmation()
                         ->modalHeading('Μαζική υποβολή στο myDATA')
-                        ->modalDescription('Υποβάλλονται μόνο τα μη υποβληθέντα (χωρίς MARK). Πιστωτικά και ήδη υποβληθέντα παραλείπονται.')
+                        ->modalDescription('Υποβάλλονται μόνο τα μη υποβληθέντα (χωρίς MARK). Πιστωτικά, άτυπα και ήδη υποβληθέντα παραλείπονται.')
                         ->action(function (Collection $records) {
                             $ok = 0;
                             $skip = 0;
@@ -382,7 +384,9 @@ class InvoicesTable
                                 // is synced inside the submitter.
                                 if ($record->mydata_state !== null
                                     || $record->credited_invoice_id !== null
-                                    || $record->local_status === 'cancelled') {
+                                    || $record->local_status === 'cancelled'
+                                    // An informal series is never filed — by design, not a failure.
+                                    || $record->isInformal()) {
                                     $skip++;
 
                                     continue;

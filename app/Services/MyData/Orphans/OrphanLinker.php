@@ -54,6 +54,7 @@ final class OrphanLinker
             filled($invoice->mydata_mark) => 'Το τοπικό παραστατικό έχει ήδη ΜΑΡΚ ('.$invoice->mydata_mark.').',
             $invoice->local_status === 'draft' => 'Το τοπικό είναι πρόχειρο (δεν έχει εκδοθεί) — δεν μπορεί να είναι το ίδιο παραστατικό.',
             $invoice->local_status === 'cancelled' => 'Το τοπικό παραστατικό είναι ακυρωμένο — επανέφερέ το πρώτα.',
+            $invoice->isInformal() => 'Το τοπικό είναι άτυπο (μη φορολογική σειρά) — δεν είναι το διαβιβασμένο παραστατικό.',
             (string) $invoice->code !== $aa || trim((string) $invoice->filedSeries()) !== $series => 'Άλλη σειρά/ΑΑ ('.$invoice->invcode.' ≠ '.($doc['invcode'] ?? '—').') — είναι άλλο παραστατικό.',
             Codes::transmittedDocBucket($type) !== 'income' => 'Δεν είναι παραστατικό πώλησης ('.($type ?: '—').').',
             Codes::isCreditNoteType($type) !== $invoice->isCreditNote() => 'Το ένα είναι πιστωτικό και το άλλο όχι.',

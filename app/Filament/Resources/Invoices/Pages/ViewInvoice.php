@@ -129,6 +129,7 @@ class ViewInvoice extends ViewRecord
                 ->visible(fn (Invoice $record) => $isProviderChannel
                     && $record->mydata_state === null
                     && $record->local_status === 'draft'
+                    && ! $record->isInformal()
                     && ! static::issuedToday($record))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
@@ -204,6 +205,7 @@ class ViewInvoice extends ViewRecord
                 // note) nor for a customer-less retail slip (nobody to offer it to).
                 ->visible(fn (Invoice $record): bool => $record->local_status === 'draft'
                     && ! $record->isOffered()
+                    && ! $record->isInformal() // never in front of the customer
                     && $record->customer_id !== null
                     && $record->credited_invoice_id === null
                     && ! ($record->invoiceType?->is_credit ?? false))
@@ -275,8 +277,12 @@ class ViewInvoice extends ViewRecord
                     // unnumbered (no UI path to a number), and not numbered-but-draft (a
                     // reserved ΑΑ the operator could abandon into a gap). A retry re-runs
                     // cleanly (assign no-ops once the invoice carries a code).
+                    // An INFORMAL (non-fiscal) series is never transmitted, so its
+                    // finalisation is its issuance on EVERY tenant — number it here too
+                    // (otherwise a provider tenant would leave it «ΠΡΟΣ-…» forever).
                     DB::transaction(function () use ($record): void {
-                        if ($record->code === null && ! $record->company->submitsElectronically()) {
+                        if ($record->code === null
+                            && (! $record->company->submitsElectronically() || $record->isInformal())) {
                             app(InvoiceNumberer::class)->assign($record);
                         }
 
@@ -422,6 +428,8 @@ class ViewInvoice extends ViewRecord
                 ->visible(fn (Invoice $record) => $record->credited_invoice_id === null
                     && $record->customer_id !== null
                     && $record->mydata_state !== 'CANCELLED'
+                    // An informal (non-fiscal) document is never a receivable.
+                    && ! $record->isInformal()
                     // MON-5: not on a draft — a πρόχειρο isn't a receivable yet.
                     && $record->local_status !== 'draft'
                     && (int) ($record->paymentMethod?->due_days ?? 0) > 0)
@@ -596,7 +604,9 @@ class ViewInvoice extends ViewRecord
                 // while its local_status is still 'draft' after reconciliation). Hidden
                 // on a genuine πρόχειρο (edit/delete it instead) and on anything
                 // cancelled (locally or at AADE — its reversal is handled elsewhere).
+                // An informal (non-fiscal) document is cancelled, never credited.
                 ->visible(fn (Invoice $record) => ($record->local_status === 'active' || $record->mydata_state === 'VALID')
+                    && ! $record->isInformal()
                     && $record->local_status !== 'cancelled'
                     && $record->credited_invoice_id === null
                     && $record->mydata_state !== 'CANCELLED'
@@ -715,7 +725,8 @@ class ViewInvoice extends ViewRecord
                 ->color('success')
                 ->visible(fn (Invoice $record) => $tenantSupportsMyData
                     && $record->mydata_state === null
-                    && $record->local_status !== 'cancelled')
+                    && $record->local_status !== 'cancelled'
+                    && ! $record->isInformal())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Αποστολή παραστατικού — '.$channelLabel)
@@ -1072,7 +1083,7 @@ class ViewInvoice extends ViewRecord
                 ->label('Preview submission XML')
                 ->icon('heroicon-o-eye')
                 ->color('gray')
-                ->visible(fn () => Filament::getTenant()?->einvoice_provider === 'gr-mydata')
+                ->visible(fn (Invoice $record) => Filament::getTenant()?->einvoice_provider === 'gr-mydata' && ! $record->isInformal())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Preview the XML this invoice would send to myDATA')
@@ -1124,7 +1135,7 @@ class ViewInvoice extends ViewRecord
                 ->label('Προεπισκόπηση παρόχου (XML)')
                 ->icon('heroicon-o-eye')
                 ->color('gray')
-                ->visible(fn () => $isProviderChannel)
+                ->visible(fn (Invoice $record) => $isProviderChannel && ! $record->isInformal())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
                 ->modalHeading('Τι θα σταλεί στον Πάροχο')
                 ->modalDescription('Το ακριβές περιεχόμενο που θα φύγει — χωρίς αποστολή/δίκτυο. Ο μυστικός κωδικός (token) ΔΕΝ περιλαμβάνεται· στέλνεται ξεχωριστά.')
@@ -1368,6 +1379,8 @@ class ViewInvoice extends ViewRecord
                 ->label('Προβολή UBL')
                 ->icon('heroicon-o-code-bracket')
                 ->color('gray')
+                // UBL is an e-invoice — an informal document is not one.
+                ->visible(fn (Invoice $record) => ! $record->isInformal())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
                 ->modalHeading('UBL — PEPPOL BIS Billing 3.0')
                 ->modalSubmitAction(false)
@@ -1406,6 +1419,7 @@ class ViewInvoice extends ViewRecord
                 ->label('Λήψη UBL')
                 ->icon('heroicon-o-arrow-down-tray')
                 ->color('gray')
+                ->visible(fn (Invoice $record) => ! $record->isInformal())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('view', $record) ?? false)
                 ->action(function (Invoice $record) {
                     // Build UP-FRONT so a mapping/validation error surfaces as a

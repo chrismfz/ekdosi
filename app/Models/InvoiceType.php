@@ -3,17 +3,17 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use RuntimeException;
 
 class InvoiceType extends Model
 {
     use BelongsToCompany;
-
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
@@ -27,6 +27,8 @@ class InvoiceType extends Model
         'is_return',
         // Combined ΤΔΑ (Slice 3a): a «ΤΔΑ» type pre-sets invoices.is_delivery_note.
         'is_delivery_note',
+        // Άτυπη (μη φορολογική) σειρά — never myDATA, never in any total.
+        'is_informal',
         'mydata_type',
         'mydata_income_class',
         'mydata_income_class_category',
@@ -46,6 +48,7 @@ class InvoiceType extends Model
             'is_credit' => 'boolean',
             'is_return' => 'boolean',
             'is_delivery_note' => 'boolean',
+            'is_informal' => 'boolean',
             'mydata_requires_quantity' => 'boolean',
         ];
     }
@@ -77,6 +80,81 @@ class InvoiceType extends Model
     public function distributionAim(): BelongsTo
     {
         return $this->belongsTo(DistributionAim::class);
+    }
+
+    protected static function booted(): void
+    {
+        // The informal flag decides whether a document is a tax document at all. Once
+        // the series has ANY document it is frozen: flipping a fiscal series to
+        // informal would retroactively drop real invoices from VAT/receivables (and a
+        // «draft» can already be filed, numbered, or hold a customer's payment), and
+        // the reverse would turn internal documents into unfiled «sales». Need the
+        // other kind? Open a new series.
+        static::saving(function (InvoiceType $type): void {
+            if ($type->exists && $type->isDirty('is_informal') && ($why = $type->informalFlagLockReason()) !== null) {
+                throw new RuntimeException('Η σειρά '.$type->code.' '.$why.' — δεν αλλάζει σε/από άτυπη. Φτιάξε νέα σειρά.');
+            }
+            if ($type->is_informal && (filled($type->mydata_type) || $type->is_credit || $type->is_delivery_note)) {
+                throw new RuntimeException('Μια άτυπη σειρά δεν έχει myDATA τύπο και δεν είναι πιστωτικό ή δελτίο αποστολής.');
+            }
+        });
+    }
+
+    /** «ΕΣΩ — Εσωτερικά (άτυπη)»: the one label every series picker renders. */
+    public function pickerLabel(): string
+    {
+        return $this->code.' — '.$this->name.($this->is_informal ? ' (άτυπη)' : '');
+    }
+
+    /**
+     * Why the informal flag can no longer change (null = it can): the series has
+     * documents, or it is a WHMCS inbox default (flipping it would silently turn
+     * real customers' WHMCS invoices informal — or our internal ones fiscal).
+     */
+    public function informalFlagLockReason(): ?string
+    {
+        if ($this->hasDocuments()) {
+            return 'έχει ήδη παραστατικά';
+        }
+
+        return $this->isWhmcsDefault() ? 'είναι προεπιλογή του WHMCS inbox' : null;
+    }
+
+    /**
+     * Any document of this series — invoices AND delivery notes, drafts included (a
+     * draft can already be filed, numbered or hold a payment). A deleted document
+     * still counts once it carried a number (it left a trace in the series); a
+     * deleted, never-numbered draft doesn't lock the series forever.
+     */
+    public function hasDocuments(): bool
+    {
+        $traced = fn ($q) => $q->whereNull('deleted_at')->orWhereNotNull('code');
+
+        return Invoice::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->withTrashed()
+            ->where('company_id', $this->company_id)
+            ->where('invoice_type_id', $this->getKey())
+            ->where($traced)
+            ->exists()
+            || DeliveryNote::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->withTrashed()
+                ->where('company_id', $this->company_id)
+                ->where('delivery_type_id', $this->getKey())
+                ->where($traced)
+                ->exists();
+    }
+
+    private function isWhmcsDefault(): bool
+    {
+        $id = $this->getKey();
+
+        return Company::query()->whereKey($this->company_id)
+            ->where(fn ($q) => $q->where('whmcs_default_invoice_type_id', $id)
+                ->orWhere('whmcs_default_receipt_type_id', $id)
+                ->orWhere('whmcs_default_unpaid_type_id', $id))
+            ->exists();
     }
 
     /**

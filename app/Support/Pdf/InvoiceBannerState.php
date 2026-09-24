@@ -24,6 +24,9 @@ use App\Models\Invoice;
  *   cancelled       — voided locally OR at AADE. Wins over everything. When
  *                     the AADE side is still VALID, note=cancel_pending_mydata
  *                     so the paper says the AADE cancellation is pending.
+ *   informal        — a document of an informal (non-fiscal) series, draft or
+ *                     issued: «ΑΤΥΠΟ — δεν αποτελεί φορολογικό στοιχείο». Never
+ *                     «pending myDATA» (it is never filed).
  *   draft           — local_status draft, never filed: not issued yet
  *                     (provider-agnostic wording — no myDATA reference).
  *   pending_mydata  — ISSUED (active) but no AADE state yet, on a tenant that
@@ -51,6 +54,10 @@ class InvoiceBannerState
                 // still owes AADE a cancel; say so instead of hiding it.
                 'note' => ($local === 'cancelled' && $aade === 'VALID') ? 'cancel_pending_mydata' : null,
             ];
+        }
+
+        if ($invoice->isInformal()) {
+            return ['kind' => 'informal', 'note' => null];
         }
 
         if ($local === 'draft' && $aade === null) {

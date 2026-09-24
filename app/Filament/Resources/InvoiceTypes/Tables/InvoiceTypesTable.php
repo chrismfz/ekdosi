@@ -61,6 +61,9 @@ class InvoiceTypesTable
                         if (filled($record->mydata_type)) {
                             return $record->mydata_type;
                         }
+                        if ($record->is_informal) {
+                            return 'Άτυπη'; // never filed by design — not a missing code
+                        }
                         $s = InvoiceTypeClassSuggester::suggest(
                             (string) $record->name,
                             (bool) $record->is_credit,
@@ -69,10 +72,13 @@ class InvoiceTypesTable
 
                         return $s ? "λείπει → {$s['code']}?" : 'λείπει';
                     })
-                    ->color(fn ($record): string => filled($record->mydata_type) ? 'gray' : 'danger')
+                    ->color(fn ($record): string => filled($record->mydata_type) ? 'gray' : ($record->is_informal ? 'info' : 'danger'))
                     ->tooltip(function ($record): ?string {
                         if (filled($record->mydata_type)) {
                             return null;
+                        }
+                        if ($record->is_informal) {
+                            return 'Άτυπη (μη φορολογική) σειρά — δεν διαβιβάζεται, δεν μετράει σε σύνολα.';
                         }
                         $s = InvoiceTypeClassSuggester::suggest(
                             (string) $record->name,

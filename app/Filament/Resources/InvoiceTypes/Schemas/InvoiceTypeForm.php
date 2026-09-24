@@ -9,6 +9,7 @@ use App\Models\DistributionAim;
 use App\Models\PaymentMethod;
 use App\Support\MyData\InvoiceTypeClassSuggester;
 use App\Support\MyDataOptions;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -17,6 +18,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rule;
@@ -60,10 +62,41 @@ class InvoiceTypeForm
                                     ->helperText('Show this type in the "new invoice" picker.'),
 
                                 Toggle::make('is_credit')
-                                    ->label('Credit document (πιστωτικό)'),
+                                    ->label('Credit document (πιστωτικό)')
+                                    // An informal series is never a credit note (the model refuses it).
+                                    // dehydrated(): a disabled field is otherwise not saved, so the
+                                    // toggle's reset to false would never reach the DB.
+                                    ->disabled(fn (Get $get): bool => (bool) $get('is_informal'))
+                                    ->dehydrated(),
 
                                 Toggle::make('is_return')
                                     ->label('Return document'),
+
+                                // Άτυπη (μη φορολογική) σειρά — docs/non-billable-services.md.
+                                Toggle::make('is_informal')
+                                    ->label('Άτυπη σειρά (μη φορολογική)')
+                                    ->helperText(fn ($record): string => ($why = $record?->informalFlagLockReason()) !== null
+                                        ? 'Κλειδωμένο: η σειρά '.$why.' (για το άλλο είδος φτιάξε νέα σειρά).'
+                                        : 'Για δοκιμές και δικά μας εσωτερικά. Δεν πάει ποτέ στο myDATA, δεν μετράει σε πωλήσεις / ΦΠΑ / υπόλοιπα, τυπώνεται «ΑΤΥΠΟ». Χωρίς myDATA τύπο, όχι πιστωτικό.')
+                                    ->disabled(fn ($record): bool => $record?->informalFlagLockReason() !== null)
+                                    ->live()
+                                    ->afterStateUpdated(function ($state, callable $set): void {
+                                        if ($state) {
+                                            $set('mydata_type', null);
+                                            $set('is_credit', false);
+                                        }
+                                    })
+                                    ->rules([
+                                        fn (Get $get, $record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get, $record): void {
+                                            if ($value && ($get('is_credit') || filled($get('mydata_type')))) {
+                                                $fail('Μια άτυπη σειρά δεν έχει myDATA τύπο και δεν είναι πιστωτικό.');
+                                            }
+                                            // is_delivery_note has no field here (seeded ΤΔΑ series).
+                                            if ($value && $record?->is_delivery_note) {
+                                                $fail('Μια σειρά Τιμολογίου-Δελτίου (ΤΔΑ) δεν γίνεται άτυπη.');
+                                            }
+                                        },
+                                    ]),
                             ])
                             ->columns(3),
 
@@ -72,6 +105,12 @@ class InvoiceTypeForm
                                 Select::make('mydata_type')
                                     ->label('myDATA invoice type')
                                     ->options(MyDataOptions::invoiceTypes())
+                                    // An informal series is never filed. Disabled here (not only
+                                    // validated on the toggle): once the series has documents the
+                                    // toggle is locked and its rule no longer runs. dehydrated():
+                                    // the toggle's reset to null must still be saved.
+                                    ->disabled(fn (Get $get): bool => (bool) $get('is_informal'))
+                                    ->dehydrated()
                                     ->searchable()
                                     ->preload()
                                     // When empty, surface a name-based suggestion
@@ -79,6 +118,9 @@ class InvoiceTypeForm
                                     ->helperText(function ($state, $get): string|HtmlString {
                                         $base = 'AADE classification code that determines how this series is filed at myDATA. e.g. "1.1" sales invoice, "2.1" service invoice, "11.2" ΑΠΥ.';
                                         $guide = ' · '.MyDataCodeGuide::hintLink('Τι σημαίνει ο κωδικός;')->toHtml();
+                                        if ($get('is_informal')) {
+                                            return 'Άτυπη σειρά — χωρίς myDATA τύπο (δεν διαβιβάζεται ποτέ).';
+                                        }
                                         if (filled($state)) {
                                             return new HtmlString(e($base).$guide);
                                         }
@@ -106,6 +148,7 @@ class InvoiceTypeForm
                                             ->icon('heroicon-m-sparkles')
                                             ->visible(function ($state, $get): bool {
                                                 return blank($state)
+                                                    && ! $get('is_informal')
                                                     && InvoiceTypeClassSuggester::suggest((string) $get('name'), (bool) $get('is_credit'), (bool) $get('is_return')) !== null;
                                             })
                                             ->action(function ($get, $set): void {

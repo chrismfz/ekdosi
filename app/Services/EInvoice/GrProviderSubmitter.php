@@ -65,6 +65,11 @@ class GrProviderSubmitter implements EInvoiceSubmitter
         // fields from $invoice->company while the credentials come from $this->tenant,
         // so a mismatched call yields ONE payload asserting TWO different issuers.
         TenantCoherence::assertInvoice($this->tenant, $invoice);
+        // An informal (non-fiscal) series never reaches the provider — refuse before
+        // any number is reserved or any audit row is written.
+        if ($invoice->isInformal()) {
+            throw new RuntimeException(Invoice::INFORMAL_NOT_FILEABLE);
+        }
 
         // MYD-021: the same single-flight lock the direct and delivery paths take.
         // This was the last filing entry point without one, so a double-click or an

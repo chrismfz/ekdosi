@@ -98,6 +98,11 @@ class MyDataSubmitter implements EInvoiceSubmitter
         // outbound request — a tenant mismatch must never reach the wire, and must
         // not leave a half-written audit trail suggesting it did.
         TenantCoherence::assertInvoice($this->tenant, $invoice);
+        // An informal (non-fiscal) series never reaches AADE — refuse before any
+        // number is reserved or any audit row is written.
+        if ($invoice->isInformal()) {
+            throw new RuntimeException(Invoice::INFORMAL_NOT_FILEABLE);
+        }
 
         // MYD-2 (AUDIT): serialise concurrent submits of the SAME invoice so
         // two operators (or a double-click / two tabs) can't both POST it and
