@@ -136,6 +136,32 @@ class InvoiceLine extends Model
         'notes',
     ];
 
+    /**
+     * The line as a COPY carries it into a new document (ReissueInvoiceAsDraft,
+     * ConvertInformalToFiscal): what was sold plus the operator-visible per-line
+     * snapshots — the §8.3 exemption reason (MYD-007, set in the form) and the
+     * revenue category. NOT the hidden §8.6 income-class snapshot (MYD-006): the
+     * form can't edit it, so the copy re-resolves it (a fixed WHMCS map / product /
+     * type then applies). Money (net/gross) is recomputed. One list for both copiers.
+     *
+     * @return array<string, mixed>
+     */
+    public function copyAttributes(): array
+    {
+        return [
+            'product_id' => $this->product_id,
+            'product_category_id' => $this->product_category_id,
+            'qty' => $this->qty,
+            'price_per_item' => $this->price_per_item,
+            'discount' => $this->discount,
+            'vat_percent' => $this->vat_percent,
+            'vat_exemption_category' => $this->vat_exemption_category,
+            'product_descr' => $this->product_descr,
+            'metric_unit' => $this->metric_unit,
+            'notes' => $this->notes,
+        ];
+    }
+
     protected function casts(): array
     {
         return [

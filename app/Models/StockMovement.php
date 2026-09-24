@@ -35,6 +35,11 @@ class StockMovement extends Model
 
     public const REASON_REVIVE = 'revive';        // un-does a REASON_CANCEL when a cancelled document is restored (Επαναφορά)
 
+    // «Μετατροπή σε φορολογικό»: the issued fiscal document takes over its informal
+    // source's stock-out (+qty, source = the FISCAL invoice); reversed (−qty, same
+    // source) if that fiscal is cancelled. Net per fiscal: what it currently holds.
+    public const REASON_CONVERSION = 'conversion';
+
     protected $fillable = [
         'company_id',
         'product_id',
