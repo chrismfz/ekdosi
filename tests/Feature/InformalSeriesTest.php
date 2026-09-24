@@ -4,12 +4,17 @@ namespace Tests\Feature;
 
 use App\Actions\IssueCreditNote;
 use App\Actions\StageServiceRenewal;
+use App\Contracts\EInvoiceSubmitter;
 use App\Enums\BillingCycle;
 use App\Enums\ServiceContractStatus;
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
 use App\Filament\Resources\Invoices\Pages\EditInvoice;
+use App\Filament\Resources\Invoices\Pages\ListInvoices;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
+use App\Filament\Resources\Invoices\RelationManagers\InvoicePaymentsRelationManager;
 use App\Filament\Resources\InvoiceTypes\Pages\EditInvoiceType;
+use App\Filament\Resources\Payments\Pages\CreatePayment;
+use App\Filament\Resources\Payments\Pages\EditPayment;
 use App\Filament\Resources\ServiceContracts\Pages\CreateServiceContract;
 use App\Models\Company;
 use App\Models\Customer;
@@ -28,6 +33,7 @@ use App\Services\Dashboard\DashboardMetrics;
 use App\Services\Dashboard\VatPeriodReport;
 use App\Services\EInvoice\GrProviderSubmitter;
 use App\Services\EInvoice\ProviderTransportRegistry;
+use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceBalance;
 use App\Services\MyData\MyDataConfigAudit;
 use App\Services\MyData\Orphans\OrphanImporter;
@@ -285,6 +291,138 @@ class InformalSeriesTest extends TestCase
         Livewire::test(CreateServiceContract::class)
             ->fillForm(['customer_id' => $this->customer->id])
             ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id]);
+    }
+
+    public function test_a_customer_default_series_follows_a_customer_switch_but_an_operator_pick_stays(): void
+    {
+        // A mis-click on our own company (default «ΕΣΩ») then the real client: the
+        // auto-filled informal series must NOT stay on the client's sale.
+        $this->customer->update(['default_invoice_type_id' => $this->informalType->id]);
+        $client = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης', 'afm' => '987654321']);
+        $clientWithDefault = Customer::create([
+            'company_id' => $this->tenant->id, 'name' => 'Πελάτης ΤΠΥ', 'default_invoice_type_id' => $this->saleType->id,
+        ]);
+        $this->actingAsOperator();
+
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id])
+            ->fillForm(['customer_id' => $client->id])
+            ->assertSchemaStateSet(['invoice_type_id' => null]);
+
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->fillForm(['customer_id' => $clientWithDefault->id])
+            ->assertSchemaStateSet(['invoice_type_id' => $this->saleType->id]);
+
+        // The operator's own pick is theirs: a later customer switch keeps it.
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->fillForm(['invoice_type_id' => $this->informalType->id])
+            ->fillForm(['customer_id' => $client->id])
+            ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id]);
+
+        // Opened from the Καρτέλα (?customer_id) — the prefilled default follows too.
+        Livewire::withQueryParams(['customer_id' => $this->customer->id])
+            ->test(CreateInvoice::class)
+            ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id])
+            ->fillForm(['customer_id' => $client->id])
+            ->assertSchemaStateSet(['invoice_type_id' => null]);
+
+        Livewire::test(CreateServiceContract::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id])
+            ->fillForm(['customer_id' => $client->id])
+            ->assertSchemaStateSet(['invoice_type_id' => null]);
+
+        // The previous default's header values don't ride along: «ΕΣΩ» is cash-term, the
+        // client's own method (credit-term) must apply — else the sale is never a receivable.
+        $cash = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        $this->informalType->update(['payment_method_id' => $cash->id]);
+        $clientWithDefault->update(['payment_method_id' => $this->credit->id]);
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['payment_method_id' => $cash->id])
+            ->fillForm(['customer_id' => $clientWithDefault->id])
+            ->assertSchemaStateSet(['invoice_type_id' => $this->saleType->id, 'payment_method_id' => $this->credit->id]);
+    }
+
+    public function test_an_informal_document_never_takes_a_payment_on_any_path(): void
+    {
+        $informal = $this->document($this->informalType, qty: 1);
+        $fiscal = $this->document($this->saleType, qty: 1);
+
+        // The model refuses on every path (form, relation manager, import…).
+        try {
+            Payment::create([
+                'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $informal->id,
+                'amount' => 10, 'pay_date' => '2026-05-11', 'kind' => 'payment',
+            ]);
+            $this->fail('A payment was recorded against an informal document.');
+        } catch (\InvalidArgumentException $e) {
+            $this->assertStringContainsString('δεν δέχεται πληρωμή', $e->getMessage());
+        }
+        $this->assertSame(0, Payment::query()->where('invoice_id', $informal->id)->count());
+
+        // The invoice's Payments tab offers neither a payment, credit nor «settle».
+        foreach (['canRecordPayment', 'canApplyCredit'] as $guard) {
+            $this->assertFalse($this->paymentsTab($informal, $guard), $guard.' offered on an informal document');
+            $this->assertTrue($this->paymentsTab($fiscal, $guard), $guard.' refused on a fiscal document');
+        }
+        $this->actingAsOperator();
+        Livewire::test(InvoicePaymentsRelationManager::class, ['ownerRecord' => $informal, 'pageClass' => ViewInvoice::class])
+            ->assertActionHidden(TestAction::make('settle_full')->table());
+
+        // The Payments form's invoice picker never lists it.
+        Livewire::test(CreatePayment::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertFormFieldExists('invoice_id', fn ($field) => ! array_key_exists($informal->id, $field->getOptions())
+                && array_key_exists($fiscal->id, $field->getOptions()));
+    }
+
+    public function test_editing_a_payment_keeps_its_current_invoice_selectable(): void
+    {
+        // An AADE cancel keeps the payment linked; the picker must still offer that link.
+        $fiscal = $this->document($this->saleType, qty: 1);
+        $payment = Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $fiscal->id,
+            'amount' => 10, 'pay_date' => '2026-05-11', 'kind' => 'payment',
+        ]);
+        $fiscal->forceFill(['mydata_state' => 'CANCELLED'])->saveQuietly();
+        $this->actingAsOperator();
+
+        Livewire::test(EditPayment::class, ['record' => $payment->getKey()])
+            ->assertFormFieldExists('invoice_id', fn ($field) => array_key_exists($fiscal->id, $field->getOptions()))
+            ->fillForm(['notes' => 'διόρθωση'])
+            ->call('save')
+            ->assertHasNoFormErrors();
+        $this->assertSame($fiscal->id, $payment->fresh()->invoice_id);
+    }
+
+    public function test_bulk_submit_skips_informal_documents_instead_of_failing_them(): void
+    {
+        $this->tenant->update(['mydata_mode' => 'sandbox']);
+        $informal = $this->document($this->informalType, qty: 1, status: 'draft', numbered: false);
+        $this->actingAsOperator();
+
+        $submitter = \Mockery::mock(EInvoiceSubmitter::class);
+        $submitter->shouldNotReceive('submit');
+        $factory = \Mockery::mock(EInvoiceSubmitterFactory::class);
+        $factory->shouldReceive('for')->andReturn($submitter);
+        $this->app->instance(EInvoiceSubmitterFactory::class, $factory);
+
+        Livewire::test(ListInvoices::class)
+            ->callTableBulkAction('submit_mydata', [$informal->getKey()])
+            ->assertNotified('Υποβλήθηκαν: 0 · Παραλείφθηκαν: 1 · Απέτυχαν: 0');
+    }
+
+    private function paymentsTab(Invoice $invoice, string $guard): bool
+    {
+        $rm = new InvoicePaymentsRelationManager;
+        $owner = new \ReflectionProperty($rm, 'ownerRecord');
+        $owner->setValue($rm, $invoice->fresh());
+
+        return (bool) (new \ReflectionMethod($rm, $guard))->invoke($rm);
     }
 
     public function test_a_numbered_document_never_crosses_the_informal_line(): void

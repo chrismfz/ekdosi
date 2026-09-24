@@ -158,7 +158,9 @@ class InvoicePaymentsRelationManager extends RelationManager
             && $invoice->mydata_state !== 'CANCELLED'
             // MON-5: a draft (πρόχειρο) isn't a receivable — paying it would
             // understate the balance (phantom credit). Finalise first, then pay.
-            && $invoice->local_status !== 'draft';
+            && $invoice->local_status !== 'draft'
+            // An informal (non-fiscal) document is never a receivable.
+            && ! $invoice->isInformal();
     }
 
     /**
@@ -180,7 +182,8 @@ class InvoicePaymentsRelationManager extends RelationManager
             && ! ($invoice->invoiceType?->is_credit ?? false)
             && $invoice->mydata_state !== 'CANCELLED'
             && $invoice->local_status !== 'cancelled'
-            && ($invoice->local_status !== 'draft' || $invoice->isOffered());
+            && ($invoice->local_status !== 'draft' || $invoice->isOffered())
+            && ! $invoice->isInformal();
     }
 
     /**
@@ -243,7 +246,7 @@ class InvoicePaymentsRelationManager extends RelationManager
                     ->label('Πλήρης εξόφληση')
                     ->icon('heroicon-o-check-circle')
                     ->color('success')
-                    ->visible(fn () => $this->balance() > 0.005)
+                    ->visible(fn () => $this->canRecordPayment() && $this->balance() > 0.005)
                     ->requiresConfirmation()
                     ->modalDescription(fn () => 'Καταχώριση πληρωμής για το υπόλοιπο: '.number_format($this->balance(), 2, ',', '.').' €.')
                     ->schema(fn () => [

@@ -27,6 +27,7 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\DateTimePicker;
 use Filament\Forms\Components\Field;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\Repeater\TableColumn;
 use Filament\Forms\Components\Select;
@@ -111,7 +112,10 @@ class InvoiceForm
                         // Pre-fill the header dimensions configured on the chosen
                         // type (Σκοπός διακίνησης / τρόπος πληρωμής / αποστολής) —
                         // see invoiceTypeDefaults().
-                        ->afterStateUpdated(fn ($state, callable $set, Get $get) => self::applyInvoiceType($state, $set, $get))
+                        ->afterStateUpdated(function ($state, callable $set, Get $get): void {
+                            $set('customer_default_type_id', null); // the operator's own pick now
+                            self::applyInvoiceType($state, $set, $get);
+                        })
                         // A paid draft or a credit-note draft may change series — but
                         // never across the informal/fiscal line (the model refuses too).
                         ->rules([
@@ -125,6 +129,11 @@ class InvoiceForm
                         // ΑΑ belongs to the series it was drawn from, so a numbered draft
                         // (e.g. reverted «ΕΣΩ5») can't be re-typed — cancel and reissue.
                         ->disabled(fn ($record) => $record && ($record->mydata_state !== null || $record->code !== null)),
+
+                    // The series the customer's default put into invoice_type_id (null once
+                    // the operator picks one themselves) — lets a customer switch replace
+                    // it. Form-only state, never saved.
+                    Hidden::make('customer_default_type_id')->dehydrated(false),
 
                     DateTimePicker::make('issued_at')
                         ->label('Ημερομηνία έκδοσης')
@@ -185,9 +194,31 @@ class InvoiceForm
                             // payment-method fallback below, which the type must win over.
                             // (Only a series still usable as a default — a deleted/credit
                             // one must not leave a dangling or wrong id in the select.)
-                            if (blank($get('invoice_type_id')) && ($defaultType = $customer->usableDefaultInvoiceType())) {
-                                $set('invoice_type_id', $defaultType->id);
-                                self::applyInvoiceType($defaultType, $set, $get);
+                            //
+                            // A type that is still the PREVIOUS customer's default (not a
+                            // pick of the operator) follows the customer switch — else a
+                            // mis-click on our own company would leave a real client's sale
+                            // in the informal «ΕΣΩ» (never filed, out of VAT), or the reverse.
+                            $current = $get('invoice_type_id');
+                            $auto = $get('customer_default_type_id');
+                            if (blank($current) || (filled($auto) && (int) $current === (int) $auto)) {
+                                // Undo the header defaults the previous auto type put there
+                                // (only where the field still holds that type's value — an
+                                // operator's own edit stays), so a stale cash-term method of
+                                // «ΕΣΩ» can't ride onto the client's sale.
+                                if (filled($current) && ($previous = self::tenantType($current))) {
+                                    foreach (self::invoiceTypeDefaults($previous) as $field => $value) {
+                                        if ($get($field) == $value) {
+                                            $set($field, is_bool($value) ? false : null);
+                                        }
+                                    }
+                                }
+                                $defaultType = $customer->usableDefaultInvoiceType();
+                                $set('invoice_type_id', $defaultType?->id);
+                                $set('customer_default_type_id', $defaultType?->id);
+                                if ($defaultType !== null) {
+                                    self::applyInvoiceType($defaultType, $set, $get);
+                                }
                             }
                             $set('header_discount_percent', (float) ($customer->discount ?? 0));
                             if (blank($get('payment_method_id')) && $customer->payment_method_id) {
