@@ -148,17 +148,22 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
-     * Issued with its number at finalize (Nixpal, or an informal series): already
-     * with the customer / accountant, so it never goes back to draft — correcting it
-     * means cancel and reissue. (A filing tenant's numbered fiscal document is not
-     * issued until its MARK: after a definitive rejection it may still revert, be
-     * fixed and resubmitted.) Gated in the only two runtime paths that move an
-     * existing document back to draft: ViewInvoice's «Επαναφορά σε πρόχειρο» and
-     * «Επαναφορά» (revive, which brings such a document back ACTIVE).
+     * A FISCAL document issued with its number at finalize — a tenant that doesn't
+     * file (Nixpal): already with the customer / accountant, so it never goes back
+     * to draft; correcting it means cancel and reissue. Gated in the only two
+     * runtime paths that move an existing document back to draft: ViewInvoice's
+     * «Επαναφορά σε πρόχειρο» and «Επαναφορά» (revive brings it back ACTIVE).
+     *
+     * NOT an informal document: internal, it never leaves us, so it stays freely
+     * editable (revert → edit → re-finalize keeps its number; a re-issue never
+     * re-advances the service contract — InvoiceObserver — and a domain renews at
+     * most once per invoice, by its registrar log — DomainRenewalService). NOT a filing tenant's numbered fiscal
+     * document either: it isn't issued until its MARK — after a definitive
+     * rejection it may still revert, be fixed and resubmitted.
      */
     public function isIssuedWithNumber(): bool
     {
-        return $this->code !== null && $this->isIssuedAtFinalize();
+        return $this->code !== null && ! $this->isInformal() && ! $this->company?->submitsElectronically();
     }
 
     private ?InvoiceType $informalTypeMemo = null;

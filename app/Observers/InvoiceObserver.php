@@ -244,6 +244,15 @@ class InvoiceObserver
                     || (int) $contract->last_renewal_invoice_id === (int) $invoice->id) {
                     return; // gone, or already advanced by this invoice
                 }
+                // An OLDER renewal re-issued (reverted / revived and finalized again —
+                // e.g. an informal one, which stays freely editable) never moves the
+                // cursor: renewals are staged one at a time (StageServiceRenewal's
+                // open-draft guard), so a newer one already billed the period after
+                // it. Advancing again would silently skip a period.
+                if ($contract->last_renewal_invoice_id !== null
+                    && (int) $contract->last_renewal_invoice_id > (int) $invoice->id) {
+                    return;
+                }
 
                 // Advance one cycle from the current cursor (the billed period).
                 // One-Time → advance() is null → cursor nulled (bills once).

@@ -262,9 +262,11 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Οριστικοποίηση παραστατικού')
-                ->modalDescription(fn (Invoice $record) => $record->isIssuedAtFinalize()
-                    ? 'Γίνεται «Ενεργό» και παίρνει οριστικό αριθμό — αυτή είναι η έκδοσή του (δεν διαβιβάζεται). Μετά δεν επιστρέφει σε πρόχειρο: για διόρθωση, ακύρωση και νέο παραστατικό.'
-                    : 'Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.')
+                ->modalDescription(fn (Invoice $record) => match (true) {
+                    $record->isInformal() => 'Γίνεται «Ενεργό» και παίρνει αριθμό (άτυπη σειρά — δεν διαβιβάζεται). Μπορείτε να το επαναφέρετε σε πρόχειρο για αλλαγές.',
+                    $record->isIssuedAtFinalize() => 'Γίνεται «Ενεργό» και παίρνει οριστικό αριθμό — αυτή είναι η έκδοσή του (δεν διαβιβάζεται). Μετά δεν επιστρέφει σε πρόχειρο: για διόρθωση, ακύρωση και νέο παραστατικό.',
+                    default => 'Γίνεται «Ενεργό» και κλειδώνει για επεξεργασία. Μπορείτε να το υποβάλετε στο myDATA ή να το επαναφέρετε σε πρόχειρο.',
+                })
                 ->action(function (Invoice $record) {
                     // Gapless-at-send: a tenant that does NOT transmit to AADE has no
                     // submission event, so finalisation IS its issuance — allocate the
@@ -322,9 +324,9 @@ class ViewInvoice extends ViewRecord
                 ->label('Επαναφορά σε πρόχειρο')
                 ->icon('heroicon-o-arrow-uturn-left')
                 ->color('gray')
-                // Never for a document issued with its number at finalize (Nixpal /
-                // informal — already with the customer or accountant: cancel and
-                // reissue), and never mid-send on a filing
+                // Never for a fiscal document issued with its number at finalize
+                // (Nixpal — already with the customer or accountant: cancel and
+                // reissue; an informal one stays free), and never mid-send on a filing
                 // tenant (in-doubt: it may already hold a MARK — resubmit reconciles).
                 // A filing tenant's fiscal document that was definitively rejected
                 // may still revert, be fixed and resubmitted.
