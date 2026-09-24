@@ -85,9 +85,7 @@ class CreateInvoice extends CreateRecord
         // The customer's default series (e.g. our own company → the informal «ΕΣΩ»)
         // plus that type's header defaults — mirrors the customer-select handler,
         // where the type's payment method wins over the customer's.
-        $type = $customer->default_invoice_type_id && blank($this->data['invoice_type_id'] ?? null)
-            ? InvoiceType::query()->where('company_id', $customer->company_id)->find($customer->default_invoice_type_id)
-            : null;
+        $type = blank($this->data['invoice_type_id'] ?? null) ? $customer->usableDefaultInvoiceType() : null;
         $typeFields = $type ? ['invoice_type_id' => $type->id] + InvoiceForm::invoiceTypeDefaults($type) : [];
 
         $this->form->fill(array_merge($this->data ?? [], [

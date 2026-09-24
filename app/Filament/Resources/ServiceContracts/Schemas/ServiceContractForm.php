@@ -59,13 +59,12 @@ class ServiceContractForm
                             if (blank($state) || filled($get('invoice_type_id'))) {
                                 return;
                             }
-                            $typeId = Customer::query()
+                            $type = Customer::query()
                                 ->where('company_id', Filament::getTenant()?->getKey())
-                                ->whereKey($state)
-                                ->value('default_invoice_type_id');
-                            // Only a series that still exists (a deleted default → leave blank).
-                            if ($typeId !== null && InvoiceType::query()->where('company_id', Filament::getTenant()?->getKey())->whereKey($typeId)->exists()) {
-                                $set('invoice_type_id', $typeId);
+                                ->find($state)
+                                ?->usableDefaultInvoiceType();
+                            if ($type !== null) {
+                                $set('invoice_type_id', $type->id);
                             }
                         }),
 

@@ -13,6 +13,7 @@ use App\Filament\Resources\InvoiceTypes\Pages\EditInvoiceType;
 use App\Filament\Resources\ServiceContracts\Pages\CreateServiceContract;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
@@ -29,6 +30,8 @@ use App\Services\EInvoice\GrProviderSubmitter;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\InvoiceBalance;
 use App\Services\MyData\MyDataConfigAudit;
+use App\Services\MyData\Orphans\OrphanImporter;
+use App\Services\MyData\Orphans\OrphanLinker;
 use App\Services\MyDataSubmitter;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\Reminders\ReminderPlanner;
@@ -211,6 +214,19 @@ class InformalSeriesTest extends TestCase
         Invoice::query()->whereKey($this->document($traced, qty: 1)->id)->update(['deleted_at' => now()]);
         $this->assertFlagLocked($traced, 'A deleted numbered document must still lock its series.');
 
+        // Delivery notes are documents of the series too.
+        $movement = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΔΑ', 'name' => 'Δελτίο', 'invcount' => 1]);
+        DeliveryNote::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΔΑ1', 'code' => 1,
+            'delivery_type_id' => $movement->id, 'issued_at' => now(), 'local_status' => 'active',
+        ]);
+        $this->assertFlagLocked($movement, 'A series with delivery notes must not turn informal.');
+
+        // A WHMCS inbox default is locked even before its first document.
+        $whmcs = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΠΥW', 'name' => 'WHMCS', 'invcount' => 1]);
+        $this->tenant->forceFill(['whmcs_default_invoice_type_id' => $whmcs->id])->save();
+        $this->assertFlagLocked($whmcs, 'A WHMCS default series must not turn informal.', 'προεπιλογή του WHMCS');
+
         // …a deleted, never-numbered draft doesn't lock a series forever.
         $abandoned = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΔΟΚ1', 'name' => 'Δοκιμή', 'invcount' => 1]);
         $this->document($abandoned, qty: 1, status: 'draft', numbered: false)->delete();
@@ -227,13 +243,13 @@ class InformalSeriesTest extends TestCase
         $fresh->update(['mydata_type' => '2.1']);
     }
 
-    private function assertFlagLocked(InvoiceType $type, string $why): void
+    private function assertFlagLocked(InvoiceType $type, string $why, string $reason = 'έχει ήδη παραστατικά'): void
     {
         try {
             $type->fresh()->update(['is_informal' => true]);
             $this->fail($why);
         } catch (RuntimeException $e) {
-            $this->assertStringContainsString('έχει ήδη παραστατικά', $e->getMessage());
+            $this->assertStringContainsString($reason, $e->getMessage());
         }
         $this->assertFalse((bool) $type->fresh()->is_informal);
     }
@@ -431,6 +447,65 @@ class InformalSeriesTest extends TestCase
     {
         $this->customer->update(['default_invoice_type_id' => $this->informalType->id]);
         $this->informalType->delete();
+        $this->actingAsOperator();
+
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['invoice_type_id' => null]);
+        Livewire::test(CreateServiceContract::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['invoice_type_id' => null]);
+    }
+
+    public function test_a_filed_document_never_lands_in_an_informal_series(): void
+    {
+        // Orphan import: a myDATA document filed under «ΕΣΩ» is never imported into it…
+        $doc = ['mark' => '400001234567890', 'invoiceType' => '2.1', 'series' => 'ΕΣΩ', 'aa' => '1', 'issuerVat' => $this->tenant->afm, 'state' => 'VALID'];
+        $this->assertCount(0, OrphanImporter::eligibleTypes($this->tenant, $doc));
+
+        // …nor linked to a local informal document of the same series/ΑΑ…
+        $informal = $this->document($this->informalType, qty: 1);
+        $informal->forceFill(['code' => 1, 'invcode' => 'ΕΣΩ1', 'series' => 'ΕΣΩ'])->save();
+        $this->assertStringContainsString('άτυπο', (string) app(OrphanLinker::class)->blocker($this->tenant, $informal->fresh(), $doc));
+
+        // …and the model refuses an AADE identity on an informal document on any path.
+        try {
+            $informal->fresh()->forceFill(['mydata_mark' => '400001234567890', 'mydata_state' => 'VALID'])->save();
+            $this->fail('An informal document must never carry a MARK.');
+        } catch (RuntimeException $e) {
+            $this->assertSame(Invoice::INFORMAL_NEVER_FILED, $e->getMessage());
+        }
+        $this->assertNull($informal->fresh()->mydata_mark);
+    }
+
+    public function test_a_credit_note_draft_never_moves_to_an_informal_series(): void
+    {
+        $original = $this->document($this->saleType, qty: 1);
+        $creditType = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΠΙΣ', 'name' => 'Πιστωτικό', 'invcount' => 1, 'is_credit' => true, 'mydata_type' => '5.1',
+        ]);
+        $credit = $this->document($creditType, qty: 1, status: 'draft', numbered: false);
+        $credit->forceFill(['credited_invoice_id' => $original->id])->save();
+
+        try {
+            $credit->fresh()->update(['invoice_type_id' => $this->informalType->id]);
+            $this->fail('A credit-note draft must not move to an informal series.');
+        } catch (RuntimeException $e) {
+            $this->assertSame(Invoice::INFORMAL_NOT_CREDIT, $e->getMessage());
+        }
+
+        $this->actingAsOperator();
+        Livewire::test(EditInvoice::class, ['record' => $credit->getKey()])
+            ->fillForm(['invoice_type_id' => $this->informalType->id])
+            ->call('save')
+            ->assertHasFormErrors(['invoice_type_id']);
+        $this->assertSame($creditType->id, $credit->fresh()->invoice_type_id);
+    }
+
+    public function test_a_default_series_reconfigured_as_credit_is_not_prefilled(): void
+    {
+        $this->saleType->update(['is_credit' => true]); // was a sale type when picked
+        $this->customer->update(['default_invoice_type_id' => $this->saleType->id]);
         $this->actingAsOperator();
 
         Livewire::test(CreateInvoice::class)

@@ -8,6 +8,7 @@ use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
 use App\Models\Concerns\HasTags;
 use App\Models\Concerns\TracksActivity;
+use App\Models\Scopes\CompanyScope;
 use App\Support\Afm;
 use App\Support\InvoiceScope;
 use App\Support\IsoCountry;
@@ -320,6 +321,21 @@ class Customer extends Model
     public function defaultInvoiceType(): BelongsTo
     {
         return $this->belongsTo(InvoiceType::class, 'default_invoice_type_id');
+    }
+
+    /**
+     * The default series, only while it is still usable as one — live, this
+     * tenant's, monetary and not a credit type (the same rule as the picker). A
+     * series deleted or re-configured since → null, so no form prefills it.
+     */
+    public function usableDefaultInvoiceType(): ?InvoiceType
+    {
+        return blank($this->default_invoice_type_id) ? null : InvoiceType::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $this->company_id)
+            ->monetary()
+            ->where('is_credit', false)
+            ->find($this->default_invoice_type_id);
     }
 
     public function paymentMethod(): BelongsTo

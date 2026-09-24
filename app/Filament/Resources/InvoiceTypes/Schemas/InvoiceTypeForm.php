@@ -75,10 +75,10 @@ class InvoiceTypeForm
                                 // Άτυπη (μη φορολογική) σειρά — docs/non-billable-services.md.
                                 Toggle::make('is_informal')
                                     ->label('Άτυπη σειρά (μη φορολογική)')
-                                    ->helperText(fn ($record): string => $record?->hasInvoices()
-                                        ? 'Κλειδωμένο: η σειρά έχει ήδη παραστατικά (για το άλλο είδος φτιάξε νέα σειρά).'
+                                    ->helperText(fn ($record): string => ($why = $record?->informalFlagLockReason()) !== null
+                                        ? 'Κλειδωμένο: η σειρά '.$why.' (για το άλλο είδος φτιάξε νέα σειρά).'
                                         : 'Για δοκιμές και δικά μας εσωτερικά. Δεν πάει ποτέ στο myDATA, δεν μετράει σε πωλήσεις / ΦΠΑ / υπόλοιπα, τυπώνεται «ΑΤΥΠΟ». Χωρίς myDATA τύπο, όχι πιστωτικό.')
-                                    ->disabled(fn ($record): bool => (bool) $record?->hasInvoices())
+                                    ->disabled(fn ($record): bool => $record?->informalFlagLockReason() !== null)
                                     ->live()
                                     ->afterStateUpdated(function ($state, callable $set): void {
                                         if ($state) {

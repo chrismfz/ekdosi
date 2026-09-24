@@ -112,12 +112,12 @@ class InvoiceForm
                         // type (Σκοπός διακίνησης / τρόπος πληρωμής / αποστολής) —
                         // see invoiceTypeDefaults().
                         ->afterStateUpdated(fn ($state, callable $set, Get $get) => self::applyInvoiceType($state, $set, $get))
-                        // An unnumbered draft that already holds a payment may change
-                        // series — but never across the informal/fiscal line.
+                        // A paid draft or a credit-note draft may change series — but
+                        // never across the informal/fiscal line (the model refuses too).
                         ->rules([
                             fn ($record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
-                                if ($record instanceof Invoice && $record->crossesInformalLine($value)) {
-                                    $fail(Invoice::INFORMAL_LINE_LOCKED);
+                                if ($record instanceof Invoice && ($why = $record->informalTypeChangeBlocker($value)) !== null) {
+                                    $fail($why);
                                 }
                             },
                         ])
@@ -183,10 +183,9 @@ class InvoiceForm
                             // programmatic $set() doesn't fire the type's afterStateUpdated,
                             // so apply its defaults explicitly — BEFORE the customer's
                             // payment-method fallback below, which the type must win over.
-                            // (Only a series that still exists in this tenant — a deleted
-                            // default must not leave a dangling id in the select.)
-                            if (blank($get('invoice_type_id')) && $customer->default_invoice_type_id
-                                && ($defaultType = self::tenantType($customer->default_invoice_type_id))) {
+                            // (Only a series still usable as a default — a deleted/credit
+                            // one must not leave a dangling or wrong id in the select.)
+                            if (blank($get('invoice_type_id')) && ($defaultType = $customer->usableDefaultInvoiceType())) {
                                 $set('invoice_type_id', $defaultType->id);
                                 self::applyInvoiceType($defaultType, $set, $get);
                             }

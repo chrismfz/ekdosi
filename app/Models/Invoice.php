@@ -116,37 +116,54 @@ class Invoice extends Model implements MovableDocument
      */
     public function isInformal(): bool
     {
-        $type = self::informalTypeLookup($this->invoice_type_id, $this->invoiceType);
-        if ($type !== null && $type->trashed() && $this->invoiceType === null) {
-            // Memoise the trashed series on this instance (one lookup, not one per
-            // call) — the same «show soft-deleted referenced rows» pattern the
-            // resource's eager load follows.
-            $this->setRelation('invoiceType', $type);
+        $loaded = $this->invoiceType;
+        if ($loaded === null && filled($this->invoice_type_id)) {
+            // A soft-deleted series: memoised on a private slot (one lookup, not one
+            // per call) — NOT via setRelation, which would change what every other
+            // $invoice->invoiceType reader sees depending on call order.
+            if ((int) $this->informalTypeMemo?->getKey() !== (int) $this->invoice_type_id) {
+                $this->informalTypeMemo = self::informalTypeLookup($this->invoice_type_id);
+            }
+            $loaded = $this->informalTypeMemo;
         }
 
-        return (bool) ($type?->is_informal ?? false);
+        return (bool) (self::informalTypeLookup($this->invoice_type_id, $loaded)?->is_informal ?? false);
     }
 
+    private ?InvoiceType $informalTypeMemo = null;
+
     /**
-     * Would re-typing this document to $newTypeId move it across the informal/fiscal
-     * line while it is already COMMITTED — numbered (its ΑΑ belongs to the series it
-     * was drawn from: a reverted «ΕΣΩ5» would be filed under ΕΣΩ/5) or holding
-     * customer money (an informal document drops out of every balance, so the
-     * payment would turn into unexplained credit)? An unnumbered, unpaid draft is
-     * free to change series. Shared by the model guard and the edit form's rule.
+     * Why re-typing this document to $newTypeId must be refused (null = allowed).
+     * Crossing the informal/fiscal line is refused once the document is COMMITTED —
+     * numbered (its ΑΑ belongs to the series it was drawn from: a reverted «ΕΣΩ5»
+     * would be filed under ΕΣΩ/5) or holding customer money (an informal document
+     * drops out of every balance, so the payment would turn into unexplained
+     * credit) — and a credit note never becomes informal (the original's credit
+     * would silently vanish). An unnumbered, unpaid sale draft is free to change
+     * series. Shared by the model guard and the edit form's rule.
      */
-    public function crossesInformalLine(int|string|null $newTypeId): bool
+    public function informalTypeChangeBlocker(int|string|null $newTypeId): ?string
     {
         if (! $this->exists) {
-            return false;
+            return null;
         }
         $was = (bool) self::informalTypeLookup($this->getOriginal('invoice_type_id'))?->is_informal;
         $now = (bool) self::informalTypeLookup($newTypeId)?->is_informal;
+        if ($was === $now) {
+            return null;
+        }
+        if ($this->getOriginal('code') !== null || $this->hasRecordedPayments()) {
+            return self::INFORMAL_LINE_LOCKED;
+        }
 
-        return $was !== $now && ($this->getOriginal('code') !== null || $this->hasRecordedPayments());
+        return $now && $this->credited_invoice_id !== null ? self::INFORMAL_NOT_CREDIT : null;
     }
 
     public const INFORMAL_LINE_LOCKED = 'Το παραστατικό έχει ήδη αριθμό ή πληρωμή — δεν αλλάζει από άτυπη σε φορολογική σειρά (ή ανάποδα). Ακύρωσέ το και φτιάξε νέο.';
+
+    public const INFORMAL_NOT_CREDIT = 'Ένα πιστωτικό δεν μπαίνει σε άτυπη σειρά.';
+
+    public const INFORMAL_NEVER_FILED = 'Ένα διαβιβασμένο (με ΜΑΡΚ / κατάσταση myDATA) παραστατικό δεν μπαίνει σε άτυπη σειρά.';
 
     /**
      * The series behind an invoice_type_id, TRASHED INCLUDED: a series deleted after
@@ -495,12 +512,23 @@ class Invoice extends Model implements MovableDocument
             }
         });
 
-        // A numbered or paid document never crosses the informal/fiscal line
-        // (crossesInformalLine). The edit form freezes/validates the type too; this
-        // covers every other path.
-        static::updating(function (self $model): void {
-            if ($model->isDirty('invoice_type_id') && $model->crossesInformalLine($model->invoice_type_id)) {
-                throw new RuntimeException(self::INFORMAL_LINE_LOCKED);
+        // The informal invariants, on EVERY write path (the edit form validates the
+        // same rules for a friendly message; orphan import/link, sync and any future
+        // path hit this):
+        //  - a committed document never crosses the informal/fiscal line
+        //    (informalTypeChangeBlocker);
+        //  - an informal document never carries an AADE identity (MARK / state) and is
+        //    never a credit note — a filed sale or a credit filed under an informal
+        //    series would silently drop out of VAT / receivables / the original's credit.
+        static::saving(function (self $model): void {
+            if ($model->exists && $model->isDirty('invoice_type_id')
+                && ($why = $model->informalTypeChangeBlocker($model->invoice_type_id)) !== null) {
+                throw new RuntimeException($why);
+            }
+            if ($model->isDirty(['invoice_type_id', 'mydata_mark', 'mydata_state', 'credited_invoice_id'])
+                && (filled($model->mydata_mark) || filled($model->mydata_state) || $model->credited_invoice_id !== null)
+                && $model->isInformal()) {
+                throw new RuntimeException($model->credited_invoice_id !== null ? self::INFORMAL_NOT_CREDIT : self::INFORMAL_NEVER_FILED);
             }
         });
     }

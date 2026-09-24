@@ -91,8 +91,8 @@ class InvoiceType extends Model
         // the reverse would turn internal documents into unfiled «sales». Need the
         // other kind? Open a new series.
         static::saving(function (InvoiceType $type): void {
-            if ($type->exists && $type->isDirty('is_informal') && $type->hasInvoices()) {
-                throw new RuntimeException('Η σειρά '.$type->code.' έχει ήδη παραστατικά — δεν αλλάζει σε/από άτυπη. Φτιάξε νέα σειρά.');
+            if ($type->exists && $type->isDirty('is_informal') && ($why = $type->informalFlagLockReason()) !== null) {
+                throw new RuntimeException('Η σειρά '.$type->code.' '.$why.' — δεν αλλάζει σε/από άτυπη. Φτιάξε νέα σειρά.');
             }
             if ($type->is_informal && (filled($type->mydata_type) || $type->is_credit || $type->is_delivery_note)) {
                 throw new RuntimeException('Μια άτυπη σειρά δεν έχει myDATA τύπο και δεν είναι πιστωτικό ή δελτίο αποστολής.');
@@ -107,19 +107,53 @@ class InvoiceType extends Model
     }
 
     /**
-     * Any document of this series — drafts included (a draft can already be filed,
-     * numbered or hold a payment). A deleted document still counts once it carried
-     * a number (it left a trace in the series); a deleted, never-numbered draft
-     * doesn't lock the series forever.
+     * Why the informal flag can no longer change (null = it can): the series has
+     * documents, or it is a WHMCS inbox default (flipping it would silently turn
+     * real customers' WHMCS invoices informal — or our internal ones fiscal).
      */
-    public function hasInvoices(): bool
+    public function informalFlagLockReason(): ?string
     {
+        if ($this->hasDocuments()) {
+            return 'έχει ήδη παραστατικά';
+        }
+
+        return $this->isWhmcsDefault() ? 'είναι προεπιλογή του WHMCS inbox' : null;
+    }
+
+    /**
+     * Any document of this series — invoices AND delivery notes, drafts included (a
+     * draft can already be filed, numbered or hold a payment). A deleted document
+     * still counts once it carried a number (it left a trace in the series); a
+     * deleted, never-numbered draft doesn't lock the series forever.
+     */
+    public function hasDocuments(): bool
+    {
+        $traced = fn ($q) => $q->whereNull('deleted_at')->orWhereNotNull('code');
+
         return Invoice::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->withTrashed()
             ->where('company_id', $this->company_id)
             ->where('invoice_type_id', $this->getKey())
-            ->where(fn ($q) => $q->whereNull('deleted_at')->orWhereNotNull('code'))
+            ->where($traced)
+            ->exists()
+            || DeliveryNote::query()
+                ->withoutGlobalScope(CompanyScope::class)
+                ->withTrashed()
+                ->where('company_id', $this->company_id)
+                ->where('delivery_type_id', $this->getKey())
+                ->where($traced)
+                ->exists();
+    }
+
+    private function isWhmcsDefault(): bool
+    {
+        $id = $this->getKey();
+
+        return Company::query()->whereKey($this->company_id)
+            ->where(fn ($q) => $q->where('whmcs_default_invoice_type_id', $id)
+                ->orWhere('whmcs_default_receipt_type_id', $id)
+                ->orWhere('whmcs_default_unpaid_type_id', $id))
             ->exists();
     }
 

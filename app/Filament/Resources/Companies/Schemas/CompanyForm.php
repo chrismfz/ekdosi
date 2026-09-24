@@ -1240,6 +1240,8 @@ class CompanyForm
         $opts = InvoiceType::query()
             ->where('company_id', $record->id)
             ->monetary()
+            // Real customers' WHMCS invoices never default into an informal series.
+            ->where('is_informal', false)
             ->orderBy('code')
             ->get()
             ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
@@ -1248,7 +1250,7 @@ class CompanyForm
         if ($currentId && ! isset($opts[$currentId])) {
             $t = InvoiceType::query()->where('company_id', $record->id)->find($currentId);
             if ($t) {
-                $opts[$t->id] = $t->code.' — '.$t->name.' (μη έγκυρο — Δελτίο Αποστολής)';
+                $opts[$t->id] = $t->code.' — '.$t->name.($t->is_informal ? ' (μη έγκυρο — άτυπη σειρά)' : ' (μη έγκυρο — Δελτίο Αποστολής)');
             }
         }
 
