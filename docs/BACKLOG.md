@@ -95,9 +95,10 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **A4 — grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — **το κύριο κομμάτι: ~75% του portfolio**
   (1381 από 1833 active, `domains/whmcs-baseline.md`).
 - **Υπηρεσίες/domains χωρίς χρέωση (δικές μας / φίλων / υπαλλήλων) — ΠΡΙΝ τη μεταφορά υπηρεσιών από WHMCS.**
-  Σχέδιο: `non-billable-services.md` — `billing_mode` στη σύμβαση (με προεπιλογή από τον πελάτη), «εσωτερική
-  ανανέωση» χωρίς παραστατικό, αναφορά αξίας για τον λογιστή. **Όχι** σειρά χωρίς myDATA (μετράει παντού στα
-  σύνολα) και **όχι** παραστατικά €0. Φορολογικά (6.2 ιδιοχρησιμοποίηση;) → λογιστής.
+  Σχέδιο v2: `non-billable-services.md` — **άτυπη σειρά** (σημαία στο είδος παραστατικού: ΕΣΩ/ΔΟΚ) που
+  εξαιρείται από κάθε σύνολο με ένα κοινό φίλτρο + test συνέπειας· επιλογή ανά υπηρεσία (υπάρχει) ή με
+  προεπιλογή πελάτη· «Μετατροπή σε φορολογικό» (ΕΣΩ→ΤΠΥ/ΤΙΜ/ΑΛΠ, χωρίς σύνδεση σύμβασης — αλλιώς διπλή
+  ανανέωση). Φορολογικά (6.2 ιδιοχρησιμοποίηση;) → λογιστής.
 - **Υπενθυμίσεις λήξης domain (60/30/15/10/5 ημέρες) — cutover blocker.** Η WHMCS έχει στείλει 34.296· στο ekdosi
   δεν υπάρχουν (README §3.8 δεν χτίστηκε).
 - **CNIC: 226 active ακόμα στο CentralNic** → **απόφαση: «χωρίς API»** (manual σύνδεση, σταδιακά όλα στο OP·
@@ -202,7 +203,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   Provisioning → Portal, strangler-fig).
 - **`domains/README.md`** — Πυλώνας A design: data model + `DomainRegistrar` contract + Openprovider mapping + .gr/grEPP + phase gates.
 - **`domains/whmcs-baseline.md`** — τι δείχνει η παραγωγική WHMCS (portfolio, ρολόγια, ενέργειες, υπενθυμίσεις) + αποφάσεις.
-- **`non-billable-services.md`** — υπηρεσίες/domains χωρίς χρέωση (δικές μας/φίλων/υπαλλήλων) — σχέδιο.
+- **`non-billable-services.md`** — άτυπη σειρά (δικά μας / δοκιμές / φίλοι-υπάλληλοι) + μετατροπή σε φορολογικό — σχέδιο.
 - **`paroxos/regulatory-blueprint.md`** + **`paroxos/implementation-plan.md`** — GR ΥΠΑΗΕΣ πάροχος + EU PEPPOL. Ο GR
   πάροχος είναι **LIVE στην παραγωγή (InvoSign)**· PEPPOL Phase 1 DONE· ανοιχτό μόνο το **PEPPOL Phase 2**.
 - **`payment-connectors.md`** — card-POS + IRIS design (NOT-STARTED, blueprint).
