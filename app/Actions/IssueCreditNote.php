@@ -99,6 +99,14 @@ class IssueCreditNote
         if ($original->credited_invoice_id !== null) {
             throw new RuntimeException('Cannot issue a credit note against another credit note.');
         }
+        // An informal (non-fiscal) document is not income a credit note could reverse
+        // — it is cancelled locally instead.
+        if ($original->isInformal()) {
+            throw new RuntimeException('Άτυπο παραστατικό — ακυρώνεται, δεν πιστώνεται.');
+        }
+        if ($creditType->is_informal) {
+            throw new RuntimeException('Ένα πιστωτικό δεν εκδίδεται σε άτυπη σειρά.');
+        }
         if (! $creditType->is_credit) {
             throw new RuntimeException("Invoice type {$creditType->code} is not a credit type (is_credit = false).");
         }

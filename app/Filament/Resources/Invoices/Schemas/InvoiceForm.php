@@ -204,6 +204,11 @@ class InvoiceForm
                             if (blank($get('payment_method_id')) && $customer->payment_method_id) {
                                 $set('payment_method_id', $customer->payment_method_id);
                             }
+                            // The customer's default series (e.g. our own company → the
+                            // informal «ΕΣΩ») — only while no type is picked yet.
+                            if (blank($get('invoice_type_id')) && $customer->default_invoice_type_id) {
+                                $set('invoice_type_id', $customer->default_invoice_type_id);
+                            }
 
                             // Reverse-charge hint: EU non-GR customer with a VAT id →
                             // this is (almost certainly) an intra-community supply that

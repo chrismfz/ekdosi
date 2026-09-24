@@ -101,7 +101,22 @@ class Invoice extends Model implements MovableDocument
     public function isPubliclyViewable(): bool
     {
         return $this->local_status === 'active'
-            && $this->mydata_state !== 'CANCELLED';
+            && $this->mydata_state !== 'CANCELLED'
+            // An informal (non-fiscal) document is not a «παραστατικό» — never on the
+            // public PDF route, the issued-for-client list or the invoice e-mail.
+            && ! $this->isInformal();
+    }
+
+    public const INFORMAL_NOT_FILEABLE = 'Άτυπο παραστατικό (μη φορολογική σειρά) — δεν διαβιβάζεται στο myDATA ούτε σε πάροχο.';
+
+    /**
+     * A document of an INFORMAL (non-fiscal) series — tests and our own internal
+     * services (docs/non-billable-services.md): never filed at myDATA, never in any
+     * money/VAT total, printed «ΑΤΥΠΟ». The PHP twin of InvoiceScope::excludeInformal().
+     */
+    public function isInformal(): bool
+    {
+        return (bool) ($this->invoiceType?->is_informal ?? false);
     }
 
     /**
@@ -129,7 +144,7 @@ class Invoice extends Model implements MovableDocument
      */
     public function isCustomerVisible(): bool
     {
-        return $this->isPubliclyViewable() || $this->isOffered();
+        return ! $this->isInformal() && ($this->isPubliclyViewable() || $this->isOffered());
     }
 
     /**
@@ -191,6 +206,7 @@ class Invoice extends Model implements MovableDocument
     public function isCustomerPayable(): bool
     {
         return $this->mydata_state !== 'CANCELLED'
+            && ! $this->isInformal()
             && ($this->local_status === 'active' || $this->isOffered());
     }
 
@@ -1322,6 +1338,11 @@ class Invoice extends Model implements MovableDocument
         if ($this->mydata_state === 'CANCELLED') {
             return false;
         }
+        // Informal (non-fiscal): never a receivable — so never overdue, never dunned
+        // (a renewal of our own internal service must not suspend it).
+        if ($this->isInformal()) {
+            return false;
+        }
         if (! in_array((string) $this->payment_status, [
             PaymentStatus::Unpaid->value,
             PaymentStatus::Partial->value,
@@ -1435,8 +1456,8 @@ class Invoice extends Model implements MovableDocument
     {
         $company = $this->company;
 
-        if ($company === null) {
-            return false;
+        if ($company === null || $this->isInformal()) {
+            return false; // an informal document is never e-mailed to the customer
         }
 
         $channel = SendChannel::fromCompany($company);

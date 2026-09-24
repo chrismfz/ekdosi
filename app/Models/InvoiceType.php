@@ -3,17 +3,17 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
-
+use App\Models\Scopes\CompanyScope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use RuntimeException;
 
 class InvoiceType extends Model
 {
     use BelongsToCompany;
-
     use HasFactory, SoftDeletes;
 
     protected $fillable = [
@@ -27,6 +27,8 @@ class InvoiceType extends Model
         'is_return',
         // Combined ΤΔΑ (Slice 3a): a «ΤΔΑ» type pre-sets invoices.is_delivery_note.
         'is_delivery_note',
+        // Άτυπη (μη φορολογική) σειρά — never myDATA, never in any total.
+        'is_informal',
         'mydata_type',
         'mydata_income_class',
         'mydata_income_class_category',
@@ -46,6 +48,7 @@ class InvoiceType extends Model
             'is_credit' => 'boolean',
             'is_return' => 'boolean',
             'is_delivery_note' => 'boolean',
+            'is_informal' => 'boolean',
             'mydata_requires_quantity' => 'boolean',
         ];
     }
@@ -77,6 +80,34 @@ class InvoiceType extends Model
     public function distributionAim(): BelongsTo
     {
         return $this->belongsTo(DistributionAim::class);
+    }
+
+    protected static function booted(): void
+    {
+        // The informal flag decides whether a document is a tax document at all. Once
+        // the series has issued documents it is frozen: flipping a fiscal series to
+        // informal would retroactively drop real invoices from VAT/receivables, and
+        // the reverse would turn internal documents into unfiled «sales».
+        static::saving(function (InvoiceType $type): void {
+            if ($type->exists && $type->isDirty('is_informal') && $type->hasIssuedInvoices()) {
+                throw new RuntimeException('Η σειρά '.$type->code.' έχει ήδη εκδοθέντα παραστατικά — δεν αλλάζει σε/από άτυπη.');
+            }
+            if ($type->is_informal && (filled($type->mydata_type) || $type->is_credit || $type->is_delivery_note)) {
+                throw new RuntimeException('Μια άτυπη σειρά δεν έχει myDATA τύπο και δεν είναι πιστωτικό ή δελτίο αποστολής.');
+            }
+        });
+    }
+
+    /** Any non-draft document (issued / filed / cancelled) of this series, trashed included. */
+    public function hasIssuedInvoices(): bool
+    {
+        return Invoice::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->withTrashed()
+            ->where('company_id', $this->company_id)
+            ->where('invoice_type_id', $this->getKey())
+            ->where('local_status', '!=', 'draft')
+            ->exists();
     }
 
     /**

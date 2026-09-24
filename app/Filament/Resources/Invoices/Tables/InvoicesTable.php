@@ -39,7 +39,9 @@ class InvoicesTable
                     ->label('Code')
                     ->searchable()
                     ->sortable()
-                    ->copyable(),
+                    ->copyable()
+                    // Informal (non-fiscal) series — visibly not a tax document.
+                    ->description(fn (Invoice $record): ?string => $record->isInformal() ? 'Άτυπο' : null),
 
                 TextColumn::make('issued_at')
                     ->label('Issued')

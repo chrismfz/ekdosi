@@ -50,7 +50,23 @@ class ServiceContractForm
                             ->all())
                         ->getOptionLabelUsing(fn ($value) => optional(Customer::query()
                             ->where('company_id', Filament::getTenant()?->getKey())
-                            ->find($value))->name),
+                            ->find($value))->name)
+                        ->live()
+                        // The customer's default series (e.g. our own company → the
+                        // informal «ΕΣΩ») pre-fills the renewal type — never clobbers
+                        // a type the operator already picked.
+                        ->afterStateUpdated(function ($state, callable $set, Get $get): void {
+                            if (blank($state) || filled($get('invoice_type_id'))) {
+                                return;
+                            }
+                            $typeId = Customer::query()
+                                ->where('company_id', Filament::getTenant()?->getKey())
+                                ->whereKey($state)
+                                ->value('default_invoice_type_id');
+                            if ($typeId !== null) {
+                                $set('invoice_type_id', $typeId);
+                            }
+                        }),
 
                     Select::make('product_id')
                         ->label('Προϊόν/Υπηρεσία (προαιρετικό)')
@@ -176,11 +192,11 @@ class ServiceContractForm
                             ->monetary()
                             ->orderBy('code')
                             ->get()
-                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name.($t->is_informal ? ' (άτυπη)' : '')])
                             ->all())
                         ->searchable()
                         ->preload()
-                        ->helperText('Απαιτείται για να εκδοθεί ανανέωση. Χωρίς αυτόν η έκδοση μπλοκάρει.'),
+                        ->helperText('Απαιτείται για να εκδοθεί ανανέωση. Χωρίς αυτόν η έκδοση μπλοκάρει. Άτυπη σειρά (π.χ. «ΕΣΩ») = δική μας υπηρεσία: ανανεώνεται κανονικά, χωρίς myDATA και εκτός υπολοίπων.'),
 
                     Select::make('payment_method_id')
                         ->label('Τρόπος πληρωμής')

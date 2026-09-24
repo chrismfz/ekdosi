@@ -149,7 +149,13 @@ class MyDataConfigAudit
         $findings = [];
         $mt = $type->mydata_type;
 
-        if (empty($mt)) {
+        if ($type->is_informal) {
+            // An informal (non-fiscal) series is DESIGNED never to reach myDATA — no
+            // «χωρίς myDATA τύπο» warning. It must not carry a type either.
+            if (! empty($mt)) {
+                $findings[] = new ConfigAuditFinding('error', 'Άτυπη σειρά με myDATA τύπο — μια άτυπη σειρά δεν διαβιβάζεται· αφαιρέστε τον τύπο.');
+            }
+        } elseif (empty($mt)) {
             // Blank = "never filed to myDATA" — legitimate for delivery /
             // aggregation / internal docs (ΣΔΕΠ, ΣΔΑΠ…). Only a problem if the
             // operator expects it filed, so it's a WARN, not an ERROR.

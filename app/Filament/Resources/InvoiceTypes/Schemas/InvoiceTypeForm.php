@@ -9,6 +9,7 @@ use App\Models\DistributionAim;
 use App\Models\PaymentMethod;
 use App\Support\MyData\InvoiceTypeClassSuggester;
 use App\Support\MyDataOptions;
+use Closure;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Select;
@@ -17,6 +18,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
+use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Schema;
 use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rule;
@@ -64,6 +66,28 @@ class InvoiceTypeForm
 
                                 Toggle::make('is_return')
                                     ->label('Return document'),
+
+                                // Άτυπη (μη φορολογική) σειρά — docs/non-billable-services.md.
+                                Toggle::make('is_informal')
+                                    ->label('Άτυπη σειρά (μη φορολογική)')
+                                    ->helperText(fn ($record): string => $record?->hasIssuedInvoices()
+                                        ? 'Κλειδωμένο: η σειρά έχει ήδη εκδοθέντα παραστατικά.'
+                                        : 'Για δοκιμές και δικά μας εσωτερικά. Δεν πάει ποτέ στο myDATA, δεν μετράει σε πωλήσεις / ΦΠΑ / υπόλοιπα, τυπώνεται «ΑΤΥΠΟ». Χωρίς myDATA τύπο, όχι πιστωτικό.')
+                                    ->disabled(fn ($record): bool => (bool) $record?->hasIssuedInvoices())
+                                    ->live()
+                                    ->afterStateUpdated(function ($state, callable $set): void {
+                                        if ($state) {
+                                            $set('mydata_type', null);
+                                            $set('is_credit', false);
+                                        }
+                                    })
+                                    ->rules([
+                                        fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                                            if ($value && ($get('is_credit') || filled($get('mydata_type')))) {
+                                                $fail('Μια άτυπη σειρά δεν έχει myDATA τύπο και δεν είναι πιστωτικό.');
+                                            }
+                                        },
+                                    ]),
                             ])
                             ->columns(3),
 

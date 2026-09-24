@@ -3,6 +3,7 @@
 namespace Tests\Feature\Portability;
 
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\DistributionAim;
 use App\Models\InvoiceType;
 use App\Models\User;
@@ -236,6 +237,27 @@ class CompanyBundleCompletenessTest extends TestCase
         // And the rewired ids are genuinely different from the source ids.
         $this->assertNotSame($receiptType->id, (int) $new->whmcs_default_receipt_type_id);
         $this->assertNotSame($unpaidType->id, (int) $new->whmcs_default_unpaid_type_id);
+    }
+
+    public function test_a_customers_default_series_is_rewired_to_the_imported_type(): void
+    {
+        $company = $this->sourceCompany();
+        InvoiceType::create(['company_id' => $company->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1]);
+        $internal = InvoiceType::create(['company_id' => $company->id, 'code' => 'ESO', 'name' => 'Εσωτερικά', 'invcount' => 1, 'is_informal' => true]);
+        Customer::create(['company_id' => $company->id, 'name' => 'Εμείς', 'afm' => '123456789', 'default_invoice_type_id' => $internal->id]);
+
+        $bundle = app(CompanyExporter::class)->build($company->fresh(), 'passphrase', 'p@ss', true);
+        Company::where('slug', 'src')->forceDelete();
+
+        app(CompanyImporter::class)->run($bundle, ['new' => true, 'full' => true, 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $new = Company::where('slug', 'src')->firstOrFail();
+        $imported = InvoiceType::where('company_id', $new->id)->where('code', 'ESO')->firstOrFail();
+        // The imported customer points at the NEW company's informal series — never
+        // the stale source id (which would reference another tenant's type).
+        $this->assertSame($imported->id, (int) Customer::where('company_id', $new->id)->value('default_invoice_type_id'));
+        $this->assertNotSame($internal->id, $imported->id);
+        $this->assertTrue((bool) $imported->is_informal);
     }
 
     // ── (3) cross-APP_KEY secret portability ─────────────────────────────────

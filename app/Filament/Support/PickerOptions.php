@@ -49,7 +49,7 @@ class PickerOptions
             ->orderByDesc('invcount')
             ->orderBy('code')
             ->get()
-            ->mapWithKeys(fn ($t) => [$t->id => ($t->is_favorite ? '⭐ ' : '').$t->code.' — '.$t->name])
+            ->mapWithKeys(fn ($t) => [$t->id => ($t->is_favorite ? '⭐ ' : '').$t->code.' — '.$t->name.($t->is_informal ? ' (άτυπη)' : '')])
             ->toArray();
     }
 

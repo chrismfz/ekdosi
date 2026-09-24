@@ -135,7 +135,7 @@ class CompanyImporter
         // WHMCS gateway → payment method map: rewire the method FK to the new tenant's
         // payment_methods id (whmcs_income_maps has no such FK, hence not listed there).
         'whmcs_payment_maps' => ['payment_method_id' => 'payment_methods'],
-        'customers' => ['payment_method_id' => 'payment_methods'],
+        'customers' => ['payment_method_id' => 'payment_methods', 'default_invoice_type_id' => 'invoice_types'],
         'customer_contacts' => ['customer_id' => 'customers'],
         // Leads (mini-CRM): both customer links rewire; the operator link is a
         // panel-global user → nulled (same rule as *_by_user_id elsewhere).

@@ -57,7 +57,7 @@ class Customer extends Model
         return [
             'type', 'afm', 'name', 'address1', 'address2', 'city', 'postcode',
             'phone1', 'phone2', 'occupation', 'tax_office', 'email', 'secondary_email',
-            'discount', 'country', 'language', 'vat_vies', 'withhold_tax', 'payment_method_id',
+            'discount', 'country', 'language', 'vat_vies', 'withhold_tax', 'payment_method_id', 'default_invoice_type_id',
             'is_active', 'needs_immediate_invoice', 'needs_invoice_before_payment', 'auto_email_invoices', 'reminders_enabled',
         ];
     }
@@ -96,6 +96,9 @@ class Customer extends Model
         'sort_order',
         'alt_customer_legacy_id',
         'payment_method_id',
+        // The series this customer's new invoices / services start with (e.g. our
+        // own company → the informal «ΕΣΩ» series). Prefill only — never forced.
+        'default_invoice_type_id',
         'whmcs_client_id',
         // PR-only additions:
         'needs_immediate_invoice',
@@ -311,6 +314,12 @@ class Customer extends Model
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /** The series this customer's new invoices / services start with (prefill only). */
+    public function defaultInvoiceType(): BelongsTo
+    {
+        return $this->belongsTo(InvoiceType::class, 'default_invoice_type_id');
     }
 
     public function paymentMethod(): BelongsTo

@@ -9,6 +9,7 @@ use App\Filament\Support\AadeFormFill;
 use App\Filament\Support\Tags\TagControls;
 use App\Filament\Support\ViesFormFill;
 use App\Models\Customer;
+use App\Models\InvoiceType;
 use App\Models\Lead;
 use App\Models\PaymentMethod;
 use App\Support\Afm;
@@ -261,6 +262,24 @@ class CustomerForm
                                         ->pluck('description', 'id'))
                                     ->searchable()
                                     ->preload(),
+
+                                // The series this customer's new invoices / services start
+                                // with — e.g. our own company → the informal «ΕΣΩ» series
+                                // (docs/non-billable-services.md). Prefill only.
+                                Select::make('default_invoice_type_id')
+                                    ->label('Προεπιλεγμένο είδος παραστατικού')
+                                    ->options(fn () => InvoiceType::query()
+                                        ->where('company_id', Filament::getTenant()?->getKey())
+                                        ->monetary()
+                                        ->where('is_credit', false)
+                                        ->orderBy('code')
+                                        ->get()
+                                        ->mapWithKeys(fn (InvoiceType $t): array => [
+                                            $t->id => $t->code.' — '.$t->name.($t->is_informal ? ' (άτυπη)' : ''),
+                                        ]))
+                                    ->searchable()
+                                    ->preload()
+                                    ->helperText('Με αυτό ξεκινούν τα νέα παραστατικά και οι νέες υπηρεσίες του. Π.χ. η εταιρεία μας → άτυπη σειρά «ΕΣΩ».'),
 
                                 Select::make('referred_by_customer_id')
                                     ->label('Referred by')
