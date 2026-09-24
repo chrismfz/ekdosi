@@ -130,6 +130,37 @@ class Invoice extends Model implements MovableDocument
         return (bool) (self::informalTypeLookup($this->invoice_type_id, $loaded)?->is_informal ?? false);
     }
 
+    /**
+     * Is this document ISSUED at finalize — i.e. does it get its real ΑΑ there,
+     * because no submission event will ever come? True on a tenant that doesn't
+     * file (Nixpal: no e-invoicing, or mode off) and for an informal series on any
+     * tenant. A filing tenant's fiscal series is numbered at the send instead
+     * (gapless-at-send). The one rule behind finalize's numbering and its wording.
+     *
+     * Deliberately NOT «the series has no myDATA type»: on a filing tenant that is a
+     * config error to fix (red «λείπει» in the types list, the submit refuses and
+     * hands the ΑΑ back) — treating it as «never sent» would issue an unfiled
+     * fiscal document silently. «Not sent by design» is the informal flag.
+     */
+    public function isIssuedAtFinalize(): bool
+    {
+        return ! $this->company?->submitsElectronically() || $this->isInformal();
+    }
+
+    /**
+     * Issued with its number at finalize (Nixpal, or an informal series): already
+     * with the customer / accountant, so it never goes back to draft — correcting it
+     * means cancel and reissue. (A filing tenant's numbered fiscal document is not
+     * issued until its MARK: after a definitive rejection it may still revert, be
+     * fixed and resubmitted.) Gated in the only two runtime paths that move an
+     * existing document back to draft: ViewInvoice's «Επαναφορά σε πρόχειρο» and
+     * «Επαναφορά» (revive, which brings such a document back ACTIVE).
+     */
+    public function isIssuedWithNumber(): bool
+    {
+        return $this->code !== null && $this->isIssuedAtFinalize();
+    }
+
     private ?InvoiceType $informalTypeMemo = null;
 
     /**
