@@ -188,6 +188,9 @@ class Invoice extends Model implements MovableDocument
         if ($was === $now) {
             return null;
         }
+        if ($now && $this->converted_from_invoice_id !== null) {
+            return self::INFORMAL_NOT_CONVERSION;
+        }
         if ($this->getOriginal('code') !== null || $this->hasRecordedPayments()) {
             return self::INFORMAL_LINE_LOCKED;
         }
@@ -198,6 +201,10 @@ class Invoice extends Model implements MovableDocument
     public const INFORMAL_LINE_LOCKED = 'Το παραστατικό έχει ήδη αριθμό ή πληρωμή — δεν αλλάζει από άτυπη σε φορολογική σειρά (ή ανάποδα). Ακύρωσέ το και φτιάξε νέο.';
 
     public const INFORMAL_NOT_CREDIT = 'Ένα πιστωτικό δεν μπαίνει σε άτυπη σειρά.';
+
+    public const INFORMAL_ALREADY_CONVERTED = 'Το άτυπο έχει ήδη ζωντανή μετατροπή σε φορολογικό — δεν γίνεται δεύτερη, ούτε επανέρχεται το άτυπο.';
+
+    public const INFORMAL_NOT_CONVERSION = 'Ένα παραστατικό που βγήκε από «Μετατροπή σε φορολογικό» δεν μπαίνει σε άτυπη σειρά.';
 
     public const INFORMAL_NEVER_FILED = 'Ένα διαβιβασμένο (με ΜΑΡΚ / κατάσταση myDATA) παραστατικό δεν μπαίνει σε άτυπη σειρά.';
 
@@ -386,6 +393,8 @@ class Invoice extends Model implements MovableDocument
         'conv_invoice_id',
         'credited_invoice_id',
         'reissued_from_invoice_id',
+        // «Μετατροπή σε φορολογικό»: the informal document this fiscal draft was made from.
+        'converted_from_invoice_id',
         'whmcs_pending_id',
         'service_contract_id',
         'local_status',
@@ -560,6 +569,25 @@ class Invoice extends Model implements MovableDocument
             if ($model->exists && $model->isDirty('invoice_type_id')
                 && ($why = $model->informalTypeChangeBlocker($model->invoice_type_id)) !== null) {
                 throw new RuntimeException($why);
+            }
+            // «Μετατροπή σε φορολογικό» — leaving CANCELLED (revive) must not make a
+            // second live conversion of one informal, nor wake an informal whose
+            // conversion is live (two documents, double charge / double stock-out).
+            if ($model->exists && $model->isDirty('local_status')
+                && $model->getOriginal('local_status') === 'cancelled' && $model->local_status !== 'cancelled') {
+                if ($model->converted_from_invoice_id !== null
+                    && self::liveConversionsOf((int) $model->converted_from_invoice_id)->whereKeyNot($model->getKey())->exists()) {
+                    throw new RuntimeException(self::INFORMAL_ALREADY_CONVERTED);
+                }
+                if ($model->isInformal() && $model->liveConversion() !== null) {
+                    throw new RuntimeException(self::INFORMAL_ALREADY_CONVERTED);
+                }
+            }
+            // A fiscal document made from an informal one never becomes informal itself
+            // (the conversion would silently undo itself).
+            if ($model->converted_from_invoice_id !== null && $model->isDirty(['invoice_type_id', 'converted_from_invoice_id'])
+                && $model->isInformal()) {
+                throw new RuntimeException(self::INFORMAL_NOT_CONVERSION);
             }
             if ($model->isDirty(['invoice_type_id', 'mydata_mark', 'mydata_state', 'credited_invoice_id'])
                 && (filled($model->mydata_mark) || filled($model->mydata_state) || $model->credited_invoice_id !== null)
@@ -1073,6 +1101,44 @@ class Invoice extends Model implements MovableDocument
     public function reissuedFrom(): BelongsTo
     {
         return $this->belongsTo(self::class, 'reissued_from_invoice_id');
+    }
+
+    /**
+     * «Μετατροπή σε φορολογικό»: the informal document this fiscal one was made
+     * from (docs/non-billable-services.md §5). Trashed included — the trace stays.
+     */
+    public function convertedFrom(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'converted_from_invoice_id')->withTrashed();
+    }
+
+    /** The fiscal documents made from this informal one (normally one; a cancelled one allows another). */
+    public function conversions(): HasMany
+    {
+        return $this->hasMany(self::class, 'converted_from_invoice_id');
+    }
+
+    /**
+     * The LIVE fiscal document made from this informal one: not deleted and not
+     * cancelled (locally or at AADE). While it exists the informal document is a
+     * frozen trace: no second conversion, no revert / cancel / revive. Only a
+     * CANCELLED (or deleted) conversion frees it. A credited one does not: it still
+     * stands legally, and «Ακύρωση & επανέκδοση» continues it (the reissue keeps the
+     * link). Deliberately not «fully credited» — that counts draft credit notes too.
+     */
+    public function liveConversion(): ?self
+    {
+        return $this->exists ? self::liveConversionsOf((int) $this->getKey())->orderBy('id')->first() : null;
+    }
+
+    /** The one «live conversion» predicate (liveConversion(), the model guards). */
+    public static function liveConversionsOf(int|array $sourceIds): Builder
+    {
+        return self::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->whereIn('converted_from_invoice_id', (array) $sourceIds)
+            ->where('local_status', '!=', 'cancelled')
+            ->where(fn ($q) => $q->whereNull('mydata_state')->orWhere('mydata_state', '!=', 'CANCELLED'));
     }
 
     /** Delivery notes (δελτία αποστολής) that dispatch this sale (delivery_notes.invoice_id → this). */

@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Invoices\Pages;
 
+use App\Actions\ConvertInformalToFiscal;
 use App\Actions\IssueCreditNote;
 use App\Actions\ReissueInvoiceAsDraft;
 use App\Actions\StornoAndReissue;
@@ -50,6 +51,7 @@ use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
+use RuntimeException;
 use Throwable;
 
 class ViewInvoice extends ViewRecord
@@ -333,7 +335,9 @@ class ViewInvoice extends ViewRecord
                 ->visible(fn (Invoice $record) => $record->local_status === 'active'
                     && $record->mydata_state === null
                     && $record->mydata_pending_since === null
-                    && ! $record->isIssuedWithNumber())
+                    && ! $record->isIssuedWithNumber()
+                    // An informal already converted to fiscal is a frozen trace.
+                    && ! static::isConvertedInformal($record))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->action(function (Invoice $record) {
@@ -344,6 +348,56 @@ class ViewInvoice extends ViewRecord
                     $record->update(['local_status' => 'draft', 'offered_at' => null]);
                     Notification::make()->title('Επαναφορά σε πρόχειρο')->success()->send();
                     $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                }),
+
+            // «Μετατροπή σε φορολογικό» (docs/non-billable-services.md §5): an issued
+            // informal document → a NEW fiscal DRAFT (today's date, no service link),
+            // issued by the operator the normal way. The informal stays as the trace.
+            Action::make('convert_to_fiscal')
+                ->label('Μετατροπή σε φορολογικό')
+                ->icon('heroicon-o-document-plus')
+                ->color('primary')
+                ->visible(fn (Invoice $record) => $record->isInformal()
+                    && $record->local_status === 'active'
+                    && ! static::isConvertedInformal($record))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Μετατροπή άτυπου σε φορολογικό')
+                ->modalDescription('Δημιουργείται ΠΡΟΧΕΙΡΟ φορολογικό με τις ίδιες γραμμές και σημερινή ημερομηνία. Το εκδίδετε κανονικά από τη σελίδα του (μπορείτε πρώτα να αλλάξετε πελάτη/ΑΦΜ). Το άτυπο μένει ως ίχνος και δεν μετράει πουθενά· η υπηρεσία δεν ξαναπροχωρά και το απόθεμα δεν ξανακινείται.')
+                ->modalSubmitActionLabel('Δημιουργία προχείρου')
+                ->schema([
+                    Select::make('invoice_type_id')
+                        ->label('Είδος φορολογικού παραστατικού')
+                        ->options(fn (Invoice $record) => InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->where('show_on_menu', true)
+                            ->where('is_informal', false)
+                            ->where('is_credit', false)
+                            ->monetary()
+                            ->orderBy('code')
+                            ->get()
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->pickerLabel()])
+                            ->all())
+                        ->searchable()
+                        ->required(),
+                ])
+                ->action(function (Invoice $record, array $data) {
+                    try {
+                        $type = InvoiceType::query()
+                            ->where('company_id', $record->company_id)
+                            ->whereKey($data['invoice_type_id'])
+                            ->firstOrFail();
+                        $fiscal = app(ConvertInformalToFiscal::class)($record, $type);
+                    } catch (Throwable $e) {
+                        Notification::make()->title('Η μετατροπή απέτυχε')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
+
+                    Notification::make()
+                        ->title('Δημιουργήθηκε πρόχειρο φορολογικό')
+                        ->body('Ελέγξτε το και εκδώστε το από τη σελίδα του.')
+                        ->success()->send();
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $fiscal, 'tenant' => $record->company]));
                 }),
 
             Action::make('cancel_local')
@@ -357,7 +411,10 @@ class ViewInvoice extends ViewRecord
                 // intended local-cancel-then-«Ακύρωση μέσω myDATA» flow).
                 ->visible(fn (Invoice $record) => in_array($record->local_status, ['draft', 'active'], true)
                     && $record->credited_invoice_id === null
-                    && ! ($isProviderChannel && $record->mydata_state === 'VALID'))
+                    && ! ($isProviderChannel && $record->mydata_state === 'VALID')
+                    // A converted informal is the frozen trace — cancel the fiscal first
+                    // if the conversion was a mistake.
+                    && ! static::isConvertedInformal($record))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Ακύρωση παραστατικού')
@@ -407,23 +464,35 @@ class ViewInvoice extends ViewRecord
                 // Blocked when CANCELLED at myDATA — terminal at AADE;
                 // reissue a new invoice instead.
                 ->visible(fn (Invoice $record) => $record->local_status === 'cancelled'
-                    && $record->mydata_state !== 'CANCELLED')
+                    && $record->mydata_state !== 'CANCELLED'
+                    // «Μετατροπή σε φορολογικό»: never a second live conversion, never
+                    // an informal whose conversion is live (the model refuses too).
+                    && ! static::isConvertedInformal($record)
+                    && ! static::isSupersededConversion($record))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Επαναφορά ακυρωμένου')
                 ->modalDescription('Επαναφέρεται σε «Ενεργό» αν είχε υποβληθεί στο myDATA ή είχε εκδοθεί με αριθμό, αλλιώς σε «Πρόχειρο». Πληρωμές που έγιναν πιστωτικό υπόλοιπο ΔΕΝ επανασυνδέονται αυτόματα.')
                 ->action(function (Invoice $record) {
-                    $record->update([
-                        // An issued-with-number document comes back as issued, never as
-                        // an editable draft under its number (isIssuedWithNumber()).
-                        'local_status' => $record->mydata_state === 'VALID' || $record->isIssuedWithNumber() ? 'active' : 'draft',
-                        // Same stale-offer trap as revert_to_draft: without this a
-                        // cancelled-then-revived proforma comes back OFFERED — visible
-                        // and payable in the portal again with no operator decision,
-                        // and locked against the edit the revive was for.
-                        'offered_at' => null,
-                        'cancel_reason' => null,
-                    ]);
+                    try {
+                        $record->update([
+                            // An issued-with-number document comes back as issued, never as
+                            // an editable draft under its number (isIssuedWithNumber()).
+                            'local_status' => $record->mydata_state === 'VALID' || $record->isIssuedWithNumber() ? 'active' : 'draft',
+                            // Same stale-offer trap as revert_to_draft: without this a
+                            // cancelled-then-revived proforma comes back OFFERED — visible
+                            // and payable in the portal again with no operator decision,
+                            // and locked against the edit the revive was for.
+                            'offered_at' => null,
+                            'cancel_reason' => null,
+                        ]);
+                    } catch (RuntimeException $e) {
+                        // A model guard (e.g. a second live «Μετατροπή σε φορολογικό»
+                        // made in another tab meanwhile) — say why, don't 500.
+                        Notification::make()->title('Δεν έγινε επαναφορά')->body($e->getMessage())->danger()->send();
+
+                        return;
+                    }
                     Notification::make()->title('Επαναφέρθηκε')->success()->send();
                     $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),
@@ -872,7 +941,7 @@ class ViewInvoice extends ViewRecord
                         // we guard visibility above so we're guaranteed
                         // a real MyDataSubmitter here.
                         if (! method_exists($submitter, 'cancel')) {
-                            throw new \RuntimeException('Submitter does not support cancellation.');
+                            throw new RuntimeException('Submitter does not support cancellation.');
                         }
                         $submitter->cancel($record, $data['reason'] ?? '');
                         // local_status → cancelled is synced inside the submitter.
@@ -1558,6 +1627,22 @@ class ViewInvoice extends ViewRecord
             ->whereNotNull('whmcs_invoice_id')
             ->whereNull('whmcs_payment_pushed_at')
             ->exists();
+    }
+
+    /** An informal document that already has a live fiscal conversion — a frozen trace. */
+    protected static function isConvertedInformal(Invoice $record): bool
+    {
+        return $record->isInformal() && $record->liveConversion() !== null;
+    }
+
+    /**
+     * A cancelled conversion whose informal was converted AGAIN meanwhile — reviving
+     * it would make two live fiscal documents for one delivery (the model refuses too).
+     */
+    protected static function isSupersededConversion(Invoice $record): bool
+    {
+        return $record->converted_from_invoice_id !== null
+            && Invoice::liveConversionsOf((int) $record->converted_from_invoice_id)->whereKeyNot($record->getKey())->exists();
     }
 
     /**

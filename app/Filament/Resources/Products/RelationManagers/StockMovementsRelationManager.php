@@ -40,6 +40,7 @@ class StockMovementsRelationManager extends RelationManager
         'purchase' => 'Αγορά (+)',
         'return' => 'Επιστροφή (+)',
         'cancel' => 'Αναστροφή ακύρωσης',
+        'conversion' => 'Μετατροπή σε φορολογικό',
     ];
 
     public function form(Schema $schema): Schema

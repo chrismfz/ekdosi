@@ -5,6 +5,7 @@ namespace Tests\Feature\Portability;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DistributionAim;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\User;
 use App\Services\Portability\CompanyExporter;
@@ -258,6 +259,34 @@ class CompanyBundleCompletenessTest extends TestCase
         $this->assertSame($imported->id, (int) Customer::where('company_id', $new->id)->value('default_invoice_type_id'));
         $this->assertNotSame($internal->id, $imported->id);
         $this->assertTrue((bool) $imported->is_informal);
+    }
+
+    public function test_invoice_conversion_and_reissue_links_are_rewired_on_import(): void
+    {
+        $company = $this->sourceCompany();
+        $type = InvoiceType::create(['company_id' => $company->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 1]);
+        $informalType = InvoiceType::create(['company_id' => $company->id, 'code' => 'ESO', 'name' => 'Εσωτερικά', 'invcount' => 1, 'is_informal' => true]);
+        // A decoy in ANOTHER company first, so a stale source id can't coincide.
+        $other = Company::create(['name' => 'Other', 'slug' => 'other-'.uniqid(), 'country_code' => 'GR']);
+        $otherType = InvoiceType::create(['company_id' => $other->id, 'code' => 'X', 'name' => 'X', 'invcount' => 1]);
+        Invoice::create(['company_id' => $other->id, 'invoice_type_id' => $otherType->id, 'issued_at' => now(), 'local_status' => 'draft']);
+
+        $informal = Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $informalType->id, 'issued_at' => now(), 'local_status' => 'active', 'invcode' => 'ESO1', 'code' => 1]);
+        $original = Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $type->id, 'issued_at' => now(), 'local_status' => 'active', 'invcode' => 'TPY1', 'code' => 1]);
+        Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $type->id, 'issued_at' => now(), 'local_status' => 'draft', 'invcode' => 'CONV', 'converted_from_invoice_id' => $informal->id]);
+        Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $type->id, 'issued_at' => now(), 'local_status' => 'draft', 'invcode' => 'REIS', 'reissued_from_invoice_id' => $original->id]);
+
+        $bundle = app(CompanyExporter::class)->build($company->fresh(), 'passphrase', 'p@ss', true);
+        Company::where('slug', 'src')->forceDelete();
+
+        app(CompanyImporter::class)->run($bundle, ['new' => true, 'full' => true, 'execute' => true, 'passphrase' => 'p@ss']);
+
+        $new = Company::where('slug', 'src')->firstOrFail();
+        $ids = Invoice::withoutGlobalScopes()->where('company_id', $new->id)->pluck('id', 'invcode');
+        $row = fn (string $code) => Invoice::withoutGlobalScopes()->whereKey($ids[$code])->first();
+        // Each link points at the IMPORTED document — never the stale source id.
+        $this->assertSame($ids['ESO1'], (int) $row('CONV')->converted_from_invoice_id);
+        $this->assertSame($ids['TPY1'], (int) $row('REIS')->reissued_from_invoice_id);
     }
 
     // ── (3) cross-APP_KEY secret portability ─────────────────────────────────

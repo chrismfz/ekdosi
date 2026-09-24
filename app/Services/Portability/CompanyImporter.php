@@ -110,7 +110,7 @@ class CompanyImporter
     ];
 
     /** Invoice self-reference columns — nulled on insert, patched after the pass. */
-    private const INVOICE_SELF_REFS = ['credited_invoice_id', 'conv_invoice_id'];
+    private const INVOICE_SELF_REFS = ['credited_invoice_id', 'conv_invoice_id', 'reissued_from_invoice_id', 'converted_from_invoice_id'];
 
     /** invoice_lines self-reference columns (MON-1: a credit line → the original
      *  line it credits). Same problem as INVOICE_SELF_REFS — the target line may
@@ -149,6 +149,10 @@ class CompanyImporter
             'distribution_aim_id' => 'distribution_aims', 'delivery_method_id' => 'delivery_methods',
             'payment_method_id' => 'payment_methods', 'bank_account_id' => 'bank_accounts',
             'credited_invoice_id' => 'invoices', 'conv_invoice_id' => 'invoices',
+            // Reissue (PROV-019) and «Μετατροπή σε φορολογικό» links — same self-ref
+            // handling; unmapped they would keep the SOURCE id (a different invoice,
+            // possibly another tenant's, in the target database).
+            'reissued_from_invoice_id' => 'invoices', 'converted_from_invoice_id' => 'invoices',
             // FKs to DEFERRED tables (not in the bundle) → nulled via the
             // never-populated map, else the source id would violate the FK.
             'whmcs_pending_id' => 'pending_whmcs_invoices', 'service_contract_id' => 'service_contracts',

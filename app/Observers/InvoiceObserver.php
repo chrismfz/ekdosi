@@ -297,16 +297,25 @@ class InvoiceObserver
         try {
             $stock = app(StockService::class);
             if ($status === 'active') {
-                $isCreditNote
-                    ? $stock->recordReturnForCreditNote($invoice)
-                    : $stock->recordSaleForInvoice($invoice);
+                if ($isCreditNote) {
+                    $stock->recordReturnForCreditNote($invoice);
+                } else {
+                    // «Μετατροπή σε φορολογικό»: take over the informal's stock-out first.
+                    $stock->transferSaleFromConvertedSource($invoice);
+                    $stock->recordSaleForInvoice($invoice);
+                }
             } elseif ($status === 'cancelled') {
                 // STOCK-001: cancelling a credit note must reverse its return-IN, or
                 // the freed qty_returned (MON-1) lets a later invoice-cancel reverse
                 // the full sale again and inflates stock. Symmetric with the sale case.
-                $isCreditNote
-                    ? $stock->reverseReturnForCreditNote($invoice)
-                    : $stock->reverseSaleForInvoice($invoice);
+                if ($isCreditNote) {
+                    $stock->reverseReturnForCreditNote($invoice);
+                } else {
+                    $reversed = $stock->reverseSaleForInvoice($invoice);
+                    // A cancelled conversion hands back to its informal source what
+                    // its cancel actually gave back.
+                    $stock->restoreSaleToConvertedSource($invoice, $reversed);
+                }
             }
         } catch (Throwable $e) {
             Log::warning('Stock movement on invoice status change failed (the status change succeeded)', [

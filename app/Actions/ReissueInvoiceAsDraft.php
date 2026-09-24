@@ -53,6 +53,10 @@ class ReissueInvoiceAsDraft
                 // PROV-019: remember what this replaces, so filing it can soft-warn
                 // while the reversed original is still standing at AADE.
                 'reissued_from_invoice_id' => $original->id,
+                // A reissued conversion is still the fiscal document of its informal
+                // source («Ακύρωση & επανέκδοση») — keep the link, else the informal
+                // would look unconverted (a 2nd conversion, a 2nd stock-out).
+                'converted_from_invoice_id' => $original->converted_from_invoice_id,
                 'header_discount_percent' => $original->header_discount_percent,
                 // Taxes are recompute-owned (RecomputeInvoiceTaxes): carry the RATES +
                 // categories; the amounts rebuild from the reissue's own net on save.
@@ -87,15 +91,7 @@ class ReissueInvoiceAsDraft
                 InvoiceLine::create([
                     'company_id' => $original->company_id,
                     'invoice_id' => $reissue->id,
-                    'product_id' => $line->product_id,
-                    'qty' => $line->qty,
-                    'price_per_item' => $line->price_per_item,
-                    'discount' => $line->discount,
-                    'vat_percent' => $line->vat_percent,
-                    'product_descr' => $line->product_descr,
-                    'metric_unit' => $line->metric_unit,
-                    'notes' => $line->notes,
-                ]);
+                ] + $line->copyAttributes());
             }
 
             ($this->recompute)($reissue->fresh('lines'));

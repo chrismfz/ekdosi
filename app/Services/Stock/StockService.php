@@ -8,6 +8,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\Product;
 use App\Models\ReturnInvoiceExtra;
+use App\Models\Scopes\CompanyScope;
 use App\Models\StockMovement;
 use Carbon\Carbon;
 use Illuminate\Database\Eloquent\Model;
@@ -175,10 +176,12 @@ class StockService
      * cancel-the-credit-note-then-cancel-the-invoice sequence nets correctly — this
      * reversal then sees the freed remainder and reverses the full sale.
      */
-    public function reverseSaleForInvoice(Invoice $invoice): void
+    /** @return array<int, float> what THIS call reversed, per product id (+qty back in) */
+    public function reverseSaleForInvoice(Invoice $invoice): array
     {
+        $reversed = [];
         if ($invoice->credited_invoice_id !== null) {
-            return; // credit notes never produced a sale-out
+            return $reversed; // credit notes never produced a sale-out
         }
 
         foreach ($invoice->lines()->get() as $line) {
@@ -202,7 +205,10 @@ class StockService
             }
 
             $this->record($product, $reverseQty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης');
+            $reversed[(int) $product->getKey()] = ($reversed[(int) $product->getKey()] ?? 0.0) + $reverseQty;
         }
+
+        return $reversed;
     }
 
     /**
@@ -301,6 +307,125 @@ class StockService
 
             $this->record($product, -(float) $line->qty, StockMovement::REASON_CANCEL, source: $line, note: 'Αναστροφή ακύρωσης πιστωτικού');
         }
+    }
+
+    /**
+     * «Μετατροπή σε φορολογικό», the fiscal document is ISSUED: it takes over the
+     * stock-out its informal source still holds. Recorded as explicit
+     * REASON_CONVERSION movements (+qty) sourced on THIS fiscal, so the informal's
+     * sale is offset and the fiscal then moves its own full quantity through the
+     * normal recordSaleForInvoice() — one delivery, one stock-out; a changed
+     * quantity, a δελτίο linked to the fiscal, a credit note, cancel / revive all
+     * run on the fiscal's own lines like any invoice.
+     *
+     * Idempotent (a fiscal that already holds a transfer takes nothing more), and
+     * only what is still AVAILABLE: the informal's standing sale minus what other
+     * (non-deleted) conversions of it hold — a reissue of a credited conversion
+     * therefore takes nothing and simply sells again, as a reissue does.
+     */
+    public function transferSaleFromConvertedSource(Invoice $fiscal): void
+    {
+        $source = $this->convertedSource($fiscal);
+        if ($source === null || $source->local_status !== 'active') {
+            return;
+        }
+        $companyId = $fiscal->company_id;
+        if ($this->conversionHeld($companyId, [(int) $fiscal->getKey()]) !== []) {
+            return; // already took over (re-fire)
+        }
+
+        $standing = [];
+        foreach ($source->lines()->get() as $line) {
+            $product = $line->product;
+            if (! $product || ! $product->track_stock
+                || $this->isCompensated($companyId, InvoiceLine::class, $line->getKey())) {
+                continue;
+            }
+            $moved = -(float) StockMovement::query()
+                ->where('company_id', $companyId)
+                ->where('reason', StockMovement::REASON_SALE)
+                ->where('source_type', InvoiceLine::class)
+                ->where('source_id', $line->getKey())
+                ->sum('qty_change');
+            if ($moved > 0) {
+                $standing[$product->getKey()] = ['product' => $product, 'qty' => ($standing[$product->getKey()]['qty'] ?? 0.0) + $moved];
+            }
+        }
+        if ($standing === []) {
+            return;
+        }
+
+        $siblings = Invoice::query()->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $companyId)
+            ->where('converted_from_invoice_id', $source->getKey())
+            ->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $held = $this->conversionHeld($companyId, $siblings);
+
+        foreach ($standing as $productId => $row) {
+            $available = $row['qty'] - ($held[$productId] ?? 0.0);
+            if ($available > 0.0005) {
+                $this->record($row['product'], $available, StockMovement::REASON_CONVERSION, source: $fiscal,
+                    note: 'Μετατροπή από '.$source->invcode, occurredAt: $fiscal->issued_at);
+            }
+        }
+    }
+
+    /**
+     * The conversion is CANCELLED: the goods its cancel actually gave back
+     * ($reversed — what reverseSaleForInvoice() just returned) are still delivered
+     * by the informal source, so that much of what the fiscal took over is handed
+     * back — never more. A draft that took nothing over, or a fiscal whose goods
+     * already came back through a credit note (or were moved by a linked δελτίο
+     * that still stands), hands back nothing.
+     *
+     * @param  array<int, float>  $reversed
+     */
+    public function restoreSaleToConvertedSource(Invoice $fiscal, array $reversed): void
+    {
+        if ($fiscal->converted_from_invoice_id === null) {
+            return;
+        }
+        foreach ($this->conversionHeld($fiscal->company_id, [(int) $fiscal->getKey()]) as $productId => $held) {
+            $qty = min($held, $reversed[$productId] ?? 0.0);
+            $product = $qty > 0.0005 ? Product::query()->withoutGlobalScope(CompanyScope::class)->find($productId) : null;
+            if ($product !== null) {
+                $this->record($product, -$qty, StockMovement::REASON_CONVERSION, source: $fiscal, note: 'Ακύρωση μετατροπής');
+            }
+        }
+    }
+
+    /**
+     * Net REASON_CONVERSION held per product by these fiscal invoices (non-zero only).
+     *
+     * @param  list<int>  $fiscalIds
+     * @return array<int, float>
+     */
+    private function conversionHeld(int|string $companyId, array $fiscalIds): array
+    {
+        if ($fiscalIds === []) {
+            return [];
+        }
+
+        return StockMovement::query()
+            ->where('company_id', $companyId)
+            ->where('reason', StockMovement::REASON_CONVERSION)
+            ->where('source_type', (new Invoice)->getMorphClass())
+            ->whereIn('source_id', $fiscalIds)
+            ->groupBy('product_id')
+            ->selectRaw('product_id, SUM(qty_change) as held')
+            ->pluck('held', 'product_id')
+            ->map(fn ($v) => (float) $v)
+            ->filter(fn (float $v) => abs($v) > 0.0005)
+            ->all();
+    }
+
+    private function convertedSource(Invoice $fiscal): ?Invoice
+    {
+        return $fiscal->converted_from_invoice_id === null ? null : Invoice::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->withTrashed()
+            ->where('company_id', $fiscal->company_id)
+            ->find($fiscal->converted_from_invoice_id);
     }
 
     /** @return list<int> line ids of δελτία linked to this invoice */

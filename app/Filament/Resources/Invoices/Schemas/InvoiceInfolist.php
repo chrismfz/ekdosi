@@ -285,7 +285,9 @@ class InvoiceInfolist
                     ->icon('heroicon-o-link')
                     ->visible(fn ($record) => $record->credited_invoice_id !== null
                         || $record->creditNotes()->exists()
-                        || $record->deliveryNotes()->exists())
+                        || $record->deliveryNotes()->exists()
+                        || $record->converted_from_invoice_id !== null
+                        || $record->conversions()->exists())
                     ->schema([
                         // Prominent badge for a fully-reversed original (credited_total
                         // reached gross). PROV-019: only claim a LEGAL cancellation
@@ -335,6 +337,31 @@ class InvoiceInfolist
                             ->color('primary')
                             ->helperText('Το αρχικό παραμένει VALID στην ΑΑΔΕ· το/τα πιστωτικό/ά το μηδενίζει/ουν λογιστικά.')
                             ->visible(fn ($record) => $record->creditNotes()->exists()),
+
+                        // «Μετατροπή σε φορολογικό»: the fiscal side → its informal source…
+                        TextEntry::make('converted_from')
+                            ->label('Από άτυπο')
+                            ->state(fn ($record) => $record->convertedFrom?->invcode)
+                            ->url(fn ($record) => $record->convertedFrom
+                                ? InvoiceResource::getUrl('view', ['record' => $record->convertedFrom, 'tenant' => $record->company])
+                                : null)
+                            ->color('primary')
+                            ->weight('bold')
+                            ->helperText('Βγήκε με «Μετατροπή σε φορολογικό» από αυτό το άτυπο.')
+                            ->visible(fn ($record) => $record->converted_from_invoice_id !== null),
+
+                        // …and the informal side → the fiscal document(s) made from it.
+                        TextEntry::make('converted_to')
+                            ->label('Μετατράπηκε σε')
+                            ->state(fn ($record) => $record->conversions->map(fn ($c) => $c->invcode.($c->local_status === 'cancelled' ? ' (ακυρωμένο)' : ''))->all())
+                            ->listWithLineBreaks()
+                            ->bulleted()
+                            ->url(fn ($record) => ($live = $record->liveConversion())
+                                ? InvoiceResource::getUrl('view', ['record' => $live, 'tenant' => $record->company])
+                                : null)
+                            ->color('primary')
+                            ->helperText('Το άτυπο μένει ως ίχνος και δεν μετράει πουθενά.')
+                            ->visible(fn ($record) => $record->conversions()->exists()),
 
                         // The delivery side of the end-to-end link: δελτία αποστολής
                         // that dispatch this sale (delivery_notes.invoice_id → this).
