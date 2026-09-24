@@ -106,7 +106,12 @@ class InvoiceType extends Model
         return $this->code.' — '.$this->name.($this->is_informal ? ' (άτυπη)' : '');
     }
 
-    /** Any document of this series at all — drafts and trashed included. */
+    /**
+     * Any document of this series — drafts included (a draft can already be filed,
+     * numbered or hold a payment). A deleted document still counts once it carried
+     * a number (it left a trace in the series); a deleted, never-numbered draft
+     * doesn't lock the series forever.
+     */
     public function hasInvoices(): bool
     {
         return Invoice::query()
@@ -114,6 +119,7 @@ class InvoiceType extends Model
             ->withTrashed()
             ->where('company_id', $this->company_id)
             ->where('invoice_type_id', $this->getKey())
+            ->where(fn ($q) => $q->whereNull('deleted_at')->orWhereNotNull('code'))
             ->exists();
     }
 

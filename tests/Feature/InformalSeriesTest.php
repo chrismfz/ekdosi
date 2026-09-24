@@ -17,6 +17,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\MyDataMark;
+use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\ServiceContract;
 use App\Models\User;
@@ -198,24 +199,23 @@ class InformalSeriesTest extends TestCase
     public function test_the_informal_flag_freezes_once_the_series_has_any_document(): void
     {
         $this->document($this->saleType, qty: 1);
-
-        try {
-            $this->saleType->fresh()->update(['is_informal' => true]);
-            $this->fail('A fiscal series with issued documents must not turn informal.');
-        } catch (RuntimeException $e) {
-            $this->assertStringContainsString('έχει ήδη παραστατικά', $e->getMessage());
-        }
-        $this->assertFalse((bool) $this->saleType->fresh()->is_informal);
+        $this->assertFlagLocked($this->saleType, 'A fiscal series with issued documents must not turn informal.');
 
         // A mere «draft» already counts: it can be filed/numbered or hold a payment.
-        $draftOnly = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο', 'invcount' => 1, 'mydata_type' => '1.1']);
+        $draftOnly = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο', 'invcount' => 1]);
         $this->document($draftOnly, qty: 1, status: 'draft', numbered: false);
-        try {
-            $draftOnly->fresh()->update(['mydata_type' => null, 'is_informal' => true]);
-            $this->fail('A series holding a draft must not turn informal.');
-        } catch (RuntimeException $e) {
-            $this->assertStringContainsString('έχει ήδη παραστατικά', $e->getMessage());
-        }
+        $this->assertFlagLocked($draftOnly, 'A series holding a draft must not turn informal.');
+
+        // A deleted NUMBERED document still locks it (it left a trace in the series)…
+        $traced = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΔΟΚ2', 'name' => 'Δοκιμή', 'invcount' => 1]);
+        Invoice::query()->whereKey($this->document($traced, qty: 1)->id)->update(['deleted_at' => now()]);
+        $this->assertFlagLocked($traced, 'A deleted numbered document must still lock its series.');
+
+        // …a deleted, never-numbered draft doesn't lock a series forever.
+        $abandoned = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΔΟΚ1', 'name' => 'Δοκιμή', 'invcount' => 1]);
+        $this->document($abandoned, qty: 1, status: 'draft', numbered: false)->delete();
+        $abandoned->fresh()->update(['is_informal' => true]);
+        $this->assertTrue((bool) $abandoned->fresh()->is_informal);
 
         // A series without any document may still change…
         $fresh = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΔΟΚ', 'name' => 'Νέα', 'invcount' => 1]);
@@ -225,6 +225,17 @@ class InformalSeriesTest extends TestCase
         // …but an informal series never carries a myDATA type.
         $this->expectException(RuntimeException::class);
         $fresh->update(['mydata_type' => '2.1']);
+    }
+
+    private function assertFlagLocked(InvoiceType $type, string $why): void
+    {
+        try {
+            $type->fresh()->update(['is_informal' => true]);
+            $this->fail($why);
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('έχει ήδη παραστατικά', $e->getMessage());
+        }
+        $this->assertFalse((bool) $type->fresh()->is_informal);
     }
 
     public function test_an_informal_document_is_cancelled_never_credited(): void
@@ -359,6 +370,75 @@ class InformalSeriesTest extends TestCase
         $this->assertSame('draft', $invoice->local_status);
         $this->assertNull($invoice->code);
         $this->assertSame(0, MyDataMark::query()->where('invoice_id', $invoice->id)->count());
+    }
+
+    public function test_a_paid_unnumbered_draft_never_crosses_the_informal_line_either(): void
+    {
+        $draft = $this->document($this->saleType, qty: 1, status: 'draft', numbered: false);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $draft->id, 'amount' => 50, 'pay_date' => '2026-05-11',
+        ]);
+
+        try {
+            $draft->fresh()->update(['invoice_type_id' => $this->informalType->id]);
+            $this->fail('A paid draft must not turn informal (its payment would drop out of every balance).');
+        } catch (RuntimeException $e) {
+            $this->assertSame(Invoice::INFORMAL_LINE_LOCKED, $e->getMessage());
+        }
+
+        // The edit form says so as a validation error, not a crash.
+        $this->actingAsOperator();
+        Livewire::test(EditInvoice::class, ['record' => $draft->getKey()])
+            ->fillForm(['invoice_type_id' => $this->informalType->id])
+            ->call('save')
+            ->assertHasFormErrors(['invoice_type_id']);
+        $this->assertSame($this->saleType->id, $draft->fresh()->invoice_type_id);
+
+        // Fiscal → fiscal stays free for an unnumbered draft.
+        $other = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο', 'invcount' => 1, 'mydata_type' => '1.1']);
+        $draft->fresh()->update(['invoice_type_id' => $other->id]);
+        $this->assertSame($other->id, $draft->fresh()->invoice_type_id);
+    }
+
+    public function test_turning_an_unused_series_informal_in_the_form_saves_it_cleanly(): void
+    {
+        $this->actingAsOperator();
+
+        // ΤΠΥ has a myDATA type and no documents: the toggle clears it, and the
+        // (now disabled) field's reset must still be saved.
+        Livewire::test(EditInvoiceType::class, ['record' => $this->saleType->getKey()])
+            ->fillForm(['is_informal' => true])
+            ->call('save')
+            ->assertHasNoFormErrors();
+        $this->assertTrue((bool) $this->saleType->fresh()->is_informal);
+        $this->assertNull($this->saleType->fresh()->mydata_type);
+
+        // A seeded ΤΔΑ series (no is_delivery_note field in the form) is refused
+        // as a validation error, not a crash.
+        $tda = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο-Δελτίο', 'invcount' => 1,
+            'mydata_type' => '1.1', 'is_delivery_note' => true,
+        ]);
+        Livewire::test(EditInvoiceType::class, ['record' => $tda->getKey()])
+            ->fillForm(['is_informal' => true])
+            ->call('save')
+            ->assertHasFormErrors(['is_informal']);
+        $this->assertFalse((bool) $tda->fresh()->is_informal);
+    }
+
+    public function test_a_deleted_default_series_is_not_prefilled(): void
+    {
+        $this->customer->update(['default_invoice_type_id' => $this->informalType->id]);
+        $this->informalType->delete();
+        $this->actingAsOperator();
+
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['invoice_type_id' => null]);
+        Livewire::test(CreateServiceContract::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['invoice_type_id' => null]);
     }
 
     public function test_the_config_audit_does_not_flag_an_informal_series_as_missing_its_mydata_type(): void

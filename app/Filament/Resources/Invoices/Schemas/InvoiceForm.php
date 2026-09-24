@@ -9,6 +9,7 @@ use App\Filament\Support\VatRateOptions;
 use App\Models\Customer;
 use App\Models\DeliveryMethod;
 use App\Models\DistributionAim;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\MetricUnit;
 use App\Models\PaymentMethod;
@@ -111,6 +112,15 @@ class InvoiceForm
                         // type (Σκοπός διακίνησης / τρόπος πληρωμής / αποστολής) —
                         // see invoiceTypeDefaults().
                         ->afterStateUpdated(fn ($state, callable $set, Get $get) => self::applyInvoiceType($state, $set, $get))
+                        // An unnumbered draft that already holds a payment may change
+                        // series — but never across the informal/fiscal line.
+                        ->rules([
+                            fn ($record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($record): void {
+                                if ($record instanceof Invoice && $record->crossesInformalLine($value)) {
+                                    $fail(Invoice::INFORMAL_LINE_LOCKED);
+                                }
+                            },
+                        ])
                         // Frozen once filed (mydata_state set) OR numbered (code set): the
                         // ΑΑ belongs to the series it was drawn from, so a numbered draft
                         // (e.g. reverted «ΕΣΩ5») can't be re-typed — cancel and reissue.
@@ -173,9 +183,12 @@ class InvoiceForm
                             // programmatic $set() doesn't fire the type's afterStateUpdated,
                             // so apply its defaults explicitly — BEFORE the customer's
                             // payment-method fallback below, which the type must win over.
-                            if (blank($get('invoice_type_id')) && $customer->default_invoice_type_id) {
-                                $set('invoice_type_id', $customer->default_invoice_type_id);
-                                self::applyInvoiceType($customer->default_invoice_type_id, $set, $get);
+                            // (Only a series that still exists in this tenant — a deleted
+                            // default must not leave a dangling id in the select.)
+                            if (blank($get('invoice_type_id')) && $customer->default_invoice_type_id
+                                && ($defaultType = self::tenantType($customer->default_invoice_type_id))) {
+                                $set('invoice_type_id', $defaultType->id);
+                                self::applyInvoiceType($defaultType, $set, $get);
                             }
                             $set('header_discount_percent', (float) ($customer->discount ?? 0));
                             if (blank($get('payment_method_id')) && $customer->payment_method_id) {
@@ -987,15 +1000,18 @@ class InvoiceForm
         ];
     }
 
-    /** Apply a picked type to the form: its header defaults + the 0% lines' §8.3 reasons. */
-    private static function applyInvoiceType(mixed $typeId, callable $set, Get $get): void
+    /** A live (non-deleted) series of the current tenant, or null. */
+    private static function tenantType(int|string|null $id): ?InvoiceType
     {
-        if (blank($typeId)) {
-            return;
-        }
-        $type = InvoiceType::query()
+        return blank($id) ? null : InvoiceType::query()
             ->where('company_id', Filament::getTenant()?->getKey())
-            ->find($typeId);
+            ->find($id);
+    }
+
+    /** Apply a picked type to the form: its header defaults + the 0% lines' §8.3 reasons. */
+    private static function applyInvoiceType(InvoiceType|int|string|null $type, callable $set, Get $get): void
+    {
+        $type = $type instanceof InvoiceType ? $type : self::tenantType($type);
         if (! $type) {
             return;
         }

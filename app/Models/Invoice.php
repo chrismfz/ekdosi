@@ -116,8 +116,37 @@ class Invoice extends Model implements MovableDocument
      */
     public function isInformal(): bool
     {
-        return (bool) (self::informalTypeLookup($this->invoice_type_id, $this->invoiceType)?->is_informal ?? false);
+        $type = self::informalTypeLookup($this->invoice_type_id, $this->invoiceType);
+        if ($type !== null && $type->trashed() && $this->invoiceType === null) {
+            // Memoise the trashed series on this instance (one lookup, not one per
+            // call) — the same «show soft-deleted referenced rows» pattern the
+            // resource's eager load follows.
+            $this->setRelation('invoiceType', $type);
+        }
+
+        return (bool) ($type?->is_informal ?? false);
     }
+
+    /**
+     * Would re-typing this document to $newTypeId move it across the informal/fiscal
+     * line while it is already COMMITTED — numbered (its ΑΑ belongs to the series it
+     * was drawn from: a reverted «ΕΣΩ5» would be filed under ΕΣΩ/5) or holding
+     * customer money (an informal document drops out of every balance, so the
+     * payment would turn into unexplained credit)? An unnumbered, unpaid draft is
+     * free to change series. Shared by the model guard and the edit form's rule.
+     */
+    public function crossesInformalLine(int|string|null $newTypeId): bool
+    {
+        if (! $this->exists) {
+            return false;
+        }
+        $was = (bool) self::informalTypeLookup($this->getOriginal('invoice_type_id'))?->is_informal;
+        $now = (bool) self::informalTypeLookup($newTypeId)?->is_informal;
+
+        return $was !== $now && ($this->getOriginal('code') !== null || $this->hasRecordedPayments());
+    }
+
+    public const INFORMAL_LINE_LOCKED = 'Το παραστατικό έχει ήδη αριθμό ή πληρωμή — δεν αλλάζει από άτυπη σε φορολογική σειρά (ή ανάποδα). Ακύρωσέ το και φτιάξε νέο.';
 
     /**
      * The series behind an invoice_type_id, TRASHED INCLUDED: a series deleted after
@@ -466,19 +495,12 @@ class Invoice extends Model implements MovableDocument
             }
         });
 
-        // A NUMBERED document never crosses the informal/fiscal line. A numbered
-        // informal («ΕΣΩ5», reverted to draft) switched to a fiscal type would be
-        // filed under the frozen informal series/ΑΑ; a numbered fiscal switched to
-        // informal would vanish from VAT/receivables and punch a hole in its series.
-        // (The form also freezes the type once numbered; this covers every path.)
+        // A numbered or paid document never crosses the informal/fiscal line
+        // (crossesInformalLine). The edit form freezes/validates the type too; this
+        // covers every other path.
         static::updating(function (self $model): void {
-            if (! $model->isDirty('invoice_type_id') || $model->getOriginal('code') === null) {
-                return;
-            }
-            $was = (bool) self::informalTypeLookup($model->getOriginal('invoice_type_id'))?->is_informal;
-            $now = (bool) self::informalTypeLookup($model->invoice_type_id)?->is_informal;
-            if ($was !== $now) {
-                throw new RuntimeException('Το '.$model->invcode.' έχει ήδη αριθμό — δεν αλλάζει από άτυπη σε φορολογική σειρά (ή ανάποδα). Ακύρωσέ το και φτιάξε νέο.');
+            if ($model->isDirty('invoice_type_id') && $model->crossesInformalLine($model->invoice_type_id)) {
+                throw new RuntimeException(self::INFORMAL_LINE_LOCKED);
             }
         });
     }

@@ -64,7 +64,10 @@ class InvoiceTypeForm
                                 Toggle::make('is_credit')
                                     ->label('Credit document (πιστωτικό)')
                                     // An informal series is never a credit note (the model refuses it).
-                                    ->disabled(fn (Get $get): bool => (bool) $get('is_informal')),
+                                    // dehydrated(): a disabled field is otherwise not saved, so the
+                                    // toggle's reset to false would never reach the DB.
+                                    ->disabled(fn (Get $get): bool => (bool) $get('is_informal'))
+                                    ->dehydrated(),
 
                                 Toggle::make('is_return')
                                     ->label('Return document'),
@@ -84,9 +87,13 @@ class InvoiceTypeForm
                                         }
                                     })
                                     ->rules([
-                                        fn (Get $get): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get): void {
+                                        fn (Get $get, $record): Closure => function (string $attribute, mixed $value, Closure $fail) use ($get, $record): void {
                                             if ($value && ($get('is_credit') || filled($get('mydata_type')))) {
                                                 $fail('Μια άτυπη σειρά δεν έχει myDATA τύπο και δεν είναι πιστωτικό.');
+                                            }
+                                            // is_delivery_note has no field here (seeded ΤΔΑ series).
+                                            if ($value && $record?->is_delivery_note) {
+                                                $fail('Μια σειρά Τιμολογίου-Δελτίου (ΤΔΑ) δεν γίνεται άτυπη.');
                                             }
                                         },
                                     ]),
@@ -100,8 +107,10 @@ class InvoiceTypeForm
                                     ->options(MyDataOptions::invoiceTypes())
                                     // An informal series is never filed. Disabled here (not only
                                     // validated on the toggle): once the series has documents the
-                                    // toggle is locked and its rule no longer runs.
+                                    // toggle is locked and its rule no longer runs. dehydrated():
+                                    // the toggle's reset to null must still be saved.
                                     ->disabled(fn (Get $get): bool => (bool) $get('is_informal'))
+                                    ->dehydrated()
                                     ->searchable()
                                     ->preload()
                                     // When empty, surface a name-based suggestion
