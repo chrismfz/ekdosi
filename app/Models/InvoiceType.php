@@ -85,12 +85,14 @@ class InvoiceType extends Model
     protected static function booted(): void
     {
         // The informal flag decides whether a document is a tax document at all. Once
-        // the series has issued documents it is frozen: flipping a fiscal series to
-        // informal would retroactively drop real invoices from VAT/receivables, and
-        // the reverse would turn internal documents into unfiled «sales».
+        // the series has ANY document it is frozen: flipping a fiscal series to
+        // informal would retroactively drop real invoices from VAT/receivables (and a
+        // «draft» can already be filed, numbered, or hold a customer's payment), and
+        // the reverse would turn internal documents into unfiled «sales». Need the
+        // other kind? Open a new series.
         static::saving(function (InvoiceType $type): void {
-            if ($type->exists && $type->isDirty('is_informal') && $type->hasIssuedInvoices()) {
-                throw new RuntimeException('Η σειρά '.$type->code.' έχει ήδη εκδοθέντα παραστατικά — δεν αλλάζει σε/από άτυπη.');
+            if ($type->exists && $type->isDirty('is_informal') && $type->hasInvoices()) {
+                throw new RuntimeException('Η σειρά '.$type->code.' έχει ήδη παραστατικά — δεν αλλάζει σε/από άτυπη. Φτιάξε νέα σειρά.');
             }
             if ($type->is_informal && (filled($type->mydata_type) || $type->is_credit || $type->is_delivery_note)) {
                 throw new RuntimeException('Μια άτυπη σειρά δεν έχει myDATA τύπο και δεν είναι πιστωτικό ή δελτίο αποστολής.');
@@ -98,15 +100,20 @@ class InvoiceType extends Model
         });
     }
 
-    /** Any non-draft document (issued / filed / cancelled) of this series, trashed included. */
-    public function hasIssuedInvoices(): bool
+    /** «ΕΣΩ — Εσωτερικά (άτυπη)»: the one label every series picker renders. */
+    public function pickerLabel(): string
+    {
+        return $this->code.' — '.$this->name.($this->is_informal ? ' (άτυπη)' : '');
+    }
+
+    /** Any document of this series at all — drafts and trashed included. */
+    public function hasInvoices(): bool
     {
         return Invoice::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->withTrashed()
             ->where('company_id', $this->company_id)
             ->where('invoice_type_id', $this->getKey())
-            ->where('local_status', '!=', 'draft')
             ->exists();
     }
 

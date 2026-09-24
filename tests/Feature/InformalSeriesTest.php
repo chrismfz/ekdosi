@@ -7,7 +7,9 @@ use App\Actions\StageServiceRenewal;
 use App\Enums\BillingCycle;
 use App\Enums\ServiceContractStatus;
 use App\Filament\Resources\Invoices\Pages\CreateInvoice;
+use App\Filament\Resources\Invoices\Pages\EditInvoice;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
+use App\Filament\Resources\InvoiceTypes\Pages\EditInvoiceType;
 use App\Filament\Resources\ServiceContracts\Pages\CreateServiceContract;
 use App\Models\Company;
 use App\Models\Customer;
@@ -31,6 +33,7 @@ use App\Services\RecomputeInvoiceTotals;
 use App\Services\Reminders\ReminderPlanner;
 use App\Support\InvoiceScope;
 use App\Support\Pdf\InvoiceBannerState;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
@@ -97,6 +100,8 @@ class InformalSeriesTest extends TestCase
         $scoped = Customer::query()->where('customers.company_id', $this->tenant->id)
             ->withOutstandingBalance($this->tenant->id)->where('customers.id', $this->customer->id)->first();
         $this->assertEqualsWithDelta(124.0, (float) $scoped->outstanding_balance, 0.001);
+        // Never filed by design → never the dashboard's «μη υποβληθέντα» backlog.
+        $this->assertSame(1, $metrics->unfiledCount());
 
         // Never a reminder / overdue / dunning / payment target.
         $this->assertNotContains($informal->id, app(ReminderPlanner::class)->openDocuments($this->tenant)->pluck('invoices.id')->all());
@@ -190,7 +195,7 @@ class InformalSeriesTest extends TestCase
         $this->assertSame('pending_mydata', InvoiceBannerState::for($this->document($this->saleType, qty: 1)->fresh())['kind']);
     }
 
-    public function test_the_informal_flag_freezes_once_the_series_has_issued_documents(): void
+    public function test_the_informal_flag_freezes_once_the_series_has_any_document(): void
     {
         $this->document($this->saleType, qty: 1);
 
@@ -198,11 +203,21 @@ class InformalSeriesTest extends TestCase
             $this->saleType->fresh()->update(['is_informal' => true]);
             $this->fail('A fiscal series with issued documents must not turn informal.');
         } catch (RuntimeException $e) {
-            $this->assertStringContainsString('έχει ήδη εκδοθέντα παραστατικά', $e->getMessage());
+            $this->assertStringContainsString('έχει ήδη παραστατικά', $e->getMessage());
         }
         $this->assertFalse((bool) $this->saleType->fresh()->is_informal);
 
-        // A series without issued documents may still change…
+        // A mere «draft» already counts: it can be filed/numbered or hold a payment.
+        $draftOnly = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΙΜ', 'name' => 'Τιμολόγιο', 'invcount' => 1, 'mydata_type' => '1.1']);
+        $this->document($draftOnly, qty: 1, status: 'draft', numbered: false);
+        try {
+            $draftOnly->fresh()->update(['mydata_type' => null, 'is_informal' => true]);
+            $this->fail('A series holding a draft must not turn informal.');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('έχει ήδη παραστατικά', $e->getMessage());
+        }
+
+        // A series without any document may still change…
         $fresh = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΔΟΚ', 'name' => 'Νέα', 'invcount' => 1]);
         $fresh->update(['is_informal' => true]);
         $this->assertTrue((bool) $fresh->fresh()->is_informal);
@@ -243,6 +258,107 @@ class InformalSeriesTest extends TestCase
         Livewire::test(CreateServiceContract::class)
             ->fillForm(['customer_id' => $this->customer->id])
             ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id]);
+    }
+
+    public function test_a_numbered_document_never_crosses_the_informal_line(): void
+    {
+        // ΕΣΩ5 finalized, then reverted to draft: its number belongs to the informal series.
+        $informal = $this->document($this->informalType, qty: 1);
+        $informal->update(['local_status' => 'draft']);
+        $fiscal = $this->document($this->saleType, qty: 1);
+
+        foreach ([[$informal, $this->saleType], [$fiscal, $this->informalType]] as [$doc, $to]) {
+            try {
+                $doc->fresh()->update(['invoice_type_id' => $to->id]);
+                $this->fail($doc->invcode.' crossed the informal line with its number.');
+            } catch (RuntimeException $e) {
+                $this->assertStringContainsString('έχει ήδη αριθμό', $e->getMessage());
+            }
+            $this->assertNotSame($to->id, $doc->fresh()->invoice_type_id);
+        }
+
+        // An UNNUMBERED draft is still free to change series.
+        $draft = $this->document($this->saleType, qty: 1, status: 'draft', numbered: false);
+        $draft->update(['invoice_type_id' => $this->informalType->id]);
+        $this->assertTrue($draft->fresh()->isInformal());
+
+        // The edit form freezes the type of a numbered draft (not only once filed).
+        $this->actingAsOperator();
+        Livewire::test(EditInvoice::class, ['record' => $informal->getKey()])->assertFormFieldDisabled('invoice_type_id');
+        Livewire::test(EditInvoice::class, ['record' => $draft->getKey()])->assertFormFieldEnabled('invoice_type_id');
+    }
+
+    public function test_a_deleted_informal_series_still_makes_its_documents_informal(): void
+    {
+        $informal = $this->document($this->informalType, qty: 1);
+        $this->informalType->delete(); // soft delete — the SQL twin still reads it
+
+        $doc = $informal->fresh();
+        $this->assertTrue($doc->isInformal());
+        $this->assertFalse($doc->isPubliclyViewable());
+        $this->assertFalse($doc->isOverdue(Carbon::parse('2026-09-01')));
+        $this->assertNotContains($doc->id, InvoiceScope::live(Invoice::query())->pluck('id')->all());
+    }
+
+    public function test_a_locked_informal_series_cannot_pick_up_a_mydata_type_or_turn_credit(): void
+    {
+        $this->document($this->informalType, qty: 1); // the toggle is now locked
+        $this->actingAsOperator();
+
+        Livewire::test(EditInvoiceType::class, ['record' => $this->informalType->getKey()])
+            ->assertFormFieldDisabled('is_informal')
+            ->assertFormFieldDisabled('mydata_type')
+            ->assertFormFieldDisabled('is_credit');
+        Livewire::test(EditInvoiceType::class, ['record' => $this->saleType->getKey()])
+            ->assertFormFieldEnabled('mydata_type')
+            ->assertFormFieldEnabled('is_credit');
+    }
+
+    public function test_the_customer_default_series_brings_its_own_header_defaults(): void
+    {
+        $cash = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        $this->informalType->update(['payment_method_id' => $cash->id]);
+        $tda = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ΤΔΑ', 'name' => 'Τιμολόγιο-Δελτίο', 'invcount' => 1,
+            'mydata_type' => '1.1', 'is_delivery_note' => true,
+        ]);
+        $other = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Αποθήκη', 'afm' => '094014201', 'default_invoice_type_id' => $tda->id]);
+        $this->customer->update(['default_invoice_type_id' => $this->informalType->id, 'payment_method_id' => $this->credit->id]);
+        $this->actingAsOperator();
+
+        // The type's payment method wins over the customer's, as when picked by hand.
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $this->customer->id])
+            ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id, 'payment_method_id' => $cash->id]);
+        Livewire::test(CreateInvoice::class)
+            ->fillForm(['customer_id' => $other->id])
+            ->assertSchemaStateSet(['invoice_type_id' => $tda->id, 'is_delivery_note' => true]);
+
+        // Same from the Καρτέλα's «Νέο Παραστατικό» (?customer_id=N).
+        Livewire::withQueryParams(['customer_id' => $this->customer->id])
+            ->test(CreateInvoice::class)
+            ->assertSchemaStateSet(['invoice_type_id' => $this->informalType->id, 'payment_method_id' => $cash->id]);
+    }
+
+    public function test_save_and_submit_on_an_informal_series_saves_a_draft_and_says_why_it_was_not_filed(): void
+    {
+        $this->tenant->forceFill(['mydata_mode' => 'sandbox', 'mydata_aade_id_sandbox' => 'U', 'mydata_subscription_key_sandbox' => 'K'])->save();
+        $this->actingAsOperator();
+
+        Livewire::test(CreateInvoice::class)
+            ->fillForm([
+                'invoice_type_id' => $this->informalType->id, 'customer_id' => $this->customer->id,
+                'payment_method_id' => $this->credit->id,
+                'lines' => [['product_descr' => 'Hosting', 'qty' => 1, 'price_per_item' => 100, 'discount' => 0, 'vat_percent' => '24.00']],
+            ])
+            ->callAction(TestAction::make('saveAndSubmit')->schemaComponent('form-actions', schema: 'content'))
+            ->assertHasNoFormErrors()
+            ->assertNotified('Αποθηκεύτηκε ως πρόχειρο — άτυπη σειρά');
+
+        $invoice = Invoice::query()->where('company_id', $this->tenant->id)->sole();
+        $this->assertSame('draft', $invoice->local_status);
+        $this->assertNull($invoice->code);
+        $this->assertSame(0, MyDataMark::query()->where('invoice_id', $invoice->id)->count());
     }
 
     public function test_the_config_audit_does_not_flag_an_informal_series_as_missing_its_mydata_type(): void

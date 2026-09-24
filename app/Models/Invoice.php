@@ -116,7 +116,26 @@ class Invoice extends Model implements MovableDocument
      */
     public function isInformal(): bool
     {
-        return (bool) ($this->invoiceType?->is_informal ?? false);
+        return (bool) (self::informalTypeLookup($this->invoice_type_id, $this->invoiceType)?->is_informal ?? false);
+    }
+
+    /**
+     * The series behind an invoice_type_id, TRASHED INCLUDED: a series deleted after
+     * issue still made its documents informal, exactly as the SQL twin
+     * (excludeInformal) reads trashed types. The plain belongsTo drops a trashed
+     * type, so fall back to a direct lookup only in that (rare) case.
+     */
+    private static function informalTypeLookup(int|string|null $typeId, ?InvoiceType $loaded = null): ?InvoiceType
+    {
+        if (blank($typeId)) {
+            return null;
+        }
+        $typeId = (int) $typeId;
+        if ($loaded !== null && (int) $loaded->getKey() === $typeId) {
+            return $loaded;
+        }
+
+        return InvoiceType::query()->withoutGlobalScope(CompanyScope::class)->withTrashed()->find($typeId);
     }
 
     /**
@@ -144,7 +163,7 @@ class Invoice extends Model implements MovableDocument
      */
     public function isCustomerVisible(): bool
     {
-        return ! $this->isInformal() && ($this->isPubliclyViewable() || $this->isOffered());
+        return ($this->isPubliclyViewable() || $this->isOffered()) && ! $this->isInformal();
     }
 
     /**
@@ -206,8 +225,8 @@ class Invoice extends Model implements MovableDocument
     public function isCustomerPayable(): bool
     {
         return $this->mydata_state !== 'CANCELLED'
-            && ! $this->isInformal()
-            && ($this->local_status === 'active' || $this->isOffered());
+            && ($this->local_status === 'active' || $this->isOffered())
+            && ! $this->isInformal();
     }
 
     /**
@@ -444,6 +463,22 @@ class Invoice extends Model implements MovableDocument
             if ($model->code === null && blank($model->invcode)) {
                 $model->invcode = ProvisionalCode::make($model->invoiceType?->code, $model->getKey());
                 $model->saveQuietly();
+            }
+        });
+
+        // A NUMBERED document never crosses the informal/fiscal line. A numbered
+        // informal («ΕΣΩ5», reverted to draft) switched to a fiscal type would be
+        // filed under the frozen informal series/ΑΑ; a numbered fiscal switched to
+        // informal would vanish from VAT/receivables and punch a hole in its series.
+        // (The form also freezes the type once numbered; this covers every path.)
+        static::updating(function (self $model): void {
+            if (! $model->isDirty('invoice_type_id') || $model->getOriginal('code') === null) {
+                return;
+            }
+            $was = (bool) self::informalTypeLookup($model->getOriginal('invoice_type_id'))?->is_informal;
+            $now = (bool) self::informalTypeLookup($model->invoice_type_id)?->is_informal;
+            if ($was !== $now) {
+                throw new RuntimeException('Το '.$model->invcode.' έχει ήδη αριθμό — δεν αλλάζει από άτυπη σε φορολογική σειρά (ή ανάποδα). Ακύρωσέ το και φτιάξε νέο.');
             }
         });
     }
@@ -1338,11 +1373,6 @@ class Invoice extends Model implements MovableDocument
         if ($this->mydata_state === 'CANCELLED') {
             return false;
         }
-        // Informal (non-fiscal): never a receivable — so never overdue, never dunned
-        // (a renewal of our own internal service must not suspend it).
-        if ($this->isInformal()) {
-            return false;
-        }
         if (! in_array((string) $this->payment_status, [
             PaymentStatus::Unpaid->value,
             PaymentStatus::Partial->value,
@@ -1350,7 +1380,10 @@ class Invoice extends Model implements MovableDocument
             return false;
         }
 
-        return $due->lt($asOf ?? Carbon::today());
+        // Informal (non-fiscal): never a receivable — so never overdue, never dunned
+        // (a renewal of our own internal service must not suspend it). Checked last:
+        // it may cost a type lookup, the column checks above are free.
+        return $due->lt($asOf ?? Carbon::today()) && ! $this->isInformal();
     }
 
     /**

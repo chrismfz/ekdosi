@@ -274,9 +274,7 @@ class CustomerForm
                                         ->where('is_credit', false)
                                         ->orderBy('code')
                                         ->get()
-                                        ->mapWithKeys(fn (InvoiceType $t): array => [
-                                            $t->id => $t->code.' — '.$t->name.($t->is_informal ? ' (άτυπη)' : ''),
-                                        ]))
+                                        ->mapWithKeys(fn (InvoiceType $t): array => [$t->id => $t->pickerLabel()]))
                                     ->searchable()
                                     ->preload()
                                     ->helperText('Με αυτό ξεκινούν τα νέα παραστατικά και οι νέες υπηρεσίες του. Π.χ. η εταιρεία μας → άτυπη σειρά «ΕΣΩ».'),

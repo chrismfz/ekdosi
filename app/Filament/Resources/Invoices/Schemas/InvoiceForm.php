@@ -102,51 +102,19 @@ class InvoiceForm
                                 ->where('company_id', Filament::getTenant()?->getKey())
                                 ->find($value);
 
-                            return $type ? $type->code.' — '.$type->name : null;
+                            return $type?->pickerLabel();
                         })
                         ->searchable()
                         ->preload()
                         ->live()
-                        // Pre-fill the header dimensions configured on the
-                        // chosen type (Σκοπός διακίνησης / τρόπος πληρωμής /
-                        // αποστολής). Covers "ΤΙΜ/ΤΠΥ should default to Πώληση"
-                        // without a hardcoded global default — set it once on
-                        // the type. Only writes the fields the type actually
-                        // configures; never blanks an operator's choice.
-                        ->afterStateUpdated(function ($state, callable $set, Get $get) {
-                            if (! $state) {
-                                return;
-                            }
-                            $type = InvoiceType::query()
-                                ->where('company_id', Filament::getTenant()?->getKey())
-                                ->find($state);
-                            if (! $type) {
-                                return;
-                            }
-                            // The 0% lines' §8.3 reasons follow the type (MYD-007): a reason
-                            // impossible for the new type must not linger into a validation
-                            // error on a field the operator never touched.
-                            self::resyncLineExemptions($get, $set, $type->mydata_type);
-                            if ($type->distribution_aim_id) {
-                                $set('distribution_aim_id', $type->distribution_aim_id);
-                            }
-                            if ($type->payment_method_id) {
-                                $set('payment_method_id', $type->payment_method_id);
-                            }
-                            if ($type->delivery_method_id) {
-                                $set('delivery_method_id', $type->delivery_method_id);
-                            }
-                            // Combined ΤΔΑ (3d): a type flagged is_delivery_note (a ΤΔΑ
-                            // series) makes THIS 1.1 also a δελτίο → pre-set the flag so the
-                            // movement section reveals. Mirror it in both directions: picking
-                            // a plain type clears it, so a ΤΔΑ→ΤΙΜ switch doesn't leave a
-                            // stale movement header on a plain invoice (operator can still
-                            // toggle it back on for an ad-hoc combined doc).
-                            $set('is_delivery_note', (bool) $type->is_delivery_note);
-                        })
-                        // Once issued (mydata_state set) the type is frozen — operator
-                        // can't reclassify a filed invoice.
-                        ->disabled(fn ($record) => $record && $record->mydata_state !== null),
+                        // Pre-fill the header dimensions configured on the chosen
+                        // type (Σκοπός διακίνησης / τρόπος πληρωμής / αποστολής) —
+                        // see invoiceTypeDefaults().
+                        ->afterStateUpdated(fn ($state, callable $set, Get $get) => self::applyInvoiceType($state, $set, $get))
+                        // Frozen once filed (mydata_state set) OR numbered (code set): the
+                        // ΑΑ belongs to the series it was drawn from, so a numbered draft
+                        // (e.g. reverted «ΕΣΩ5») can't be re-typed — cancel and reissue.
+                        ->disabled(fn ($record) => $record && ($record->mydata_state !== null || $record->code !== null)),
 
                     DateTimePicker::make('issued_at')
                         ->label('Ημερομηνία έκδοσης')
@@ -200,14 +168,18 @@ class InvoiceForm
                             // (operator can still override per invoice). The payment
                             // method is a FALLBACK: the invoice TYPE wins, so only
                             // fill from the customer when the type didn't set one.
+                            // The customer's default series (e.g. our own company → the
+                            // informal «ΕΣΩ») — only while no type is picked yet. A
+                            // programmatic $set() doesn't fire the type's afterStateUpdated,
+                            // so apply its defaults explicitly — BEFORE the customer's
+                            // payment-method fallback below, which the type must win over.
+                            if (blank($get('invoice_type_id')) && $customer->default_invoice_type_id) {
+                                $set('invoice_type_id', $customer->default_invoice_type_id);
+                                self::applyInvoiceType($customer->default_invoice_type_id, $set, $get);
+                            }
                             $set('header_discount_percent', (float) ($customer->discount ?? 0));
                             if (blank($get('payment_method_id')) && $customer->payment_method_id) {
                                 $set('payment_method_id', $customer->payment_method_id);
-                            }
-                            // The customer's default series (e.g. our own company → the
-                            // informal «ΕΣΩ») — only while no type is picked yet.
-                            if (blank($get('invoice_type_id')) && $customer->default_invoice_type_id) {
-                                $set('invoice_type_id', $customer->default_invoice_type_id);
                             }
 
                             // Reverse-charge hint: EU non-GR customer with a VAT id →
@@ -989,6 +961,51 @@ class InvoiceForm
         $tenantId = Filament::getTenant()?->getKey();
 
         return once(fn () => InvoiceType::query()->where('company_id', $tenantId)->whereKey($typeId)->value('mydata_type'));
+    }
+
+    /**
+     * The header fields a type pre-fills when picked — only the ones it actually
+     * configures (never blanks an operator's choice). Covers «ΤΙΜ/ΤΠΥ should default
+     * to Πώληση» without a hardcoded global default. Shared by the type select, the
+     * customer's default series and CreateInvoice's ?customer_id prefill.
+     *
+     * @return array<string, mixed>
+     */
+    public static function invoiceTypeDefaults(InvoiceType $type): array
+    {
+        return array_filter([
+            'distribution_aim_id' => $type->distribution_aim_id,
+            'payment_method_id' => $type->payment_method_id,
+            'delivery_method_id' => $type->delivery_method_id,
+        ]) + [
+            // Combined ΤΔΑ (3d): a type flagged is_delivery_note (a ΤΔΑ series) makes
+            // THIS 1.1 also a δελτίο → pre-set the flag so the movement section
+            // reveals. Mirrored in both directions: picking a plain type clears it, so
+            // a ΤΔΑ→ΤΙΜ switch doesn't leave a stale movement header on a plain invoice
+            // (operator can still toggle it back on for an ad-hoc combined doc).
+            'is_delivery_note' => (bool) $type->is_delivery_note,
+        ];
+    }
+
+    /** Apply a picked type to the form: its header defaults + the 0% lines' §8.3 reasons. */
+    private static function applyInvoiceType(mixed $typeId, callable $set, Get $get): void
+    {
+        if (blank($typeId)) {
+            return;
+        }
+        $type = InvoiceType::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->find($typeId);
+        if (! $type) {
+            return;
+        }
+        // The 0% lines' §8.3 reasons follow the type (MYD-007): a reason impossible
+        // for the new type must not linger into a validation error on a field the
+        // operator never touched.
+        self::resyncLineExemptions($get, $set, $type->mydata_type);
+        foreach (self::invoiceTypeDefaults($type) as $field => $value) {
+            $set($field, $value);
+        }
     }
 
     /**

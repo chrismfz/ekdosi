@@ -192,7 +192,7 @@ class ServiceContractForm
                             ->monetary()
                             ->orderBy('code')
                             ->get()
-                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name.($t->is_informal ? ' (άτυπη)' : '')])
+                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->pickerLabel()])
                             ->all())
                         ->searchable()
                         ->preload()

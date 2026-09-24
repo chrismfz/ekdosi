@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Pages;
 
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Filament\Resources\Invoices\Schemas\InvoiceForm;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
@@ -81,6 +82,14 @@ class CreateInvoice extends CreateRecord
             return;
         }
 
+        // The customer's default series (e.g. our own company → the informal «ΕΣΩ»)
+        // plus that type's header defaults — mirrors the customer-select handler,
+        // where the type's payment method wins over the customer's.
+        $type = $customer->default_invoice_type_id && blank($this->data['invoice_type_id'] ?? null)
+            ? InvoiceType::query()->where('company_id', $customer->company_id)->find($customer->default_invoice_type_id)
+            : null;
+        $typeFields = $type ? ['invoice_type_id' => $type->id] + InvoiceForm::invoiceTypeDefaults($type) : [];
+
         $this->form->fill(array_merge($this->data ?? [], [
             'customer_id' => $customer->id,
             'company_name' => $customer->name,
@@ -97,7 +106,7 @@ class CreateInvoice extends CreateRecord
             // method is the starting value — the type overrides it once picked.
             'header_discount_percent' => (float) ($customer->discount ?? 0),
             'payment_method_id' => $customer->payment_method_id,
-        ]));
+        ], $typeFields));
     }
 
     protected function handleRecordCreation(array $data): Model
@@ -171,6 +180,18 @@ class CreateInvoice extends CreateRecord
 
     private function chainSubmit(Invoice $invoice): void
     {
+        // An informal series is never filed: say so plainly instead of letting the
+        // submitter's refusal read as a failure to «retry».
+        if ($invoice->isInformal()) {
+            Notification::make()
+                ->title('Αποθηκεύτηκε ως πρόχειρο — άτυπη σειρά')
+                ->body('Τα άτυπα δεν διαβιβάζονται στο myDATA. Οριστικοποίησέ το από τη σελίδα του για να πάρει αριθμό.')
+                ->info()
+                ->send();
+
+            return;
+        }
+
         try {
             $tenant = Filament::getTenant();
             $submitter = app(EInvoiceSubmitterFactory::class)->for($tenant);

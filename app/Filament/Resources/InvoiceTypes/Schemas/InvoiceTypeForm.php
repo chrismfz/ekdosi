@@ -62,7 +62,9 @@ class InvoiceTypeForm
                                     ->helperText('Show this type in the "new invoice" picker.'),
 
                                 Toggle::make('is_credit')
-                                    ->label('Credit document (πιστωτικό)'),
+                                    ->label('Credit document (πιστωτικό)')
+                                    // An informal series is never a credit note (the model refuses it).
+                                    ->disabled(fn (Get $get): bool => (bool) $get('is_informal')),
 
                                 Toggle::make('is_return')
                                     ->label('Return document'),
@@ -70,10 +72,10 @@ class InvoiceTypeForm
                                 // Άτυπη (μη φορολογική) σειρά — docs/non-billable-services.md.
                                 Toggle::make('is_informal')
                                     ->label('Άτυπη σειρά (μη φορολογική)')
-                                    ->helperText(fn ($record): string => $record?->hasIssuedInvoices()
-                                        ? 'Κλειδωμένο: η σειρά έχει ήδη εκδοθέντα παραστατικά.'
+                                    ->helperText(fn ($record): string => $record?->hasInvoices()
+                                        ? 'Κλειδωμένο: η σειρά έχει ήδη παραστατικά (για το άλλο είδος φτιάξε νέα σειρά).'
                                         : 'Για δοκιμές και δικά μας εσωτερικά. Δεν πάει ποτέ στο myDATA, δεν μετράει σε πωλήσεις / ΦΠΑ / υπόλοιπα, τυπώνεται «ΑΤΥΠΟ». Χωρίς myDATA τύπο, όχι πιστωτικό.')
-                                    ->disabled(fn ($record): bool => (bool) $record?->hasIssuedInvoices())
+                                    ->disabled(fn ($record): bool => (bool) $record?->hasInvoices())
                                     ->live()
                                     ->afterStateUpdated(function ($state, callable $set): void {
                                         if ($state) {
@@ -96,6 +98,10 @@ class InvoiceTypeForm
                                 Select::make('mydata_type')
                                     ->label('myDATA invoice type')
                                     ->options(MyDataOptions::invoiceTypes())
+                                    // An informal series is never filed. Disabled here (not only
+                                    // validated on the toggle): once the series has documents the
+                                    // toggle is locked and its rule no longer runs.
+                                    ->disabled(fn (Get $get): bool => (bool) $get('is_informal'))
                                     ->searchable()
                                     ->preload()
                                     // When empty, surface a name-based suggestion
@@ -103,6 +109,9 @@ class InvoiceTypeForm
                                     ->helperText(function ($state, $get): string|HtmlString {
                                         $base = 'AADE classification code that determines how this series is filed at myDATA. e.g. "1.1" sales invoice, "2.1" service invoice, "11.2" ΑΠΥ.';
                                         $guide = ' · '.MyDataCodeGuide::hintLink('Τι σημαίνει ο κωδικός;')->toHtml();
+                                        if ($get('is_informal')) {
+                                            return 'Άτυπη σειρά — χωρίς myDATA τύπο (δεν διαβιβάζεται ποτέ).';
+                                        }
                                         if (filled($state)) {
                                             return new HtmlString(e($base).$guide);
                                         }
@@ -130,6 +139,7 @@ class InvoiceTypeForm
                                             ->icon('heroicon-m-sparkles')
                                             ->visible(function ($state, $get): bool {
                                                 return blank($state)
+                                                    && ! $get('is_informal')
                                                     && InvoiceTypeClassSuggester::suggest((string) $get('name'), (bool) $get('is_credit'), (bool) $get('is_return')) !== null;
                                             })
                                             ->action(function ($get, $set): void {
