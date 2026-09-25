@@ -8,8 +8,8 @@ use App\Models\MetricUnit;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Stock\StockService;
+use App\Services\Taric\CnCatalog;
 use App\Support\MyData\ClassificationGuidance;
-use App\Support\MyData\Taric;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
@@ -98,18 +98,26 @@ class ProductForm
                                         ->ignore($record?->id))
                                     ->helperText('Internal stock code, distinct from barcode. e.g. "HOST-PREM-12M".'),
 
-                                TextInput::make('taric_code')
+                                Select::make('taric_code')
                                     ->label('Κωδικός TARIC / ΣΟ')
-                                    ->maxLength(20)
-                                    ->placeholder('π.χ. 8471 30 00')
-                                    // Ενιαία Κωδικοποίηση Ειδών (1/1/2027): 8 ψηφία ΣΟ → +«00», ή 10 TARIC.
-                                    ->rule(fn () => function (string $attribute, mixed $value, \Closure $fail): void {
-                                        if (! Taric::isValidInput((string) $value)) {
-                                            $fail('Ο κωδικός πρέπει να έχει 8 (Συνδυασμένη Ονοματολογία) ή 10 ψηφία (TARIC).');
+                                    ->searchable()
+                                    // Ενιαία Κωδικοποίηση Ειδών (1/1/2027): search the EU Combined
+                                    // Nomenclature (cn_codes) by words or code; stored as the 10-char
+                                    // TaricNo (8 ΣΟ + «00»). «Κωδικοί ΣΟ / TARIC» keeps the list current.
+                                    ->getSearchResultsUsing(fn (string $search): array => app(CnCatalog::class)->search($search))
+                                    ->getOptionLabelUsing(fn ($value): ?string => app(CnCatalog::class)->labelFor($value) ?? $value)
+                                    // Only catalog codes — or the value the product already has (a
+                                    // legacy / since-abolished code stays until the operator changes it).
+                                    ->rule(fn ($record) => function (string $attribute, mixed $value, \Closure $fail) use ($record): void {
+                                        if (blank($value) || $value === $record?->taric_code) {
+                                            return;
+                                        }
+                                        if (app(CnCatalog::class)->labelFor((string) $value) === null) {
+                                            $fail('Ο κωδικός δεν υπάρχει στη Συνδυασμένη Ονοματολογία.');
                                         }
                                     })
-                                    ->dehydrateStateUsing(fn (?string $state) => Taric::normalize($state))
-                                    ->helperText('Για αγαθά — υποχρεωτικός στα τιμολόγια/δελτία από 1/1/2027 (Ενιαία Κωδικοποίηση Ειδών). Δεκτά 8 ψηφία (συμπληρώνεται «00») ή 10. Οι υπηρεσίες δεν έχουν.'),
+                                    ->placeholder('Αναζήτηση: π.χ. «φορητές», «καλώδια», «8471»')
+                                    ->helperText('Για αγαθά — υποχρεωτικός στα Τιμολόγια–Δελτία Αποστολής/Δελτία Διακίνησης από 1/1/2027. Οι υπηρεσίες δεν έχουν.'),
 
                                 TextInput::make('barcode')
                                     ->maxLength(25)

@@ -212,6 +212,7 @@ php artisan mydata:reconcile-sales --tenant=SLUG [--raw] # READ-ONLY local↔AAD
 php artisan mydata:import-expenses --tenant=SLUG --year=2025 [--year=…] [--only=suppliers|self]  # back-fill past years' expenses (idempotent, per quarter)
 php artisan mydata:e3-snapshot --tenant=SLUG --year=2025 [--year=…]    # store AADE's Ε3 per year → source of «Φορολογικά» for closed years
 php artisan delivery:refresh-status [--tenant=SLUG]      # READ-ONLY «Έλεγχος κατάστασης» of open δελτία/ΤΔΑ (scheduled every 3h)
+php artisan cn:import --year=2027 [--file=…]             # refresh the Συνδυασμένη Ονοματολογία (TARIC list) from the EU open data
 
 # WHMCS
 php artisan whmcs:fetch-pending --tenant=SLUG            # stage paid+unfiled WHMCS invoices into the inbox
