@@ -50,6 +50,20 @@ class LeaveRequestsTable
                     ->boolean()
                     ->visible(fn (): bool => LeaveRequestPolicy::isApprover(auth()->user()))
                     ->toggleable(),
+                TextColumn::make('ergani_status')
+                    ->label('ΕΡΓΑΝΗ')
+                    ->badge()
+                    ->formatStateUsing(fn (?string $state, LeaveRequest $record): string => self::erganiLabel($record))
+                    ->color(fn (?string $state): string => match ($state) {
+                        'submitted', 'cancelled' => 'success',
+                        'failed', 'cancel_failed' => 'danger',
+                        'unknown', 'submitting', 'cancelling' => 'warning',
+                        default => 'gray',
+                    })
+                    ->tooltip(fn (LeaveRequest $record): ?string => $record->ergani_error ?: $record->ergani_protocol)
+                    ->placeholder('—')
+                    ->visible(fn (): bool => LeaveRequestPolicy::isApprover(auth()->user()))
+                    ->toggleable(),
                 TextColumn::make('created_at')->label('Υποβλήθηκε')->dateTime('d/m/Y H:i')->toggleable(isToggledHiddenByDefault: true),
             ])
             ->filters([
@@ -71,5 +85,21 @@ class LeaveRequestsTable
                     LeaveRequestActions::cancel(),
                 ]),
             ]);
+    }
+
+    public static function erganiLabel(LeaveRequest $record): string
+    {
+        $trial = $record->ergani_env === 'trial' ? ' (δοκ.)' : '';
+
+        return match ($record->ergani_status) {
+            'submitted' => 'Δηλώθηκε'.$trial,
+            'cancelled' => 'Ανακλήθηκε'.$trial,
+            'failed' => 'Αποτυχία',
+            'cancel_failed' => 'Αποτυχία ανάκλησης',
+            'submitting' => 'Σε εξέλιξη…',
+            'cancelling' => 'Ανάκληση…',
+            'unknown' => 'Άγνωστο — έλεγχος',
+            default => '—',
+        };
     }
 }
