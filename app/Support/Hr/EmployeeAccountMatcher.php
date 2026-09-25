@@ -26,6 +26,15 @@ class EmployeeAccountMatcher
         return $this->memo[$company->getKey()] ??= $this->compute($company);
     }
 
+    /** @var array<int, bool> */
+    private array $canFile = [];
+
+    /** Can this account file leave in the current tenant? Memoised for the request. */
+    public function canFileLeave(User $user): bool
+    {
+        return $this->canFile[(int) $user->getKey()] ??= $user->can('Create:LeaveRequest');
+    }
+
     /** Drop the memo after a link changed who is free. */
     public function reset(): void
     {
@@ -54,14 +63,21 @@ class EmployeeAccountMatcher
         // A user linked to a DELETED employee is still taken (unique company_id+user_id).
         $taken = $employees->pluck('user_id')->filter()->map(fn ($id): int => (int) $id)->all();
         $employees = $employees->reject(fn (Employee $e): bool => $e->trashed());
-        /** @var Collection<int, User> $users */
-        $users = $company->users()->get()->reject(fn (User $u): bool => in_array((int) $u->getKey(), $taken, true))->values();
+        /** @var Collection<int, User> $all */
+        $all = $company->users()->get();
+        $users = $all->reject(fn (User $u): bool => in_array((int) $u->getKey(), $taken, true))->values();
 
         $candidates = [];
         foreach ($employees->whereNull('user_id') as $employee) {
             $email = mb_strtolower(trim((string) $employee->email));
-            $byEmail = $email !== '' ? $users->filter(fn (User $u): bool => mb_strtolower(trim((string) $u->email)) === $email) : collect();
-            $matches = $byEmail->isNotEmpty() ? $byEmail : $users->filter(fn (User $u): bool => self::sameName($employee, (string) $u->name));
+            // Email is decisive: if it belongs to ANY company user (even one already
+            // linked elsewhere), never fall back to a same-name stranger.
+            $byEmail = $email !== '' ? $all->filter(fn (User $u): bool => mb_strtolower(trim((string) $u->email)) === $email) : collect();
+            if ($byEmail->isNotEmpty()) {
+                $matches = $byEmail->reject(fn (User $u): bool => in_array((int) $u->getKey(), $taken, true));
+            } else {
+                $matches = $users->filter(fn (User $u): bool => self::sameName($employee, (string) $u->name));
+            }
             if ($matches->count() === 1) {
                 $candidates[$employee->getKey()] = $matches->first();
             }

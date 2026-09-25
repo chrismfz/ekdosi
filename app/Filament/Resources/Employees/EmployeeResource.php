@@ -218,7 +218,8 @@ class EmployeeResource extends Resource
     /** Can this account file leave in the CURRENT tenant (operator / ergani role / admins)? */
     public static function canFileLeave(User $user): bool
     {
-        return $user->can('Create:LeaveRequest');
+        // Column description + tooltip both ask, per row → memoised per request (scoped matcher).
+        return app(EmployeeAccountMatcher::class)->canFileLeave($user);
     }
 
     /**
@@ -259,20 +260,25 @@ class EmployeeResource extends Resource
             ->modalDescription('Συνδέει κάθε επιλεγμένο εργαζόμενο με τον λογαριασμό που προτείνεται δίπλα του (ίδιο email ή ίδιο ονοματεπώνυμο, μόνο όταν υπάρχει ένα και μοναδικό ταίριασμα). Όσοι δεν έχουν πρόταση παραλείπονται.')
             ->authorize(fn (): bool => auth()->user()?->can('Update:Employee') ?? false)
             ->action(function (EloquentCollection $records): void {
+                // Snapshot of what the operator SAW before anything is linked: an
+                // earlier link in this batch can make a previously ambiguous row
+                // unambiguous — that row must still be skipped, not silently linked.
+                $shown = [];
+                foreach ($records as $record) {
+                    $shown[$record->getKey()] = app(EmployeeAccountMatcher::class)->suggestionFor($record)?->getKey();
+                }
                 $linked = 0;
                 foreach ($records as $record) {
-                    if (! (auth()->user()?->can('update', $record) ?? false)) {
-                        continue;
-                    }
-                    $suggestion = app(EmployeeAccountMatcher::class)->suggestionFor($record);
-                    if ($suggestion && self::linkIfStillSuggested($record, (int) $suggestion->getKey())) {
+                    $userId = $shown[$record->getKey()];
+                    if ($userId !== null && (auth()->user()?->can('update', $record) ?? false)
+                        && self::linkIfStillSuggested($record, (int) $userId)) {
                         $linked++;
                     }
                 }
                 $skipped = $records->count() - $linked;
-                Notification::make()
-                    ->title('Συνδέθηκαν '.$linked.($skipped > 0 ? ' · παραλείφθηκαν '.$skipped.' (χωρίς μοναδική πρόταση)' : ''))
-                    ->success()->send();
+                $n = Notification::make()
+                    ->title('Συνδέθηκαν '.$linked.($skipped > 0 ? ' · παραλείφθηκαν '.$skipped.' (χωρίς πρόταση ή ήδη συνδεδεμένοι)' : ''));
+                $linked > 0 ? $n->success()->send() : $n->warning()->send();
             })
             ->deselectRecordsAfterCompletion();
     }

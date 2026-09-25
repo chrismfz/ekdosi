@@ -95,7 +95,7 @@ class EmployeeLinkingTest extends HrTestCase
         $eb = $this->employee('Δεύτερος', 'Βήτα');
 
         Livewire::test(ListEmployees::class)->callTableBulkAction('linkSuggestedBulk', [$ea, $eb])
-            ->assertNotified('Συνδέθηκαν 1 · παραλείφθηκαν 1 (χωρίς μοναδική πρόταση)');
+            ->assertNotified('Συνδέθηκαν 1 · παραλείφθηκαν 1 (χωρίς πρόταση ή ήδη συνδεδεμένοι)');
         $this->assertSame($a->id, $ea->fresh()->user_id);
         $this->assertNull($eb->fresh()->user_id);
 
@@ -114,5 +114,32 @@ class EmployeeLinkingTest extends HrTestCase
 
         $this->assertFalse(auth()->user()->can('update', $e));
         $this->assertFalse(EmployeeResource::linkSuggestedAction()->record($e)->isVisible());
+    }
+
+    public function test_bulk_never_links_a_row_that_showed_no_suggestion(): void
+    {
+        // Reviewer's scenario: A has U's email; B has the same name as U and V (ambiguous → «—»).
+        // Linking A first frees nothing for B in the operator's eyes — B must stay unlinked.
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        $u = $this->named('Νίκος Παπαδόπουλος', email: 'nikos@firm.test');
+        $this->named('Νίκος Παπαδόπουλος');
+        $a = $this->employee('Παπαδόπουλος', 'Νίκος', 'nikos@firm.test');
+        $b = $this->employee('Παπαδόπουλος', 'Νίκος');
+        $this->assertNull(app(EmployeeAccountMatcher::class)->suggestionFor($b));
+
+        Livewire::test(ListEmployees::class)->callTableBulkAction('linkSuggestedBulk', [$a, $b]);
+
+        $this->assertSame($u->id, $a->fresh()->user_id);
+        $this->assertNull($b->fresh()->user_id);
+    }
+
+    public function test_email_of_an_already_linked_user_blocks_the_name_fallback(): void
+    {
+        $u = $this->named('Νίκος Παπαδόπουλος', email: 'nikos@firm.test');
+        $this->employee('Παπαδόπουλος', 'Νίκος', user: $u);
+        $this->named('Άλλος Χρήστης');
+        $dup = $this->employee('Χρήστης', 'Άλλος', 'nikos@firm.test');   // email → taken U; name → the other user
+
+        $this->assertNull(app(EmployeeAccountMatcher::class)->suggestionFor($dup));
     }
 }
