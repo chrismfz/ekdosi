@@ -166,16 +166,6 @@ class LeaveCalendar extends Page
                 || $l->isApproved()
                 || (int) $l->employee?->user_id === $me);
 
-        $employees = Employee::query()
-            ->where('company_id', $tenant->getKey())
-            ->where(fn ($q) => $q->where('is_active', true)
-                ->orWhereIn('id', $leaves->pluck('employee_id')->unique()->all()))
-            ->orderBy('last_name')->orderBy('first_name')
-            ->get();
-
-        $byEmployee = $leaves->groupBy('employee_id');
-        // Declared υπερωρίες of the month (not the retired «superseded» attempts) —
-        // shown to approvers and to the employee themself, like the leave type.
         $overtime = OvertimeDeclaration::query()
             ->where('company_id', $tenant->getKey())
             ->whereBetween('work_date', [$from->toDateString(), $to->toDateString()])
@@ -183,6 +173,18 @@ class LeaveCalendar extends Page
             ->orderBy('from_time')
             ->get()
             ->groupBy('employee_id');
+
+        $employees = Employee::query()
+            ->where('company_id', $tenant->getKey())
+            ->where(fn ($q) => $q->where('is_active', true)
+                ->orWhereIn('id', $leaves->pluck('employee_id')->merge($overtime->keys())->unique()->all()))
+            ->orderBy('last_name')->orderBy('first_name')
+            ->get();
+
+        $byEmployee = $leaves->groupBy('employee_id');
+        // Declared υπερωρίες of the month (not the retired «superseded» attempts) —
+        // shown to approvers and to the employee themself, like the leave type.
+
         $taken = Employee::annualLeaveTakenMap((int) $tenant->getKey(), (int) $from->format('Y'));
 
         return $employees->map(function (Employee $e) use ($byEmployee, $overtime, $approver, $me, $taken, $from, $to): array {

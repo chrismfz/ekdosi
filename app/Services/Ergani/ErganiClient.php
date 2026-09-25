@@ -38,7 +38,7 @@ class ErganiClient
     /**
      * Log in and read the employer record.
      *
-     * @return array{afm: ?string, name: ?string, in_card_sector: bool, environment: string}
+     * @return array{afm: ?string, name: ?string, in_card_sector: ?bool, environment: string} in_card_sector null = ΕΡΓΑΝΗ didn't say
      *
      * @throws RuntimeException with a Greek operator-facing message
      */
@@ -58,7 +58,10 @@ class ErganiClient
         return [
             'afm' => $employer['Afm'] ?? null,
             'name' => $employer['Eponimia'] ?? null,
-            'in_card_sector' => ($employer['IsInCardSector'] ?? '0') === '1',
+            // null when absent — never a silent «no» (the card-sector watch stores this).
+            'in_card_sector' => array_key_exists('IsInCardSector', $employer) && $employer['IsInCardSector'] !== null && $employer['IsInCardSector'] !== ''
+                ? in_array($employer['IsInCardSector'], ['1', 1, true], true)
+                : null,
             'environment' => $this->company->ergani_mode === 'production' ? 'Παραγωγή' : 'Δοκιμαστικό',
         ];
     }

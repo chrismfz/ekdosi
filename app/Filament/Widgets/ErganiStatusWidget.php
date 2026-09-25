@@ -65,7 +65,10 @@ class ErganiStatusWidget extends Widget
                 $soon = LeaveRequest::query()->where('company_id', $id)
                     ->where('status', LeaveStatus::Approved->value)
                     ->whereBetween('starts_on', [$today->toDateString(), $today->addDays(2)->toDateString()])
-                    ->where(fn ($q) => $q->whereNull('ergani_status')->orWhere('ergani_status', 'failed'))
+                    // Not declared yet (failed ones are already in the line above) and the
+                    // accountant wasn't emailed to declare it by hand either.
+                    ->whereNull('ergani_status')
+                    ->whereNull('accountant_notified_at')
                     ->count();
                 if ($soon > 0) {
                     $attention[] = ['text' => $soon.' εγκεκριμένη/ες άδεια/ες ξεκινά/ούν έως μεθαύριο ΧΩΡΙΣ δήλωση', 'url' => LeaveRequestResource::getUrl('index')];
@@ -73,8 +76,11 @@ class ErganiStatusWidget extends Widget
             }
         }
         if (OvertimeDeclarationResource::canAccess()) {
+            // NULL too: a row whose submit never claimed it (crash right after create) —
+            // the calendar marks it «!» and the list offers «Δήλωση στο ΕΡΓΑΝΗ».
             $n = OvertimeDeclaration::query()->where('company_id', $id)
-                ->where('work_date', '>=', $today->toDateString())->where($uncertain)->count();
+                ->where('work_date', '>=', $today->toDateString())
+                ->where(fn ($q) => $q->whereNull('ergani_status')->orWhere($uncertain))->count();
             if ($n > 0) {
                 $attention[] = ['text' => $n.' επερχόμενη/ες υπερωρία/ες χωρίς επιβεβαιωμένη δήλωση', 'url' => OvertimeDeclarationResource::getUrl('index')];
             }

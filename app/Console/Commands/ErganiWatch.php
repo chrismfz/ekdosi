@@ -7,7 +7,6 @@ use App\Services\Ergani\ErganiClient;
 use App\Services\Hr\LeaveWorkflow;
 use Filament\Notifications\Notification;
 use Illuminate\Console\Command;
-use Illuminate\Http\Client\ConnectionException;
 
 /**
  * «Φύλακας κάρτας» — weekly, READ-ONLY: asks ΕΡΓΑΝΗ (production, EX_BASE_01)
@@ -33,10 +32,15 @@ class ErganiWatch extends Command
         foreach ($companies as $company) {
             $production = clone $company;
             $production->ergani_mode = 'production';   // in memory only — never saved
+            // Per-tenant isolation: one tenant's error (of ANY kind) never stops the sweep.
             try {
                 $inSector = (new ErganiClient($production))->employerInfo()['in_card_sector'];
-            } catch (\RuntimeException|ConnectionException $e) {
+                if ($inSector === null) {
+                    throw new \RuntimeException('το ΕΡΓΑΝΗ δεν επέστρεψε IsInCardSector — δεν αποθηκεύτηκε τίποτα');
+                }
+            } catch (\Throwable $e) {
                 $this->warn("{$company->slug}: {$e->getMessage()}");
+                report($e);
                 $failed++;
 
                 continue;
@@ -60,6 +64,7 @@ class ErganiWatch extends Command
             }
         }
 
-        return $failed > 0 && $failed === $companies->count() ? self::FAILURE : self::SUCCESS;
+        // Any failed tenant → FAILURE, so ops:health shows it (the others were still checked).
+        return $failed > 0 ? self::FAILURE : self::SUCCESS;
     }
 }

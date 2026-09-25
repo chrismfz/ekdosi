@@ -161,7 +161,7 @@ class AdminPanelProvider extends PanelProvider
             // — nobody should mistake a trial protocol for a real declaration.
             ->renderHook(
                 PanelsRenderHook::PAGE_START,
-                fn (): string => ErganiTrialBar::html(),
+                fn (array $scopes): string => ErganiTrialBar::html($scopes),
                 scopes: ErganiTrialBar::PAGES,
             )
             // Build/version badge under the brand — the deployed identity

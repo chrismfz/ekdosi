@@ -27,13 +27,20 @@ final class ErganiTrialBar
         ListOvertimeDeclarations::class, ListWorkCardEvents::class, WorkCard::class,
     ];
 
-    public static function html(): string
+    /** @param  list<string>  $scopes  the rendering page's classes (Filament passes them to the hook) */
+    public static function html(array $scopes = []): string
     {
         $c = Filament::getTenant();
         if (! $c instanceof Company || ! $c->hasErgani() || $c->ergani_mode === 'production') {
             return '';
         }
-        if (! $c->ergani_submit_leaves && ! WorkCardService::enabledFor($c) && ! OvertimeService::enabledFor($c)) {
+        // Only where THIS screen actually declares something in the trial.
+        $declares = match (true) {
+            in_array(ListOvertimeDeclarations::class, $scopes, true) => OvertimeService::enabledFor($c),
+            in_array(ListWorkCardEvents::class, $scopes, true), in_array(WorkCard::class, $scopes, true) => WorkCardService::enabledFor($c),
+            default => (bool) $c->ergani_submit_leaves,   // the leave screens
+        };
+        if (! $declares) {
             return '';
         }
 

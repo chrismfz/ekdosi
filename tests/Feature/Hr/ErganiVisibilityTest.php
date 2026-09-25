@@ -5,6 +5,9 @@ namespace Tests\Feature\Hr;
 use App\Enums\LeaveStatus;
 use App\Enums\LeaveType;
 use App\Filament\Pages\LeaveCalendar;
+use App\Filament\Resources\LeaveRequests\LeaveRequestResource;
+use App\Filament\Resources\LeaveRequests\Pages\ListLeaveRequests;
+use App\Filament\Resources\OvertimeDeclarations\Pages\ListOvertimeDeclarations;
 use App\Filament\Widgets\ErganiStatusWidget;
 use App\Models\Employee;
 use App\Models\ErganiSubmission;
@@ -97,10 +100,17 @@ class ErganiVisibilityTest extends HrTestCase
         $this->assertSame('', ErganiTrialBar::html(), 'nothing auto-declared → no bar');
 
         $this->company->forceFill(['ergani_submit_leaves' => true])->save();
-        $this->assertStringContainsString('ΔΟΚΙΜΑΣΤΙΚΟ ΕΡΓΑΝΗ', ErganiTrialBar::html());
+        $this->assertStringContainsString('ΔΟΚΙΜΑΣΤΙΚΟ ΕΡΓΑΝΗ', ErganiTrialBar::html([ListLeaveRequests::class]));
+        $this->assertSame('', ErganiTrialBar::html([ListOvertimeDeclarations::class]), 'overtime off → not on the overtime page');
 
         $this->company->forceFill(['ergani_mode' => 'production'])->save();
-        $this->assertSame('', ErganiTrialBar::html());
+        $this->assertSame('', ErganiTrialBar::html([ListLeaveRequests::class]));
+
+        // Rendered on the real page through the panel hook.
+        $this->company->forceFill(['ergani_mode' => 'trial'])->save();
+        $this->get(LeaveRequestResource::getUrl('index', tenant: $this->company))->assertOk()->assertSee('ΔΟΚΙΜΑΣΤΙΚΟ ΕΡΓΑΝΗ');
+        $this->company->forceFill(['ergani_submit_leaves' => false])->save();
+        $this->get(LeaveRequestResource::getUrl('index', tenant: $this->company))->assertOk()->assertDontSee('ΔΟΚΙΜΑΣΤΙΚΟ ΕΡΓΑΝΗ');
     }
 
     public function test_card_sector_watch_reads_production_stores_and_bells_once_on_the_flip(): void
@@ -130,5 +140,30 @@ class ErganiVisibilityTest extends HrTestCase
         $this->artisan('ergani:watch')->assertSuccessful();
         $this->assertTrue($this->company->fresh()->ergani_card_sector);
         $this->assertSame(1, User::find($admin->id)->notifications()->count(), 'one bell, on the flip only');
+    }
+
+    public function test_watch_never_stores_a_guess_when_ergani_omits_the_flag(): void
+    {
+        Http::fake(fn (Request $r) => str_ends_with($r->url(), '/Authentication')
+            ? Http::response(['accessToken' => 'tok'])
+            : Http::response(['EX_BASE_01' => ['Ergodotis' => ['Afm' => '800561849']]]));
+
+        $this->artisan('ergani:watch')->assertFailed();
+        $this->assertNull($this->company->fresh()->ergani_card_sector);
+    }
+
+    public function test_attention_counts_a_null_overtime_and_skips_leaves_the_accountant_was_told_about(): void
+    {
+        $this->company->forceFill(['ergani_submit_leaves' => true, 'ergani_submit_overtime' => true])->save();
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        $e = $this->employeeFor(null);
+        $this->overtime($e, '2026-10-06', '18:00', '20:00', null, null);
+        $told = LeaveRequest::create(['company_id' => $this->company->id, 'employee_id' => $e->id, 'type' => LeaveType::Annual,
+            'starts_on' => '2026-10-06', 'ends_on' => '2026-10-06', 'days' => 1, 'status' => LeaveStatus::Approved]);
+        $told->forceFill(['accountant_notified_at' => now()])->saveQuietly();
+
+        Livewire::test(ErganiStatusWidget::class)
+            ->assertSee('1 επερχόμενη/ες υπερωρία/ες')
+            ->assertDontSee('ΧΩΡΙΣ δήλωση');
     }
 }

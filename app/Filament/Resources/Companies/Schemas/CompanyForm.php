@@ -1274,7 +1274,7 @@ class CompanyForm
                                                         ->title('Συνδέθηκε στο ΕΡΓΑΝΗ ('.$info['environment'].')')
                                                         ->body(sprintf('%s — ΑΦΜ %s. Ψηφιακή κάρτα εργασίας: %s.%s',
                                                             $info['name'] ?? '—', $info['afm'] ?? '—',
-                                                            $info['in_card_sector'] ? 'ΥΠΟΧΡΕΟΣ' : 'όχι υπόχρεος',
+                                                            $info['in_card_sector'] === null ? 'άγνωστο (το ΕΡΓΑΝΗ δεν το ανέφερε)' : ($info['in_card_sector'] ? 'ΥΠΟΧΡΕΟΣ' : 'όχι υπόχρεος'),
                                                             $afmMismatch ? ' ⚠ Ο ΑΦΜ δεν ταιριάζει με τον ΑΦΜ της εταιρείας!' : ''))
                                                         ->status($afmMismatch ? 'warning' : 'success')
                                                         ->persistent()
