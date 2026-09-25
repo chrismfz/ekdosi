@@ -43,7 +43,7 @@ final class LeaveRequestActions
                 Textarea::make('note')->label('Σημείωση (προαιρετικά)')->rows(2)->maxLength(1000),
             ])
             ->action(function (LeaveRequest $record, array $data): void {
-                self::run(fn (User $u) => app(LeaveWorkflow::class)->approve($record, $u, $data['note'] ?? null, (int) $data['days']), 'Η άδεια εγκρίθηκε');
+                self::run(fn (User $u) => app(LeaveWorkflow::class)->approve($record, $u, $data['note'] ?? null, (int) $data['days']), 'Η άδεια εγκρίθηκε', $record);
                 self::warnAboutFailedSideEffects($record->fresh());
             });
     }
@@ -60,7 +60,7 @@ final class LeaveRequestActions
                 Textarea::make('note')->label('Αιτιολογία')->rows(2)->maxLength(1000)->required(),
             ])
             ->action(function (LeaveRequest $record, array $data): void {
-                self::run(fn (User $u) => app(LeaveWorkflow::class)->reject($record, $u, $data['note']), 'Η άδεια απορρίφθηκε');
+                self::run(fn (User $u) => app(LeaveWorkflow::class)->reject($record, $u, $data['note']), 'Η άδεια απορρίφθηκε', $record);
             });
     }
 
@@ -70,7 +70,11 @@ final class LeaveRequestActions
             ->label(fn (LeaveRequest $record): string => $record->isApproved() ? 'Ανάκληση' : 'Ακύρωση αιτήματος')
             ->icon('heroicon-o-arrow-uturn-left')
             ->color('gray')
-            ->visible(fn (LeaveRequest $record): bool => auth()->user()?->can('cancel', $record) ?? false)
+            // State check HERE, not only in the policy: a super_admin bypasses every
+            // policy (Gate::before), so the policy alone would show «Ακύρωση» on a
+            // leave that is already rejected/cancelled.
+            ->visible(fn (LeaveRequest $record): bool => ($record->isPending() || $record->isApproved())
+                && (auth()->user()?->can('cancel', $record) ?? false))
             ->authorize(fn (LeaveRequest $record): bool => auth()->user()?->can('cancel', $record) ?? false)
             ->requiresConfirmation()
             ->modalDescription(fn (LeaveRequest $record): string => match (true) {
@@ -79,7 +83,7 @@ final class LeaveRequestActions
                 default => 'Η άδεια είχε εγκριθεί αλλά ο λογιστής ΔΕΝ είχε ενημερωθεί με email — αν τον είχατε ενημερώσει χειροκίνητα, ενημερώστε τον και για την ακύρωση.',
             })
             ->action(function (LeaveRequest $record): void {
-                self::run(fn (User $u) => app(LeaveWorkflow::class)->cancel($record, $u), 'Ακυρώθηκε');
+                self::run(fn (User $u) => app(LeaveWorkflow::class)->cancel($record, $u), 'Ακυρώθηκε', $record);
                 self::warnAboutFailedSideEffects($record->fresh());
             });
     }
@@ -99,6 +103,7 @@ final class LeaveRequestActions
                 : 'Θα σταλεί η έγκριση της άδειας στον λογιστή.')
             ->action(function (LeaveRequest $record): void {
                 $ok = app(LeaveWorkflow::class)->notifyAccountant($record, (string) $record->accountantOwed());
+                $record->refresh();
                 $n = Notification::make()->title($ok ? 'Στάλθηκε στον λογιστή' : 'Αποτυχία αποστολής email (δες logs)');
                 $ok ? $n->success()->send() : $n->danger()->send();
             });
@@ -213,6 +218,7 @@ final class LeaveRequestActions
 
                     return;
                 }
+                $record->refresh();
                 Notification::make()->title('Καταχωρίστηκε το πρωτόκολλο '.$data['protocol'])->success()->send();
                 self::warnAboutFailedSideEffects($record->fresh());
             });
@@ -298,7 +304,7 @@ final class LeaveRequestActions
     }
 
     /** Run a workflow step as the current user; surface a guard failure as a notification. */
-    private static function run(callable $step, string $success): void
+    private static function run(callable $step, string $success, ?LeaveRequest $record = null): void
     {
         $user = auth()->user();
         if (! $user instanceof User) {
@@ -310,6 +316,10 @@ final class LeaveRequestActions
             Notification::make()->title($success)->success()->send();
         } catch (RuntimeException $e) {
             Notification::make()->title($e->getMessage())->danger()->send();
+        } finally {
+            // The workflow worked on its own (locked, fresh) copy — refresh the one
+            // the page renders, or the view keeps showing the old state/actions.
+            $record?->refresh();
         }
     }
 }

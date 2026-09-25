@@ -66,6 +66,8 @@ class TenantRoleProvisioner
     public const ERGANI_PERMISSION_MAP = [
         'LeaveRequest' => ['ViewAny', 'View', 'Create'],
         'LeaveCalendar' => ['View'],
+        // Their own «Κάρτα εργασίας» (punch screen) — not the admin list / kiosk.
+        'WorkCard' => ['View'],
     ];
 
     /**
@@ -114,6 +116,8 @@ class TenantRoleProvisioner
         // stay company_admin.
         'LeaveRequest' => ['ViewAny', 'View', 'Create'],
         'LeaveCalendar' => ['View'],
+        // Their own «Κάρτα εργασίας» (punch screen) — not the admin list / kiosk.
+        'WorkCard' => ['View'],
     ];
 
     /**

@@ -225,4 +225,17 @@ class LeaveAccessTest extends HrTestCase
         $this->actAs($operator);
         $this->get('/admin/'.$this->company->slug.'/invoices')->assertOk();
     }
+
+    public function test_no_cancel_button_on_a_closed_leave_even_for_a_super_admin(): void
+    {
+        Mail::fake();
+        $admin = $this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
+        app(TenantRoleProvisioner::class)->assignSuperAdmin($admin, $this->company);
+        $this->actAs($admin);
+        $leave = $this->leaveOf($this->employeeFor(null), '2026-10-05', '2026-10-05', LeaveType::Annual, LeaveStatus::Cancelled);
+
+        Livewire::test(ViewLeaveRequest::class, ['record' => $leave->getRouteKey()])
+            ->assertActionHidden('cancelLeave')
+            ->assertActionHidden('approve');
+    }
 }

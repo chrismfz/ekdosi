@@ -21,11 +21,15 @@ use Symfony\Component\HttpFoundation\Response;
 class RestrictErganiStaff
 {
     /** Route-name fragments an ergani user may open (panel-id agnostic). */
-    private const ALLOWED = [
+    /** Route names an ergani user may open: a resource PREFIX, or an EXACT page. */
+    private const ALLOWED_PREFIXES = [
         '.resources.leave-requests.',
+    ];
+
+    private const ALLOWED_PAGES = [
         '.pages.leave-calendar',
-        // Per-USER self-service (their own login sessions) — no tenant data.
-        '.pages.my-sessions',
+        '.pages.work-card',     // their own punch screen (the kiosk is «card-kiosk»)
+        '.pages.my-sessions',   // per-USER self-service (their own login sessions)
     ];
 
     public function handle(Request $request, Closure $next): Response
@@ -37,8 +41,13 @@ class RestrictErganiStaff
         }
 
         $name = (string) $request->route()?->getName();
-        foreach (self::ALLOWED as $fragment) {
+        foreach (self::ALLOWED_PREFIXES as $fragment) {
             if (str_contains($name, $fragment)) {
+                return $next($request);
+            }
+        }
+        foreach (self::ALLOWED_PAGES as $page) {
+            if (str_ends_with($name, $page)) {   // exact page — a future «work-card-x» stays denied
                 return $next($request);
             }
         }

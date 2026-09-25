@@ -221,6 +221,17 @@ class LeaveWorkflow
      */
     public function approvers(Company $company): Collection
     {
+        return self::usersWhoCan($company, 'Update:LeaveRequest');
+    }
+
+    /**
+     * The tenant's users holding $ability, evaluated with the tenant's permission
+     * team set (teams mode) — shared by the leave and work-card bells.
+     *
+     * @return Collection<int, User>
+     */
+    public static function usersWhoCan(Company $company, string $ability): Collection
+    {
         $registrar = app(PermissionRegistrar::class);
         $previous = $registrar->getPermissionsTeamId();
         $registrar->setPermissionsTeamId($company->getKey());
@@ -228,7 +239,7 @@ class LeaveWorkflow
         try {
             return $company->users()->get()
                 ->each(fn (User $u) => $u->unsetRelation('roles')->unsetRelation('permissions'))
-                ->filter(fn (User $u): bool => Gate::forUser($u)->allows('Update:LeaveRequest'))
+                ->filter(fn (User $u): bool => Gate::forUser($u)->allows($ability))
                 ->values();
         } finally {
             $registrar->setPermissionsTeamId($previous);

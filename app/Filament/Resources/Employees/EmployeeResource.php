@@ -30,6 +30,7 @@ use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Unique;
 use UnitEnum;
 
@@ -110,6 +111,24 @@ class EmployeeResource extends Resource
                         ->searchable()
                         ->unique(ignoreRecord: true, modifyRuleUsing: $tenantScoped)
                         ->helperText('Για να ζητά ο ίδιος άδειες. Χωρίς λογαριασμό, τις καταχωρεί ο διαχειριστής.'),
+                    Toggle::make('has_work_card')
+                        ->label('Ψηφιακή κάρτα εργασίας')
+                        ->helperText('Μόνο αν είναι δηλωμένος στο ΕΡΓΑΝΗ «με ένδειξη κάρτας» — αλλιώς το ΕΡΓΑΝΗ απορρίπτει τις κινήσεις του.')
+                        ->inline(false),
+                    // Tablet «ρολόι» PIN: write-only — the field never shows the stored
+                    // hash; blank = keep. Hashed before it reaches the model.
+                    TextInput::make('card_pin_hash')
+                        ->label('PIN ρολογιού (tablet)')
+                        ->password()
+                        ->revealable()
+                        ->autocomplete('new-password')
+                        ->regex('/^\d{4,6}$/')
+                        ->validationMessages(['regex' => 'Το PIN έχει 4–6 ψηφία.'])
+                        ->formatStateUsing(fn (): ?string => null)
+                        ->dehydrated(fn (?string $state): bool => filled($state))
+                        ->dehydrateStateUsing(fn (string $state): string => Hash::make($state))
+                        ->helperText(fn (?Employee $record): string => ($record && filled($record->card_pin_hash) ? 'Έχει οριστεί PIN — κενό = το κρατά. ' : 'Δεν έχει PIN — χωρίς αυτό δεν χτυπά κάρτα από το tablet. ')
+                            .'4–6 ψηφία, ο εργαζόμενος το δίνει στο tablet του γραφείου.'),
                     TextInput::make('ergani_branch')
                         ->label('Α/Α παραρτήματος ΕΡΓΑΝΗ')
                         ->numeric()->integer()->minValue(0)->maxValue(255)->default(0)->required(),

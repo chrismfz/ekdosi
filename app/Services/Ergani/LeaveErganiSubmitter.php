@@ -41,7 +41,7 @@ class LeaveErganiSubmitter
      * auth / throttling). Anything else (408, a proxy's 4xx page, 5xx, a 2xx
      * without a protocol) is ambiguous → «unknown».
      */
-    private const DEFINITE_REJECTIONS = [400, 401, 403, 404, 422, 429];
+    public const DEFINITE_REJECTIONS = [400, 401, 403, 404, 422, 429];
 
     /** Is automatic submission switched on (and configured) for this tenant? */
     public static function enabledFor(?Company $company): bool

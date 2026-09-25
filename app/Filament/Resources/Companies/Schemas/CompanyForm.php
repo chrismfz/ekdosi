@@ -1230,6 +1230,17 @@ class CompanyForm
                                                 .'Το email στον λογιστή συνεχίζει, με τον αριθμό πρωτοκόλλου.')
                                             ->live()
                                             ->columnSpanFull(),
+                                        Toggle::make('ergani_submit_cards')
+                                            ->label('Αυτόματη δήλωση ψηφιακής κάρτας εργασίας')
+                                            ->helperText(fn (callable $get): string => ($get('ergani_mode') === 'production'
+                                                ? '⚠ ΠΑΡΑΓΩΓΗ: κάθε είσοδος/έξοδος δηλώνεται ΠΡΑΓΜΑΤΙΚΑ (WRKCardSE) — μια κάρτα ΔΕΝ ανακαλείται. '
+                                                : 'Δοκιμαστικό: οι κάρτες φέρουν «ΑΚΥΡΟ». ')
+                                                .'Μόνο για εργαζόμενους με «Ψηφιακή κάρτα εργασίας».')
+                                            ->columnSpanFull(),
+                                        Toggle::make('ergani_card_requires_kiosk')
+                                            ->label('Κάρτα μόνο μέσω QR γραφείου')
+                                            ->helperText('Ο εργαζόμενος χτυπά κάρτα μόνο σκανάροντας το QR του «Σημείου κάρτας» (tablet στο γραφείο) — απόδειξη παρουσίας.')
+                                            ->columnSpanFull(),
                                     ])
                                     ->columns(3)
                                     ->footerActions([

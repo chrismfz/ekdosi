@@ -1334,7 +1334,15 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   δήλωσης· `LeaveErganiSubmitter` + `ergani_submissions` (append-only audit)· PDF ΕΡΓΑΝΗ· retry actions· race-safe
   (ανάκληση κατά τη διάρκεια δήλωσης → ανακαλείται)· καταστάσεις submitted / failed (σίγουρα όχι) / **unknown** (timeout·
   επανάληψη μόνο με επιβεβαίωση ή «Καταχώριση πρωτοκόλλου») / cancelled / cancel_failed. E2E validated στο trial.
-- Επόμενα (BACKLOG): ψηφιακή κάρτα (`WRKCardSE`), υπερωρία (`WTOOv`), `WTOLeaveC` (ορθή επανάληψη), import εργαζομένων (`EX_BASE_05`).
+- **Ψηφιακή Κάρτα Εργασίας** (Φάση 3, opt-in `ergani_submit_cards`, ανά εργαζόμενο `has_work_card`): «Κάρτα εργασίας»
+  (υπάλληλος: Είσοδος/Έξοδος), «Σημείο κάρτας (QR)» (tablet: περιστρεφόμενο HMAC QR, `ergani_card_requires_kiosk`),
+  «Κάρτες εργασίας» (admin: λίστα/retry/εκπρόθεσμη με f_aitiologia/χειροκίνητη). `WorkCardService` + `work_card_events`
+  (δεν διαγράφονται — η κάρτα δεν ανακαλείται στο ΕΡΓΑΝΗ). Live validated στο trial.
+- **Tablet «ρολόι»** (`/card-kiosk`, `CardKioskController`, `WorkCardKioskDevice`): ενεργοποίηση ΣΥΣΚΕΥΗΣ από admin
+  (httpOnly cookie με token· στη βάση μόνο SHA-256), πίνακας παρουσίας + όνομα/PIN (`employees.card_pin_hash`,
+  κλιμακούμενο κλείδωμα, παύση ανά συσκευή) + QR· χωρίς login, χωρίς μυστικό στο URL· λίστα/ανάκληση συσκευών στο
+  «Σημείο κάρτας».
+- Επόμενα (BACKLOG): υπερωρία (`WTOOv`), `WTOLeaveC` (ορθή επανάληψη), import εργαζομένων (`EX_BASE_05`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·
