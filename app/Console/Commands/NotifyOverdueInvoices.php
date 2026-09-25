@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Support\Hr\ErganiStaff;
 use App\Support\TableFilterUrl;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -75,7 +76,7 @@ class NotifyOverdueInvoices extends Command
                 continue;
             }
 
-            $users = $company->users()->get();
+            $users = ErganiStaff::staffRecipients($company);
             foreach ($users as $user) {
                 Notification::make()
                     ->title('Ληξιπρόθεσμα τιμολόγια')

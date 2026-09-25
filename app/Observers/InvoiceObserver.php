@@ -10,6 +10,7 @@ use App\Services\Domains\DomainRenewalService;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeReturnedQuantities;
 use App\Services\Stock\StockService;
+use App\Support\Hr\ErganiStaff;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -141,7 +142,7 @@ class InvoiceObserver
     private function notifyDomainRenewalProblem(Invoice $invoice, string $body): void
     {
         try {
-            $recipients = $invoice->company?->users;
+            $recipients = $invoice->company ? ErganiStaff::staffRecipients($invoice->company) : null;
             if ($recipients === null || $recipients->isEmpty()) {
                 return;
             }

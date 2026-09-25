@@ -376,6 +376,9 @@ Open items → `docs/BACKLOG.md` (roadmap; decided-don't-reopen → «Guardrails
   Strict null→throw stays deferred — naive flip breaks ~18 safe explicit-where paths, and an
   execution-time tripwire false-positives on relation/eager-load FK queries (guardrail in
   `docs/BACKLOG.md`; full original note: `git show 631078d:docs/BACKLOG.md` «Strict tenant scope»).
+- **Role `ergani` («Προσωπικό — μόνο άδειες», non-operator staff).** `RestrictErganiStaff` (persistent tenant middleware)
+  default-denies every tenant route except the leave screens; `Dashboard`/Βοηθός check `ErganiStaff::isRestricted`. **Rule for
+  ANY new tenant-wide bell/broadcast: recipients = `ErganiStaff::staffRecipients($company)`, never `$company->users`.**
 - **Activity log** (`TracksActivity` on Invoice/Customer/Payment): `logOnly(loggedAttributes())` —
   business columns only, NEVER the money/myDATA CACHE columns; `logOnlyDirty()` +
   `dontLogEmptyChanges()`. v5 stores the diff in **`attribute_changes`** (not `properties`); causer

@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Ticket;
 use App\Models\TicketMessage;
 use App\Models\User;
+use App\Support\Hr\ErganiStaff;
 use Filament\Notifications\Actions\Action;
 use Filament\Notifications\Notification;
 use Illuminate\Support\Collection;
@@ -41,7 +42,7 @@ class TicketNotifier
         $agents = $department !== null ? $department->agents()->get() : collect();
 
         // No agents on the department → the whole tenant handles it.
-        $base = $agents->isNotEmpty() ? $agents : $company->users()->get();
+        $base = $agents->isNotEmpty() ? $agents : ErganiStaff::staffRecipients($company);
 
         if ($ticket->assignee !== null) {
             $base = $base->push($ticket->assignee);

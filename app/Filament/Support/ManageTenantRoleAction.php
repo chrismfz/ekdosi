@@ -149,6 +149,7 @@ final class ManageTenantRoleAction
 
         $options[TenantRoleProvisioner::ROLE_COMPANY_ADMIN] = self::roleLabel(TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
         $options[TenantRoleProvisioner::ROLE_OPERATOR] = self::roleLabel(TenantRoleProvisioner::ROLE_OPERATOR);
+        $options[TenantRoleProvisioner::ROLE_ERGANI] = self::roleLabel(TenantRoleProvisioner::ROLE_ERGANI);
 
         return $options;
     }
@@ -162,6 +163,7 @@ final class ManageTenantRoleAction
             ShieldUtils::getSuperAdminName() => 'Super admin (όλα τα δικαιώματα)',
             TenantRoleProvisioner::ROLE_COMPANY_ADMIN => 'Διαχειριστής εταιρίας',
             TenantRoleProvisioner::ROLE_OPERATOR => 'Χειριστής',
+            TenantRoleProvisioner::ROLE_ERGANI => 'Προσωπικό (μόνο άδειες)',
             default => 'Κανένας ρόλος',
         };
     }
@@ -176,6 +178,7 @@ final class ManageTenantRoleAction
             ShieldUtils::getSuperAdminName() => 'danger',
             TenantRoleProvisioner::ROLE_COMPANY_ADMIN => 'warning',
             TenantRoleProvisioner::ROLE_OPERATOR => 'success',
+            TenantRoleProvisioner::ROLE_ERGANI => 'info',
             default => 'gray',
         };
     }

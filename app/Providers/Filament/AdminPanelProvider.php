@@ -6,6 +6,7 @@ use App\Filament\Pages\Assistant;
 use App\Filament\Pages\Dashboard;
 use App\Filament\Pages\McpTokens;
 use App\Filament\Pages\MySessions;
+use App\Http\Middleware\RestrictErganiStaff;
 use App\Models\Company;
 use App\Support\BuildInfo;
 use App\Support\Settings\SystemSettings;
@@ -113,6 +114,7 @@ class AdminPanelProvider extends PanelProvider
                 'Λογιστικά',
                 'Διασυνδέσεις',
                 'Πύλη πελατών',
+                'Προσωπικό',
                 'Σύστημα',
                 'Διαχείριση',
                 // «Ρυθμίσεις» is no longer a flat group — it's the SettingsCluster
@@ -175,6 +177,11 @@ class AdminPanelProvider extends PanelProvider
             ])
             ->authMiddleware([
                 Authenticate::class,
-            ]);
+            ])
+            // «Προσωπικό (μόνο άδειες)» (role `ergani`): default-deny every tenant
+            // screen except the leave ones. Persistent → Livewire updates re-check.
+            ->tenantMiddleware([
+                RestrictErganiStaff::class,
+            ], isPersistent: true);
     }
 }

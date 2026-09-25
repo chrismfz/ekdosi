@@ -184,6 +184,13 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Επαφές (shared CRM)** — κοινή `Contact` ↔ many customers με ρόλους (π.χ. λογιστής πολλών πελατών). DEFERRED —
   να μη σπάσει το per-customer `customer_contacts` που χρησιμοποιεί ο Sendable statement.
 
+### 👥 Προσωπικό / ΕΡΓΑΝΗ (`ergani/README.md`)
+- **Φάση 1 (εργαζόμενοι + άδειες + ημερολόγιο + ρόλος `ergani`) → SHIPPED** (FEATURES §22). MyIP **δεν** είναι υπόχρεη
+  κάρτας (`EX_BASE_01.IsInCardSector=0`, trial). Επόμενα: (α) **υποβολή `WTOLeave`** από το ekdosi (`companies.ergani_mode` trial|production όπως
+  `mydata_mode` — ίδια e-ΕΦΚΑ creds και στα δύο, μόνο το URL αλλάζει → default trial, διακόπτης μόνο super_admin, το
+  περιβάλλον γράφεται σε κάθε υποβολή· `Usertype 01`, creds κρυπτογραφημένα, token cache — 429)· (β) import εργαζομένων από `EX_BASE_05`· (γ) κάρτα `WRKCardSE` +
+  υπερωρία `WTOOv` (ελαφρύ). Ανοιχτά: άδεια που διασχίζει έτος χρεώνεται όλη στο έτος έναρξης· ICS feed· ανά-παράρτημα αργίες.
+
 ---
 
 ## 🧭 Guardrails — decided, don't re-open without a NEW reason
@@ -259,6 +266,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **`non-billable-services.md`** — άτυπη σειρά (δικά μας / δοκιμές / φίλοι-υπάλληλοι) + μετατροπή σε φορολογικό — σχέδιο.
 - **`paroxos/regulatory-blueprint.md`** + **`paroxos/implementation-plan.md`** — GR ΥΠΑΗΕΣ πάροχος + EU PEPPOL. Ο GR
   πάροχος είναι **LIVE στην παραγωγή (InvoSign)**· PEPPOL Phase 1 DONE· ανοιχτό μόνο το **PEPPOL Phase 2**.
+- **`ergani/README.md`** — ΕΡΓΑΝΗ ΙΙ API (κάρτα/άδειες/υπερωρίες) + σχέδιο· επίσημος οδηγός API στο ίδιο folder (NOT-STARTED).
 - **`payment-connectors.md`** — card-POS + IRIS design (NOT-STARTED, blueprint).
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 DONE· Phase 1 (real 2nd source) OPEN.
 - **`whmcs-legacy-plugin-map.md`** — legacy WHMCS plugins → `ekdosi_bridge`. T-1/T-2 DONE· T-3 cutover OPEN.

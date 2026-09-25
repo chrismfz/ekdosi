@@ -11,6 +11,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Services\Payments\Gateways\EurobankGateway;
 use App\Services\Payments\PaymentGatewayRegistry;
 use App\Services\Payments\PaymentIntentService;
+use App\Support\Hr\ErganiStaff;
 use App\Support\Money;
 use App\Support\Payments\PaymentOutcome;
 use Filament\Notifications\Notification;
@@ -389,7 +390,7 @@ class EurobankReturnController
         }
 
         try {
-            $recipients = $intent->company?->users;
+            $recipients = $intent->company ? ErganiStaff::staffRecipients($intent->company) : null;
             if ($recipients === null || $recipients->isEmpty()) {
                 return;
             }
@@ -430,7 +431,7 @@ class EurobankReturnController
     {
         try {
             $company = $intent->company;
-            $recipients = $company?->users;
+            $recipients = $company ? ErganiStaff::staffRecipients($company) : null;
             if ($recipients === null || $recipients->isEmpty()) {
                 return;
             }
