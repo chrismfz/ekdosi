@@ -277,6 +277,17 @@
   **παραλήπτη/μεταφορέα**, όχι εκδότη (η ΑΑΔΕ το απορρίπτει [833] με τα credentials του εκδότη) — δεν
   προσφέρεται ως ενέργεια, μόνο παρατηρείται μέσω «Έλεγχος κατάστασης» (→ delivered/partial/failed).
   Δες `docs/delivery-two-party-sandbox.md`.
+- **«Ίδια μέσα» — «Παραδόθηκε (ίδιο όχημα)»** (Β' Φάση 12/10/2026, δελτίο + ΤΔΑ): όταν κάναμε ΕΜΕΙΣ την «Έναρξη
+  διακίνησης» είμαστε ο μεταφορέας → `confirmOutcome` (πλήρης / αποτυχία· η μερική θέλει deliveredPackaging — όχι ακόμα).
+  **«Μη υπόχρεος παραλήπτης»** (header `nonObligatedRecipient`, όχι μαζί με «χωρίς ψηφιακή διακίνηση» [290]) → η πλήρης
+  παράδοση κλείνει αμέσως (Completed)· υπόχρεος B2B → «Παραδόθηκε — αναμένεται ο παραλήπτης» (DeliveredByCarrier) ώσπου
+  να σκανάρει το QR. Φίλτρο «Ανεπιβεβαίωτα (> 7 ημέρες)». Sandbox-validated 2026-09-25 (`docs/delivery-two-party-sandbox.md`).
+- **TARIC / Ενιαία Κωδικοποίηση Ειδών** (1/1/2027): `products.taric_code` (`App\Support\MyData\Taric`: 8 ψηφία ΣΟ → +«00»,
+  ή 10) → snapshot `taric_code`/`item_code` (SKU) στη γραμμή (InvoiceLine/DeliveryNoteLine `saving`: μόνο νέα γραμμή ή αλλαγή
+  είδους) → `TaricNo`/`itemCode` σε ΤΔΑ (`AadeInvoiceDocument`) και 9.3 (`DeliveryNoteSubmitter`)· `Taric::appliesTo` =
+  `Codes::allowsItemDescr` (ΤΔΑ/9.x μόνο). Sandbox-validated 2026-09-25 (9.3 + ΤΔΑ).
+- **Αυτόματος «Έλεγχος κατάστασης»** (`delivery:refresh-status`, scheduler κάθε 3 ώρες, «Χρονοπρογραμματιστής» → Ψηφιακή
+  Διακίνηση): read-only επανάγνωση των ανοιχτών δελτίων/ΤΔΑ (`DeliveryLifecycleService::OPEN_STATES`), 90 ημέρες, ≤40/tenant/run.
 - **Δήλωση επιστροφής (ConfirmDeliveryReturn, myDATA v2.0.2)** — όταν ο μεταφορέας δεν παρέδωσε και
   επέστρεψε τα αγαθά: από `rejected`/`partial`/`failed`/`in_transit_return → returned` (το `in_transit`
   απορρίπτεται [828]), η ΑΑΔΕ φέρνει `deliveryReturnMark`

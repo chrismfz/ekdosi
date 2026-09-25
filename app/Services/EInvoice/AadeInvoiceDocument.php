@@ -11,6 +11,7 @@ use App\Services\InvoiceVatBreakdown;
 use App\Support\Afm;
 use App\Support\MyData\Codes;
 use App\Support\MyData\IncomeClassResolver;
+use App\Support\MyData\Taric;
 use App\Support\MyData\VatExemptionGuidance;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -262,6 +263,18 @@ class AadeInvoiceDocument
                 && Codes::allowsItemDescr((string) $invoice->invoiceType?->mydata_type, (bool) $invoice->is_delivery_note)
                 && filled($line->product_descr)) {
                 $detail->setItemDescr(mb_substr((string) $line->product_descr, 0, 256));
+            }
+
+            // Ενιαία Κωδικοποίηση Ειδών (1/1/2027): TaricNo + itemCode from the line SNAPSHOT —
+            // ONLY where AADE accepts them (a combined ΤΔΑ here; same rule as itemDescr, §5.4).
+            if (Taric::appliesTo((string) $invoice->invoiceType?->mydata_type, $isTda)) {
+                [$taric, $itemCode] = Taric::lineCodes($line);
+                if ($taric !== null) {
+                    $detail->setTaricNo($taric);
+                }
+                if ($itemCode !== null) {
+                    $detail->setItemCode($itemCode);
+                }
             }
 
             // G4: a 0% line is filed as vatCategory=7 (exempt) WITH the reason

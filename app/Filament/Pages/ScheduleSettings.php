@@ -74,6 +74,7 @@ class ScheduleSettings extends Page implements HasForms
         'mydata_console_refresh_enabled' => ['myDATA — ανανέωση κονσόλας (όλα)', 'Ζεσταίνει ΟΛΑ τα δεδομένα της Κονσόλας myDATA (Πωλήσεις/Έξοδα/Ε3/Εικόνα ΦΠΑ) ώστε να ανοίγει φρέσκια. Το βαρύτερο AADE pull — καλύπτει και τα «εικόνα ΦΠΑ»/«άντληση εξόδων», οπότε άφησέ τα κλειστά αν ανάψεις αυτό. ΔΕΝ δημιουργεί εγγραφές.', false],
         // Ψηφιακή Διακίνηση (ΔΑ)
         'delivery_fetch_inbound_enabled' => ['Ψηφιακό ΔΑ — άντληση εισερχόμενων', 'Φέρνει στο staging «Εισερχόμενα Διακίνησης» τα Δελτία Αποστολής που έκοψαν ΑΛΛΟΙ σε βάρος μας (παραλαβές), ανά myDATA-readable εταιρεία. Read-only — ΔΕΝ αποδέχεται/απορρίπτει/εκδίδει τίποτα (μένουν operator-gated).', false],
+        'delivery_refresh_status_enabled' => ['Ψηφιακό ΔΑ — έλεγχος κατάστασης', 'Ξαναδιαβάζει από την ΑΑΔΕ την κατάσταση των ανοιχτών δελτίων/ΤΔΑ μας (σε διακίνηση, αναμένεται ο παραλήπτης κ.λπ.) ώστε να φαίνεται όταν ο πελάτης σκανάρει το QR ή ο μεταφορέας παραδώσει. Δεν δηλώνει τίποτα στην ΑΑΔΕ — ενημερώνει μόνο την τοπική κατάσταση· αν ένα ΤΔΑ βρεθεί ακυρωμένο στην ΑΑΔΕ, το ακυρώνει και τοπικά (όπως το χειροκίνητο «Έλεγχος κατάστασης»).', false],
         // myDATA — μητρώα (προμηθευτές/πελάτες)
         'suppliers_sync_enabled' => ['myDATA — συγχρονισμός προμηθευτών', 'Χτίζει το μητρώο Προμηθευτών από τα ΑΦΜ εκδοτών των RequestDocs, ανά myDATA εταιρεία. Read-from-AADE, γράφει ΜΟΝΟ νέους προμηθευτές (idempotent· δεν αγγίζει τιμολόγια/έξοδα/χρήμα). Παράθυρο: τελευταίος μήνας.', false],
         'customers_sync_enabled' => ['myDATA — συγχρονισμός πελατών', 'Χτίζει το μητρώο Πελατών από τους counterpart ΑΦΜ των πωλήσεων (RequestTransmittedDocs), ανά myDATA εταιρεία. Read-from-AADE, γράφει ΜΟΝΟ νέους πελάτες. Παράθυρο: τελευταίοι 12 μήνες (βαρύτερο pull).', false],
@@ -107,7 +108,7 @@ class ScheduleSettings extends Page implements HasForms
         'Email & ουρά εργασιών' => ['mail_sweep_enabled', 'queue_heartbeat_enabled', 'resend_failed_emails_enabled'],
         'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_fetch_unpaid_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
         'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_console_refresh_enabled'],
-        'Ψηφιακή Διακίνηση (ΔΑ)' => ['delivery_fetch_inbound_enabled'],
+        'Ψηφιακή Διακίνηση (ΔΑ)' => ['delivery_fetch_inbound_enabled', 'delivery_refresh_status_enabled'],
         'myDATA — μητρώα (προμηθευτές/πελάτες)' => ['suppliers_sync_enabled', 'customers_sync_enabled', 'aade_status_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'invoice_reminders_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled', 'intent_expiry_enabled', 'ai_reminders_enabled'],
@@ -135,6 +136,7 @@ class ScheduleSettings extends Page implements HasForms
         'mydata_fetch_expenses_cron' => ['myDATA — άντληση εξόδων', 'cron'],
         'mydata_console_refresh_cron' => ['myDATA — ανανέωση κονσόλας', 'cron'],
         'delivery_fetch_inbound_cron' => ['Ψηφιακό ΔΑ — άντληση εισερχόμενων', 'cron'],
+        'delivery_refresh_status_cron' => ['Ψηφιακό ΔΑ — έλεγχος κατάστασης', 'cron'],
         'suppliers_sync_cron' => ['myDATA — συγχρονισμός προμηθευτών', 'cron'],
         'customers_sync_cron' => ['myDATA — συγχρονισμός πελατών', 'cron'],
         'aade_status_refresh_cron' => ['ΑΑΔΕ — έλεγχος κατάστασης ΑΦΜ πελατών', 'cron'],

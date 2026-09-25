@@ -19,6 +19,7 @@ use App\Support\EInvoice\ProviderResult;
 use App\Support\IsoCountry;
 use App\Support\MyData\Codes;
 use App\Support\MyData\DeliveryCodes;
+use App\Support\MyData\Taric;
 use App\Support\Tenancy\TenantCoherence;
 use Carbon\Carbon;
 use Firebed\AadeMyData\Enums\CountryCode;
@@ -232,6 +233,15 @@ class DeliveryNoteSubmitter
 
             if (! empty($line->product_descr)) {
                 $detail->setItemDescr((string) $line->product_descr);
+            }
+
+            // Ενιαία Κωδικοποίηση Ειδών (1/1/2027): the line's SNAPSHOT (10 chars — Taric).
+            [$taric, $itemCode] = Taric::lineCodes($line);
+            if ($taric !== null) {
+                $detail->setTaricNo($taric);
+            }
+            if ($itemCode !== null) {
+                $detail->setItemCode($itemCode);
             }
 
             // «Χαρακτηρισμός Συναλλαγών 3 = Διακίνηση» — MANDATORY on a delivery

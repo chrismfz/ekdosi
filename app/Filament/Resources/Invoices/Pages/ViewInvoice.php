@@ -47,6 +47,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Utilities\Get;
+use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -1357,9 +1358,40 @@ class ViewInvoice extends ViewRecord
                     'Δηλώθηκε η έναρξη διακίνησης',
                 )),
 
+            // «Παραδόθηκε (ίδιο όχημα)» — ConfirmDeliveryOutcome as the CARRIER («ίδια μέσα»,
+            // Β' Φάση 12/10/2026). Only after OUR «Έναρξη διακίνησης» (transfer_mark = we are
+            // the carrier). Sandbox 2026-09-25: FULL + μη υπόχρεος → «Παραδόθηκε» (Completed);
+            // FULL on a B2B → «αναμένεται ο παραλήπτης» (QR scan); NONE → «Αποτυχία».
+            Action::make('confirm_outcome')
+                ->label('Παραδόθηκε (ίδιο όχημα)')
+                ->icon('heroicon-o-check-badge')
+                ->color('success')
+                ->visible(fn (Invoice $record) => $record->is_delivery_note
+                    && ! $record->without_digital_transport_tracking
+                    && $record->delivery_state === 'in_transit'
+                    && DeliveryLifecycleService::isOwnVehicleCarrier($record, $record->company))
+                ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Δήλωση παράδοσης (myDATA) — με δικό μας όχημα')
+                ->modalDescription(fn (Invoice $record) => $record->non_obligated_recipient
+                    ? 'Ο παραλήπτης είναι «μη υπόχρεος»: με την πλήρη παράδοση η διακίνηση ολοκληρώνεται αμέσως.'
+                    : 'Ο παραλήπτης είναι υπόχρεη επιχείρηση: μετά την πλήρη παράδοση η διακίνηση ολοκληρώνεται όταν ο πελάτης σκανάρει το QR του δελτίου (myDATAapp ή ERP).')
+                ->schema([
+                    Select::make('outcome')
+                        ->label('Αποτέλεσμα')
+                        ->options(['FULL' => 'Πλήρης παράδοση', 'NONE' => 'Δεν παραδόθηκε (αποτυχία)'])
+                        ->default('FULL')
+                        ->required()
+                        ->helperText('Η μερική παράδοση (με ποσότητες συσκευασίας) δεν υποστηρίζεται ακόμα.'),
+                ])
+                ->modalSubmitActionLabel('Δήλωση')
+                ->action(fn (Invoice $record, array $data) => $this->runMovementLifecycle(
+                    $record,
+                    fn (DeliveryLifecycleService $svc) => $svc->confirmOutcome($record, DeliveryOutcomeType::from($data['outcome'])),
+                    'Δηλώθηκε η παράδοση',
+                )),
+
             // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (§3.2.7). Sources per
-            // CONFIRM_RETURN_FROM_STATES (rejected/partial/failed/in_transit_return). No
-            // issuer «Δήλωση παράδοσης» — the outcome is the recipient's/carrier's [833].
+            // CONFIRM_RETURN_FROM_STATES (rejected/partial/failed/in_transit_return).
             Action::make('confirm_return')
                 ->label('Δήλωση επιστροφής')
                 ->icon('heroicon-o-arrow-uturn-left')

@@ -162,6 +162,26 @@ class CombinedTdaLifecycleUiTest extends TestCase
         return $invoice->fresh();
     }
 
+    public function test_own_vehicle_outcome_shows_only_after_our_own_transfer(): void
+    {
+        $this->bootPanel();
+
+        // Registered → not yet (start the movement first).
+        $registered = $this->filedTda();
+        Livewire::test(ViewInvoice::class, ['record' => $registered->id, 'tenant' => $this->tenant->slug])
+            ->assertActionHidden('confirm_outcome');
+
+        // In transit after OUR «Έναρξη» (transfer_mark) → we are the carrier → offered.
+        $ours = $this->filedTda(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222']);
+        Livewire::test(ViewInvoice::class, ['record' => $ours->id, 'tenant' => $this->tenant->slug])
+            ->assertActionVisible('confirm_outcome');
+
+        // In transit WITHOUT our transfer_mark → a third-party carrier → not ours to declare.
+        $theirs = $this->filedTda(['delivery_state' => 'in_transit', 'transfer_mark' => null]);
+        Livewire::test(ViewInvoice::class, ['record' => $theirs->id, 'tenant' => $this->tenant->slug])
+            ->assertActionHidden('confirm_outcome');
+    }
+
     public function test_view_shows_register_transfer_on_a_registered_tda(): void
     {
         $this->bootPanel();

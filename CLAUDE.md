@@ -211,6 +211,7 @@ php artisan mydata:test-submit <invoiceId> [--execute]   # dry-run XML / --execu
 php artisan mydata:reconcile-sales --tenant=SLUG [--raw] # READ-ONLY local↔AADE cross-check / raw XML dump
 php artisan mydata:import-expenses --tenant=SLUG --year=2025 [--year=…] [--only=suppliers|self]  # back-fill past years' expenses (idempotent, per quarter)
 php artisan mydata:e3-snapshot --tenant=SLUG --year=2025 [--year=…]    # store AADE's Ε3 per year → source of «Φορολογικά» for closed years
+php artisan delivery:refresh-status [--tenant=SLUG]      # READ-ONLY «Έλεγχος κατάστασης» of open δελτία/ΤΔΑ (scheduled every 3h)
 
 # WHMCS
 php artisan whmcs:fetch-pending --tenant=SLUG            # stage paid+unfiled WHMCS invoices into the inbox

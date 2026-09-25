@@ -196,6 +196,7 @@ class DeliveryNoteInfolist
                         ->formatStateUsing(fn (?string $state) => DeliveryLifecycleService::stateLabel($state) ?? '—')
                         ->placeholder('—'),
                     TextEntry::make('transfer_mark')->label('MARK έναρξης')->placeholder('—')->copyable(),
+                    TextEntry::make('outcome_mark')->label('MARK παράδοσης')->placeholder('—')->copyable(),
                     TextEntry::make('return_mark')->label('MARK επιστροφής')->placeholder('—')->copyable(), // v2.0.2 ConfirmDeliveryReturn
                 ]),
 

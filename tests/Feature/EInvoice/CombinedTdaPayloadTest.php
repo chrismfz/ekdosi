@@ -79,6 +79,24 @@ class CombinedTdaPayloadTest extends TestCase
         return $doc->toXml($doc->build($invoice));
     }
 
+    public function test_taric_goes_on_a_tda_line_but_never_on_a_plain_1_1(): void
+    {
+        $tenant = $this->tenant();
+        $tda = $this->invoice($tenant);
+        $tda->lines()->first()->forceFill(['taric_code' => '8471300000', 'item_code' => 'SRV-R640'])->save();
+        $xml = $this->xml($tenant, $tda->fresh('lines'));
+        $this->assertStringContainsString('<TaricNo>8471300000</TaricNo>', $xml);
+        $this->assertStringContainsString('<itemCode>SRV-R640</itemCode>', $xml);
+
+        // A plain 1.1 (not a δελτίο): §5.4 accepts TaricNo/itemCode only on ΤΔΑ / 9.x.
+        $other = $this->tenant();
+        $plain = $this->invoice($other, ['invcode' => 'ΤΠΥ9', 'code' => 9, 'is_delivery_note' => false, 'move_purpose' => null]);
+        $plain->lines()->first()->forceFill(['taric_code' => '8471300000', 'item_code' => 'SRV-R640'])->save();
+        $xml2 = $this->xml($other, $plain->fresh('lines'));
+        $this->assertStringNotContainsString('TaricNo', $xml2);
+        $this->assertStringNotContainsString('itemCode', $xml2);
+    }
+
     public function test_combined_tda_emits_the_movement_header_on_the_1_1(): void
     {
         $tenant = $this->tenant();

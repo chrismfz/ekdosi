@@ -42,6 +42,21 @@ myDATA is request-response, ERP-initiated; the recipient/carrier "confirms" by a
 
 ---
 
+## §UPDATE — RAN 2026-09-25: «ίδια μέσα» (issuer = carrier), myip only — SUPERSEDES the [833] note below
+
+Raw firebed, myip sandbox creds (`dev`), a 9.3 built by `DeliveryNoteSubmitter::buildAadeDeliveryNote` (series TST):
+
+| Case | RegisterTransfer (by myip, carrierVatNumber = own ΑΦΜ, type 1, vehicle) | ConfirmDeliveryOutcome(FULL) by myip | AADE status |
+|---|---|---|---|
+| header `nonObligatedRecipient=true` | ✅ | ✅ | **COMPLETED** |
+| obligated B2B recipient | ✅ | ✅ | **DELIVERED_BY_CARRIER** (awaits the recipient's QR scan) |
+
+- The issuer that **itself called RegisterTransfer is the carrier** and may declare the outcome. The 13/9 [833] was an
+  issuer confirming WITHOUT having registered the transfer (or pre-v2.0.2-official behaviour).
+- `TaricNo` 8 digits → **[101] XML schema: length must be exactly 10**; 10 digits accepted.
+- A 9.3 whose `dispatchDate` is in the past → **[280]**.
+Wired: `DeliveryLifecycleService::confirmOutcome` + «Παραδόθηκε (ίδιο όχημα)» (FULL / NONE).
+
 ## §Findings — RAN 2026-09-13 (myip ISSUER ⇄ nexon RECIPIENT/CARRIER)
 
 ### confirmReturn source-state matrix (now empirically complete)
