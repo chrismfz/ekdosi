@@ -277,6 +277,11 @@
   **παραλήπτη/μεταφορέα**, όχι εκδότη (η ΑΑΔΕ το απορρίπτει [833] με τα credentials του εκδότη) — δεν
   προσφέρεται ως ενέργεια, μόνο παρατηρείται μέσω «Έλεγχος κατάστασης» (→ delivered/partial/failed).
   Δες `docs/delivery-two-party-sandbox.md`.
+- **«Ίδια μέσα» — «Παραδόθηκε (ίδιο όχημα)»** (Β' Φάση 12/10/2026, δελτίο + ΤΔΑ): όταν κάναμε ΕΜΕΙΣ την «Έναρξη
+  διακίνησης» είμαστε ο μεταφορέας → `confirmOutcome` (πλήρης / αποτυχία· η μερική θέλει deliveredPackaging — όχι ακόμα).
+  **«Μη υπόχρεος παραλήπτης»** (header `nonObligatedRecipient`, όχι μαζί με «χωρίς ψηφιακή διακίνηση» [290]) → η πλήρης
+  παράδοση κλείνει αμέσως (Completed)· υπόχρεος B2B → «Παραδόθηκε — αναμένεται ο παραλήπτης» (DeliveredByCarrier) ώσπου
+  να σκανάρει το QR. Φίλτρο «Ανεπιβεβαίωτα (> 7 ημέρες)». Sandbox-validated 2026-09-25 (`docs/delivery-two-party-sandbox.md`).
 - **Δήλωση επιστροφής (ConfirmDeliveryReturn, myDATA v2.0.2)** — όταν ο μεταφορέας δεν παρέδωσε και
   επέστρεψε τα αγαθά: από `rejected`/`partial`/`failed`/`in_transit_return → returned` (το `in_transit`
   απορρίπτεται [828]), η ΑΑΔΕ φέρνει `deliveryReturnMark`

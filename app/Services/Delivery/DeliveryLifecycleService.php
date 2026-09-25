@@ -21,12 +21,14 @@ use Firebed\AadeMyData\Exceptions\MyDataConnectionException;
 use Firebed\AadeMyData\Exceptions\MyDataException;
 use Firebed\AadeMyData\Exceptions\MyDataTimeoutException;
 use Firebed\AadeMyData\Http\CancelInvoice;
+use Firebed\AadeMyData\Http\DigitalGoodsMovement\ConfirmDeliveryOutcome;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\ConfirmDeliveryReturn;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RegisterTransfer;
 use Firebed\AadeMyData\Http\DigitalGoodsMovement\RequestDeliveryNoteStatus;
 use Firebed\AadeMyData\Http\MyDataRequest;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryEvent;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryNoteStatusResponse;
+use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryOutcome;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\DeliveryReturn;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\Response as DgmResponse;
 use Firebed\AadeMyData\Models\DigitalGoodsMovement\ResponseDoc;
@@ -55,10 +57,12 @@ use Throwable;
  * written ONLY here via forceFill alongside the audit row):
  *
  *     registered ──registerTransfer──▶ in_transit
- *     in_transit ──(AADE reports Completed/DeliveredByCarrier/FailedDelivery via refresh)──▶ delivered | partial | failed
- *                  (the delivery OUTCOME is the recipient's/carrier's ConfirmDeliveryOutcome, NOT an issuer
- *                   action — [833]; we only OBSERVE it. DeliveredByCarrier PARTIAL vs FULL is split by the
- *                   ConfirmOutcome lifecycleHistory detail so confirmReturn stays reachable after a partial.)
+ *     in_transit ──confirmOutcome (ONLY if WE registered the transfer = we are the carrier, «ίδια μέσα»)──▶
+ *                  delivered (nonObligatedRecipient → AADE Completed) | awaiting_recipient (B2B → DeliveredByCarrier) | failed (NONE)
+ *     in_transit ──(AADE reports Completed/DeliveredByCarrier/FailedDelivery via refresh)──▶ delivered | awaiting_recipient | partial | failed
+ *                  (a third-party carrier / the recipient files the outcome; we OBSERVE it. DeliveredByCarrier PARTIAL
+ *                   vs FULL is split by the ConfirmOutcome lifecycleHistory detail — PARTIAL keeps confirmReturn reachable,
+ *                   FULL = awaiting_recipient until the recipient's QR scan moves AADE to Completed → delivered.)
  *     {rejected|partial|failed|in_transit_return} ──confirmReturn──▶ returned  (v2.0.2 §3.2.7; AADE→Completed, deliveryReturnMark; `in_transit` pruned — AADE [828], see CONFIRM_RETURN_FROM_STATES)
  *     in_transit ──(AADE reports IN_TRANSIT_RETURN via refresh)──▶ in_transit_return  (carrier-side return leg; we don't submit it)
  *     (any filed) ──cancel──▶ cancelled   (terminal; uses CancelInvoice by MARK)
@@ -87,9 +91,11 @@ use Throwable;
  *     (AADE posts a deliveryReturnMark) — the last drove the DELIVERED_BY_CARRIER split
  *     in deliveryStateFromAade (was collapsed to `delivered`, blocking the return).
  * ROLE NOTES (empirical): the CARRIER is whoever CALLS RegisterTransfer, not the declared
- * `carrierVatNumber`; issuer-side ConfirmDeliveryOutcome is a [833]/[817]/[814] dead-end
- * (not the issuer's call). NOT wired here (issuer-scoped service): the recipient/carrier
- * side is driven by that party's own ERP — a receiving-ekdosi flow would be net-new.
+ * `carrierVatNumber`. UPDATE 2026-09-25 (sandbox, «ίδια μέσα»): the issuer that CALLED
+ * RegisterTransfer itself IS the carrier and CAN ConfirmDeliveryOutcome — FULL +
+ * nonObligatedRecipient → Completed, FULL on an obligated B2B → DeliveredByCarrier (the
+ * 2026-09-13 [833] was an issuer confirming WITHOUT having registered the transfer). A
+ * THIRD-PARTY carrier's / the recipient's own calls stay with their ERP (not wired here).
  */
 class DeliveryLifecycleService
 {
@@ -111,6 +117,9 @@ class DeliveryLifecycleService
         'in_transit' => 'Σε διακίνηση',
         'in_transit_return' => 'Σε διακίνηση (επιστροφή)', // v2.0.2 DeliveryStatus::IN_TRANSIT_RETURN (9)
         'delivered' => 'Παραδόθηκε',
+        // DeliveredByCarrier + FULL: the carrier (we, with our own vehicle) delivered;
+        // an OBLIGATED B2B recipient still has to confirm by scanning the QR.
+        'awaiting_recipient' => 'Παραδόθηκε — αναμένεται ο παραλήπτης',
         'partial' => 'Μερική παράδοση',
         'failed' => 'Αποτυχία παράδοσης',
         'returned' => 'Επιστράφηκε',
@@ -204,21 +213,91 @@ class DeliveryLifecycleService
         );
     }
 
-    // ---- 2. ConfirmDeliveryOutcome — NOT an issuer action -------------
+    // ---- 2. ConfirmDeliveryOutcome — «ίδια μέσα» (we are the carrier) ---
 
-    // There is deliberately NO confirmDelivery() here. ConfirmDeliveryOutcome
-    // (FULL/PARTIAL/NONE) is the RECIPIENT's / CARRIER's call, never the issuer's:
-    // the two-party sandbox validation (2026-09-13, docs/delivery-two-party-sandbox.md)
-    // proved AADE rejects an issuer-credentialled outcome with [833] «Only the
-    // recipient or carrier can confirm delivery outcome» — even when the issuer
-    // declared itself the carrier (the carrier is whoever CALLS RegisterTransfer,
-    // and the document's own issuer never qualifies). NONE is additionally [817]
-    // carrier-only, and PARTIAL additionally needs [814] deliveredPackaging. This
-    // service is issuer-scoped (TenantCoherence::assertDeliveryNote), so an outcome
-    // call from here could only ever [833]-fail — hence it is gated out entirely
-    // rather than offered as a dead-end. We only OBSERVE the outcome the other party
-    // files, via refreshStatus → DeliveredByCarrier/Completed/FailedDelivery. A
-    // receiving-ekdosi «confirm receipt» would be a net-new, recipient-scoped flow.
+    /**
+     * «Παραδόθηκε (ίδιο όχημα)» — ConfirmDeliveryOutcome by the CARRIER. The carrier
+     * is whoever CALLED RegisterTransfer (credentials, not the carrierVatNumber field),
+     * so this is offered ONLY when WE started the movement (our transfer_mark) and the
+     * δελτίο is in_transit — the «ίδια μέσα» case (Ε.2030/2025: εκδότης = αποστολέας,
+     * δεν υφίσταται τρίτος μεταφορέας).
+     *
+     * Sandbox-proven 2026-09-25 (supersedes the 2026-09-13 «issuer can never confirm»
+     * [833] note, which confirmed WITHOUT having registered the transfer itself):
+     *   - FULL + header nonObligatedRecipient → AADE COMPLETED  → `delivered`;
+     *   - FULL, obligated B2B recipient        → DELIVERED_BY_CARRIER → `awaiting_recipient`
+     *     (the recipient closes it by scanning the QR — Α.1122/2024 άρθ.3 §4);
+     *   - NONE                                 → FAILED_DELIVERY → `failed` (then «Δήλωση επιστροφής»).
+     * PARTIAL is NOT offered: AADE requires [814] deliveredPackaging, which we don't model yet.
+     */
+    public function confirmOutcome(MovableDocument $note, DeliveryOutcomeType $outcome): DeliveryMark
+    {
+        $note->assertMovementTenant($this->tenant);
+
+        $this->requireState($note, 'in_transit', 'Δήλωση παράδοσης');
+
+        if (! self::isOwnVehicleCarrier($note, $this->tenant)) {
+            throw new RuntimeException(
+                "Δήλωση παράδοσης: η διακίνηση του {$note->invcode} δεν μεταφέρεται από εμάς (χωρίς δική μας «Έναρξη "
+                .'διακίνησης» ή με άλλον ΑΦΜ μεταφορέα) — την παράδοση τη δηλώνει ο μεταφορέας ή ο παραλήπτης.'
+            );
+        }
+
+        if ($outcome === DeliveryOutcomeType::PARTIAL) {
+            throw new RuntimeException('Η μερική παράδοση θέλει στοιχεία συσκευασίας (deliveredPackaging) — δεν υποστηρίζεται ακόμα.');
+        }
+
+        $deliveryOutcome = (new DeliveryOutcome)
+            ->setQrUrl($this->requireQrUrl($note))
+            ->setOutcome($outcome);
+
+        $action = new ConfirmDeliveryOutcome;
+        $response = $this->dispatch($note, 'confirm_outcome', fn () => $action->handle($deliveryOutcome));
+        $first = $this->firstSuccessful($response, 'Δήλωση παράδοσης');
+
+        $mark = $first->getDeliveryOutcomeMark();
+        $state = match (true) {
+            $outcome === DeliveryOutcomeType::NONE => 'failed',
+            (bool) $note->non_obligated_recipient => 'delivered',
+            default => 'awaiting_recipient',
+        };
+
+        $audit = $this->persistEvent(
+            $note,
+            action: 'CONFIRM_OUTCOME',
+            mark: $mark !== null ? (string) $mark : null,
+            requestXml: $this->requestXml($action),
+            responseXml: $action->getResponseXML() ?? '',
+            cache: ['delivery_state' => $state, 'outcome_mark' => $mark !== null ? (string) $mark : null],
+        );
+
+        // The state above is our best guess from the local flag; AADE is the truth (e.g.
+        // a private recipient may complete even without the flag). One read-only status
+        // query settles it — best-effort: the declaration itself already succeeded.
+        try {
+            $this->refreshStatus($note);
+        } catch (Throwable $e) {
+            Log::info('confirmOutcome: post-declaration status refresh skipped', [
+                'note' => $note->invcode, 'error' => $e->getMessage(),
+            ]);
+        }
+
+        return $audit;
+    }
+
+    /**
+     * «Ίδια μέσα»: did WE start this movement as its carrier? We called RegisterTransfer
+     * (our transfer_mark) with our own ΑΦΜ as carrier — not a courier's ΑΦΜ in carrier_afm
+     * (registerTransfer sends `carrier_afm ?: tenant afm`). Shared by the service guard and
+     * the UI visibility so the two can't drift.
+     */
+    public static function isOwnVehicleCarrier(MovableDocument $note, Company $tenant): bool
+    {
+        $carrier = trim((string) ($note->carrier_afm ?? ''));
+
+        return filled($note->transfer_mark)
+            && ($carrier === '' || $carrier === trim((string) $tenant->afm));
+    }
 
     // ---- 2b. ConfirmDeliveryReturn (δήλωση επιστροφής) -----------------
 
@@ -842,7 +921,7 @@ class DeliveryLifecycleService
      * DeliveredByCarrier(PARTIAL) as a valid ConfirmDeliveryReturn source (AADE-confirmed
      * two-party sandbox 2026-09-13: the return posts a deliveryReturnMark), so a PARTIAL
      * must map to 'partial' (∈ CONFIRM_RETURN_FROM_STATES → the operator can close the
-     * return) while a FULL carrier delivery stays terminal 'delivered'. Hence the
+     * return) while a FULL carrier delivery is 'awaiting_recipient' (the recipient's QR scan → Completed → 'delivered'). Hence the
      * $lifecycleHistory argument — the status alone can't tell the two apart.
      */
     private function deliveryStateFromAade(?DeliveryStatus $status, ?array $lifecycleHistory = null): ?string
@@ -851,7 +930,9 @@ class DeliveryLifecycleService
             DeliveryStatus::REGISTERED => 'registered',
             DeliveryStatus::IN_TRANSIT => 'in_transit',
             DeliveryStatus::IN_TRANSIT_RETURN => 'in_transit_return',
-            DeliveryStatus::DELIVERED_BY_CARRIER => $this->carrierDeliveredPartially($lifecycleHistory) ? 'partial' : 'delivered',
+            // FULL by the carrier: the goods arrived, but an obligated recipient still has to
+            // confirm (QR) before AADE moves it to COMPLETED → not «delivered» yet.
+            DeliveryStatus::DELIVERED_BY_CARRIER => $this->carrierDeliveredPartially($lifecycleHistory) ? 'partial' : 'awaiting_recipient',
             DeliveryStatus::COMPLETED => 'delivered',
             DeliveryStatus::FAILED_DELIVERY => 'failed',
             DeliveryStatus::REJECTED => 'rejected',

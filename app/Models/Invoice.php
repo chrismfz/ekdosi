@@ -346,7 +346,7 @@ class Invoice extends Model implements MovableDocument
             // service via forceFill, like the money cache.
             'is_delivery_note', 'without_digital_transport_tracking',
             'move_purpose', 'other_move_purpose_title', 'dispatch_at', 'vehicle_number',
-            'transport_type', 'carrier_afm',
+            'transport_type', 'carrier_afm', 'non_obligated_recipient',
             'loading_street', 'loading_number', 'loading_postcode', 'loading_city', 'start_shipping_branch',
             'delivery_street', 'delivery_number', 'delivery_postcode', 'delivery_city', 'complete_shipping_branch',
             'mydata_state', 'mydata_mark',
@@ -458,6 +458,7 @@ class Invoice extends Model implements MovableDocument
         'loading_street', 'loading_number', 'loading_postcode', 'loading_city', 'start_shipping_branch',
         'delivery_street', 'delivery_number', 'delivery_postcode', 'delivery_city', 'complete_shipping_branch',
         'transport_type', 'carrier_afm',
+        'non_obligated_recipient',
     ];
 
     protected function casts(): array
@@ -468,6 +469,7 @@ class Invoice extends Model implements MovableDocument
             // Combined ΤΔΑ (Slice 3a/3b)
             'is_delivery_note' => 'boolean',
             'without_digital_transport_tracking' => 'boolean',
+            'non_obligated_recipient' => 'boolean',
             'dispatch_at' => 'datetime',
             'move_purpose' => 'integer',
             'transport_type' => 'integer',

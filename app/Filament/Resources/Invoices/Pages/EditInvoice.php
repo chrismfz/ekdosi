@@ -123,8 +123,9 @@ class EditInvoice extends EditRecord
             foreach (Invoice::MOVEMENT_DATA_COLUMNS as $col) {
                 $data[$col] = null;
             }
-            // NOT-NULL boolean → reset to its default, not null.
+            // NOT-NULL booleans → reset to their default, not null.
             $data['without_digital_transport_tracking'] = false;
+            $data['non_obligated_recipient'] = false;
         }
 
         return $data;

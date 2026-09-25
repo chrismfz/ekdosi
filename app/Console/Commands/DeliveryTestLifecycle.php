@@ -13,10 +13,11 @@ use Illuminate\Console\Command;
  * applicable steps in order: ΕΝΑΡΞΗ (RegisterTransfer) → ΕΛΕΓΧΟΣ (RequestDeliveryNoteStatus)
  * → [ΑΚΥΡΩΣΗ].
  *
- * The delivery OUTCOME (ConfirmDeliveryOutcome) and the ΕΠΙΣΤΡΟΦΗ from a state only a
- * recipient/carrier can produce are NOT part of the issuer's lifecycle — AADE rejects an
- * issuer-credentialled outcome with [833], and confirmReturn from `in_transit` is [828].
- * Those need a SECOND tenant (recipient/carrier); see `docs/delivery-two-party-sandbox.md`.
+ * The «ίδια μέσα» OUTCOME (ConfirmDeliveryOutcome after OUR RegisterTransfer — we are the
+ * carrier; sandbox 2026-09-25) is `DeliveryLifecycleService::confirmOutcome`, not run here.
+ * A third-party carrier's / the recipient's outcome and the ΕΠΙΣΤΡΟΦΗ from a state only they
+ * can produce (confirmReturn from `in_transit` is [828]) need a SECOND tenant; see
+ * `docs/delivery-two-party-sandbox.md`.
  *
  *   php artisan delivery:test-lifecycle <id>                       # show the plan
  *   php artisan delivery:test-lifecycle <id> --execute             # run register→status
@@ -72,10 +73,9 @@ class DeliveryTestLifecycle extends Command
         if ($note->fresh()->delivery_state === 'registered') {
             $ok = $this->step('ΕΝΑΡΞΗ ΔΙΑΚΙΝΗΣΗΣ (RegisterTransfer)', $note, fn () => $lifecycle->registerTransfer($note)) && $ok;
         }
-        // NB: the delivery OUTCOME (ConfirmDeliveryOutcome) is the recipient's/carrier's
-        // call ([833]) and confirmReturn needs a recipient/carrier-produced source state —
-        // neither is reachable from the issuer alone. Drive those from a second tenant
-        // per docs/delivery-two-party-sandbox.md.
+        // NB: our own «ίδια μέσα» outcome is confirmOutcome (not exercised here); a third-party
+        // carrier's / the recipient's outcome and a confirmReturn source state need a second
+        // tenant per docs/delivery-two-party-sandbox.md.
         $ok = $this->step('ΕΛΕΓΧΟΣ ΚΑΤΑΣΤΑΣΗΣ (RequestDeliveryNoteStatus)', $note, fn () => $lifecycle->refreshStatus($note)) && $ok;
         if ($this->option('cancel')) {
             $ok = $this->step('ΑΚΥΡΩΣΗ (CancelInvoice)', $note, fn () => $lifecycle->cancel($note, 'sandbox validation')) && $ok;

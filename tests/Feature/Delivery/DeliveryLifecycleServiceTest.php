@@ -16,8 +16,11 @@ use App\Models\ProductCategory;
 use App\Models\StockMovement;
 use App\Models\VatCategory;
 use App\Services\Delivery\DeliveryLifecycleService;
+use App\Services\EInvoice\MovementHeaderBuilder;
 use App\Services\Stock\StockService;
+use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
+use Firebed\AadeMyData\Models\InvoiceHeader;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -455,6 +458,122 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertSame('222222222222222', $fresh->transfer_mark);
     }
 
+    public function test_own_vehicle_full_outcome_awaits_an_obligated_recipient(): void
+    {
+        // «Ίδια μέσα»: WE started the movement (transfer_mark) → we are the carrier and may
+        // declare the outcome. B2B (obligated) recipient → «αναμένεται ο παραλήπτης».
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222', 'carrier_afm' => null]);
+
+        $mark = $this->service($this->confirmOutcomeResponse())->confirmOutcome($note, DeliveryOutcomeType::FULL);
+
+        $this->assertSame('CONFIRM_OUTCOME', $mark->mydata_action);
+        $this->assertSame('555555555555555', $mark->mark);
+        $fresh = $note->fresh();
+        $this->assertSame('awaiting_recipient', $fresh->delivery_state);
+        $this->assertSame('555555555555555', $fresh->outcome_mark);
+    }
+
+    public function test_own_vehicle_full_outcome_closes_for_a_non_obligated_recipient(): void
+    {
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222', 'carrier_afm' => null]);
+        $note->forceFill(['non_obligated_recipient' => true])->save();
+
+        $this->service($this->confirmOutcomeResponse())->confirmOutcome($note, DeliveryOutcomeType::FULL);
+
+        $this->assertSame('delivered', $note->fresh()->delivery_state);        // AADE Completed
+    }
+
+    public function test_own_vehicle_none_outcome_is_a_failed_delivery(): void
+    {
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222', 'carrier_afm' => null]);
+
+        $this->service($this->confirmOutcomeResponse())->confirmOutcome($note, DeliveryOutcomeType::NONE);
+
+        $this->assertSame('failed', $note->fresh()->delivery_state);           // → «Δήλωση επιστροφής» available
+    }
+
+    public function test_the_post_declaration_refresh_takes_aades_state(): void
+    {
+        // Flag OFF (we guess «αναμένεται ο παραλήπτης»), but AADE completed it (e.g. a
+        // private recipient) → the read-only refresh right after settles to «Παραδόθηκε».
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222', 'carrier_afm' => null]);
+
+        $this->serviceWith([$this->confirmOutcomeResponse(), $this->statusResponse('COMPLETED')])
+            ->confirmOutcome($note, DeliveryOutcomeType::FULL);
+
+        $this->assertSame('delivered', $note->fresh()->delivery_state);
+    }
+
+    public function test_own_vehicle_outcome_on_a_combined_tda_invoice(): void
+    {
+        $tda = $this->makeFiledTda(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222', 'carrier_afm' => null]);
+
+        $mark = $this->service($this->confirmOutcomeResponse())->confirmOutcome($tda, DeliveryOutcomeType::FULL);
+
+        $this->assertSame('CONFIRM_OUTCOME', $mark->mydata_action);
+        $fresh = $tda->fresh();
+        $this->assertSame('awaiting_recipient', $fresh->delivery_state);
+        $this->assertSame('555555555555555', $fresh->outcome_mark);       // invoices.outcome_mark
+        $this->assertSame(1, $fresh->movementMarks()->where('mydata_action', 'CONFIRM_OUTCOME')->count());
+    }
+
+    public function test_outcome_is_refused_when_a_courier_was_declared_as_carrier(): void
+    {
+        // We started it, but with a courier's ΑΦΜ as carrier → not «ίδια μέσα».
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222']);
+        $note->forceFill(['carrier_afm' => '099999999'])->save();
+
+        $this->assertFalse(DeliveryLifecycleService::isOwnVehicleCarrier($note->fresh(), $this->tenant));
+        $this->expectException(RuntimeException::class);
+        $this->service($this->confirmOutcomeResponse())->confirmOutcome($note->fresh(), DeliveryOutcomeType::FULL);
+    }
+
+    public function test_outcome_is_refused_when_someone_else_started_the_movement(): void
+    {
+        // in_transit WITHOUT our transfer_mark = a third-party carrier registered it → not ours to declare.
+        $note = $this->makeFiledNote(['delivery_state' => 'in_transit', 'transfer_mark' => null]);
+
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('δεν μεταφέρεται από εμάς');
+        $this->service($this->confirmOutcomeResponse())->confirmOutcome($note, DeliveryOutcomeType::FULL);
+    }
+
+    public function test_outcome_requires_in_transit_and_rejects_partial(): void
+    {
+        $registered = $this->makeFiledNote(['delivery_state' => 'registered', 'transfer_mark' => '222222222222222', 'carrier_afm' => null]);
+        try {
+            $this->service($this->confirmOutcomeResponse())->confirmOutcome($registered, DeliveryOutcomeType::FULL);
+            $this->fail('registered must be refused');
+        } catch (RuntimeException $e) {
+            $this->assertStringContainsString('Δήλωση παράδοσης', $e->getMessage());
+        }
+
+        $moving = $this->makeFiledNote(['delivery_state' => 'in_transit', 'transfer_mark' => '222222222222222', 'carrier_afm' => null]);
+        $this->expectException(RuntimeException::class);
+        $this->expectExceptionMessage('deliveredPackaging');
+        $this->service($this->confirmOutcomeResponse())->confirmOutcome($moving, DeliveryOutcomeType::PARTIAL);
+    }
+
+    public function test_the_non_obligated_flag_reaches_the_movement_header_but_never_with_untracked(): void
+    {
+        // The shared builder (9.3 AND ΤΔΑ) emits nonObligatedRecipient — except on an
+        // untracked ΤΔΑ, where AADE [290] forbids the combination.
+        $note = new DeliveryNote(['non_obligated_recipient' => true]);
+        $h = new InvoiceHeader;
+        MovementHeaderBuilder::applyCommon($h, 1, $note);
+        $this->assertTrue($h->get('nonObligatedRecipient'));
+
+        $tda = new Invoice(['non_obligated_recipient' => true, 'without_digital_transport_tracking' => true]);
+        $h2 = new InvoiceHeader;
+        MovementHeaderBuilder::applyCommon($h2, 1, $tda);
+        $this->assertNull($h2->get('nonObligatedRecipient'));
+
+        $plain = new DeliveryNote(['non_obligated_recipient' => false]);
+        $h3 = new InvoiceHeader;
+        MovementHeaderBuilder::applyCommon($h3, 1, $plain);
+        $this->assertNull($h3->get('nonObligatedRecipient'));
+    }
+
     public function test_register_transfer_rejects_wrong_state(): void
     {
         // Already in_transit → cannot register again.
@@ -688,17 +807,18 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertContains('partial', DeliveryLifecycleService::CONFIRM_RETURN_FROM_STATES);
     }
 
-    public function test_refresh_maps_delivered_by_carrier_full_to_delivered(): void
+    public function test_refresh_maps_delivered_by_carrier_full_to_awaiting_recipient(): void
     {
-        // A FULL carrier delivery is terminal — no return leg — so DeliveredByCarrier
-        // with a FULL ConfirmOutcome stays 'delivered'.
+        // A FULL carrier delivery has no return leg, but an OBLIGATED recipient still has
+        // to confirm (QR scan) before AADE moves it to Completed → «αναμένεται ο
+        // παραλήπτης», not yet «Παραδόθηκε» (sandbox 2026-09-25).
         $note = $this->makeFiledNote(['delivery_state' => 'in_transit']);
 
         $result = $this->service($this->statusResponseDeliveredByCarrier('FULL'))->refreshStatus($note);
 
         $this->assertSame(DeliveryStatus::DELIVERED_BY_CARRIER, $result['aade_status']);
-        $this->assertSame('delivered', $result['mapped_state']);
-        $this->assertSame('delivered', $note->fresh()->delivery_state);
+        $this->assertSame('awaiting_recipient', $result['mapped_state']);
+        $this->assertSame('awaiting_recipient', $note->fresh()->delivery_state);
     }
 
     public function test_delivered_by_carrier_uses_the_latest_outcome_not_any_partial(): void
@@ -711,8 +831,8 @@ class DeliveryLifecycleServiceTest extends TestCase
         $result = $this->service($this->statusResponseDeliveredByCarrierSequence(['PARTIAL', 'FULL']))
             ->refreshStatus($note);
 
-        $this->assertSame('delivered', $result['mapped_state']);
-        $this->assertSame('delivered', $note->fresh()->delivery_state);
+        $this->assertSame('awaiting_recipient', $result['mapped_state']);     // FULL wins, not return-eligible
+        $this->assertSame('awaiting_recipient', $note->fresh()->delivery_state);
     }
 
     public function test_refresh_status_maps_aade_state_and_forcefills(): void
@@ -1162,6 +1282,20 @@ XML;
 <ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
     <response>
         <transferMark>222222222222222</transferMark>
+        <statusCode>Success</statusCode>
+    </response>
+</ResponseDoc>
+XML;
+    }
+
+    /** ConfirmDeliveryOutcome returns a ResponseDoc with deliveryOutcomeMark + Success. */
+    private function confirmOutcomeResponse(): string
+    {
+        return <<<'XML'
+<?xml version="1.0" encoding="utf-8"?>
+<ResponseDoc xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xmlns:xsd="http://www.w3.org/2001/XMLSchema">
+    <response>
+        <deliveryOutcomeMark>555555555555555</deliveryOutcomeMark>
         <statusCode>Success</statusCode>
     </response>
 </ResponseDoc>

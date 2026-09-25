@@ -52,5 +52,14 @@ class MovementHeaderBuilder
         if (filled($doc->vehicle_number)) {
             $header->setVehicleNumber((string) $doc->vehicle_number);
         }
+
+        // «Μη υπόχρεος λήπτης» (private person / no ERP): with our own vehicle («ίδια
+        // μέσα») our FULL outcome then closes the movement (AADE Completed) instead of
+        // waiting for a recipient QR scan that will never come. Never together with a
+        // ΤΔΑ's withoutDigitalTransportTracking — AADE [290] forbids the combination
+        // (and an untracked note has no outcome to close anyway).
+        if ((bool) $doc->non_obligated_recipient && ! (bool) ($doc->without_digital_transport_tracking ?? false)) {
+            $header->setNonObligatedRecipient(true);
+        }
     }
 }

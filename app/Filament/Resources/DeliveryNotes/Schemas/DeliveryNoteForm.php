@@ -358,6 +358,11 @@ class DeliveryNoteForm
                         ->default(fn () => Filament::getTenant()?->afm)
                         ->helperText(DeliveryGuidance::fieldHelp('carrier_afm')),
 
+                    Toggle::make('non_obligated_recipient')
+                        ->label('Μη υπόχρεος παραλήπτης (ιδιώτης / χωρίς ERP)')
+                        ->helperText(DeliveryGuidance::fieldHelp('non_obligated_recipient'))
+                        ->default(false),
+
                     DateTimePicker::make('dispatch_at')
                         ->label('Έναρξη διακίνησης (ημ/ώρα)')
                         ->required()

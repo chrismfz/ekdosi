@@ -5,8 +5,10 @@ namespace App\Filament\Resources\DeliveryNotes\Tables;
 use App\Services\Delivery\DeliveryLifecycleService;
 use App\Support\MyData\DeliveryCodes;
 use Filament\Tables\Columns\TextColumn;
+use Filament\Tables\Filters\Filter;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Builder;
 
 class DeliveryNotesTable
 {
@@ -78,6 +80,17 @@ class DeliveryNotesTable
                         'active' => 'Ενεργό',
                         'cancelled' => 'Ακυρωμένο',
                     ]),
+
+                // Β' Φάση: a movement we started that nobody closed — still «Σε διακίνηση»
+                // (no «Παραδόθηκε» declared) or delivered by us but the B2B recipient never
+                // scanned the QR («αναμένεται ο παραλήπτης») — for more than a week.
+                Filter::make('unconfirmed')
+                    ->label('Ανεπιβεβαίωτα (> 7 ημέρες)')
+                    ->query(fn (Builder $query) => $query
+                        ->whereIn('delivery_state', ['in_transit', 'awaiting_recipient'])
+                        ->where(fn (Builder $q) => $q
+                            ->where('dispatch_at', '<', now()->subDays(7))
+                            ->orWhere(fn (Builder $w) => $w->whereNull('dispatch_at')->where('issued_at', '<', now()->subDays(7))))),
             ]);
     }
 }

@@ -11,9 +11,11 @@ use App\Services\Delivery\DeliveryNotePdf;
 use App\Services\Delivery\DeliveryNoteSubmitter;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
+use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use RuntimeException;
 use Throwable;
 
@@ -31,9 +33,10 @@ use Throwable;
  * The e-transport lifecycle (D3, Β' φάση) rides ON TOP of a filed note via
  * DeliveryLifecycleService: «Έναρξη διακίνησης» (RegisterTransfer), «Δήλωση
  * επιστροφής» (ConfirmDeliveryReturn), «Έλεγχος κατάστασης (ΑΑΔΕ)»
- * (RequestDeliveryNoteStatus) and «Ακύρωση» (CancelInvoice by MARK). The delivery
- * OUTCOME (ConfirmDeliveryOutcome) is intentionally absent — it is the recipient's/
- * carrier's call ([833]), only OBSERVED here via «Έλεγχος κατάστασης». Each
+ * (RequestDeliveryNoteStatus), «Ακύρωση» (CancelInvoice by MARK) and — for «ίδια μέσα»,
+ * when WE started the movement as its carrier — «Παραδόθηκε (ίδιο όχημα)»
+ * (ConfirmDeliveryOutcome; a third-party carrier's / the recipient's outcome is only
+ * OBSERVED via «Έλεγχος κατάστασης»). Each
  * resolves the service for the record's own company, runs inside try/catch and
  * surfaces a Greek success/danger notification (never a 500), then refreshes.
  */
@@ -142,10 +145,35 @@ class ViewDeliveryNote extends ViewRecord
                     'Δηλώθηκε η έναρξη διακίνησης',
                 )),
 
-            // NO «Δήλωση παράδοσης» action: ConfirmDeliveryOutcome is the recipient's /
-            // carrier's call, never the issuer's — AADE rejects an issuer-credentialled
-            // outcome with [833] (two-party sandbox 2026-09-13, docs/delivery-two-party-sandbox.md).
-            // The outcome is OBSERVED via «Έλεγχος κατάστασης» (refresh → delivered/partial/failed).
+            // «Παραδόθηκε (ίδιο όχημα)» — ConfirmDeliveryOutcome as the CARRIER («ίδια μέσα»,
+            // Β' Φάση 12/10/2026). Only after OUR «Έναρξη διακίνησης» (transfer_mark = we are
+            // the carrier). Sandbox 2026-09-25: FULL + μη υπόχρεος → «Παραδόθηκε» (Completed);
+            // FULL on a B2B → «αναμένεται ο παραλήπτης» (QR scan); NONE → «Αποτυχία».
+            Action::make('confirm_outcome')
+                ->label('Παραδόθηκε (ίδιο όχημα)')
+                ->icon('heroicon-o-check-badge')
+                ->color('success')
+                ->visible(fn (DeliveryNote $record) => $record->delivery_state === 'in_transit'
+                    && DeliveryLifecycleService::isOwnVehicleCarrier($record, $record->company))
+                ->authorize(fn (DeliveryNote $record) => auth()->user()?->can('update', $record) ?? false)
+                ->modalHeading('Δήλωση παράδοσης (myDATA) — με δικό μας όχημα')
+                ->modalDescription(fn (DeliveryNote $record) => $record->non_obligated_recipient
+                    ? 'Ο παραλήπτης είναι «μη υπόχρεος»: με την πλήρη παράδοση η διακίνηση ολοκληρώνεται αμέσως.'
+                    : 'Ο παραλήπτης είναι υπόχρεη επιχείρηση: μετά την πλήρη παράδοση η διακίνηση ολοκληρώνεται όταν ο πελάτης σκανάρει το QR του δελτίου (myDATAapp ή ERP).')
+                ->schema([
+                    Select::make('outcome')
+                        ->label('Αποτέλεσμα')
+                        ->options(['FULL' => 'Πλήρης παράδοση', 'NONE' => 'Δεν παραδόθηκε (αποτυχία)'])
+                        ->default('FULL')
+                        ->required()
+                        ->helperText('Η μερική παράδοση (με ποσότητες συσκευασίας) δεν υποστηρίζεται ακόμα.'),
+                ])
+                ->modalSubmitActionLabel('Δήλωση')
+                ->action(fn (DeliveryNote $record, array $data) => $this->runLifecycle(
+                    $record,
+                    fn (DeliveryLifecycleService $svc) => $svc->confirmOutcome($record, DeliveryOutcomeType::from($data['outcome'])),
+                    'Δηλώθηκε η παράδοση',
+                )),
 
             // «Δήλωση επιστροφής» — ConfirmDeliveryReturn (myDATA v2.0.2 §3.2.7): ο
             // εκδότης κλείνει τη διακίνηση με επιστροφή. Πηγές (plain 9.3):

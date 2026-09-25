@@ -17,9 +17,9 @@ use Illuminate\Support\Facades\DB;
  * the tenant's configured myDATA environment. Creates a throwaway TEST δελτίο,
  * then runs the ISSUER chain — ΕΚΔΟΣΗ (SendInvoices) → ΕΝΑΡΞΗ (RegisterTransfer)
  * → ΕΛΕΓΧΟΣ (RequestDeliveryNoteStatus) → [ΑΚΥΡΩΣΗ] — and writes a .txt report
- * (every step + the request/response XML). The delivery OUTCOME is the recipient's/
- * carrier's call ([833]), out of a single-tenant harness — see
- * docs/delivery-two-party-sandbox.md.
+ * (every step + the request/response XML). The «ίδια μέσα» outcome (confirmOutcome, we
+ * as carrier) is not part of this harness; a third-party carrier's / the recipient's
+ * outcome needs a second tenant — see docs/delivery-two-party-sandbox.md.
  *
  * Dry-run by default (builds the XML, NO AADE call). Pass --execute to actually
  * file at AADE (the tenant must be in sandbox mode with dev credentials and the
@@ -91,9 +91,8 @@ class DeliverySandboxValidate extends Command
 
         if ($note->fresh()->mydata_state === 'VALID') {
             $ok = $this->step('ΕΝΑΡΞΗ ΔΙΑΚΙΝΗΣΗΣ (RegisterTransfer)', $note, fn () => $lifecycle->registerTransfer($note)) && $ok;
-            // The delivery OUTCOME (ConfirmDeliveryOutcome) is the recipient's/carrier's
-            // call ([833]), not the issuer's — this single-tenant harness cannot drive it.
-            // See docs/delivery-two-party-sandbox.md for the two-party outcome/return flow.
+            // The outcome isn't driven here (our «ίδια μέσα» one = confirmOutcome; a third
+            // party's needs a second tenant — docs/delivery-two-party-sandbox.md).
             $ok = $this->step('ΕΛΕΓΧΟΣ ΚΑΤΑΣΤΑΣΗΣ (RequestDeliveryNoteStatus)', $note, fn () => $lifecycle->refreshStatus($note)) && $ok;
             if ($this->option('cancel')) {
                 $ok = $this->step('ΑΚΥΡΩΣΗ (CancelInvoice)', $note, fn () => $lifecycle->cancel($note, 'sandbox validation')) && $ok;

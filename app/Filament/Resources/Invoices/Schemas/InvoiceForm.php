@@ -318,7 +318,7 @@ class InvoiceForm
 
                     Toggle::make('without_digital_transport_tracking')
                         ->label('Χωρίς ψηφιακή διακίνηση (χωρίς QR / κύκλο ζωής)')
-                        ->helperText('Το ΤΔΑ φιλάρεται κατευθείαν ως «ολοκληρωμένο» — δεν επιστρέφει qrUrl και δεν παρακολουθείται (Έναρξη/Έλεγχος/Επιστροφή δεν εφαρμόζονται). Άφησέ το κλειστό για κανονική παρακολούθηση διακίνησης.')
+                        ->helperText('Το ΤΔΑ φιλάρεται κατευθείαν ως «ολοκληρωμένο» — δεν επιστρέφει qrUrl και δεν παρακολουθείται (Έναρξη/Έλεγχος/Επιστροφή δεν εφαρμόζονται). ⚠ ΔΕΝ είναι νόμιμη διέξοδος για παράδοση σε επιχείρηση με δικό μας όχημα (Β\' Φάση, 12/10/2026): εκεί ξεκινάμε τη διακίνηση και δηλώνουμε «Παραδόθηκε». Για λιανική με απόδειξη (ΑΛΠ) δεν χρειάζεται καθόλου δελτίο. Άφησέ το κλειστό για κανονική παρακολούθηση.')
                         ->visible(fn (Get $get): bool => (bool) $get('is_delivery_note'))
                         ->columnSpanFull()
                         ->disabled(fn ($record) => $record && $record->mydata_state !== null),
@@ -440,6 +440,13 @@ class InvoiceForm
                                 ->required()
                                 ->maxLength(40)
                                 ->helperText(DeliveryGuidance::fieldHelp('vehicle_number')),
+
+                            Toggle::make('non_obligated_recipient')
+                                ->label('Μη υπόχρεος παραλήπτης (ιδιώτης / χωρίς ERP)')
+                                ->helperText(DeliveryGuidance::fieldHelp('non_obligated_recipient'))
+                                // Meaningless (and AADE [290]) on an untracked ΤΔΑ — hide it there.
+                                ->visible(fn (Get $get): bool => ! (bool) $get('without_digital_transport_tracking'))
+                                ->default(false),
 
                             TextInput::make('carrier_afm')
                                 ->label('ΑΦΜ μεταφορέα')
