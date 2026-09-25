@@ -82,6 +82,7 @@ class IncomeVsExpenseTool implements AssistantTool
                 'net' => round($book->expenseNet(), 2),
                 'vat' => round($book->expenseVat(), 2),
                 'gross' => round($book->expenseGross(), 2),
+                'capex_net' => $book->expenseCapex(), // εκ των οποίων αγορές παγίων (E3_882/883) — όχι έξοδο χρήσης
             ],
             'expense_breakdown' => $book->expenseBreakdown(),
             'vat_balance' => $book->vatBalance(),

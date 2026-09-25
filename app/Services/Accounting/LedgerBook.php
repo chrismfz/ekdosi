@@ -139,7 +139,7 @@ class LedgerBook
                 // operator hasn't classified yet still lands in the right
                 // category from the issuer's per-line E3 codes the import kept,
                 // instead of «αταξινόμητο». Eager-loaded so it's one query, not N.
-                'lines:id,expense_id,net_value,classification_category',
+                'lines:id,expense_id,net_value,classification_category,classification_type',
             ]);
 
         return $query->get()->map(function (Expense $exp) use ($creditTypes): LedgerRow {
@@ -173,6 +173,9 @@ class LedgerBook
                 recordId: $exp->getKey(),
                 accountCode: $account['code'] ?? null,
                 accountName: $account['name'] ?? null,
+                capex: $isIncome ? 0.0 : round($sign * (float) $exp->lines
+                    ->filter(fn ($l) => Codes::isCapexClassification($l->classification_type))
+                    ->sum('net_value'), 2),
                 expenseBucket: $isIncome ? null : match ($exp->source) {
                     ExpenseSource::Sync => 'suppliers',
                     ExpenseSource::SelfDeclared => $exp->category ?: 'other',

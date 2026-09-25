@@ -18,6 +18,7 @@ use Carbon\CarbonInterface;
  *   κέρδος      = έσοδα (our invoices + myDATA 17.3/17.4 income adjustments)
  *               − έξοδα (supplier docs + what the accountant self-declares:
  *                 μισθοδοσία 17.1, αποσβέσεις 17.2, ΕΦΚΑ 14.5, 17.5/17.6 …)
+ *                 WITHOUT αγορές παγίων (E3_882/883 — deducted via αποσβέσεις)
  *   φόρος       = max(0, κέρδος) × rate
  *   προκαταβολή = max(0, φόρος × prepayment_rate − παρακρατήσεις)   (for next year)
  *   υπόλοιπο    = φόρος − παρακρατήσεις + προκαταβολή − προκαταβολή που βεβαιώθηκε πέρσι
@@ -46,7 +47,7 @@ class IncomeTaxEstimate
      * @return array{
      *   year:int, is_current:bool, through:string, profile:IncomeTaxProfile,
      *   income:float, income_adjustments:float, income_total:float,
-     *   expense_total:float, expense_breakdown:list<array>, profit:float, withheld:float,
+     *   expense_all:float, capex:float, expense_total:float, expense_breakdown:list<array>, profit:float, withheld:float,
      *   tax:float, prepayment_next:float, prior_prepayment:float, prior_source:string, prior_hint:?float,
      *   expense_warning:bool, headline_payable:?float, monthly_saving:?float,
      *   payable:float, projection:?array
@@ -198,7 +199,11 @@ class IncomeTaxEstimate
         )), 2);
 
         $incomeTotal = $book->incomeNet();
-        $expense = $book->expenseNet();
+        // Αγορές παγίων (E3_882/883) are capital expenditure: deducted over the years
+        // via αποσβέσεις (17.2 / E3_587), never as an expense of the year they're bought.
+        $capex = $book->expenseCapex();
+        $expenseAll = $book->expenseNet();
+        $expense = round($expenseAll - $capex, 2);
 
         return $this->core[$year] = [
             'is_current' => $isCurrent,
@@ -207,7 +212,9 @@ class IncomeTaxEstimate
             'income' => round($incomeTotal - $adjustments, 2),
             'income_adjustments' => $adjustments,
             'income_total' => $incomeTotal,
-            'expense_total' => $expense,
+            'expense_all' => $expenseAll,   // everything in the book (incl. πάγια)
+            'capex' => $capex,
+            'expense_total' => $expense,    // deductible: without αγορές παγίων
             'expense_breakdown' => $book->expenseBreakdown(),
             'profit' => round($incomeTotal - $expense, 2),
             'withheld' => $book->incomeWithheld(),

@@ -46,5 +46,8 @@ class LedgerRow
         // Income rows only: the tax the customer withheld on this document
         // (invoices.withhold_amount), signed like net — a credit note gives it back.
         public readonly float $withheld = 0.0,
+        // Expense rows only: the part of net classified as «Αγορές παγίων» (E3_882/883,
+        // Codes::isCapexClassification), signed like net — kept in the book, not deductible.
+        public readonly float $capex = 0.0,
     ) {}
 }

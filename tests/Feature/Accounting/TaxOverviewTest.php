@@ -6,6 +6,7 @@ use App\Filament\Pages\TaxOverview;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Expense;
+use App\Models\ExpenseLine;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
@@ -144,6 +145,21 @@ class TaxOverviewTest extends TestCase
         $this->assertNull($e['projection']);                                    // nothing left to project
         $this->assertEqualsWithDelta($e['payable'], $e['headline_payable'], 0.001);
         $this->assertEqualsWithDelta($e['payable'], $e['monthly_saving'], 0.001); // December: one month left
+    }
+
+    public function test_fixed_asset_purchases_are_not_deducted_as_expenses(): void
+    {
+        // A 15.1 contract classified E3_882_002 (αγορά ενσώματου παγίου — e.g. a property):
+        // in the book, but NOT an expense of the year (only its αποσβέσεις are).
+        $asset = $this->expense('self_declared', 'other', '15.1', '2025-10-20', 49000);
+        ExpenseLine::create(['company_id' => $this->tenant->id, 'expense_id' => $asset->id, 'line_number' => 1,
+            'net_value' => 49000, 'classification_type' => 'E3_882_002', 'classification_category' => 'category2_4']);
+
+        $e = (new IncomeTaxEstimate($this->tenant))->forYear(2025);
+        $this->assertEqualsWithDelta(49000.0, $e['capex'], 0.001);
+        $this->assertEqualsWithDelta(54000.0, $e['expense_all'], 0.001);      // 5.000 + the asset
+        $this->assertEqualsWithDelta(5000.0, $e['expense_total'], 0.001);     // deductible = without it
+        $this->assertEqualsWithDelta(5500.0, $e['profit'], 0.001);            // unchanged by the purchase
     }
 
     public function test_no_projection_before_a_month_of_data(): void

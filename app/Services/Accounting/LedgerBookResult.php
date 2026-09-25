@@ -75,6 +75,12 @@ class LedgerBookResult
         return $this->sum('income', 'withheld');
     }
 
+    /** Αγορές παγίων (E3_882/883) inside the expenses — in the book, not deductible. */
+    public function expenseCapex(): float
+    {
+        return $this->sum('expense', 'capex');
+    }
+
     public function incomeCount(): int
     {
         return count($this->incomeRows());

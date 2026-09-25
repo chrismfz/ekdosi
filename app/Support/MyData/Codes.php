@@ -668,6 +668,27 @@ final class Codes
      */
     public const INCOME_ADJUSTMENT_TYPES = ['17.3', '17.4'];
 
+    /**
+     * E3 «Αγορές παγίων χρήσης» (ενσώματα E3_882_*, άυλα E3_883_*): capital
+     * expenditure — recorded in the Βιβλίο, but NOT a deductible expense of the
+     * year (it is written off through αποσβέσεις, E3_587 / 17.2). An income-tax
+     * estimate must leave these lines out of the expenses.
+     *
+     * @var list<string>
+     */
+    public const CAPEX_E3_PREFIXES = ['E3_882', 'E3_883'];
+
+    public static function isCapexClassification(?string $type): bool
+    {
+        foreach (self::CAPEX_E3_PREFIXES as $prefix) {
+            if ($type !== null && str_starts_with($type, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public static function selfDeclaredVatCategory(?string $code): array
     {
         $key = self::selfDeclaredVatCategoryKey($code);

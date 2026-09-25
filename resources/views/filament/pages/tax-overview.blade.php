@@ -72,6 +72,9 @@
                             <tr><td class="py-1 pl-6 text-xs fi-color-gray">εκ των οποίων τακτοποιήσεις εσόδων (17.3/17.4)</td><td class="text-right text-xs fi-color-gray">{{ $this->fmt($e['income_adjustments']) }}</td>@if ($proj)<td></td>@endif</tr>
                         @endif
                         <tr><td class="py-1">Έξοδα (μαζί με μισθοδοσία, ΕΦΚΑ, αποσβέσεις)</td><td class="text-right">− {{ $this->fmt($e['expense_total']) }}</td>@if ($proj)<td class="text-right fi-color-gray">− {{ $this->fmt($proj['expense_total']) }}</td>@endif</tr>
+                        @if (abs($e['capex']) > 0.004)
+                            <tr><td class="py-1 pl-6 text-xs fi-color-gray">εκτός: αγορές παγίων {{ $this->fmt($e['capex']) }} (E3_882/883) — δεν αφαιρούνται, εκπίπτουν μέσω αποσβέσεων</td><td></td>@if ($proj)<td></td>@endif</tr>
+                        @endif
                         <tr class="font-semibold"><td class="py-1">Κέρδος (λογιστικό)</td><td class="text-right">{{ $this->fmt($e['profit']) }}</td>@if ($proj)<td class="text-right">{{ $this->fmt($proj['profit']) }}</td>@endif</tr>
                         <tr><td class="py-1">Φόρος εισοδήματος ({{ rtrim(rtrim(number_format($p->rate, 2, ',', ''), '0'), ',') }}%)</td><td class="text-right">{{ $this->fmt($e['tax']) }}</td>@if ($proj)<td class="text-right fi-color-gray">{{ $this->fmt($proj['tax']) }}</td>@endif</tr>
                         <tr><td class="py-1">Παρακρατήσεις φόρου στα τιμολόγιά μας</td><td class="text-right">− {{ $this->fmt($e['withheld']) }}</td>@if ($proj)<td class="text-right fi-color-gray">− {{ $this->fmt($proj['withheld']) }}</td>@endif</tr>
@@ -131,7 +134,10 @@
                                 <td class="text-right whitespace-nowrap">{{ $this->fmt($b['net']) }}</td>
                             </tr>
                         @endforeach
-                        <tr class="font-semibold"><td class="py-1">Σύνολο</td><td class="text-right">{{ $this->fmt($e['expense_total']) }}</td></tr>
+                        <tr class="font-semibold"><td class="py-1">Σύνολο</td><td class="text-right">{{ $this->fmt($e['expense_all']) }}</td></tr>
+                        @if (abs($e['capex']) > 0.004)
+                            <tr><td class="py-1 text-xs fi-color-gray" colspan="2">Περιλαμβάνει αγορές παγίων {{ $this->fmt($e['capex']) }}, που δεν μετράνε στον φόρο της χρήσης (μόνο οι αποσβέσεις τους).</td></tr>
+                        @endif
                     </tbody>
                 </table>
             @endif
