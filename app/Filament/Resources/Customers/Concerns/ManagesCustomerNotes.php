@@ -38,13 +38,16 @@ trait ManagesCustomerNotes
      */
     private array $resolvedNoteCache = [];
 
+    /** Per-request memo for canManageNotes() — asked once per row per action. */
+    private ?bool $canManageNotesCache = null;
+
     /**
      * Whether the operator may add/change notes (drives the create/edit gates).
      * Public so a page's Blade view can read it (Blade runs outside class scope).
      */
     public function canManageNotes(): bool
     {
-        return auth()->user()?->can('update', $this->record) ?? false;
+        return $this->canManageNotesCache ??= (auth()->user()?->can('update', $this->record) ?? false);
     }
 
     /**

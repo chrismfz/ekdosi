@@ -74,6 +74,37 @@ class ServiceContractFormRenderTest extends TestCase
         Livewire::test(ViewServiceContract::class, ['record' => $contract->getKey()])->assertOk();
     }
 
+    public function test_view_contract_shows_its_notes_escaped_with_line_breaks(): void
+    {
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Π', 'afm' => '123456789']);
+        $contract = ServiceContract::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $customer->id,
+            'billing_cycle' => BillingCycle::Annual->value, 'amount' => 100, 'vat_percent' => 24,
+            'status' => ServiceContractStatus::Active->value, 'next_due_date' => now(),
+            'notes' => "84.54.49.221\n<b>192.168.144.10</b>",
+        ]);
+
+        Livewire::test(ViewServiceContract::class, ['record' => $contract->getKey()])
+            ->assertOk()
+            ->assertSeeHtml('84.54.49.221<br />')
+            ->assertSeeHtml('&lt;b&gt;192.168.144.10&lt;/b&gt;')
+            ->assertDontSeeHtml('<b>192.168.144.10</b>');
+    }
+
+    public function test_view_contract_without_notes_hides_the_notes_section(): void
+    {
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Π', 'afm' => '123456789']);
+        $contract = ServiceContract::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $customer->id,
+            'billing_cycle' => BillingCycle::Annual->value, 'amount' => 100, 'vat_percent' => 24,
+            'status' => ServiceContractStatus::Active->value, 'next_due_date' => now(),
+        ]);
+
+        Livewire::test(ViewServiceContract::class, ['record' => $contract->getKey()])
+            ->assertOk()
+            ->assertSchemaComponentHidden('notes', 'infolist');
+    }
+
     public function test_product_form_with_recurring_section_renders(): void
     {
         Livewire::test(CreateProduct::class)->assertOk();

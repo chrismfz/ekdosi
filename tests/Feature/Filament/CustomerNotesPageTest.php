@@ -166,6 +166,40 @@ class CustomerNotesPageTest extends TestCase
     }
 
     #[Test]
+    public function each_note_row_renders_its_open_edit_delete_buttons(): void
+    {
+        // Regression: a ->contentGrid() WITHOUT a Stack/Split layout moved the
+        // record actions to «after content», a position the plain-table render
+        // never prints — so the buttons were computed visible yet never shown.
+        $c = $this->customer();
+        $this->note($c);
+
+        $html = Livewire::test(CustomerNotes::class, ['record' => $c->id])->html();
+
+        $this->assertStringContainsString('Άνοιγμα', $html);
+        $this->assertStringContainsString("mountAction('edit'", $html);
+        $this->assertStringContainsString("mountAction('delete'", $html);
+    }
+
+    #[Test]
+    public function a_note_opens_in_the_view_modal_and_can_be_deleted(): void
+    {
+        $c = $this->customer();
+        $note = $this->note($c, ['title' => 'Router', 'body' => '192.168.1.1']);
+
+        Livewire::test(CustomerNotes::class, ['record' => $c->id])
+            ->mountTableAction('view', $note)
+            ->assertSuccessful()
+            ->assertSee('192.168.1.1');
+
+        Livewire::test(CustomerNotes::class, ['record' => $c->id])
+            ->callTableAction('delete', $note)
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSoftDeleted($note);
+    }
+
+    #[Test]
     public function markdown_body_renders_to_safe_html(): void
     {
         $c = $this->customer();

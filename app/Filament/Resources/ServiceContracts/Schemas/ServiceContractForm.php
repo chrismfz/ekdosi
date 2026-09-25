@@ -226,6 +226,18 @@ class ServiceContractForm
                         ->helperText('Εμφανίζεται ως περιγραφή γραμμής στο παραστατικό ανανέωσης.'),
                 ]),
 
+            // Own always-open section (not buried in the collapsed «Παροχή &
+            // χρονισμός») — IPs / credentials hints the operator looks up often.
+            Section::make('Σημειώσεις')
+                ->columnSpanFull()
+                ->schema([
+                    Textarea::make('notes')
+                        ->label('Σημειώσεις')
+                        ->hiddenLabel()
+                        ->rows(4)
+                        ->autosize(),
+                ]),
+
             Section::make('Παροχή & χρονισμός')
                 ->columnSpanFull()
                 ->columns(2)
@@ -284,11 +296,6 @@ class ServiceContractForm
                         ->formatStateUsing(fn ($state) => $state === null ? '' : ($state ? '1' : '0'))
                         ->default('')
                         ->helperText('Κληρονομεί τον διακόπτη του προϊόντος, εκτός αν τον εξαναγκάσεις εδώ για αυτή τη σύμβαση.'),
-
-                    Textarea::make('notes')
-                        ->label('Σημειώσεις')
-                        ->rows(3)
-                        ->columnSpanFull(),
                 ]),
         ]);
     }

@@ -23,6 +23,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Schema;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\HtmlString;
 use Throwable;
 
 /**
@@ -104,6 +105,18 @@ class ViewServiceContract extends ViewRecord
                         ->bulleted()
                         ->placeholder('Καμία καταγεγραμμένη αλλαγή τιμής')
                         ->columnSpanFull(),
+                ]),
+
+            // The contract's free-text notes (IPs, hostnames…) — shown here too, not
+            // only in the edit form. Line breaks kept; the text is escaped first.
+            Section::make('Σημειώσεις')
+                ->columnSpanFull()
+                ->visible(fn (ServiceContract $record): bool => filled($record->notes))
+                ->schema([
+                    TextEntry::make('notes')
+                        ->label('Σημειώσεις')
+                        ->hiddenLabel()
+                        ->formatStateUsing(fn (?string $state): HtmlString => new HtmlString(nl2br(e((string) $state)))),
                 ]),
         ]);
     }
