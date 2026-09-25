@@ -9,6 +9,7 @@ use App\Services\Leads\LeadMatcher;
 use App\Services\Support\Inbound\ImapMailbox;
 use App\Services\Support\Inbound\WebklexImapMailbox;
 use App\Support\ErrorAlerts\ExceptionNotifier;
+use App\Support\Hr\EmployeeAccountMatcher;
 use App\Support\Settings\SystemSettings;
 use App\Support\Tenancy\CompanyContext;
 use App\Support\Tenancy\PortalHost;
@@ -47,6 +48,8 @@ class AppServiceProvider extends ServiceProvider
         // Leads dedupe lookup — request-scoped so one form render shares a single
         // lookup across banner / DNC rule / create hook (memo inside the class).
         $this->app->scoped(LeadMatcher::class);
+        // Employee ↔ panel-user suggestions — one computation per request (table rows share it).
+        $this->app->scoped(EmployeeAccountMatcher::class);
 
         // Deploy-wide settings store — singleton so the loaded map is shared
         // (one DB/cache read per process; the scheduler reads it on every tick).
