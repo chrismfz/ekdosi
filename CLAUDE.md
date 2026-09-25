@@ -209,6 +209,7 @@ php artisan mydata:preflight [--tenant=SLUG]             # READ-ONLY config audi
 php artisan mydata:set-credentials --tenant=SLUG --test  # set sandbox creds (key = hidden prompt), verify
 php artisan mydata:test-submit <invoiceId> [--execute]   # dry-run XML / --execute files to AADE
 php artisan mydata:reconcile-sales --tenant=SLUG [--raw] # READ-ONLY local↔AADE cross-check / raw XML dump
+php artisan mydata:import-expenses --tenant=SLUG --year=2025 [--year=…] [--only=suppliers|self]  # back-fill past years' expenses (idempotent, per quarter)
 
 # WHMCS
 php artisan whmcs:fetch-pending --tenant=SLUG            # stage paid+unfiled WHMCS invoices into the inbox

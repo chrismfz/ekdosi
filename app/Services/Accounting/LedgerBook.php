@@ -2,6 +2,7 @@
 
 namespace App\Services\Accounting;
 
+use App\Enums\ExpenseSource;
 use App\Models\Company;
 use App\Models\Expense;
 use App\Models\Invoice;
@@ -41,8 +42,11 @@ class LedgerBook
         if ($book === 'all' || $book === 'income') {
             $rows = array_merge($rows, $this->incomeRows($start, $end));
         }
-        if ($book === 'all' || $book === 'expense') {
-            $rows = array_merge($rows, $this->expenseRows($start, $end));
+        // The expenses table feeds BOTH books (17.3/17.4 income adjustments live
+        // there — see expenseRows), so it's read for either filter, then narrowed.
+        $rows = array_merge($rows, $this->expenseRows($start, $end));
+        if ($book !== 'all') {
+            $rows = array_values(array_filter($rows, fn (LedgerRow $r) => $r->book === $book));
         }
 
         if ($category !== null && $category !== '') {
@@ -112,6 +116,7 @@ class LedgerBook
                 recordId: $inv->getKey(),
                 accountCode: $account['code'] ?? null,
                 accountName: $account['name'] ?? null,
+                withheld: round($sign * (float) $inv->withhold_amount, 2),
             );
         })->all();
     }
@@ -138,6 +143,8 @@ class LedgerBook
             ]);
 
         return $query->get()->map(function (Expense $exp) use ($creditTypes): LedgerRow {
+            // A 17.3/17.4 «τακτοποίηση εσόδων» raises income — booked on the income side.
+            $isIncome = in_array($exp->invoice_type, Codes::INCOME_ADJUSTMENT_TYPES, true);
             $isCredit = in_array($exp->invoice_type, $creditTypes, true);
             $sign = $isCredit ? -1 : 1;
             $code = $exp->effectiveClassificationCategory();
@@ -149,7 +156,7 @@ class LedgerBook
             }
 
             return new LedgerRow(
-                book: 'expense',
+                book: $isIncome ? 'income' : 'expense',
                 date: $exp->issue_date,
                 docType: $exp->invoice_type ?? '',
                 doc: $doc,
@@ -166,6 +173,11 @@ class LedgerBook
                 recordId: $exp->getKey(),
                 accountCode: $account['code'] ?? null,
                 accountName: $account['name'] ?? null,
+                expenseBucket: $isIncome ? null : match ($exp->source) {
+                    ExpenseSource::Sync => 'suppliers',
+                    ExpenseSource::SelfDeclared => $exp->category ?: 'other',
+                    default => 'manual',
+                },
             );
         })->all();
     }

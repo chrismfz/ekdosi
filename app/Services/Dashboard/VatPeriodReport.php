@@ -63,7 +63,9 @@ class VatPeriodReport
             $monthStart = $cursor->copy()->startOfMonth();
             $monthEnd = $cursor->copy()->endOfMonth();
             $out[] = $this->forPeriod($monthStart, $monthEnd, $cursor->format('m/Y'));
-            $cursor->addMonthNoOverflow();
+            // Reassign: on a CarbonImmutable the call returns a NEW instance (the
+            // in-place form repeated the first month thrice); mutable returns $this.
+            $cursor = $cursor->addMonthNoOverflow();
         }
 
         return $out;

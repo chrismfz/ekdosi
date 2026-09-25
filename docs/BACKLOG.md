@@ -13,7 +13,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 Ο κανόνας της σειράς: **η προτεραιότητα ενός finding δεν είναι ιδιότητά του — είναι finding × αυτή η επιχείρηση ×
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
-1. **Delivery notes (ΔΑ)** — πλήρη **9.1 / 9.2** (το inbound inbox 4b είναι ήδη χτισμένο).
+1. **Delivery notes (ΔΑ)** — **TARIC στα είδη πριν την 1/1/2027** (βλ. Roadmap) · πλήρη **9.1 / 9.2** (το inbound inbox
+   4b είναι ήδη χτισμένο). Η Β' Φάση (12/10/2026: φόρτωση/μεταφόρτωση/παραλαβή) καλύπτεται από την πλευρά του εκδότη.
 2. **Migration / money tooling:** Bank-statement import → CSV εξόδων (αν χρειαστεί) → Cashflow /
    recurring-expenses (accountant-gated).
 3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
@@ -31,7 +32,9 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **POS-1(c) — πραγματική POS διασύνδεση (ν.5073/2023).** Σύλληψη `ProvidersSignature` + `tid` + `transactionId` από το
   Cardlink/Eurobank vPOS return → πέρασμα σε `InvoSignDocument`/`AadeInvoiceDocument` ώστε να φιλάρει το type-7.
   Μέχρι τότε card/vPOS/PayPal → §8.12 **1**, 3, 6 ή 8.
-- **Payment connectors — IRIS + card-POS** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά).
+- **Payment connectors — IRIS + card-POS** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά). Η υποχρέωση
+  αποδοχής IRIS είναι ήδη σε ισχύ (αναφέρεται από τους ανταγωνιστές, π.χ. kiros)· φυσική θέση = «Πλήρωσε» στην πύλη
+  δίπλα στο vPOS, μέσω του υπάρχοντος `PaymentGateway` seam.
 - **Bank-statement import → match πληρωμών** — ανέβασμα κίνησης (CSV/MT940) → auto-match σε ανοιχτά τιμολόγια
   (ποσό/ημερομηνία/ΑΦΜ) → προτεινόμενες `Payment` εγγραφές προς έγκριση. **DEFERRED (owner, 2026-09-23)** — θέλει
   πρώτα δείγμα export από την τράπεζα (format/στήλες) για να σχεδιαστεί ο parser.
@@ -46,8 +49,19 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   (Έσοδα − Έξοδα = καθαρή ροή + σωρευτικό αποθεματικό). **⚠ Κίνδυνος διπλομέτρησης:** πρότυπο «ΔΕΗ» + myDATA
   τιμολόγιο ΔΕΗ = 2× → κανόνας «το πρότυπο μετράει μόνο αν ΔΕΝ βρεθεί myDATA παραστατικό τον μήνα». Ερώτημα
   λογιστή: ποια foreign δηλώνονται ήδη. Λείπουν μόνο recurring-templates + cashflow widget + anti-double-count.
+- **«Φορολογικά»: ποιες κατηγορίες παρακράτησης συμψηφίζονται με τον φόρο εισοδήματος** _(ερώτημα λογιστή)._ Η
+  `IncomeTaxEstimate` αφαιρεί ΟΛΟ το `invoices.withhold_amount`, ανεξαρτήτως `withhold_category` (§8.4, 18 κατηγορίες)·
+  αν κάποια δεν είναι προκαταβολή φόρου εισοδήματος, το υπόλοιπο βγαίνει μικρότερο. Φιλτράρισμα ανά κατηγορία όταν
+  απαντήσει ο λογιστής (σήμερα οι παρακρατήσεις μας είναι 0 → χωρίς πρακτική επίπτωση).
 
 ### 🚚 Delivery notes (Ψηφιακό ΔΑ)
+- **TARIC / κωδικός είδους στις γραμμές (υποχρεωτικό από 1/1/2027 — Ενιαία Κωδικοποίηση Ειδών, ΚΥΑ ΥΠΕΘΟΟ-ΑΑΔΕ
+  30/4/2026).** myDATA `invoiceDetails.TaricNo` (ακριβώς 10 χαρ.) + `itemCode` (≤50), δεκτά ΜΟΝΟ σε τιμολόγια + δελτία
+  αποστολής/διακίνησης (9.3) — `docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md` §5.4 (γρ. ~1039). Το firebed
+  έχει ήδη `InvoiceDetails::setTaricNo()/setItemCode()`· λείπει πεδίο στο προϊόν (+ snapshot στη γραμμή) και emit στους
+  builders (τιμολόγιο/ΤΔΑ/9.3). Αφορά αγαθά — οι υπηρεσίες hosting δεν έχουν TARIC.
+- **Β' Φάση (12/10/2026) — από την πλευρά του ΠΑΡΑΛΗΠΤΗ:** η επιβεβαίωση παραλαβής + ποσοτικός/ποιοτικός έλεγχος
+  (`ConfirmDeliveryOutcome`, qrUrl-only) = Slice 4c παρακάτω· χρειάζεται μόνο αν tenant παραλαμβάνει αγαθά με ψηφιακό ΔΑ.
 - **Inbound «Εισερχόμενα Διακίνησης»** — 4a+4b ✅ ΧΤΙΣΜΕΝΑ (#540/#566: fetch + Απόρριψη/Έλεγχος/Παραλήφθηκε).
   Μένουν: sandbox rehearsal μιας πραγματικής απόρριψης (nexon⇄myip) · **4c** (qrUrl Confirm-outcome) DEFERRED
   μέχρι να παραλάβει tenant ψηφιακά παρακολουθούμενη διακίνηση.

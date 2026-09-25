@@ -658,6 +658,16 @@ final class Codes
      */
     public const ACCOUNTING_EXPENSE_CATEGORIES = ['payroll', 'depreciation', 'adjustments'];
 
+    /**
+     * «Λοιπές Εγγραφές Τακτοποίησης ΕΣΟΔΩΝ» (λογιστική / φορολογική βάση). Self-declared,
+     * so the importer lands them in the expenses table with the other 17.x, but they
+     * RAISE income: the Βιβλίο Εσόδων-Εξόδων (and everything built on it) books them
+     * on the income side.
+     *
+     * @var list<string>
+     */
+    public const INCOME_ADJUSTMENT_TYPES = ['17.3', '17.4'];
+
     public static function selfDeclaredVatCategory(?string $code): array
     {
         $key = self::selfDeclaredVatCategoryKey($code);

@@ -59,6 +59,11 @@ class ReconcileWindowPresetTest extends TestCase
         $this->assertSame(['2026-01-01', '2026-05-15'], $this->page->resolve(['preset' => 'year']));
     }
 
+    public function test_previous_year_is_the_full_prior_calendar_year(): void
+    {
+        $this->assertSame(['2025-01-01', '2025-12-31'], $this->page->resolve(['preset' => 'prev_year']));
+    }
+
     public function test_custom_uses_the_supplied_dates(): void
     {
         $this->assertSame(
