@@ -102,7 +102,7 @@ class ServiceContractFormRenderTest extends TestCase
 
         Livewire::test(ViewServiceContract::class, ['record' => $contract->getKey()])
             ->assertOk()
-            ->assertDontSee('Σημειώσεις');
+            ->assertSchemaComponentHidden('notes', 'infolist');
     }
 
     public function test_product_form_with_recurring_section_renders(): void

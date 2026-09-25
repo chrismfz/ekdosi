@@ -182,6 +182,24 @@ class CustomerNotesPageTest extends TestCase
     }
 
     #[Test]
+    public function a_note_opens_in_the_view_modal_and_can_be_deleted(): void
+    {
+        $c = $this->customer();
+        $note = $this->note($c, ['title' => 'Router', 'body' => '192.168.1.1']);
+
+        Livewire::test(CustomerNotes::class, ['record' => $c->id])
+            ->mountTableAction('view', $note)
+            ->assertSuccessful()
+            ->assertSee('192.168.1.1');
+
+        Livewire::test(CustomerNotes::class, ['record' => $c->id])
+            ->callTableAction('delete', $note)
+            ->assertHasNoTableActionErrors();
+
+        $this->assertSoftDeleted($note);
+    }
+
+    #[Test]
     public function markdown_body_renders_to_safe_html(): void
     {
         $c = $this->customer();

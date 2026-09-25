@@ -114,6 +114,7 @@ class ViewServiceContract extends ViewRecord
                 ->visible(fn (ServiceContract $record): bool => filled($record->notes))
                 ->schema([
                     TextEntry::make('notes')
+                        ->label('Σημειώσεις')
                         ->hiddenLabel()
                         ->formatStateUsing(fn (?string $state): HtmlString => new HtmlString(nl2br(e((string) $state)))),
                 ]),

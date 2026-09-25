@@ -232,6 +232,7 @@ class ServiceContractForm
                 ->columnSpanFull()
                 ->schema([
                     Textarea::make('notes')
+                        ->label('Σημειώσεις')
                         ->hiddenLabel()
                         ->rows(4)
                         ->autosize(),
