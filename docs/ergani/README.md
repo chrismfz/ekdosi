@@ -54,8 +54,11 @@
   Ergazomenoi.ErgazomenoiWTO[]{f_afm, f_eponymo, f_onoma, f_date, ErgazomenosAnalytics.ErgazomenosWTOAnalytics[]{f_type
   (π.χ. ΑΔΚΑΝ), f_from, f_to, f_year, f_req_days}}}`. Ημερομηνίες **`dd/mm/yyyy`**, ώρες `HH:MM`, `f_req_days` 3 ψηφία.
 - **`WTOOv`**: ίδιο σχήμα χωρίς `f_year`/`f_req_days` (`f_type` = `ΥΠ`/`ΧΥΠ`) — **ελαφρύ**, το κουμπί υπερωρίας είναι εύκολο.
-- **Services** (`schemas/ServicesList.json`): `EX_BASE_05` τρέχον δυναμικό (`afm`) → **import εργαζομένων** αντί για
-  πληκτρολόγηση· `EX_BASE_07/08` ημερολόγιο/ωράριο (`PararthmaAa`, `Date` = `dd/mm/yyyy`) → για MyIP «Criteria doesn't meet
+- **Services** (`schemas/ServicesList.json`): `EX_BASE_05` τρέχον δυναμικό (`afm` προαιρετικό) → **import εργαζομένων**
+  (✅ υλοποιήθηκε — `ErganiEmployeeImporter`). **Επαληθεύτηκε στην Παραγωγή 2026-09-25** (μόνο ανάγνωση): απάντηση
+  `{"EX_BASE_05":{"Cur":[…]}}`, ανά εργαζόμενο `afm`, `Eponimo`, `Onoma` (κεφαλαία χωρίς τόνους), `PararthmaAa`, `DateFrom`
+  (ISO με offset), ΚΑΙ ευαίσθητα (`Amka`, `AmIka`, `ArTaytotitas`, `Dieythinsi`, `Apodoxes`, `BirthDate`, …) — **δεν τα
+  αποθηκεύουμε**. Στο trial η λίστα είναι κενή. Ίδιοι κωδικοί e-ΕΦΚΑ δουλεύουν και στην Παραγωγή (URL επιβεβαιώθηκε)· `EX_BASE_07/08` ημερολόγιο/ωράριο (`PararthmaAa`, `Date` = `dd/mm/yyyy`) → για MyIP «Criteria doesn't meet
   requirements» (πιθανώς επειδή εκτός κλάδου κάρτας).
 
 Αναφορά κώδικα (όχι dependency): `withlogicco/ergani-python-sdk` (MIT) — `ergani/client.py`, `models.py`, `utils.py`.
