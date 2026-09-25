@@ -64,6 +64,33 @@ class ErganiClient
     }
 
     /**
+     * Run a READ-ONLY lookup service (`WebServices/ExecuteService`, e.g. EX_BASE_05
+     * «τρέχον δυναμικό») and return its decoded JSON. Declares nothing.
+     *
+     * @param  array<string, string>  $parameters
+     *
+     * @throws RuntimeException with a Greek operator-facing message
+     */
+    public function service(string $code, array $parameters = []): array
+    {
+        $response = $this->call(fn (PendingRequest $http) => $http->post($this->baseUrl().'/WebServices/ExecuteService', [
+            'ServiceCode' => $code,
+            'Parameters' => array_map(fn (string $name, string $value): array => ['Name' => $name, 'Value' => $value],
+                array_keys($parameters), array_values($parameters)),
+        ]));
+
+        if (! $response->successful()) {
+            // Never echo a lookup's raw body (it may carry personal data) — only ΕΡΓΑΝΗ's own message.
+            $json = $response->json();
+            $msg = is_array($json) && is_string($json['message'] ?? null) ? $this->message($json, '') : 'χωρίς μήνυμα';
+
+            throw new RuntimeException('Το ΕΡΓΑΝΗ απάντησε '.$response->status().': '.$msg);
+        }
+
+        return (array) $response->json();
+    }
+
+    /**
      * Submit a document (e.g. WTOLeave). Returns ΕΡΓΑΝΗ's receipt and the raw
      * exchange for the audit row; a 400 carries ΕΡΓΑΝΗ's own message.
      *
