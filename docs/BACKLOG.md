@@ -184,6 +184,13 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Επαφές (shared CRM)** — κοινή `Contact` ↔ many customers με ρόλους (π.χ. λογιστής πολλών πελατών). DEFERRED —
   να μη σπάσει το per-customer `customer_contacts` που χρησιμοποιεί ο Sendable statement.
 
+### 👥 Προσωπικό / ΕΡΓΑΝΗ (`ergani/README.md`)
+- **Άδειες + Ψηφιακή Κάρτα — DESIGN (Φάση 0 + trial probe 2026-09-25).** MyIP **δεν** είναι υπόχρεη κάρτας —
+  επιβεβαιωμένο από το ίδιο το ΕΡΓΑΝΗ (`EX_BASE_01.IsInCardSector=0`, trial). Πραγματικό πρόβλημα = **άδειες** (Google
+  Calendar, ξεχνιέται ο λογιστής) → Φάση 1 = εργαζόμενοι (import `EX_BASE_05`) + άδειες (ρόλος `employee`, έγκριση,
+  ημερολόγιο μέσα στο ekdosi, email λογιστή → μετά `WTOLeave`)· μετά κάρτα (`WRKCardSE`) + υπερωρία (`WTOOv`, ελαφρύ).
+  Κωδικοί/σχήματα επιβεβαιωμένα στο `ergani/schemas/`.
+
 ---
 
 ## 🧭 Guardrails — decided, don't re-open without a NEW reason
@@ -259,6 +266,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **`non-billable-services.md`** — άτυπη σειρά (δικά μας / δοκιμές / φίλοι-υπάλληλοι) + μετατροπή σε φορολογικό — σχέδιο.
 - **`paroxos/regulatory-blueprint.md`** + **`paroxos/implementation-plan.md`** — GR ΥΠΑΗΕΣ πάροχος + EU PEPPOL. Ο GR
   πάροχος είναι **LIVE στην παραγωγή (InvoSign)**· PEPPOL Phase 1 DONE· ανοιχτό μόνο το **PEPPOL Phase 2**.
+- **`ergani/README.md`** — ΕΡΓΑΝΗ ΙΙ API (κάρτα/άδειες/υπερωρίες) + σχέδιο· επίσημος οδηγός API στο ίδιο folder (NOT-STARTED).
 - **`payment-connectors.md`** — card-POS + IRIS design (NOT-STARTED, blueprint).
 - **`bridges-connectors.md`** — multi-billing-source. Phase 0 DONE· Phase 1 (real 2nd source) OPEN.
 - **`whmcs-legacy-plugin-map.md`** — legacy WHMCS plugins → `ekdosi_bridge`. T-1/T-2 DONE· T-3 cutover OPEN.
