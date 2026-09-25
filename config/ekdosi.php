@@ -194,6 +194,12 @@ return [
         // departments (IMAP) and route inbound email into tickets (Πυλώνας E).
         // OFF by default — opt in per deploy once the mailbox config is verified
         // live («Test σύνδεσης» / MCP support_imap). Every 5 min when armed.
+        // ergani:watch — weekly READ-ONLY ΕΡΓΑΝΗ check (production EX_BASE_01): did the
+        // employer enter the Ψηφιακή Κάρτα sector? One call per ΕΡΓΑΝΗ-enabled tenant
+        // with credentials; declares nothing → safe ON by default.
+        'ergani_watch_enabled' => env('EKDOSI_SCHEDULE_ERGANI_WATCH', true),
+        'ergani_watch_cron' => env('EKDOSI_ERGANI_WATCH_CRON', '15 7 * * 1'),
+
         'tickets_poll_imap_enabled' => env('EKDOSI_SCHEDULE_TICKETS_POLL_IMAP', false),
         'tickets_poll_imap_cron' => env('EKDOSI_TICKETS_POLL_IMAP_CRON', '*/5 * * * *'),
 

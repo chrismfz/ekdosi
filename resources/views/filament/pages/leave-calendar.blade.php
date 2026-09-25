@@ -22,6 +22,8 @@
         .dark .lvc-cell { background:rgba(255,255,255,.03); }
         .lvc-off { background:#e5e7eb; } .dark .lvc-off { background:rgba(255,255,255,.1); }
         .lvc-hol { background:#fde68a; } .dark .lvc-hol { background:rgba(251,191,36,.3); }
+        .lvc-ot { display:block; font-size:.6rem; font-weight:700; line-height:1; color:#6d28d9; } .dark .lvc-ot { color:#c4b5fd; }
+        .lvc-ot-warn { color:#c2410c; } .dark .lvc-ot-warn { color:#fdba74; }
         .lvc-today { box-shadow:inset 0 0 0 2px #2563eb; } .dark .lvc-today { box-shadow:inset 0 0 0 2px #60a5fa; }
         .lvc-success { background:#bbf7d0; color:#14532d; font-weight:600; } .dark .lvc-success { background:rgba(74,222,128,.3); color:#bbf7d0; }
         .lvc-danger { background:#fecaca; color:#7f1d1d; font-weight:600; } .dark .lvc-danger { background:rgba(248,113,113,.3); color:#fecaca; }
@@ -72,6 +74,9 @@
                                     @if ($cell && ! $d['weekend'] && ! $d['holiday'])
                                         {{ $cell['label'] }}
                                     @endif
+                                    @if ($ot = $row['ot'][$d['key']] ?? null)
+                                        <span class="lvc-ot {{ $ot['warn'] ? 'lvc-ot-warn' : '' }}" title="{{ $ot['title'] }}">{{ $ot['label'] }}{{ $ot['warn'] ? '!' : '' }}</span>
+                                    @endif
                                 </td>
                             @endforeach
                         </tr>
@@ -88,6 +93,7 @@
             <span><span class="lvc-sw lvc-info"></span>Άλλη άδεια</span>
             <span><span class="lvc-sw lvc-pending"></span>Σε αναμονή</span>
             <span><span class="lvc-sw lvc-hol"></span>Αργία</span>
+            <span><span class="lvc-ot" style="display:inline">+2ω</span> Υπερωρία (<span class="lvc-ot lvc-ot-warn" style="display:inline">!</span> = δεν δηλώθηκε / αβέβαιη)</span>
             <span><span class="lvc-sw lvc-off"></span>Σαββατοκύριακο</span>
         </div>
 
