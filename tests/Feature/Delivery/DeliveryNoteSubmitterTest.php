@@ -178,6 +178,17 @@ class DeliveryNoteSubmitterTest extends TestCase
         return $note->fresh('lines');
     }
 
+    public function test_the_9_3_line_carries_the_taric_and_item_code_snapshot(): void
+    {
+        $note = $this->makeNote(['invcode' => 'DAT1', 'code' => 501]);
+        $note->lines()->first()->forceFill(['taric_code' => '8471300000', 'item_code' => 'SRV-R640'])->save();
+
+        $detail = (new DeliveryNoteSubmitter($this->tenant))->buildAadeDeliveryNote($note->fresh('lines'))->getInvoiceDetails()[0];
+
+        $this->assertSame('8471300000', $detail->getTaricNo());
+        $this->assertSame('SRV-R640', $detail->getItemCode());
+    }
+
     /* ============ MYD-011: recipient country is never guessed as GR ============ */
 
     private int $countryProbe = 0;

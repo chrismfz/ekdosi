@@ -273,6 +273,7 @@ class DeliveryNote extends Model implements MovableDocument
             'issued_at' => 'datetime',
             'dispatch_at' => 'datetime',
             'non_obligated_recipient' => 'boolean',
+            'movement_checked_at' => 'datetime',
             'move_purpose' => 'integer',
             'transport_type' => 'integer',
             'start_shipping_branch' => 'integer',

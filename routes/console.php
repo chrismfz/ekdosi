@@ -323,6 +323,18 @@ $trackSchedule(
     'delivery_fetch_inbound'
 );
 
+// delivery:refresh-status — READ-ONLY «Έλεγχος κατάστασης» of our open δελτία/ΤΔΑ
+// (DeliveryLifecycleService::OPEN_STATES) so a recipient's QR scan / a carrier's move
+// shows up without the operator pressing the button. Default ON (read-only).
+$trackSchedule(
+    Schedule::command('delivery:refresh-status')
+        ->cron($scheduleCron('delivery_refresh_status_cron', '20 */3 * * *'))
+        ->name('delivery-refresh-status-all')
+        ->when(fn () => $scheduleEnabled('delivery_refresh_status_enabled'))
+        ->withoutOverlapping(30),
+    'delivery_refresh_status'
+);
+
 // suppliers:sync — build the Προμηθευτές μητρώο from myDATA RequestDocs issuer
 // AFMs, once per myDATA-readable tenant (--tenant passed by TenantScheduleSweep).
 // READ-from-AADE, write-ONLY-to-suppliers (idempotent — creates only missing

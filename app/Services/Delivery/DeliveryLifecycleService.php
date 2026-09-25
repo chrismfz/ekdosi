@@ -127,6 +127,14 @@ class DeliveryLifecycleService
         'cancelled' => 'Ακυρώθηκε',
     ];
 
+    /**
+     * Movement states AADE can still move on its own (another party acts: the recipient
+     * scans / rejects, a carrier starts / delivers / returns) — what the scheduled
+     * delivery:refresh-status re-reads. Terminal ones (delivered / returned / cancelled)
+     * and the ones only WE advance (failed / partial / rejected → confirmReturn) are out.
+     */
+    public const OPEN_STATES = ['registered', 'in_transit', 'in_transit_return', 'awaiting_recipient'];
+
     public static function stateLabel(?string $state): ?string
     {
         return $state === null ? null : (self::STATE_LABELS[$state] ?? $state);
@@ -886,8 +894,9 @@ class DeliveryLifecycleService
         // it in a lockForUpdate transaction would hold the row lock across network I/O.
         // The unguarded no-op means two overlapping refreshes could each write a STATE_SYNC
         // row — a duplicate FORENSIC row (state still converges; nothing money-wrong). This
-        // path is UNREACHABLE until 3d wires the invoice-view refresh action; the lock (done
-        // right — WHMCS call outside it) is deferred to 3d with it. BACKLOG: «Combined ΤΔΑ».
+        // path IS reachable now — the invoice-view «Έλεγχος κατάστασης» and the scheduled
+        // delivery:refresh-status (withoutOverlapping) — so the overlap needs a manual click
+        // racing the scheduler; the lock (done right — WHMCS call outside it) stays deferred.
         $result = app(SyncInvoiceStateFromAade::class)->sync($invoice, 'CANCELLED');
 
         // Reconcile the movement cache too — SyncInvoiceStateFromAade is money-only and

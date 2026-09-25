@@ -470,6 +470,7 @@ class Invoice extends Model implements MovableDocument
             'is_delivery_note' => 'boolean',
             'without_digital_transport_tracking' => 'boolean',
             'non_obligated_recipient' => 'boolean',
+            'movement_checked_at' => 'datetime',
             'dispatch_at' => 'datetime',
             'move_purpose' => 'integer',
             'transport_type' => 'integer',

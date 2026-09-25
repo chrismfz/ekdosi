@@ -9,6 +9,7 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Stock\StockService;
 use App\Support\MyData\ClassificationGuidance;
+use App\Support\MyData\Taric;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
@@ -96,6 +97,19 @@ class ProductForm
                                         ->whereNull('deleted_at')
                                         ->ignore($record?->id))
                                     ->helperText('Internal stock code, distinct from barcode. e.g. "HOST-PREM-12M".'),
+
+                                TextInput::make('taric_code')
+                                    ->label('Κωδικός TARIC / ΣΟ')
+                                    ->maxLength(20)
+                                    ->placeholder('π.χ. 8471 30 00')
+                                    // Ενιαία Κωδικοποίηση Ειδών (1/1/2027): 8 ψηφία ΣΟ → +«00», ή 10 TARIC.
+                                    ->rule(fn () => function (string $attribute, mixed $value, \Closure $fail): void {
+                                        if (! Taric::isValidInput((string) $value)) {
+                                            $fail('Ο κωδικός πρέπει να έχει 8 (Συνδυασμένη Ονοματολογία) ή 10 ψηφία (TARIC).');
+                                        }
+                                    })
+                                    ->dehydrateStateUsing(fn (?string $state) => Taric::normalize($state))
+                                    ->helperText('Για αγαθά — υποχρεωτικός στα τιμολόγια/δελτία από 1/1/2027 (Ενιαία Κωδικοποίηση Ειδών). Δεκτά 8 ψηφία (συμπληρώνεται «00») ή 10. Οι υπηρεσίες δεν έχουν.'),
 
                                 TextInput::make('barcode')
                                     ->maxLength(25)

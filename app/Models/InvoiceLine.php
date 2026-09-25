@@ -58,6 +58,19 @@ class InvoiceLine extends Model
                     ?? Invoice::query()->whereKey($line->invoice_id)->value('company_id');
             }
 
+            // Ενιαία Κωδικοποίηση Ειδών (TARIC, 1/1/2027): SNAPSHOT the product's code + SKU
+            // when the line is created or its product changes — never on a later unrelated
+            // save, so a filed document keeps the code it was issued with.
+            if (! $line->exists || $line->isDirty('product_id')) {
+                // Same tenant only; a since-trashed product still carries its code.
+                $product = $line->product_id
+                    ? Product::withTrashed()->where('company_id', $line->company_id)
+                        ->whereKey($line->product_id)->first(['id', 'taric_code', 'sku'])
+                    : null;   // product cleared on a draft line → no stale code
+                $line->taric_code = $product?->taric_code;
+                $line->item_code = filled($product?->sku) ? mb_substr((string) $product->sku, 0, 50) : null;
+            }
+
             // Loud-fail validation on inputs the form requires but the
             // DB/migration allows null/out-of-range — defends every
             // non-form caller (tests, factories, API, hostile Livewire
@@ -105,6 +118,8 @@ class InvoiceLine extends Model
     }
 
     protected $fillable = [
+        'taric_code',
+        'item_code',
         'company_id',
         'legacy_id',
         'invoice_id',

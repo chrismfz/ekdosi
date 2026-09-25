@@ -261,6 +261,12 @@ return [
         'delivery_fetch_inbound_enabled' => env('EKDOSI_SCHEDULE_DELIVERY_FETCH_INBOUND', true),
         'delivery_fetch_inbound_cron' => env('EKDOSI_DELIVERY_FETCH_INBOUND_CRON', '0 */6 * * *'),
 
+        // delivery:refresh-status — READ-ONLY «Έλεγχος κατάστασης» of our open δελτία/ΤΔΑ
+        // (a recipient's QR scan / reject, a carrier's start / delivery / return) so the
+        // state and the «Ανεπιβεβαίωτα» filter stay current. Default ON (read-only).
+        'delivery_refresh_status_enabled' => env('EKDOSI_SCHEDULE_DELIVERY_REFRESH_STATUS', true),
+        'delivery_refresh_status_cron' => env('EKDOSI_DELIVERY_REFRESH_STATUS_CRON', '20 */3 * * *'),
+
         // suppliers:sync / customers:sync — build the Προμηθευτές / Πελάτες μητρώο
         // from myDATA issuer AFMs (RequestDocs) / sales counterpart AFMs
         // (RequestTransmittedDocs), per myDATA-readable tenant. READ-from-AADE,

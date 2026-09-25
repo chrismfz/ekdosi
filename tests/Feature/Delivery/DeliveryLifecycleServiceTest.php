@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Delivery;
 
+use App\Console\Commands\DeliveryRefreshStatus;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\DeliveryMark;
@@ -526,6 +527,50 @@ class DeliveryLifecycleServiceTest extends TestCase
         $this->assertFalse(DeliveryLifecycleService::isOwnVehicleCarrier($note->fresh(), $this->tenant));
         $this->expectException(RuntimeException::class);
         $this->service($this->confirmOutcomeResponse())->confirmOutcome($note->fresh(), DeliveryOutcomeType::FULL);
+    }
+
+    public function test_the_scheduled_refresh_rereads_only_open_movements(): void
+    {
+        // An «αναμένεται ο παραλήπτης» note the recipient has since scanned → AADE COMPLETED.
+        $open = $this->makeFiledNote(['delivery_state' => 'awaiting_recipient']);
+        // Terminal / our-own-next-step states are NOT polled (no mock response queued for them).
+        $this->makeFiledNote(['delivery_state' => 'delivered']);
+        $this->makeFiledNote(['delivery_state' => 'failed']);
+
+        DeliveryRefreshStatus::$testHandler = new MockHandler([
+            new GuzzleResponse(200, [], $this->statusResponse('COMPLETED')),
+        ]);
+        try {
+            $this->artisan('delivery:refresh-status', ['--tenant' => $this->tenant->slug])
+                ->expectsOutputToContain('ελέγχθηκαν 1, άλλαξαν 1')
+                ->assertSuccessful();
+        } finally {
+            DeliveryRefreshStatus::$testHandler = null;
+        }
+
+        $this->assertSame('delivered', $open->fresh()->delivery_state);
+    }
+
+    public function test_the_scheduled_refresh_rotates_through_documents_beyond_the_cap(): void
+    {
+        // Two open notes, cap 1: a no-change poll must NOT re-pick the same note next run
+        // (updated_at doesn't move on a no-change refresh — movement_checked_at does).
+        $a = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+        $b = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+
+        foreach ([1, 2] as $_) {
+            DeliveryRefreshStatus::$testHandler = new MockHandler([
+                new GuzzleResponse(200, [], $this->statusResponse('IN_TRANSIT')),
+            ]);
+            try {
+                $this->artisan('delivery:refresh-status', ['--tenant' => $this->tenant->slug, '--limit' => 1])->assertSuccessful();
+            } finally {
+                DeliveryRefreshStatus::$testHandler = null;
+            }
+        }
+
+        $this->assertNotNull($a->fresh()->movement_checked_at);
+        $this->assertNotNull($b->fresh()->movement_checked_at);                 // both polled across 2 runs
     }
 
     public function test_outcome_is_refused_when_someone_else_started_the_movement(): void

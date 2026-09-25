@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
+use App\Support\MyData\Taric;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -38,7 +39,19 @@ class Product extends Model
     use BelongsToCompany;
     use HasFactory, HasTags, SoftDeletes;
 
+    /**
+     * TARIC is stored NORMALISED (10 chars: an 8-digit ΣΟ code +«00») whatever the entry
+     * path — form, CSV import, inline create, API. An unparseable value is kept trimmed so
+     * the bad input stays visible (the form rejects it; AADE would too) rather than vanish.
+     */
+    public function setTaricCodeAttribute(?string $value): void
+    {
+        $this->attributes['taric_code'] = Taric::normalize($value)
+            ?? (trim((string) $value) === '' ? null : mb_substr(trim((string) $value), 0, 10));
+    }
+
     protected $fillable = [
+        'taric_code',
         'company_id',
         'legacy_id',
         'barcode',
