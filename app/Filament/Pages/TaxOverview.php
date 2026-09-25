@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Models\Company;
+use App\Services\Accounting\E3YearTotals;
 use App\Services\Accounting\IncomeTaxEstimate;
 use App\Services\Dashboard\VatPeriodReport;
 use App\Services\Dashboard\VatPeriodSummary;
@@ -16,6 +17,11 @@ use Filament\Forms\Components\Repeater;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
+use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
+use GuzzleHttp\Handler\MockHandler;
+use Illuminate\Support\Facades\Log;
+use RuntimeException;
+use Throwable;
 use UnitEnum;
 
 /**
@@ -44,6 +50,9 @@ class TaxOverview extends Page
     private const SUMMARY_YEARS = 6;
 
     public int $year;
+
+    /** Test seam: a MockHandler threaded into the Ε3 fetch (no network). */
+    public static ?MockHandler $testHandler = null;
 
     private ?array $estimate = null;
 
@@ -174,9 +183,50 @@ class TaxOverview extends Page
         return CompanySettings::canAccess();
     }
 
+    /** Can this tenant read its own picture back from myDATA (direct or via a provider)? */
+    public function canReadMyData(): bool
+    {
+        return $this->tenant()->canReadMyData();
+    }
+
+    private function refreshE3(): void
+    {
+        try {
+            $snap = E3YearTotals::refresh($this->tenant(), $this->year, static::$testHandler);
+            $this->estimate = $this->summary = null;
+            $this->service = null;
+
+            Notification::make()
+                ->title("Ε3 {$this->year} από την ΑΑΔΕ")
+                ->body('Έσοδα '.$this->fmt((float) $snap->income).' · Έξοδα '.$this->fmt((float) $snap->expense)
+                    .' · Αγορές παγίων '.$this->fmt((float) $snap->capex).' ('.$snap->doc_count.' εγγραφές).')
+                ->success()
+                ->send();
+        } catch (RateLimitExceededException) {
+            Notification::make()->title('Προσωρινό όριο myDATA')->body('Δοκιμάστε ξανά σε λίγα λεπτά.')->warning()->send();
+        } catch (RuntimeException $e) {
+            Notification::make()->title('Η λήψη Ε3 απέτυχε')->body($e->getMessage())->danger()->send();
+        } catch (Throwable $e) {
+            Log::warning('Tax overview E3 refresh failed', [
+                'company_id' => $this->tenant()->getKey(), 'year' => $this->year,
+                'exception' => $e::class, 'message' => $e->getMessage(),
+            ]);
+            Notification::make()->title('Η λήψη Ε3 απέτυχε')->body('Η σύνδεση με την ΑΑΔΕ απέτυχε.')->danger()->send();
+        }
+    }
+
     protected function getHeaderActions(): array
     {
         return [
+            Action::make('refresh_e3')
+                ->label('Ανανέωση Ε3 (ΑΑΔΕ)')
+                ->icon('heroicon-o-arrow-path')
+                ->color('gray')
+                ->visible(fn () => $this->canReadMyData())
+                ->requiresConfirmation()
+                ->modalHeading(fn () => "Ε3 {$this->year} από την ΑΑΔΕ")
+                ->modalDescription('Κατεβάζει το Ε3 του έτους από το myDATA (μόνο ανάγνωση), δηλαδή τον τελικό χαρακτηρισμό του λογιστή. Για κλεισμένα έτη η εκτίμηση βασίζεται σε αυτό.')
+                ->action(fn () => $this->refreshE3()),
             Action::make('tax_profile')
                 ->label('Φορολογικό προφίλ')
                 ->icon('heroicon-o-cog-6-tooth')

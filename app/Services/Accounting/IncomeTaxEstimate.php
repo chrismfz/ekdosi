@@ -3,6 +3,7 @@
 namespace App\Services\Accounting;
 
 use App\Models\Company;
+use App\Models\E3YearSnapshot;
 use App\Models\Expense;
 use App\Models\Invoice;
 use App\Support\Accounting\IncomeTaxProfile;
@@ -29,6 +30,11 @@ use Carbon\CarbonInterface;
  * For the running year a straight-line projection to 31/12 is added — crude
  * (payroll is often posted per quarter), and labelled as such on the page.
  *
+ * SOURCE per year: a CLOSED year with an Ε3 snapshot ({@see E3YearTotals}) takes
+ * income/expense/capex from AADE's Ε3 (the accountant's final classification);
+ * otherwise — and always for the running year — from the local book. The other
+ * side is returned alongside as a cross-check. Withholdings are always local.
+ *
  * Read-only, tenant-scoped through LedgerBook (explicit company_id). NOT a tax
  * return: accounting profit ≠ taxable profit (non-deductibles, inventory,
  * provisions) unless the accountant posts the 17.4/17.6 tax-basis adjustments.
@@ -46,6 +52,7 @@ class IncomeTaxEstimate
     /**
      * @return array{
      *   year:int, is_current:bool, through:string, profile:IncomeTaxProfile,
+     *   source:string, e3:?array, local:array,
      *   income:float, income_adjustments:float, income_total:float,
      *   expense_all:float, capex:float, expense_total:float, expense_breakdown:list<array>, profit:float, withheld:float,
      *   tax:float, prepayment_next:float, prior_prepayment:float, prior_source:string, prior_hint:?float,
@@ -198,19 +205,50 @@ class IncomeTaxEstimate
             array_filter($book->incomeRows(), fn (LedgerRow $r) => in_array($r->docType, Codes::INCOME_ADJUSTMENT_TYPES, true)),
         )), 2);
 
-        $incomeTotal = $book->incomeNet();
+        $localIncome = $book->incomeNet();
         // Αγορές παγίων (E3_882/883) are capital expenditure: deducted over the years
         // via αποσβέσεις (17.2 / E3_587), never as an expense of the year they're bought.
-        $capex = $book->expenseCapex();
-        $expenseAll = $book->expenseNet();
-        $expense = round($expenseAll - $capex, 2);
+        $localCapex = $book->expenseCapex();
+        $localExpenseAll = $book->expenseNet();
+        $localExpense = round($localExpenseAll - $localCapex, 2);
+
+        // A CLOSED year with an Ε3 snapshot: AADE's Ε3 is the accountant's FINAL
+        // classification (a later re-classification — e.g. a 17.5 re-booked as αγορά
+        // παγίου — never reaches our local lines), so it is the source. The running
+        // year stays local: the accountant posts the Ε3 per quarter, it lags.
+        $snapshot = E3YearSnapshot::query()
+            ->where('company_id', $this->tenant->getKey())
+            ->where('year', $year)
+            ->first();
+        // Only a snapshot that covers the WHOLE year (taken after 31/12): one taken
+        // mid-year must never turn into the «final» figure once the year closes.
+        $useE3 = $snapshot !== null && ! $isCurrent && E3YearTotals::coversFullYear($snapshot);
+
+        $incomeTotal = $useE3 ? (float) $snapshot->income : $localIncome;
+        $expense = $useE3 ? (float) $snapshot->expense : $localExpense;
+        $capex = $useE3 ? (float) $snapshot->capex : $localCapex;
+        $expenseAll = round($expense + $capex, 2);
 
         return $this->core[$year] = [
             'is_current' => $isCurrent,
             'through' => $through->toDateString(),
             'doc_count' => count($book->rows),
-            'income' => round($incomeTotal - $adjustments, 2),
-            'income_adjustments' => $adjustments,
+            'source' => $useE3 ? 'e3' : 'local',
+            'e3' => $snapshot === null ? null : [
+                'income' => (float) $snapshot->income,
+                'expense' => (float) $snapshot->expense,
+                'capex' => (float) $snapshot->capex,
+                'through' => $snapshot->through->toDateString(),
+                'fetched_at' => $snapshot->fetched_at->toDateTimeString(),
+                'full_year' => E3YearTotals::coversFullYear($snapshot),
+                'review' => E3YearTotals::reviewFlags($snapshot->rows ?? []),
+            ],
+            'local' => [
+                'income' => $localIncome, 'expense' => $localExpense, 'capex' => $localCapex,
+                'expense_all' => $localExpenseAll,  // = Σ of the (local) expense_breakdown
+            ],
+            'income' => round($incomeTotal - ($useE3 ? 0.0 : $adjustments), 2),
+            'income_adjustments' => $useE3 ? 0.0 : $adjustments,
             'income_total' => $incomeTotal,
             'expense_all' => $expenseAll,   // everything in the book (incl. πάγια)
             'capex' => $capex,
@@ -220,7 +258,8 @@ class IncomeTaxEstimate
             'withheld' => $book->incomeWithheld(),
             // Expenses under 10% of income usually means they weren't imported for
             // that year (myDATA expense import is recent) — the profit is then overstated.
-            'expense_warning' => $incomeTotal > 0 && $expense < 0.1 * $incomeTotal,
+            // (Local source only — the Ε3 is the accountant's own figure.)
+            'expense_warning' => ! $useE3 && $incomeTotal > 0 && $expense < 0.1 * $incomeTotal,
         ];
     }
 }

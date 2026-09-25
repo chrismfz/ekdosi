@@ -57,6 +57,27 @@
         {{-- Income tax estimate --}}
         <x-filament::section heading="Εκτίμηση φόρου εισοδήματος" class="lg:col-span-2">
             @php($proj = $e['projection'])
+            <div class="text-xs mb-2 {{ $e['source'] === 'e3' ? 'fi-color-gray' : '' }}">
+                @if ($e['source'] === 'e3')
+                    <span class="font-semibold">Πηγή: Ε3 ΑΑΔΕ</span> (τελικός χαρακτηρισμός λογιστή · ανανέωση {{ \Illuminate\Support\Carbon::parse($e['e3']['fetched_at'])->format('d/m/Y H:i') }}).
+                    <span class="fi-color-gray">Κατά τα τοπικά δεδομένα: έσοδα {{ $this->fmt($e['local']['income']) }} · εκπιπτόμενα έξοδα {{ $this->fmt($e['local']['expense']) }}.</span>
+                    @if (count($e['e3']['review']) > 0)
+                        <div class="text-danger-600 dark:text-danger-400 mt-1">
+                            Το Ε3 περιέχει κατηγορίες που μετρούν εδώ όπως είναι αλλά θέλουν έλεγχο λογιστή:
+                            @foreach ($e['e3']['review'] as $label => $value){{ $label }} {{ $this->fmt($value) }}@if (! $loop->last) · @endif @endforeach.
+                        </div>
+                    @endif
+                @else
+                    <span class="font-semibold">Πηγή: τοπικά δεδομένα</span> (παραστατικά + έξοδα myDATA).
+                    @if ($e['e3'] && ! $e['is_current'] && ! $e['e3']['full_year'])
+                        <span class="text-danger-600 dark:text-danger-400">Το Ε3 που έχει αποθηκευτεί φτάνει μόνο ως {{ \Illuminate\Support\Carbon::parse($e['e3']['through'])->format('d/m/Y') }}. Πατήστε «Ανανέωση Ε3 (ΑΑΔΕ)» για ολόκληρο το έτος.</span>
+                    @elseif ($e['e3'])
+                        <span class="fi-color-gray">Ε3 ΑΑΔΕ έως {{ \Illuminate\Support\Carbon::parse($e['e3']['through'])->format('d/m/Y') }}: έσοδα {{ $this->fmt($e['e3']['income']) }} · έξοδα {{ $this->fmt($e['e3']['expense']) }}.</span>
+                    @elseif (! $e['is_current'] && $this->canReadMyData())
+                        <span class="text-danger-600 dark:text-danger-400">Για κλεισμένο έτος πατήστε «Ανανέωση Ε3 (ΑΑΔΕ)»: τα τοπικά δεν έχουν τον τελικό χαρακτηρισμό του λογιστή (π.χ. αγορές παγίων).</span>
+                    @endif
+                @endif
+            </div>
             <div class="overflow-x-auto">
                 <table class="min-w-full text-sm">
                     <thead>
@@ -119,7 +140,10 @@
         </x-filament::section>
 
         {{-- Expenses by bucket --}}
-        <x-filament::section heading="Έξοδα ανά κατηγορία">
+        <x-filament::section heading="Έξοδα ανά κατηγορία (τοπικά)">
+            @if ($e['source'] === 'e3')
+                <div class="text-xs fi-color-gray mb-2">Η εκτίμηση του έτους βασίζεται στο Ε3 της ΑΑΔΕ, όχι σε αυτή την ανάλυση.</div>
+            @endif
             @if (count($e['expense_breakdown']) === 0)
                 <div class="fi-color-gray text-sm">Δεν υπάρχουν έξοδα για το {{ $this->year }}.</div>
             @else
@@ -134,10 +158,11 @@
                                 <td class="text-right whitespace-nowrap">{{ $this->fmt($b['net']) }}</td>
                             </tr>
                         @endforeach
-                        <tr class="font-semibold"><td class="py-1">Σύνολο</td><td class="text-right">{{ $this->fmt($e['expense_all']) }}</td></tr>
-                        @if (abs($e['capex']) > 0.004)
-                            <tr><td class="py-1 text-xs fi-color-gray" colspan="2">Περιλαμβάνει αγορές παγίων {{ $this->fmt($e['capex']) }}, που δεν μετράνε στον φόρο της χρήσης (μόνο οι αποσβέσεις τους).</td></tr>
+                        <tr class="font-semibold"><td class="py-1">Σύνολο</td><td class="text-right">{{ $this->fmt($e['local']['expense_all']) }}</td></tr>
+                        @if (abs($e['local']['capex']) > 0.004)
+                            <tr><td class="py-1 text-xs fi-color-gray" colspan="2">Περιλαμβάνει αγορές παγίων {{ $this->fmt($e['local']['capex']) }}, που δεν μετράνε στον φόρο της χρήσης (μόνο οι αποσβέσεις τους).</td></tr>
                         @endif
+
                     </tbody>
                 </table>
             @endif
@@ -217,6 +242,7 @@
                             <td class="py-1">
                                 <button type="button" wire:click="$set('year', {{ $ys['year'] }})" class="underline">{{ $ys['year'] }}</button>
                                 @if ($ys['is_current'])<span class="text-xs fi-color-gray">(μέχρι σήμερα)</span>@endif
+                                <span class="text-xs fi-color-gray">· {{ $ys['source'] === 'e3' ? 'Ε3' : 'τοπικά' }}</span>
                                 @if ($ys['expense_warning'])<span class="text-xs text-danger-600 dark:text-danger-400" title="Έξοδα κάτω από 10% των εσόδων: πιθανώς δεν έχουν εισαχθεί">⚠ ελλιπή έξοδα</span>@endif
                             </td>
                             <td class="text-right">{{ $this->fmt($ys['income_total']) }}</td>
