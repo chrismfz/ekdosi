@@ -10,13 +10,16 @@ use App\Filament\Resources\Employees\Pages\ListEmployees;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\User;
+use App\Support\Hr\EmployeeAccountMatcher;
 use BackedEnum;
 use Filament\Actions\Action;
+use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\EditAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
+use Filament\Forms\Components\Hidden;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -32,7 +35,9 @@ use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rules\Unique;
 use UnitEnum;
@@ -150,7 +155,7 @@ class EmployeeResource extends Resource
 
         return $table
             // Balance in the same query (no per-row SUM).
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->withSum(
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('user')->withSum(
                 ['leaveRequests as annual_taken' => fn (Builder $q) => $q
                     ->where('status', LeaveStatus::Approved->value)
                     ->where('type', LeaveType::Annual->value)
@@ -166,7 +171,20 @@ class EmployeeResource extends Resource
                     ->sortable()
                     ->weight('medium'),
                 TextColumn::make('afm')->label('ΑΦΜ')->placeholder('—')->toggleable(),
-                TextColumn::make('user.name')->label('Λογαριασμός')->placeholder('—'),
+                // Who is who: the linked account (name + email), a role warning, or
+                // an unambiguous suggestion to confirm with «Σύνδεση».
+                TextColumn::make('user.name')
+                    ->label('Λογαριασμός')
+                    ->state(fn (Employee $record): string => $record->user?->name
+                        ?? (($s = app(EmployeeAccountMatcher::class)->suggestionFor($record)) ? 'Πρόταση: '.$s->name : '—'))
+                    ->description(fn (Employee $record): ?string => match (true) {
+                        $record->user !== null => $record->user->email.(self::canFileLeave($record->user) ? '' : ' · ⚠ χωρίς ρόλο για άδειες'),
+                        default => app(EmployeeAccountMatcher::class)->suggestionFor($record)?->email,
+                    })
+                    ->color(fn (Employee $record): ?string => $record->user === null && app(EmployeeAccountMatcher::class)->suggestionFor($record) ? 'gray' : null)
+                    ->tooltip(fn (Employee $record): ?string => $record->user && ! self::canFileLeave($record->user)
+                        ? 'Ο λογαριασμός δεν μπορεί να ζητήσει άδεια — δώστε ρόλο «Operator» ή «Προσωπικό (άδειες & κάρτα)» στους Χρήστες.'
+                        : null),
                 TextColumn::make('balance')
                     ->label('Υπόλοιπο '.$year)
                     ->state(fn (Employee $record): string => ($record->annual_leave_days - (int) $record->annual_taken).' / '.$record->annual_leave_days)
@@ -190,8 +208,101 @@ class EmployeeResource extends Resource
             ->emptyStateHeading('Δεν υπάρχουν εργαζόμενοι ακόμη')
             ->emptyStateDescription('Προσθέστε κάθε εργαζόμενο μία φορά (ονοματεπώνυμο, ΑΦΜ όπως στο ΕΡΓΑΝΗ). Μετά μπορεί να ζητά άδειες και να χτυπά κάρτα.')
             ->filters([TrashedFilter::make()])
-            ->recordActions([self::unlockPinAction(), EditAction::make()])
-            ->toolbarActions([BulkActionGroup::make([RestoreBulkAction::make()])]);
+            ->recordActions([self::linkSuggestedAction(), self::unlockPinAction(), EditAction::make()])
+            ->toolbarActions([
+                self::linkSuggestedBulkAction(),
+                BulkActionGroup::make([RestoreBulkAction::make()]),
+            ]);
+    }
+
+    /** Can this account file leave in the CURRENT tenant (operator / ergani role / admins)? */
+    public static function canFileLeave(User $user): bool
+    {
+        // Column description + tooltip both ask, per row → memoised per request (scoped matcher).
+        return app(EmployeeAccountMatcher::class)->canFileLeave($user);
+    }
+
+    /**
+     * Confirm the suggested account. The modal shows WHICH user; the action links
+     * only if that is still the (unambiguous, unlinked) suggestion at click time.
+     */
+    public static function linkSuggestedAction(): Action
+    {
+        return Action::make('linkSuggested')
+            ->label('Σύνδεση')
+            ->icon('heroicon-o-link')
+            ->color('primary')
+            ->visible(fn (Employee $record): bool => app(EmployeeAccountMatcher::class)->suggestionFor($record) !== null
+                && (auth()->user()?->can('update', $record) ?? false))
+            ->authorize(fn (Employee $record): bool => auth()->user()?->can('update', $record) ?? false)
+            ->requiresConfirmation()
+            ->modalHeading(fn (Employee $record): string => 'Σύνδεση λογαριασμού — '.$record->full_name)
+            ->modalDescription(fn (Employee $record): string => ($s = app(EmployeeAccountMatcher::class)->suggestionFor($record))
+                ? 'Ο εργαζόμενος θα συνδεθεί με τον λογαριασμό «'.$s->name.'» <'.$s->email.'>. Μετά θα βλέπει και θα ζητά τις δικές του άδειες.'
+                : '')
+            ->fillForm(fn (Employee $record): array => ['seen_user_id' => app(EmployeeAccountMatcher::class)->suggestionFor($record)?->getKey()])
+            ->schema([Hidden::make('seen_user_id')])
+            ->action(function (Employee $record, array $data): void {
+                $linked = self::linkIfStillSuggested($record, (int) ($data['seen_user_id'] ?? 0));
+                $linked
+                    ? Notification::make()->title('Συνδέθηκε με «'.$record->fresh()->user?->name.'»')->success()->send()
+                    : Notification::make()->title('Η πρόταση άλλαξε στο μεταξύ — δεν έγινε σύνδεση. Ανανεώστε τη σελίδα.')->warning()->send();
+            });
+    }
+
+    /** Link every selected employee that has an unambiguous suggestion; skip the rest. */
+    public static function linkSuggestedBulkAction(): BulkAction
+    {
+        return BulkAction::make('linkSuggestedBulk')
+            ->label('Σύνδεση με τις προτάσεις')
+            ->icon('heroicon-o-link')
+            ->requiresConfirmation()
+            ->modalDescription('Συνδέει κάθε επιλεγμένο εργαζόμενο με τον λογαριασμό που προτείνεται δίπλα του (ίδιο email ή ίδιο ονοματεπώνυμο, μόνο όταν υπάρχει ένα και μοναδικό ταίριασμα). Όσοι δεν έχουν πρόταση παραλείπονται.')
+            ->authorize(fn (): bool => auth()->user()?->can('Update:Employee') ?? false)
+            ->action(function (EloquentCollection $records): void {
+                // Snapshot of what the operator SAW before anything is linked: an
+                // earlier link in this batch can make a previously ambiguous row
+                // unambiguous — that row must still be skipped, not silently linked.
+                $shown = [];
+                foreach ($records as $record) {
+                    $shown[$record->getKey()] = app(EmployeeAccountMatcher::class)->suggestionFor($record)?->getKey();
+                }
+                $linked = 0;
+                foreach ($records as $record) {
+                    $userId = $shown[$record->getKey()];
+                    if ($userId !== null && (auth()->user()?->can('update', $record) ?? false)
+                        && self::linkIfStillSuggested($record, (int) $userId)) {
+                        $linked++;
+                    }
+                }
+                $skipped = $records->count() - $linked;
+                $n = Notification::make()
+                    ->title('Συνδέθηκαν '.$linked.($skipped > 0 ? ' · παραλείφθηκαν '.$skipped.' (χωρίς πρόταση ή ήδη συνδεδεμένοι)' : ''));
+                $linked > 0 ? $n->success()->send() : $n->warning()->send();
+            })
+            ->deselectRecordsAfterCompletion();
+    }
+
+    /**
+     * Re-derive the suggestion NOW (fresh matcher, not the request memo) and link
+     * only if it is still exactly $userId — so a stale modal or a concurrent link
+     * of the same user can't produce a wrong or duplicate link.
+     */
+    private static function linkIfStillSuggested(Employee $employee, int $userId): bool
+    {
+        $employee->refresh();
+        $current = (new EmployeeAccountMatcher)->suggestionFor($employee);
+        if ($userId === 0 || $current === null || (int) $current->getKey() !== $userId) {
+            return false;
+        }
+        try {
+            $employee->forceFill(['user_id' => $userId])->save();
+        } catch (UniqueConstraintViolationException) {
+            return false; // the same user got linked to someone else a moment ago
+        }
+        app(EmployeeAccountMatcher::class)->reset();
+
+        return true;
     }
 
     /** Lift a PIN lockout (wrong tries on the tablet) — shown only while locked. */

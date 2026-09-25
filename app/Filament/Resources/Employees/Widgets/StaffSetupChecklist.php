@@ -63,7 +63,7 @@ class StaffSetupChecklist extends Widget
             [
                 'done' => $active > 0 && (clone $employees)->whereNotNull('user_id')->exists(),
                 'title' => 'Λογαριασμοί εργαζομένων',
-                'hint' => 'Συνδέστε λογαριασμό ekdosi (πεδίο «Λογαριασμός») για να ζητούν μόνοι τους άδειες.',
+                'hint' => 'Για να ζητούν μόνοι τους άδειες: πατήστε «Σύνδεση» όπου η στήλη «Λογαριασμός» γράφει «Πρόταση», ή διαλέξτε λογαριασμό μέσα στην καρτέλα.',
                 'url' => null,
                 'optional' => true,
             ],
