@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\CompanyBackupDownloadController;
+use App\Http\Controllers\Ergani\CardKioskController;
 use App\Http\Controllers\ExpenseDocumentDownloadController;
 use App\Http\Controllers\Portal\DocumentPdfController as PortalDocumentPdfController;
 use App\Http\Controllers\Portal\DocumentShowController as PortalDocumentShowController;
@@ -27,6 +28,15 @@ use Illuminate\Support\Facades\Route;
 // app isn't installed yet, the EnsureInstalled middleware still redirects `/`
 // to /install before this view is reached.)
 Route::view('/', 'root-placeholder');
+
+// Office tablet QR display for the Ψηφιακή Κάρτα Εργασίας — no login; the device
+// is ACTIVATED once by an admin (httpOnly cookie), the URL carries no secret.
+Route::get('/card-kiosk', [CardKioskController::class, 'show'])
+    ->middleware('throttle:card-kiosk-view')
+    ->name('ergani.card-kiosk');
+Route::post('/card-kiosk/punch', [CardKioskController::class, 'punch'])
+    ->middleware('throttle:card-kiosk-punch')
+    ->name('ergani.card-kiosk.punch');
 
 /**
  * Customer portal — a customer-facing surface on the dedicated `portal` guard,

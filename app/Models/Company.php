@@ -89,6 +89,9 @@ class Company extends Model
         'ergani_password',
         // Φάση 2: explicit opt-in to submit approved leaves (WTOLeave) — creds alone never do.
         'ergani_submit_leaves',
+        // Φάση 3: Ψηφιακή Κάρτα Εργασίας (WRKCardSE) opt-in + «μόνο μέσω QR γραφείου».
+        'ergani_submit_cards',
+        'ergani_card_requires_kiosk',
         // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
         'mydata_send_item_descr',
         'gsis_username',
@@ -166,6 +169,8 @@ class Company extends Model
         'whmcs_api_secret',
         'whmcs_webhook_secret',
         'ai_api_key',
+        // ΕΡΓΑΝΗ e-ΕΦΚΑ password.
+        'ergani_password',
     ];
 
     protected function casts(): array
@@ -185,6 +190,8 @@ class Company extends Model
             'enable_domain_management' => 'boolean',
             'ergani_enabled' => 'boolean',
             'ergani_submit_leaves' => 'boolean',
+            'ergani_submit_cards' => 'boolean',
+            'ergani_card_requires_kiosk' => 'boolean',
             'ergani_password' => MaybeEncrypted::class,
             'ai_monthly_token_cap' => 'integer',
             'ai_api_key' => MaybeEncrypted::class,

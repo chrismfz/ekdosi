@@ -2,6 +2,7 @@
 
 namespace App\Providers;
 
+use App\Http\Controllers\Ergani\CardKioskController;
 use App\Listeners\RecordAuthEvent;
 use App\Models\User;
 use App\Services\Leads\LeadMatcher;
@@ -192,6 +193,15 @@ class AppServiceProvider extends ServiceProvider
          * client). Keeping the gate at «approve», not at «register», is what keeps
          * third-party and local clients workable.
          */
+        // Office-tablet «ρολόι» (ψηφιακή κάρτα): SEPARATE buckets — the tablet's own
+        // 15'' page reloads must never spend the punch budget (a 429 on a real punch
+        // risks ΕΡΓΑΝΗ's 15' deadline). Punches are keyed per activated device.
+        RateLimiter::for('card-kiosk-view', fn (Request $request): Limit => Limit::perMinute(30)->by('ckv|'.$request->ip()));
+        // Above the per-tablet wrong-PIN pause (20/15'), so a burst meets THAT (clear
+        // message + admin bell), not a generic 429.
+        RateLimiter::for('card-kiosk-punch', fn (Request $request): Limit => Limit::perMinute(40)
+            ->by('ckp|'.sha1((string) $request->cookie(CardKioskController::COOKIE)).'|'.$request->ip()));
+
         RateLimiter::for('oauth', function (Request $request): Limit {
             // 'oauth' is HARDCODED to match laravel/mcp, which registers the DCR
             // route at a hardcoded `oauth/register` (Server\Registrar::oauthRoutes()

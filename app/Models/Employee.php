@@ -41,14 +41,19 @@ class Employee extends Model
         'hired_at',
         'is_active',
         'notes',
+        'has_work_card',
+        'card_pin_hash',
     ];
+
+    /** The tablet PIN is a secret — never serialized (JSON, Livewire, exports, logs). */
+    protected $hidden = ['card_pin_hash'];
 
     /** @return list<string> */
     protected function loggedAttributes(): array
     {
         return [
             'user_id', 'afm', 'last_name', 'first_name', 'email', 'ergani_branch',
-            'annual_leave_days', 'hired_at', 'is_active', 'notes',
+            'annual_leave_days', 'hired_at', 'is_active', 'notes', 'has_work_card',
         ];
     }
 
@@ -57,6 +62,9 @@ class Employee extends Model
         return [
             'hired_at' => 'date',
             'is_active' => 'boolean',
+            'has_work_card' => 'boolean',
+            'card_pin_locked_until' => 'datetime',
+            'card_pin_failures' => 'integer',
             'annual_leave_days' => 'integer',
             'ergani_branch' => 'integer',
         ];
@@ -70,6 +78,11 @@ class Employee extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    public function workCardEvents(): HasMany
+    {
+        return $this->hasMany(WorkCardEvent::class);
     }
 
     public function leaveRequests(): HasMany
