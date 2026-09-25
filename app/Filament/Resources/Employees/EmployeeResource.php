@@ -2,8 +2,6 @@
 
 namespace App\Filament\Resources\Employees;
 
-use App\Enums\LeaveStatus;
-use App\Enums\LeaveType;
 use App\Filament\Resources\Employees\Pages\CreateEmployee;
 use App\Filament\Resources\Employees\Pages\EditEmployee;
 use App\Filament\Resources\Employees\Pages\ListEmployees;
@@ -154,14 +152,7 @@ class EmployeeResource extends Resource
         $year = (int) now()->format('Y');
 
         return $table
-            // Balance in the same query (no per-row SUM).
-            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('user')->withSum(
-                ['leaveRequests as annual_taken' => fn (Builder $q) => $q
-                    ->where('status', LeaveStatus::Approved->value)
-                    ->where('type', LeaveType::Annual->value)
-                    ->whereYear('starts_on', $year)],
-                'days',
-            ))
+            ->modifyQueryUsing(fn (Builder $query): Builder => $query->with('user'))
             ->defaultSort('last_name')
             ->columns([
                 TextColumn::make('last_name')
@@ -187,7 +178,10 @@ class EmployeeResource extends Resource
                         : null),
                 TextColumn::make('balance')
                     ->label('Υπόλοιπο '.$year)
-                    ->state(fn (Employee $record): string => ($record->annual_leave_days - (int) $record->annual_taken).' / '.$record->annual_leave_days)
+                    // One query for all rows (once() per company+year, per request); a
+                    // leave crossing New Year is split between the two years.
+                    ->state(fn (Employee $record): string => ($record->annual_leave_days
+                        - (self::takenThisYear((int) $record->company_id, $year)[$record->getKey()] ?? 0)).' / '.$record->annual_leave_days)
                     ->alignEnd(),
                 IconColumn::make('has_work_card')->label('Κάρτα')->boolean()
                     ->trueIcon('heroicon-o-finger-print')->falseIcon('heroicon-o-minus')->falseColor('gray')
@@ -213,6 +207,12 @@ class EmployeeResource extends Resource
                 self::linkSuggestedBulkAction(),
                 BulkActionGroup::make([RestoreBulkAction::make()]),
             ]);
+    }
+
+    /** @return array<int, int> */
+    private static function takenThisYear(int $companyId, int $year): array
+    {
+        return once(fn (): array => Employee::annualLeaveTakenMap($companyId, $year));
     }
 
     /** Can this account file leave in the CURRENT tenant (operator / ergani role / admins)? */

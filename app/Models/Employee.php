@@ -6,6 +6,9 @@ use App\Enums\LeaveStatus;
 use App\Enums\LeaveType;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\TracksActivity;
+use App\Support\Hr\WorkingDays;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
@@ -95,14 +98,14 @@ class Employee extends Model
         return trim($this->last_name.' '.$this->first_name);
     }
 
-    /** Approved κανονική άδεια days that START in the given year. */
+    /**
+     * Approved κανονική άδεια days charged to the given year. A leave that crosses
+     * New Year (29/12–3/1) is split by its working days in each year — not charged
+     * whole to the start year.
+     */
     public function annualLeaveTaken(int $year): int
     {
-        return (int) $this->leaveRequests()
-            ->where('status', LeaveStatus::Approved->value)
-            ->where('type', LeaveType::Annual->value)
-            ->whereYear('starts_on', $year)
-            ->sum('days');
+        return self::annualLeaveTakenMap((int) $this->company_id, $year, (int) $this->getKey())[$this->getKey()] ?? 0;
     }
 
     public function annualLeaveRemaining(int $year): int
@@ -111,23 +114,62 @@ class Employee extends Model
     }
 
     /**
-     * Approved κανονική άδεια days per employee of a company for a year, in ONE
-     * query (for lists/calendars — annualLeaveTaken() is the per-record form).
+     * Approved κανονική άδεια days per employee charged to $year, in ONE query
+     * (lists/calendars; annualLeaveTaken() is the per-record form).
      *
      * @return array<int, int> employee_id => days
      */
-    public static function annualLeaveTakenMap(int $companyId, int $year): array
+    public static function annualLeaveTakenMap(int $companyId, int $year, ?int $employeeId = null): array
     {
-        return LeaveRequest::query()
+        $jan1 = CarbonImmutable::create($year, 1, 1);
+        $calendar = WorkingDays::for($companyId);   // one holiday cache for every crossing leave
+
+        $map = [];
+        LeaveRequest::query()
             ->where('company_id', $companyId)
+            ->when($employeeId !== null, fn (Builder $query) => $query->where('employee_id', $employeeId))
             ->where('status', LeaveStatus::Approved->value)
             ->where('type', LeaveType::Annual->value)
-            ->whereYear('starts_on', $year)
-            ->groupBy('employee_id')
-            ->selectRaw('employee_id, SUM(days) as taken')
-            ->pluck('taken', 'employee_id')
-            ->map(fn ($v): int => (int) $v)
-            ->all();
+            ->whereDate('starts_on', '<=', $jan1->endOfYear()->toDateString())
+            ->whereDate('ends_on', '>=', $jan1->toDateString())
+            ->get(['id', 'employee_id', 'starts_on', 'ends_on', 'days'])
+            ->each(function (LeaveRequest $leave) use (&$map, $year, $companyId, $calendar): void {
+                $map[$leave->employee_id] = ($map[$leave->employee_id] ?? 0) + self::daysInYear($leave, $year, $companyId, $calendar);
+            });
+
+        return $map;
+    }
+
+    /**
+     * The part of $leave->days that falls in $year. Split by working days (the
+     * company's calendar) cumulatively, so the yearly parts always add up to the
+     * stored `days` — even when an approver adjusted it by hand.
+     */
+    public static function daysInYear(LeaveRequest $leave, int $year, int $companyId, ?WorkingDays $calendar = null): int
+    {
+        $from = CarbonImmutable::parse($leave->starts_on)->startOfDay();
+        $to = CarbonImmutable::parse($leave->ends_on)->startOfDay();
+        $days = (int) $leave->days;
+        if ((int) $from->format('Y') === $year && (int) $to->format('Y') === $year) {
+            return $days;
+        }
+
+        $calc = $calendar ?? WorkingDays::for($companyId);
+        $total = $calc->count($from, $to);
+        if ($total <= 0) {
+            return (int) $from->format('Y') === $year ? $days : 0;
+        }
+        // Days charged up to the end of year $y (0 before the leave starts).
+        $upTo = function (int $y) use ($calc, $from, $to, $total, $days): int {
+            $end = CarbonImmutable::create($y, 12, 31);
+            if ($end->lt($from)) {
+                return 0;
+            }
+
+            return (int) round($days * $calc->count($from, $end->lt($to) ? $end : $to) / $total);
+        };
+
+        return $upTo($year) - $upTo($year - 1);
     }
 
     /** The employee record of a panel user within a company (null when not staff). */
