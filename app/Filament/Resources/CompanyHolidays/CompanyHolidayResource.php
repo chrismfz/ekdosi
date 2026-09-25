@@ -4,12 +4,14 @@ namespace App\Filament\Resources\CompanyHolidays;
 
 use App\Enums\HolidayRule;
 use App\Filament\Resources\CompanyHolidays\Pages\ManageCompanyHolidays;
+use App\Models\Company;
 use App\Models\CompanyHoliday;
 use App\Support\Hr\GreekHolidays;
 use BackedEnum;
 use Carbon\CarbonImmutable;
 use Filament\Actions\DeleteAction;
 use Filament\Actions\EditAction;
+use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\TextInput;
@@ -47,6 +49,14 @@ class CompanyHolidayResource extends Resource
     protected static ?int $navigationSort = 40;
 
     protected static bool $isGloballySearchable = false;
+
+    /** Only for tenants with the Προσωπικό / ΕΡΓΑΝΗ pillar enabled (Company → «ΕΡΓΑΝΗ»). */
+    public static function canAccess(): bool
+    {
+        return Filament::getTenant() instanceof Company
+            && Filament::getTenant()->hasErgani()
+            && parent::canAccess();
+    }
 
     public static function form(Schema $schema): Schema
     {

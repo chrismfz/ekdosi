@@ -33,6 +33,7 @@ abstract class HrTestCase extends TestCase
             'name' => 'Hr Co', 'slug' => 'hr-'.uniqid(), 'country_code' => 'GR',
             'leave_notify_email' => 'accountant@example.test',
         ]);
+        $this->company->forceFill(['ergani_enabled' => true])->save();
 
         $perms = ['View:LeaveCalendar', 'View:Dashboard', 'ViewAny:Invoice', 'View:Invoice', 'Create:Invoice', 'Update:Invoice'];
         foreach (['LeaveRequest', 'Employee', 'CompanyHoliday'] as $r) {

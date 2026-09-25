@@ -91,8 +91,6 @@ class CompanySettings extends Page implements HasForms
         'auto_email_on_issue',
         'mail_from_address',
         'mail_from_name',
-        // Προσωπικό: the accountant emailed on every approved/cancelled leave.
-        'leave_notify_email',
         // i18n Slice 0: the tenant's fallback communication language (drives emails
         // when a customer has no explicit language/country). Business identity, not
         // a credential → safe to self-serve.
@@ -238,17 +236,6 @@ class CompanySettings extends Page implements HasForms
                             ->helperText('Fallback γλώσσα όταν ο πελάτης δεν έχει ρητή γλώσσα ούτε χώρα (ο πελάτης/η χώρα του υπερισχύουν). Ισχύει στα email· το PDF μένει «παγωμένο» στο έγγραφο.'),
                     ])
                     ->columns(2),
-
-                Section::make('Προσωπικό — άδειες')
-                    ->description('Κάθε άδεια που εγκρίνεται ή ανακαλείται στέλνεται αυτόματα με email εδώ, για να δηλωθεί (μία φορά) στο ΕΡΓΑΝΗ.')
-                    ->schema([
-                        TextInput::make('leave_notify_email')
-                            ->label('Email λογιστή για τις άδειες')
-                            ->email()
-                            ->maxLength(191)
-                            ->placeholder('λογιστής@παράδειγμα.gr')
-                            ->helperText('Κενό = δεν στέλνεται τίποτα (ο λογιστής ενημερώνεται χειροκίνητα).'),
-                    ]),
 
                 $this->remindersSection(),
 

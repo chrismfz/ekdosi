@@ -81,6 +81,12 @@ class Company extends Model
         'support_enabled',
         // Πυλώνας A — Domains pillar per-tenant kill-switch (default off).
         'enable_domain_management',
+        // Προσωπικό / ΕΡΓΑΝΗ pillar per-tenant kill-switch (default off) + the
+        // ΕΡΓΑΝΗ ΙΙ environment and e-ΕΦΚΑ credentials (docs/ergani/README.md).
+        'ergani_enabled',
+        'ergani_mode',
+        'ergani_username',
+        'ergani_password',
         // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
         'mydata_send_item_descr',
         'gsis_username',
@@ -175,6 +181,8 @@ class Company extends Model
             'ai_assistant_enabled' => 'boolean',
             'support_enabled' => 'boolean',
             'enable_domain_management' => 'boolean',
+            'ergani_enabled' => 'boolean',
+            'ergani_password' => MaybeEncrypted::class,
             'ai_monthly_token_cap' => 'integer',
             'ai_api_key' => MaybeEncrypted::class,
             'whmcs_webhook_secret' => MaybeEncrypted::class,
@@ -237,6 +245,16 @@ class Company extends Model
     public function hasDomainManagement(): bool
     {
         return (bool) $this->enable_domain_management;
+    }
+
+    /**
+     * True iff the Προσωπικό / ΕΡΓΑΝΗ pillar (leaves, calendar, employees,
+     * holidays) is enabled for this tenant. Default off — a super-admin flips it
+     * in the «ΕΡΓΑΝΗ» tab of the Company form.
+     */
+    public function hasErgani(): bool
+    {
+        return (bool) $this->ergani_enabled;
     }
 
     /**

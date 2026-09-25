@@ -47,6 +47,7 @@ class LeaveCalendar extends Page
     public static function canAccess(): bool
     {
         return Filament::getTenant() instanceof Company
+            && Filament::getTenant()->hasErgani()
             && (bool) auth()->user()?->can('View:LeaveCalendar');
     }
 

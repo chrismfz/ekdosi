@@ -8,9 +8,11 @@ use App\Filament\Resources\LeaveRequests\Pages\ViewLeaveRequest;
 use App\Filament\Resources\LeaveRequests\Schemas\LeaveRequestForm;
 use App\Filament\Resources\LeaveRequests\Schemas\LeaveRequestInfolist;
 use App\Filament\Resources\LeaveRequests\Tables\LeaveRequestsTable;
+use App\Models\Company;
 use App\Models\LeaveRequest;
 use App\Policies\LeaveRequestPolicy;
 use BackedEnum;
+use Filament\Facades\Filament;
 use Filament\Resources\Resource;
 use Filament\Schemas\Schema;
 use Filament\Support\Icons\Heroicon;
@@ -41,6 +43,14 @@ class LeaveRequestResource extends Resource
     protected static ?int $navigationSort = 10;
 
     protected static bool $isGloballySearchable = false;
+
+    /** Only for tenants with the Προσωπικό / ΕΡΓΑΝΗ pillar enabled (Company → «ΕΡΓΑΝΗ»). */
+    public static function canAccess(): bool
+    {
+        return Filament::getTenant() instanceof Company
+            && Filament::getTenant()->hasErgani()
+            && parent::canAccess();
+    }
 
     /** Non-approvers only ever query their own employee record's requests. */
     public static function getEloquentQuery(): Builder
