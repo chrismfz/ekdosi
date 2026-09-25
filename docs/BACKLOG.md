@@ -13,8 +13,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 Ο κανόνας της σειράς: **η προτεραιότητα ενός finding δεν είναι ιδιότητά του — είναι finding × αυτή η επιχείρηση ×
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
-1. **Delivery notes (ΔΑ) — ΣΕ ΕΞΕΛΙΞΗ:** **«ίδια μέσα»** (Nexon παραδίδει με δικό της όχημα) πριν τις **12/10/2026** +
-   **TARIC στα είδη** πριν την **1/1/2027** (βλ. Roadmap «Delivery notes») · μετά πλήρη **9.1 / 9.2**.
+1. **Delivery notes (ΔΑ)** — «ίδια μέσα» + TARIC ✅ (v2.5.0). Μένουν: **συμπλήρωση TARIC στα είδη αγαθών πριν την
+   1/1/2027** (δεδομένα, όχι κώδικας) · μερική παράδοση (deliveredPackaging) · πλήρη **9.1 / 9.2** (βλ. Roadmap).
 2. **Migration / money tooling:** Bank-statement import → CSV εξόδων (αν χρειαστεί) → Cashflow /
    recurring-expenses (accountant-gated).
 3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
@@ -63,29 +63,16 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   απαντήσει ο λογιστής (σήμερα οι παρακρατήσεις μας είναι 0 → χωρίς πρακτική επίπτωση).
 
 ### 🚚 Delivery notes (Ψηφιακό ΔΑ)
-- **«Ίδια μέσα» — ο εκδότης μεταφέρει ο ίδιος (έρευνα 2026-09-25, ΣΕ ΕΞΕΛΙΞΗ).** Β' Φάση από **12/10/2026** (Α.1094/2026,
-  ΦΕΚ Β' 2445/30.04.2026 → φόρτωση/μεταφόρτωση/παραλαβή). Ρόλοι με ίδια μέσα: εκδότης = αποστολέας, **χωρίς μεταφορέα**
-  (Ε.2030/2025 Πίνακας 1 παρ. 1). Έναρξη = `RegisterTransfer` από όποιον μεταφέρει (DGM v2.0.2 §3.2.1, πραγματικό
-  `vehicleNumber`)· **παράδοση = ο ΠΑΡΑΛΗΠΤΗΣ σκανάρει το QR** (Α.1122/2024 άρθ.3 §4) — ο εκδότης δεν κλείνει ([833],
-  sandbox 13/9). **B2C με ΑΛΠ = χωρίς ΔΑ** (Α.1122 άρθ.2 περ. ι). `withoutDigitalTransportTracking` **δεν** είναι νόμιμη
-  διέξοδος για B2B ίδια μέσα (καμία διάταξη δεν το προβλέπει). Αν ο λήπτης δεν σκανάρει: μένει «σε διακίνηση», χωρίς
-  auto-close/πρόστιμο που να εντοπίστηκε.
-  **Να χτιστεί:** ροή ίδια μέσα (έναρξη + πινακίδα, ευκρινές QR στο PDF για τον πελάτη, λίστα ανεπιβεβαίωτων > Ν ημέρες,
-  refreshStatus) · προειδοποίηση στο «Χωρίς Ψηφιακή Παρακολούθηση» για B2B · **sandbox:** `nonObligatedRecipient` (μη
-  υπόχρεος λήπτης) → μπορεί ο εκδότης-μεταφορέας να δώσει FULL ([832] λέει «μόνο ο μεταφορέας»);
-  Πηγές: https://www.aade.gr/sites/default/files/2026-05/a1094ada.pdf · https://www.taxheaven.gr/circulars/47725/a-1122-2024 ·
-  https://www.aade.gr/sites/default/files/2024-08/A.1123_2024_fek.pdf · https://www.taxheaven.gr/news/70944/pshfiaka-deltia-apostolhs-dieykriniseis-efarmoghs ·
-  https://www.aade.gr/sites/default/files/2026-07/ADA%20%20E%202038.pdf ·
-  https://www.aade.gr/sites/default/files/2026-09/myDATA%20API%20Documentation_DeliveryNote_v2.0.2_official_0.pdf
-- **TARIC / κωδικός είδους στις γραμμές (υποχρεωτικό από 1/1/2027 — Ενιαία Κωδικοποίηση Ειδών, ΚΥΑ ΥΠΕΘΟΟ-ΑΑΔΕ
-  30/4/2026).** myDATA `invoiceDetails.TaricNo` (ακριβώς 10 χαρ.) + `itemCode` (≤50), δεκτά ΜΟΝΟ σε τιμολόγια + δελτία
-  αποστολής/διακίνησης (9.3) — `docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md` §5.4 (γρ. ~1039). Το firebed
-  έχει ήδη `InvoiceDetails::setTaricNo()/setItemCode()`· λείπει πεδίο στο προϊόν (+ snapshot στη γραμμή) και emit στους
-  builders (τιμολόγιο/ΤΔΑ/9.3). Αφορά αγαθά — οι υπηρεσίες hosting δεν έχουν TARIC.
-  **ΣΕ ΕΞΕΛΙΞΗ.** ⚠ Η Α.1123 άρθ.6 λέει **Συνδυασμένη Ονοματολογία (8ψήφια)**, το myDATA θέλει **10** → η επέκταση «00»
-  είναι η συνήθης αλλά **δεν** υπάρχει οδηγία ΑΑΔΕ (το FAQ TARIC v2.0 είναι τελωνειακό) → δοκιμή sandbox. Όλοι οι υπόχρεοι,
-  B2B και B2C, χωρίς εξαίρεση μικρών· αν η επιχείρηση έχει δικούς κωδικούς ειδών, στέλνονται κι αυτοί (άρθ.6 παρ.2 →
-  `itemCode`). Πηγή: https://www.aade.gr/sites/default/files/2026-07/FAQS_tARIC_0.pdf
+- **«Ίδια μέσα» — υπόλοιπα (τα βασικά ✅ v2.5.0, `FEATURES.md §5`).** (1) **Μερική παράδοση** — ConfirmDeliveryOutcome
+  PARTIAL θέλει [814] `deliveredPackaging` (τύπος+ποσότητα συσκευασίας) → μοντέλο συσκευασιών ανά γραμμή. (2) `delivery:refresh-status`
+  χωρίς HealthRecorder streak (ops:health δεν βλέπει μόνιμη αποτυχία) και χωρίς bell όταν ο scheduler βρει ΤΔΑ ακυρωμένο στην
+  ΑΑΔΕ (το ακυρώνει τοπικά σιωπηλά). (3) Group QR (`GenerateGroupQRCode`) — μόνο για πολλά ΔΑ/δρομολόγιο.
+  Πηγές/νομικό πλαίσιο: `docs/delivery-two-party-sandbox.md` §UPDATE 2026-09-25 · Α.1094/2026 · Α.1122/2024 · Ε.2030/2025.
+- **TARIC — υπόλοιπα (✅ v2.5.0: πεδίο είδους, snapshot γραμμής, TaricNo/itemCode σε ΤΔΑ/9.x, sandbox-validated).**
+  (1) **Δεδομένα:** συμπλήρωση `taric_code` στα είδη αγαθών πριν την **1/1/2027**. (2) Η επέκταση 8→10 με «00» είναι η
+  συνήθης· δεν υπάρχει ρητή οδηγία ΑΑΔΕ (https://www.aade.gr/sites/default/files/2026-07/FAQS_tARIC_0.pdf) — αν βγει, άλλαξε
+  `Taric::normalize`. (3) P2: preview XML εκδομένου εγγράφου χωρίς snapshot δείχνει τον ΤΡΕΧΟΝΤΑ κωδικό του είδους· άκυρος
+  κωδικός από CSV φαίνεται μόνο ως [101] στην υποβολή (θέλει προειδοποίηση/preflight).
 - **Β' Φάση (12/10/2026) — από την πλευρά του ΠΑΡΑΛΗΠΤΗ:** η επιβεβαίωση παραλαβής + ποσοτικός/ποιοτικός έλεγχος
   (`ConfirmDeliveryOutcome`, qrUrl-only) = Slice 4c παρακάτω· χρειάζεται μόνο αν tenant παραλαμβάνει αγαθά με ψηφιακό ΔΑ.
 - **Inbound «Εισερχόμενα Διακίνησης»** — 4a+4b ✅ ΧΤΙΣΜΕΝΑ (#540/#566: fetch + Απόρριψη/Έλεγχος/Παραλήφθηκε).
