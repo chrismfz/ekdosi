@@ -92,6 +92,8 @@ class ScheduleSettings extends Page implements HasForms
         'service_dunning_enabled' => ['Dunning υπηρεσιών', 'Auto suspend/terminate ληξιπρόθεσμων συμβολαίων. Πραγματικός διακόπτης = το per-product dunning_enabled.', false],
         'intent_expiry_enabled' => ['Πληρωμές — λήξη εκκρεμών intents', 'Σημειώνει «Έληξε» τα εγκαταλελειμμένα online payment intents της Πύλης πέρα από το όριο, ώστε οι «Εκκρεμείς Πληρωμές Πύλης» να μένουν πραγματικές. Μόνο αλλαγή κατάστασης — μια καθυστερημένη επιβεβαίωση εξοφλεί κανονικά.', false],
         'ai_reminders_enabled' => ['AI Βοηθός — υπενθυμίσεις', 'Παραδίδει τις ώριμες (operator-confirmed) υπενθυμίσεις του AI «Βοηθού» ως ειδοποιήσεις-καμπανάκι. Τρέχει κάθε λεπτό.', false],
+        // Προσωπικό / ΕΡΓΑΝΗ
+        'ergani_watch_enabled' => ['ΕΡΓΑΝΗ — φύλακας ψηφιακής κάρτας', 'Μία φορά την εβδομάδα ρωτά το ΕΡΓΑΝΗ (Παραγωγή, μόνο ανάγνωση) αν η εταιρεία εντάχθηκε στην Ψηφιακή Κάρτα Εργασίας· ειδοποιεί τους διαχειριστές την ημέρα που θα γίνει «ναι». Δεν δηλώνει τίποτα.', false],
         // Υποστήριξη & domains
         'tickets_poll_imap_enabled' => ['Υποστήριξη — polling email (IMAP)', 'Διαβάζει τα mailboxes των τμημάτων υποστήριξης (IMAP) και δρομολογεί εισερχόμενα email σε tickets.', false],
         'domain_sync_enabled' => ['Συγχρονισμός domains', 'Συγχρονίζει καταστάσεις/λήξεις domains (νυχτερινό).', false],
@@ -112,6 +114,7 @@ class ScheduleSettings extends Page implements HasForms
         'myDATA — μητρώα (προμηθευτές/πελάτες)' => ['suppliers_sync_enabled', 'customers_sync_enabled', 'aade_status_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
         'Υπηρεσίες & ειδοποιήσεις' => ['overdue_notifications_enabled', 'invoice_reminders_enabled', 'leads_notify_due_enabled', 'service_renewals_enabled', 'service_dunning_enabled', 'intent_expiry_enabled', 'ai_reminders_enabled'],
+        'Προσωπικό / ΕΡΓΑΝΗ' => ['ergani_watch_enabled'],
         'Υποστήριξη & domains' => ['tickets_poll_imap_enabled', 'domain_sync_enabled'],
         'Αναφορές' => ['dashboard_metrics_enabled'],
     ];
@@ -150,6 +153,7 @@ class ScheduleSettings extends Page implements HasForms
         'backup_cleanup_cron' => ['Backup — καθαρισμός', 'cron'],
         'backup_monitor_cron' => ['Backup — παρακολούθηση', 'cron'],
         'company_backups_cron' => ['Backup ανά εταιρία', 'cron'],
+        'ergani_watch_cron' => ['ΕΡΓΑΝΗ — φύλακας ψηφιακής κάρτας', 'cron'],
         'tickets_poll_imap_cron' => ['Υποστήριξη — polling email', 'cron'],
         'domain_sync_cron' => ['Συγχρονισμός domains', 'cron'],
         'dashboard_metrics_cron' => ['Αναφορές — προθέρμανση cache', 'cron'],

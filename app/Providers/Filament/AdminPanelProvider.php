@@ -9,6 +9,7 @@ use App\Filament\Pages\MySessions;
 use App\Http\Middleware\RestrictErganiStaff;
 use App\Models\Company;
 use App\Support\BuildInfo;
+use App\Support\Hr\ErganiTrialBar;
 use App\Support\Settings\SystemSettings;
 use App\Support\TwoFactor\AppAuthentication;
 use BezhanSalleh\FilamentShield\FilamentShieldPlugin;
@@ -154,6 +155,14 @@ class AdminPanelProvider extends PanelProvider
                 fn (): string => Assistant::assistantAvailable()
                     ? Blade::render('@livewire(\'assistant-widget\')')
                     : '',
+            )
+            // «ΔΟΚΙΜΑΣΤΙΚΟ ΕΡΓΑΝΗ» bar on the Προσωπικό screens that DECLARE something,
+            // while the tenant is in the trial environment with any auto-declaration on
+            // — nobody should mistake a trial protocol for a real declaration.
+            ->renderHook(
+                PanelsRenderHook::PAGE_START,
+                fn (): string => ErganiTrialBar::html(),
+                scopes: ErganiTrialBar::PAGES,
             )
             // Build/version badge under the brand — the deployed identity
             // (v{SemVer} · {build stamp}) always in view for support/diagnostics.

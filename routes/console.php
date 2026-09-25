@@ -187,6 +187,18 @@ $trackSchedule(
     'whmcs_auto_issue'
 );
 
+// ergani:watch — weekly READ-ONLY ΕΡΓΑΝΗ check: is the employer now in the
+// Ψηφιακή Κάρτα sector (EX_BASE_01, production)? Stores it, bells admins on
+// the flip. Declares nothing — ON by default.
+$trackSchedule(
+    Schedule::command('ergani:watch')
+        ->cron($scheduleCron('ergani_watch_cron', '15 7 * * 1'))
+        ->name('ergani-watch')
+        ->when(fn () => $scheduleEnabled('ergani_watch_enabled'))
+        ->withoutOverlapping(30),
+    'ergani_watch'
+);
+
 // tickets:poll-imap — poll each support-enabled tenant's mail-configured
 // department mailboxes and route inbound email into tickets (Πυλώνας E). Reads
 // only, files nothing at AADE; the command isolates each department. OFF by

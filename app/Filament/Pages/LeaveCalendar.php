@@ -2,9 +2,11 @@
 
 namespace App\Filament\Pages;
 
+use App\Filament\Resources\OvertimeDeclarations\OvertimeDeclarationResource;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
+use App\Models\OvertimeDeclaration;
 use App\Policies\LeaveRequestPolicy;
 use App\Support\Hr\WorkingDays;
 use BackedEnum;
@@ -144,7 +146,7 @@ class LeaveCalendar extends Page
     /**
      * Rows: employees with their visible leave per day.
      *
-     * @return list<array{id: int, name: string, entitlement: int, cells: array<string, array{label: string, title: string, class: string}>, remaining: ?int}>
+     * @return list<array{id: int, name: string, entitlement: int, cells: array<string, array{label: string, title: string, class: string}>, ot: array<string, array{label: string, title: string, warn: bool}>, remaining: ?int}>
      */
     protected function rows(): array
     {
@@ -172,9 +174,18 @@ class LeaveCalendar extends Page
             ->get();
 
         $byEmployee = $leaves->groupBy('employee_id');
+        // Declared υπερωρίες of the month (not the retired «superseded» attempts) —
+        // shown to approvers and to the employee themself, like the leave type.
+        $overtime = OvertimeDeclaration::query()
+            ->where('company_id', $tenant->getKey())
+            ->whereBetween('work_date', [$from->toDateString(), $to->toDateString()])
+            ->where(fn ($q) => $q->whereNull('ergani_status')->orWhere('ergani_status', '!=', 'superseded'))
+            ->orderBy('from_time')
+            ->get()
+            ->groupBy('employee_id');
         $taken = Employee::annualLeaveTakenMap((int) $tenant->getKey(), (int) $from->format('Y'));
 
-        return $employees->map(function (Employee $e) use ($byEmployee, $approver, $me, $taken, $from, $to): array {
+        return $employees->map(function (Employee $e) use ($byEmployee, $overtime, $approver, $me, $taken, $from, $to): array {
             $mine = (int) $e->user_id === $me;
             $cells = [];
 
@@ -196,11 +207,26 @@ class LeaveCalendar extends Page
                 }
             }
 
+            $ot = [];
+            if ($approver || $mine) {
+                foreach ($overtime->get($e->id, collect())->groupBy(fn (OvertimeDeclaration $o): string => $o->work_date->toDateString()) as $day => $slots) {
+                    $minutes = $slots->sum(fn (OvertimeDeclaration $o): int => OvertimeDeclaration::minutes($o->from_time, $o->to_time));
+                    $warn = $slots->contains(fn (OvertimeDeclaration $o): bool => $o->ergani_status !== 'submitted');
+                    $ot[$day] = [
+                        'label' => '+'.intdiv($minutes, 60).($minutes % 60 ? ':'.str_pad((string) ($minutes % 60), 2, '0', STR_PAD_LEFT) : '').'ω',
+                        'title' => 'Υπερωρία '.$slots->map(fn (OvertimeDeclaration $o): string => $o->from_time.'–'.$o->to_time
+                            .' · '.OvertimeDeclarationResource::erganiLabel($o).($o->ergani_protocol ? ' (πρωτ. '.$o->ergani_protocol.')' : ''))->implode(' / '),
+                        'warn' => $warn,
+                    ];
+                }
+            }
+
             return [
                 'id' => (int) $e->id,
                 'name' => $e->full_name,
                 'entitlement' => (int) $e->annual_leave_days,
                 'cells' => $cells,
+                'ot' => $ot,
                 'remaining' => ($approver || $mine) ? $e->annual_leave_days - ($taken[$e->id] ?? 0) : null,
             ];
         })->all();

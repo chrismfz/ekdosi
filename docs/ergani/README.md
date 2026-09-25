@@ -57,6 +57,12 @@
   2026-09-26:** `f_type` **`ΥΠ`** δεκτό (πρωτ. `ΑΚ - ΟΡ…`)· slot που έχει ήδη ξεκινήσει → **400 «Η υποβολή σας θεωρείται
   εκπρόθεσμη»** → το ekdosi το απορρίπτει πριν καλέσει. Δεν ανακαλείται μέσω API (μόνο `WTOLeave`/`WTOLeaveC`).
 - **Παράμετροι services:** `Parameters: [{ParameterName, ParameterValue}]` (επαληθευμένο — ΟΧΙ `Name`/`Value`).
+- **`EX_BASE_07` (ημερολόγιο πραγματικής απασχόλησης) / `EX_BASE_08` (τρέχουσα ψηφιακή οργάνωση χρόνου)** — δοκιμή στην
+  **Παραγωγή 2026-09-26** (μόνο ανάγνωση), `PararthmaAa=0`, `Date=dd/mm/yyyy`: **400 «Criteria doesn't meet requirements»**
+  (και στο trial). Η μορφή είναι σωστή (`20260925` → «Parameter Date Invalid Form»· ISO με ώρα → «should contain 2
+  arguments»), άρα το 400 είναι **επιλεξιμότητα**: οι υπηρεσίες αφορούν την ψηφιακή οργάνωση χρόνου — εργοδότες στην κάρτα
+  (MyIP: `IsInCardSector=0`). Ο φύλακας `ergani:watch` ειδοποιεί όταν αλλάξει. `EX_BASE_04` → «Service Code is not
+  authenticate to specific User».
 - **Services** (`schemas/ServicesList.json`): `EX_BASE_05` τρέχον δυναμικό (`afm` προαιρετικό) → **import εργαζομένων**
   (✅ υλοποιήθηκε — `ErganiEmployeeImporter`). **Επαληθεύτηκε στην Παραγωγή 2026-09-25** (μόνο ανάγνωση): απάντηση
   `{"EX_BASE_05":{"Cur":[…]}}`, ανά εργαζόμενο `afm`, `Eponimo`, `Onoma` (κεφαλαία χωρίς τόνους), `PararthmaAa`, `DateFrom`
