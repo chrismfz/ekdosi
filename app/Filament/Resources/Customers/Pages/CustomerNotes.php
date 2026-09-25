@@ -120,7 +120,6 @@ class CustomerNotes extends Page implements HasTable
                         ->where('title', 'like', "%{$search}%")
                         ->orWhere('body', 'like', "%{$search}%")),
             ])
-            ->contentGrid(['default' => 1])
             ->filters([
                 SelectFilter::make('kind')
                     ->label('Είδος')
