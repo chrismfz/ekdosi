@@ -122,6 +122,7 @@ class Employee extends Model
     public static function annualLeaveTakenMap(int $companyId, int $year, ?int $employeeId = null): array
     {
         $jan1 = CarbonImmutable::create($year, 1, 1);
+        $calendar = WorkingDays::for($companyId);   // one holiday cache for every crossing leave
 
         $map = [];
         LeaveRequest::query()
@@ -132,8 +133,8 @@ class Employee extends Model
             ->whereDate('starts_on', '<=', $jan1->endOfYear()->toDateString())
             ->whereDate('ends_on', '>=', $jan1->toDateString())
             ->get(['id', 'employee_id', 'starts_on', 'ends_on', 'days'])
-            ->each(function (LeaveRequest $leave) use (&$map, $year, $companyId): void {
-                $map[$leave->employee_id] = ($map[$leave->employee_id] ?? 0) + self::daysInYear($leave, $year, $companyId);
+            ->each(function (LeaveRequest $leave) use (&$map, $year, $companyId, $calendar): void {
+                $map[$leave->employee_id] = ($map[$leave->employee_id] ?? 0) + self::daysInYear($leave, $year, $companyId, $calendar);
             });
 
         return $map;
@@ -144,7 +145,7 @@ class Employee extends Model
      * company's calendar) cumulatively, so the yearly parts always add up to the
      * stored `days` — even when an approver adjusted it by hand.
      */
-    public static function daysInYear(LeaveRequest $leave, int $year, int $companyId): int
+    public static function daysInYear(LeaveRequest $leave, int $year, int $companyId, ?WorkingDays $calendar = null): int
     {
         $from = CarbonImmutable::parse($leave->starts_on)->startOfDay();
         $to = CarbonImmutable::parse($leave->ends_on)->startOfDay();
@@ -153,7 +154,7 @@ class Employee extends Model
             return $days;
         }
 
-        $calc = WorkingDays::for($companyId);
+        $calc = $calendar ?? WorkingDays::for($companyId);
         $total = $calc->count($from, $to);
         if ($total <= 0) {
             return (int) $from->format('Y') === $year ? $days : 0;
