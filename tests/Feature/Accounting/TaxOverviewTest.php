@@ -135,6 +135,17 @@ class TaxOverviewTest extends TestCase
         $this->assertFalse($svc->forYear(2025)['expense_warning']);             // 5.000 of 10.500
     }
 
+    public function test_on_the_last_day_of_the_year_the_headline_is_the_full_year(): void
+    {
+        Carbon::setTestNow('2026-12-31 18:00:00');
+        $this->invoice('2026-03-10', 5000, 6200);
+
+        $e = (new IncomeTaxEstimate($this->tenant))->forYear(2026);
+        $this->assertNull($e['projection']);                                    // nothing left to project
+        $this->assertEqualsWithDelta($e['payable'], $e['headline_payable'], 0.001);
+        $this->assertEqualsWithDelta($e['payable'], $e['monthly_saving'], 0.001); // December: one month left
+    }
+
     public function test_no_projection_before_a_month_of_data(): void
     {
         Carbon::setTestNow('2026-01-10 10:00:00');

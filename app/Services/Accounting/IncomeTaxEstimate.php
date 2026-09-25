@@ -95,7 +95,11 @@ class IncomeTaxEstimate
         // year: the 31/12 projection — the year-to-date payable subtracts the FULL
         // prior prepayment from a PARTIAL year's tax, which reads as a fake refund
         // until ~mid-year. No projection yet (first month) → null, «λίγα δεδομένα».
-        $out['headline_payable'] = $core['is_current'] ? ($out['projection']['payable'] ?? null) : $out['payable'];
+        // On 31/12 the year-to-date IS the full year (no projection needed).
+        $yearComplete = $core['is_current'] && $today->dayOfYear === $today->daysInYear;
+        $out['headline_payable'] = $core['is_current'] && ! $yearComplete
+            ? ($out['projection']['payable'] ?? null)
+            : $out['payable'];
 
         // Running year only: spread what we'll owe over the months left in the
         // year (incl. this one), so it's put aside by 31/12. Null for closed years.

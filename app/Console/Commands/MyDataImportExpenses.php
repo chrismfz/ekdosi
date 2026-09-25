@@ -45,16 +45,24 @@ class MyDataImportExpenses extends Command
     public function handle(): int
     {
         $key = (string) $this->option('tenant');
-        $tenant = $key === '' ? null : Company::query()
-            ->where(fn ($q) => $q->where('slug', $key)->orWhere('id', ctype_digit($key) ? (int) $key : 0))
-            ->first();
+        // Slug first, then a numeric id — never an OR that could match two tenants.
+        $tenant = $key === '' ? null
+            : (Company::query()->where('slug', $key)->first()
+                ?? (ctype_digit($key) ? Company::query()->find((int) $key) : null));
         if (! $tenant) {
             $this->error('Δώστε υπαρκτή εταιρία: --tenant=SLUG');
 
             return self::FAILURE;
         }
 
-        $years = array_values(array_unique(array_map('intval', (array) $this->option('year'))));
+        $raw = (array) $this->option('year');
+        // Reject anything but a plain year: intval('2023,2024') would silently import only 2023.
+        if (array_filter($raw, fn ($y) => ! ctype_digit((string) $y)) !== []) {
+            $this->error('Κάθε --year πρέπει να είναι ένα έτος (π.χ. --year=2023 --year=2024).');
+
+            return self::FAILURE;
+        }
+        $years = array_values(array_unique(array_map('intval', $raw)));
         sort($years);
         $thisYear = (int) now()->year;
         if ($years === [] || array_filter($years, fn (int $y) => $y < 2019 || $y > $thisYear) !== []) {

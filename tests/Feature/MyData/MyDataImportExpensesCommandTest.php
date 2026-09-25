@@ -73,6 +73,7 @@ class MyDataImportExpensesCommandTest extends TestCase
         $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug])->assertFailed();
         $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2030']])->assertFailed();
         $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2025'], '--only' => 'x'])->assertFailed();
+        $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2023,2024']])->assertFailed(); // not a silent «2023 only»
     }
 
     /** N DISTINCT responses — a Response body is a one-shot stream, so reusing one instance reads empty. */
