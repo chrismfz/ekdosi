@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Employee;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 
 /**
  * «Εισαγωγή από ΕΡΓΑΝΗ» — reads the employer's CURRENT roster (EX_BASE_05
@@ -28,7 +29,7 @@ class ErganiEmployeeImporter
     public const DELETED = 'deleted';
 
     /**
-     * @return list<array{afm: string, last_name: string, first_name: string, branch: int, hired_at: ?string}>
+     * @return list<array{afm: string, last_name: string, first_name: string, branch: int, hired_at: ?string, multi_branch: bool}>
      */
     public function fetch(Company $company): array
     {
@@ -36,19 +37,35 @@ class ErganiEmployeeImporter
         $production->ergani_mode = 'production';   // in memory only — never saved
 
         $rows = (array) data_get((new ErganiClient($production))->service('EX_BASE_05'), 'EX_BASE_05.Cur', []);
+        if (isset($rows['afm'])) {
+            $rows = [$rows];   // a single employee may come back as an object, not a list
+        }
 
         $out = [];
         foreach ($rows as $row) {
             $afm = trim((string) data_get($row, 'afm'));
+            $branch = (int) data_get($row, 'PararthmaAa', 0);
             if (! preg_match('/^\d{9}$/', $afm)) {
+                continue;
+            }
+            if ($branch < 0 || $branch > 255) {
+                Log::warning('ΕΡΓΑΝΗ import: branch out of range, row skipped', ['company' => $company->getKey(), 'branch' => $branch]);
+
+                continue;
+            }
+            if (isset($out[$afm])) {
+                // Same person in two παραρτήματα: keep the first, flag it — the operator picks.
+                $out[$afm]['multi_branch'] = true;
+
                 continue;
             }
             $out[$afm] = [
                 'afm' => $afm,
                 'last_name' => self::title((string) data_get($row, 'Eponimo')),
                 'first_name' => self::title((string) data_get($row, 'Onoma')),
-                'branch' => max(0, min(255, (int) data_get($row, 'PararthmaAa', 0))),
+                'branch' => $branch,
                 'hired_at' => self::date(data_get($row, 'DateFrom')),
+                'multi_branch' => false,
             ];
         }
 
@@ -72,6 +89,7 @@ class ErganiEmployeeImporter
             $planned[] = $row + [
                 'status' => $e === null ? self::NEW : ($e->trashed() ? self::DELETED : self::EXISTS),
                 'local_name' => $e?->full_name,
+                'local_inactive' => $e !== null && ! $e->trashed() && ! $e->is_active,
             ];
         }
 

@@ -53,7 +53,7 @@ class ErganiEmployeeImportTest extends HrTestCase
 
         $rows = app(ErganiEmployeeImporter::class)->fetch($this->company);
 
-        $this->assertSame([['afm' => '123456789', 'last_name' => 'Αντωνιου', 'first_name' => 'Ηλιας', 'branch' => 1, 'hired_at' => '2021-03-01']], $rows);
+        $this->assertSame([['afm' => '123456789', 'last_name' => 'Αντωνιου', 'first_name' => 'Ηλιας', 'branch' => 1, 'hired_at' => '2021-03-01', 'multi_branch' => false]], $rows);
         $this->assertNotEmpty($this->urls);
         foreach ($this->urls as $url) {
             $this->assertStringStartsWith(ErganiClient::PRODUCTION_URL, $url);
@@ -129,5 +129,47 @@ class ErganiEmployeeImportTest extends HrTestCase
         Livewire::test(ListEmployees::class)->assertActionVisible('importFromErgani')->call('$refresh');
 
         $this->assertSame([], $this->urls, 'only opening the modal may read ΕΡΓΑΝΗ');
+    }
+
+    public function test_a_single_employee_object_is_read_as_one_row(): void
+    {
+        Http::fake(fn (Request $r) => str_ends_with($r->url(), '/Authentication')
+            ? Http::response(['accessToken' => 'tok'])
+            : Http::response(['EX_BASE_05' => ['Cur' => $this->row('123456789', 'ΜΟΝΟΣ', 'ΕΝΑΣ')]]));
+        $this->assertSame('123456789', app(ErganiEmployeeImporter::class)->fetch($this->company)[0]['afm'], 'single object → one row');
+    }
+
+    public function test_duplicate_afm_is_flagged_and_bad_branch_skipped(): void
+    {
+        $this->fake([$this->row('123456789', 'Α', 'Β', 1), $this->row('123456789', 'Α', 'Β', 2), $this->row('222222222', 'Γ', 'Δ', 999)]);
+        $rows = app(ErganiEmployeeImporter::class)->fetch($this->company);
+        $this->assertCount(1, $rows, 'out-of-range branch skipped');
+        $this->assertSame([1, true], [$rows[0]['branch'], $rows[0]['multi_branch']]);
+    }
+
+    public function test_lookup_errors_never_echo_the_raw_body(): void
+    {
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        Http::fake(function (Request $r) {
+            $this->urls[] = $r->url();
+
+            return str_ends_with($r->url(), '/Authentication')
+                ? Http::response(['accessToken' => 'tok'])
+                : Http::response('<html>Amka 01018012345</html>', 500);
+        });
+        try {
+            app(ErganiEmployeeImporter::class)->fetch($this->company);
+            $this->fail('expected an exception');
+        } catch (\RuntimeException $e) {
+            $this->assertStringNotContainsString('01018012345', $e->getMessage());
+        }
+    }
+
+    public function test_modal_open_rerender_and_cancel_read_ergani_once(): void
+    {
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        $this->fake([$this->row('111111111', 'ΝΕΟΣ', 'ΠΡΩΤΟΣ')]);
+        Livewire::test(ListEmployees::class)->mountAction('importFromErgani')->call('$refresh')->unmountAction();
+        $this->assertCount(1, array_filter($this->urls, fn (string $u) => str_ends_with($u, '/ExecuteService')), 'open + re-render + cancel = one ΕΡΓΑΝΗ read');
     }
 }

@@ -80,7 +80,11 @@ class ErganiClient
         ]));
 
         if (! $response->successful()) {
-            throw new RuntimeException('Το ΕΡΓΑΝΗ απάντησε '.$response->status().': '.$this->message($response->json(), $response->body()));
+            // Never echo a lookup's raw body (it may carry personal data) — only ΕΡΓΑΝΗ's own message.
+            $json = $response->json();
+            $msg = is_array($json) && is_string($json['message'] ?? null) ? $this->message($json, '') : 'χωρίς μήνυμα';
+
+            throw new RuntimeException('Το ΕΡΓΑΝΗ απάντησε '.$response->status().': '.$msg);
         }
 
         return (array) $response->json();

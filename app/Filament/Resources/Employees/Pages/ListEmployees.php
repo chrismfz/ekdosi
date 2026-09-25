@@ -14,9 +14,11 @@ use Filament\Facades\Filament;
 use Filament\Forms\Components\CheckboxList;
 use Filament\Forms\Components\Placeholder;
 use Filament\Notifications\Notification;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\HtmlString;
 
 class ListEmployees extends BaseListRecords
@@ -62,10 +64,15 @@ class ListEmployees extends BaseListRecords
             ->fillForm(fn (): array => ['afms' => collect($this->plan()['rows'] ?? [])
                 ->where('status', ErganiEmployeeImporter::NEW)->pluck('afm')->values()->all()])
             ->schema(fn (): array => $this->importSchema())
-            ->action(function (array $data): void {
+            ->action(function (array $data, Action $action): void {
+                if ($this->plan() === null) {
+                    Notification::make()->title('Δεν έγινε εισαγωγή')->body($this->erganiError ?? 'Το ΕΡΓΑΝΗ δεν απάντησε.')->danger()->send();
+                    $action->halt();
+                }
                 try {
-                    $r = app(ErganiEmployeeImporter::class)->apply($this->tenant(), array_values((array) ($data['afms'] ?? [])), $this->plan()['rows'] ?? null);
-                } catch (UniqueConstraintViolationException) {
+                    // Fresh server-side read at submit (the preview may be up to a minute old).
+                    $r = app(ErganiEmployeeImporter::class)->apply($this->tenant(), array_values((array) ($data['afms'] ?? [])));
+                } catch (UniqueConstraintViolationException|QueryException) {
                     Notification::make()->title('Κάποιος άλλος εισήγαγε ταυτόχρονα τους ίδιους εργαζόμενους — ανανεώστε και ξαναδοκιμάστε.')->warning()->send();
 
                     return;
@@ -98,8 +105,9 @@ class ListEmployees extends BaseListRecords
             $descriptions[$row['afm']] = match ($row['status']) {
                 ErganiEmployeeImporter::NEW => 'Νέος — θα προστεθεί'.($row['hired_at'] ? ' (πρόσληψη '.date('d/m/Y', strtotime($row['hired_at'])).')' : ''),
                 ErganiEmployeeImporter::DELETED => 'Υπάρχει στους διαγραμμένους — δεν αλλάζει (επαναφορά χειροκίνητα)',
-                default => 'Υπάρχει ως «'.$row['local_name'].'» — ενημερώνεται μόνο παράρτημα/ημ. πρόσληψης',
-            }.($row['branch'] ? ' · παράρτημα '.$row['branch'] : '');
+                default => 'Υπάρχει ως «'.$row['local_name'].'»'.($row['local_inactive'] ? ' (ανενεργός εδώ)' : '').' — ενημερώνεται μόνο παράρτημα/ημ. πρόσληψης',
+            }.($row['branch'] ? ' · παράρτημα '.$row['branch'] : '')
+                .($row['multi_branch'] ? ' · ⚠ δηλωμένος σε πολλά παραρτήματα — ελέγξτε το παράρτημα στην καρτέλα του' : '');
         }
 
         $schema = [
@@ -128,13 +136,21 @@ class ListEmployees extends BaseListRecords
     private function plan(): ?array
     {
         // Raw state, not getMountedAction(): resolving the action would evaluate this schema again (recursion).
-        if ((Arr::last($this->mountedActions)['name'] ?? null) !== 'importFromErgani') {
+        // mountedActions is client-writable, so re-check who may import before any ΕΡΓΑΝΗ call.
+        if ((Arr::last($this->mountedActions)['name'] ?? null) !== 'importFromErgani'
+            || ! (auth()->user()?->can('create', Employee::class) ?? false)
+            || blank($this->tenant()->ergani_username) || blank($this->tenant()->ergani_password)) {
             return null;
         }
         if ($this->erganiPlan === null && $this->erganiError === null) {
             try {
                 $importer = app(ErganiEmployeeImporter::class);
-                $this->erganiPlan = $importer->plan($this->tenant(), $importer->fetch($this->tenant()));
+                // The modal re-renders on every Livewire round-trip (open, cancel, submit):
+                // cache the READ for a minute per user+tenant so that's one ΕΡΓΑΝΗ call,
+                // not one per click. The submit itself re-reads fresh (apply()).
+                $rows = Cache::remember('ergani.ex05.'.$this->tenant()->getKey().'.'.auth()->id(), 60,
+                    fn (): array => $importer->fetch($this->tenant()));
+                $this->erganiPlan = $importer->plan($this->tenant(), $rows);
             } catch (\RuntimeException|ConnectionException $e) {
                 $this->erganiError = $e instanceof ConnectionException ? 'Το ΕΡΓΑΝΗ δεν απαντά — δοκιμάστε ξανά σε λίγο.' : $e->getMessage();
             }
