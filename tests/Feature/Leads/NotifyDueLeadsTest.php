@@ -8,6 +8,7 @@ use App\Models\Lead;
 use App\Models\User;
 use Illuminate\Console\Scheduling\Schedule;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Gate;
 use Tests\TestCase;
 
@@ -30,6 +31,10 @@ class NotifyDueLeadsTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
+
+        // Pin the clock mid-day (app timezone): «later today» is endOfDay()->subMinute(),
+        // which a run in the last minute of the day would already see as overdue.
+        $this->travelTo(Carbon::parse('2026-09-25 12:00:00', 'Europe/Athens'));
 
         $this->tenant = Company::create(['name' => 'Due Co', 'slug' => 'nd-'.uniqid(), 'country_code' => 'GR']);
         $this->anna = User::create(['name' => 'Άννα', 'email' => 'anna-'.uniqid().'@t.l', 'password' => bcrypt('x')]);
