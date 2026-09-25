@@ -170,7 +170,7 @@ class LeaveAccessTest extends HrTestCase
         }
 
         $rows = Livewire::test(LeaveCalendar::class)->viewData('rows');
-        $this->assertSame(['id', 'name', 'entitlement', 'cells', 'remaining'], array_keys($rows[0]));
+        $this->assertSame(['id', 'name', 'entitlement', 'cells', 'ot', 'remaining'], array_keys($rows[0]));
         $this->assertStringNotContainsString('ΙΔΙΩΤΙΚΟ', json_encode($rows));
     }
 

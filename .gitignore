@@ -40,3 +40,6 @@ Thumbs.db
 
 # sandbox / test-run scratch outputs — never commit
 *sandbox-results.txt
+
+# Claude Code worktrees (spawned task sessions) — never part of the repo
+/.claude/worktrees/
