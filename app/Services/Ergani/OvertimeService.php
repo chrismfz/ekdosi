@@ -14,6 +14,7 @@ use App\Services\TenantMailerFactory;
 use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -60,6 +61,9 @@ class OvertimeService
         if (blank($employee->afm)) {
             throw new OvertimeRefused('Λείπει ο ΑΦΜ του εργαζομένου — συμπληρώστε τον στην καρτέλα του.');
         }
+        if (LeaveErganiSubmitter::erganiName((string) $employee->last_name, 50) === '' || LeaveErganiSubmitter::erganiName((string) $employee->first_name, 30) === '') {
+            throw new OvertimeRefused('Λείπει επώνυμο ή όνομα του εργαζομένου — το ΕΡΓΑΝΗ τα απαιτεί.');
+        }
         if (! preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $from) || ! preg_match('/^([01]\d|2[0-3]):[0-5]\d$/', $to)) {
             throw new OvertimeRefused('Οι ώρες γράφονται ΩΩ:ΛΛ (π.χ. 18:00).');
         }
@@ -74,15 +78,14 @@ class OvertimeService
         // overlap check and declare the same hours twice — a WTOOv can't be withdrawn.
         $declaration = DB::transaction(function () use ($employee, $starts, $from, $to, $note, $userId): OvertimeDeclaration {
             Employee::query()->withoutGlobalScopes()->whereKey($employee->getKey())->lockForUpdate()->first();
-            $overlap = OvertimeDeclaration::query()->withoutGlobalScopes()
-                ->where('employee_id', $employee->getKey())
-                ->whereDate('work_date', $starts->toDateString())
-                ->where(fn ($q) => $q->whereNull('ergani_status')->orWhereIn('ergani_status', ['submitted', 'submitting', 'unknown']))
-                ->where('from_time', '<', $to)->where('to_time', '>', $from)
-                ->exists();
-            if ($overlap) {
+            $mode = (string) $employee->company->ergani_mode;
+            if (self::overlapping((int) $employee->getKey(), $starts->toDateString(), $from, $to, $mode)->exists()) {
                 throw new OvertimeRefused('Υπάρχει ήδη δηλωμένη υπερωρία του εργαζομένου που επικαλύπτει αυτές τις ώρες.');
             }
+            // An older FAILED attempt for these hours is replaced by this one — retire
+            // it so its «Δήλωση στο ΕΡΓΑΝΗ» retry can never declare the same hours again.
+            self::overlapping((int) $employee->getKey(), $starts->toDateString(), $from, $to, $mode, ['failed'])
+                ->update(['ergani_status' => 'superseded', 'updated_at' => now()]);
 
             return OvertimeDeclaration::create([
                 'company_id' => $employee->company_id,
@@ -109,14 +112,31 @@ class OvertimeService
             return false;
         }
 
-        $claimed = OvertimeDeclaration::query()->withoutGlobalScopes()
-            ->whereKey($declaration->getKey())
-            ->where(fn ($q) => $q
-                ->when(! $confirmedUnknown, fn ($q) => $q->whereNull('ergani_status')->orWhere('ergani_status', 'failed'))
-                ->when($confirmedUnknown, fn ($q) => $q->where('ergani_status', 'unknown')
-                    ->orWhere(fn ($q) => $q->where('ergani_status', 'submitting')
-                        ->where('updated_at', '<', now()->subMinutes(LeaveErganiSubmitter::CLAIM_STALE_MINUTES)))))
-            ->update(['ergani_status' => 'submitting', 'ergani_env' => $company->ergani_mode, 'updated_at' => now()]);
+        // Claim under the employee lock AND re-check overlaps (excluding itself): a
+        // retry of an old row must never re-declare hours another row already holds.
+        $claimed = DB::transaction(function () use ($declaration, $company, $confirmedUnknown): int|string {
+            Employee::query()->withoutGlobalScopes()->whereKey($declaration->employee_id)->lockForUpdate()->first();
+            $clash = self::overlapping((int) $declaration->employee_id, $declaration->work_date->toDateString(),
+                $declaration->from_time, $declaration->to_time, (string) $company->ergani_mode)
+                ->whereKeyNot($declaration->getKey())->exists();
+            if ($clash) {
+                return 'clash';
+            }
+
+            return OvertimeDeclaration::query()->withoutGlobalScopes()
+                ->whereKey($declaration->getKey())
+                ->where(fn ($q) => $q
+                    ->when(! $confirmedUnknown, fn ($q) => $q->whereNull('ergani_status')->orWhere('ergani_status', 'failed'))
+                    ->when($confirmedUnknown, fn ($q) => $q->where('ergani_status', 'unknown')
+                        ->orWhere(fn ($q) => $q->where('ergani_status', 'submitting')
+                            ->where('updated_at', '<', now()->subMinutes(LeaveErganiSubmitter::CLAIM_STALE_MINUTES)))))
+                ->update(['ergani_status' => 'submitting', 'ergani_env' => $company->ergani_mode, 'updated_at' => now()]);
+        });
+        if ($claimed === 'clash') {
+            $declaration->forceFill(['ergani_status' => 'superseded', 'ergani_error' => 'Οι ίδιες ώρες είναι ήδη σε άλλη δήλωση υπερωρίας — δεν ξαναστάλθηκε.'])->saveQuietly();
+
+            return false;
+        }
         if ($claimed === 0) {
             return false;
         }
@@ -145,8 +165,12 @@ class OvertimeService
 
         if (! $result['ok']) {
             if (in_array($result['status'], LeaveErganiSubmitter::DEFINITE_REJECTIONS, true)) {
-                $this->audit($declaration, $payload, $result, $userId);
-                $ok = $this->fail($declaration, (string) ($result['message'] ?? 'Άγνωστο σφάλμα ΕΡΓΑΝΗ'));
+                $ok = $this->fail($declaration, (string) ($result['message'] ?? 'Άγνωστο σφάλμα ΕΡΓΑΝΗ'));   // status first
+                try {
+                    $this->audit($declaration, $payload, $result, $userId);
+                } catch (\Throwable $e) {
+                    Log::error('ΕΡΓΑΝΗ overtime audit failed', ['overtime' => $declaration->getKey(), 'error' => $e->getMessage()]);
+                }
                 $this->afterOutcome($declaration, $userId);
 
                 return $ok;
@@ -155,6 +179,8 @@ class OvertimeService
             return $this->unknown($declaration, $payload, $userId, 'απάντηση '.$result['status'].': '.$result['message'], $result);
         }
 
+        // Log the protocol FIRST: if the save below fails, it's the only trace of a real declaration.
+        Log::info('ΕΡΓΑΝΗ overtime declared', ['overtime' => $declaration->getKey(), 'protocol' => $result['protocol'], 'env' => $company->ergani_mode]);
         $declaration->forceFill([
             'ergani_status' => 'submitted',
             'ergani_protocol' => $result['protocol'],
@@ -169,6 +195,24 @@ class OvertimeService
         $this->afterOutcome($declaration, $userId);
 
         return true;
+    }
+
+    /**
+     * Rows of the employee whose hours overlap [from, to) on $date in the SAME
+     * ΕΡΓΑΝΗ environment (a trial row has no legal force and never blocks a real
+     * one). Default statuses = anything that is or may be declared.
+     *
+     * @param  list<string>  $statuses
+     */
+    public static function overlapping(int $employeeId, string $date, string $from, string $to, string $mode, array $statuses = ['submitted', 'submitting', 'unknown']): Builder
+    {
+        return OvertimeDeclaration::query()->withoutGlobalScopes()
+            ->where('employee_id', $employeeId)
+            ->whereDate('work_date', $date)
+            ->where('from_time', '<', $to)->where('to_time', '>', $from)
+            ->where(fn (Builder $q) => $q->whereNull('ergani_env')->orWhere('ergani_env', $mode))
+            ->where(fn (Builder $q) => $q->whereIn('ergani_status', $statuses)
+                ->when(in_array('submitting', $statuses, true), fn (Builder $q) => $q->orWhereNull('ergani_status')));
     }
 
     /** @return array<string, mixed> */
@@ -202,7 +246,13 @@ class OvertimeService
     /** Payroll needs every overtime: FYI to the accountant; a failure also rings the admins. */
     private function afterOutcome(OvertimeDeclaration $declaration, ?int $userId): void
     {
-        $declaration->refresh();
+        try {
+            $declaration->refresh();
+        } catch (\Throwable $e) {
+            Log::warning('Overtime refresh before notifications failed', ['overtime' => $declaration->getKey(), 'error' => $e->getMessage()]);
+
+            return;
+        }
         $company = $declaration->company;
         $to = trim((string) $company?->leave_notify_email);
         if ($to !== '') {

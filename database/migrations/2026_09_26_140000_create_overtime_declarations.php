@@ -28,7 +28,7 @@ return new class extends Migration
             $table->string('to_time', 5);
             $table->string('note', 200)->nullable();          // internal — never sent to ΕΡΓΑΝΗ
             $table->foreignId('created_by_user_id')->nullable()->constrained('users')->nullOnDelete();
-            $table->string('ergani_status', 15)->nullable();  // null | submitting | submitted | failed | unknown
+            $table->string('ergani_status', 15)->nullable();  // null | submitting | submitted | failed | unknown | superseded
             $table->string('ergani_env', 12)->nullable();
             $table->string('ergani_protocol', 50)->nullable();
             $table->timestamp('ergani_submitted_at')->nullable();

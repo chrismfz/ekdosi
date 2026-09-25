@@ -87,7 +87,8 @@ class ListOvertimeDeclarations extends BaseListRecords
                     }
                     $n = Notification::make()
                         ->title($o->ergani_status === 'submitted' ? 'Δηλώθηκε — πρωτ. '.$o->ergani_protocol : 'Καταχωρήθηκε αλλά ΔΕΝ δηλώθηκε στο ΕΡΓΑΝΗ')
-                        ->body($o->ergani_status === 'submitted' ? $employee->full_name.' · '.$o->slotLabel() : $o->ergani_error);
+                        ->body($o->ergani_status === 'submitted' ? $employee->full_name.' · '.$o->slotLabel()
+                            : ($o->ergani_error ?: 'Η δήλωση υπερωριών απενεργοποιήθηκε στο μεταξύ — δείτε την καρτέλα ΕΡΓΑΝΗ της εταιρείας.'));
                     $o->ergani_status === 'submitted' ? $n->success()->send() : $n->danger()->persistent()->send();
                 }),
         ];

@@ -136,4 +136,67 @@ class ErganiOvertimeTest extends HrTestCase
         $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_ERGANI));
         $this->assertFalse(OvertimeDeclarationResource::canAccess());
     }
+
+    public function test_a_failed_row_is_superseded_by_a_new_declaration_and_can_never_resend(): void
+    {
+        $calls = 0;
+        Http::fake(function (Request $r) use (&$calls) {
+            if (str_ends_with($r->url(), '/Authentication')) {
+                return Http::response(['accessToken' => 'tok']);
+            }
+            $this->sent[] = $r->data();
+
+            return ++$calls === 1
+                ? Http::response(['message' => 'Λάθος'], 400)
+                : Http::response([['id' => '2', 'protocol' => 'ΑΚ - ΟΡ2', 'submitDate' => '28/09/2026 10:01']]);
+        });
+        $e = $this->employee();
+        $a = app(OvertimeService::class)->declare($e, '2026-09-28', '18:00', '20:00', null);
+        $this->assertSame('failed', $a->ergani_status);
+
+        $b = app(OvertimeService::class)->declare($e, '2026-09-28', '19:00', '21:00', null);
+        $this->assertSame('submitted', $b->ergani_status);
+        $this->assertSame('superseded', $a->fresh()->ergani_status, 'the old failed attempt is retired');
+
+        $this->sent = [];
+        $this->assertFalse(app(OvertimeService::class)->submit($a->fresh()));
+        $this->assertSame([], $this->sent, 'a retry never re-declares hours another row holds');
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        $this->assertFalse(OvertimeDeclarationResource::retryAction()->record($a->fresh())->isVisible());
+    }
+
+    public function test_an_unknown_retry_is_refused_when_other_hours_overlap(): void
+    {
+        $this->fake();
+        $e = $this->employee();
+        // Two rows could only coexist if one predates (e.g. trial→production switch): simulate a stale unknown.
+        $a = OvertimeDeclaration::create(['company_id' => $this->company->id, 'employee_id' => $e->id, 'work_date' => '2026-09-28', 'from_time' => '18:00', 'to_time' => '20:00']);
+        $a->forceFill(['ergani_status' => 'unknown', 'ergani_env' => 'trial'])->saveQuietly();
+        $b = OvertimeDeclaration::create(['company_id' => $this->company->id, 'employee_id' => $e->id, 'work_date' => '2026-09-28', 'from_time' => '19:00', 'to_time' => '20:00']);
+        $b->forceFill(['ergani_status' => 'submitted', 'ergani_env' => 'trial'])->saveQuietly();
+
+        $this->assertFalse(app(OvertimeService::class)->submit($a, confirmedUnknown: true));
+        $this->assertSame([], $this->sent);
+        $this->assertSame('superseded', $a->fresh()->ergani_status);
+    }
+
+    public function test_a_trial_declaration_never_blocks_the_real_one(): void
+    {
+        $this->fake();
+        $e = $this->employee();
+        app(OvertimeService::class)->declare($e, '2026-09-28', '18:00', '20:00', null);   // trial
+        $this->company->forceFill(['ergani_mode' => 'production'])->save();
+        $e->refresh();
+
+        $real = app(OvertimeService::class)->declare($e, '2026-09-28', '18:00', '20:00', null);
+        $this->assertSame(['submitted', 'production'], [$real->ergani_status, $real->ergani_env]);
+    }
+
+    public function test_failure_email_tells_the_accountant_not_to_declare_it_themselves(): void
+    {
+        $this->fake(400, ['message' => 'Λάθος']);
+        app(OvertimeService::class)->declare($this->employee(), '2026-09-28', '18:00', '19:00', null);
+
+        Mail::assertSent(OvertimeAccountantMail::class, fn (OvertimeAccountantMail $m) => str_contains($m->intro(), 'ΜΗΝ τη δηλώσετε εσείς'));
+    }
 }

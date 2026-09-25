@@ -58,6 +58,7 @@ class OvertimeDeclarationResource extends Resource
             'failed' => 'Δεν δηλώθηκε',
             'unknown' => 'Αβέβαιο — ελέγξτε στο ΕΡΓΑΝΗ',
             'submitting' => 'Σε εξέλιξη…',
+            'superseded' => 'Αντικαταστάθηκε',
             default => '—',
         };
     }
@@ -104,18 +105,18 @@ class OvertimeDeclarationResource extends Resource
             ->label('Δήλωση στο ΕΡΓΑΝΗ')
             ->icon('heroicon-o-cloud-arrow-up')
             ->color('warning')
-            ->visible(fn (OvertimeDeclaration $record): bool => in_array($record->ergani_status, [null, 'failed', 'unknown'], true)
+            ->visible(fn (OvertimeDeclaration $record): bool => (in_array($record->ergani_status, [null, 'failed', 'unknown'], true) || self::staleClaim($record))
                 && ! $record->hasStarted()
                 && OvertimeService::enabledFor($record->company)
                 && (auth()->user()?->can('update', $record) ?? false))
             ->authorize(fn (OvertimeDeclaration $record): bool => auth()->user()?->can('update', $record) ?? false)
             ->modalHeading(fn (OvertimeDeclaration $record): string => 'Δήλωση υπερωρίας — '.$record->employee?->full_name.' · '.$record->slotLabel())
-            ->modalDescription(fn (OvertimeDeclaration $record): string => ($record->ergani_status === 'unknown'
+            ->modalDescription(fn (OvertimeDeclaration $record): string => (self::needsConfirmation($record)
                     ? '⚠ Η προηγούμενη δήλωση έχει ΑΓΝΩΣΤΟ αποτέλεσμα. Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ καταχωρήθηκε — δεν ανακαλείται. '
                     : '')
                 .($record->company?->ergani_mode === 'production' ? '⚠ ΠΑΡΑΓΩΓΗ — πραγματική δήλωση.' : 'Δοκιμαστικό περιβάλλον.'))
             ->fillForm(fn (OvertimeDeclaration $record): array => [
-                'seen' => $record->ergani_status === 'unknown' ? 'unknown' : 'plain',
+                'seen' => self::needsConfirmation($record) ? 'unknown' : 'plain',
                 'seen_mode' => $record->company?->ergani_mode,
             ])
             ->schema([Hidden::make('seen'), Hidden::make('seen_mode')])
@@ -130,6 +131,18 @@ class OvertimeDeclarationResource extends Resource
                 $n = Notification::make()->title($ok ? 'Δηλώθηκε — πρωτ. '.$record->ergani_protocol : 'Δεν δηλώθηκε')->body($ok ? null : $record->ergani_error);
                 $ok ? $n->success()->send() : $n->danger()->persistent()->send();
             });
+    }
+
+    /** «Unknown», or a «submitting» claim left by a crashed attempt — may have landed. */
+    public static function needsConfirmation(OvertimeDeclaration $record): bool
+    {
+        return $record->ergani_status === 'unknown' || self::staleClaim($record);
+    }
+
+    private static function staleClaim(OvertimeDeclaration $record): bool
+    {
+        return $record->ergani_status === 'submitting'
+            && $record->updated_at?->lt(now()->subMinutes(LeaveErganiSubmitter::CLAIM_STALE_MINUTES));
     }
 
     public static function getPages(): array
