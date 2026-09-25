@@ -9,7 +9,7 @@ use Filament\Schemas\Components\Utilities\Get;
 
 /**
  * Shared date-window picker for the myDATA consoles: a preset selector
- * (Μήνας / Τρίμηνο / Προηγούμενο τρίμηνο / Έτος / Προσαρμογή) over CALENDAR
+ * (Μήνας / Τρίμηνο / Προηγούμενο τρίμηνο / Έτος / Προηγούμενο έτος / Προσαρμογή) over CALENDAR
  * (= φορολογικά) boundaries, with custom from/to revealed only for «Προσαρμογή».
  * One home so both consoles (έσοδα / έξοδα) stay identical and a preset
  * definition is defined once.
@@ -27,6 +27,7 @@ trait ResolvesReconcileWindow
                     'quarter' => 'Τρέχον τρίμηνο',
                     'prev_quarter' => 'Προηγούμενο τρίμηνο',
                     'year' => 'Τρέχον έτος',
+                    'prev_year' => 'Προηγούμενο έτος',
                     'custom' => 'Προσαρμογή…',
                 ])
                 ->default('quarter')
@@ -70,6 +71,11 @@ trait ResolvesReconcileWindow
             'prev_quarter' => [
                 $now->copy()->subQuarter()->startOfQuarter()->toDateString(),
                 $now->copy()->subQuarter()->endOfQuarter()->toDateString(),
+            ],
+            // Back-fill a whole past year (e.g. expenses from before the myDATA import started).
+            'prev_year' => [
+                $now->copy()->subYearNoOverflow()->startOfYear()->toDateString(),
+                $now->copy()->subYearNoOverflow()->endOfYear()->toDateString(),
             ],
             default => [$now->copy()->startOfQuarter()->toDateString(), $now->toDateString()], // quarter
         };

@@ -178,6 +178,7 @@ class Company extends Model
             'ai_api_key' => MaybeEncrypted::class,
             'whmcs_webhook_secret' => MaybeEncrypted::class,
             'whmcs_custom_field_map' => 'array',
+            'income_tax_profile' => 'array',
             'whmcs_invoice_min_date' => 'date',
             'whmcs_third_party_enabled' => 'boolean',
             'aade_status_auto_refresh' => 'boolean',

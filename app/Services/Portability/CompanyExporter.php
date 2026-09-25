@@ -91,6 +91,7 @@ class CompanyExporter
         'delivery_notes', 'delivery_note_lines', 'delivery_note_events', 'delivery_marks',
         // Re-derivable / operational, not source-of-truth tenant data.
         'inbound_delivery_notes', // «Εισερχόμενα Διακίνησης» — re-fetched from myDATA (RequestDocs).
+        'e3_year_snapshots',      // «Φορολογικά» Ε3 per year — re-fetched from myDATA (RequestE3Info).
         'pending_whmcs_invoices',  // WHMCS inbox — re-fetched from the bridge.
         'stock_movements',         // re-derived from invoices/delivery notes.
         'service_contracts',       // deferred bucket-C (recurring-billing layer).

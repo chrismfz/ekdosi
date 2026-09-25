@@ -87,6 +87,47 @@ class AssistantReadToolsTest extends TestCase
         $this->assertSame('προς απόδοση', $res['vat_balance_note']);
     }
 
+    public function test_income_vs_expense_breaks_expenses_down_by_economic_bucket(): void
+    {
+        $mk = fn (array $a) => Expense::create([
+            'company_id' => $this->tenant->id, 'supplier_afm' => '123456789', 'supplier_name' => 'Χ',
+            'vat_total' => 0, 'currency' => 'EUR',
+        ] + $a + ['gross_total' => $a['net_total']]);
+
+        $mk(['source' => 'sync', 'issue_date' => '2026-02-10', 'net_total' => 400, 'vat_total' => 96, 'gross_total' => 496]);
+        $mk(['source' => 'sync', 'invoice_type' => '5.1', 'issue_date' => '2026-02-20', 'net_total' => 100]); // supplier credit → −100
+        $mk(['source' => 'self_declared', 'category' => 'payroll', 'invoice_type' => '17.1', 'issue_date' => '2026-03-31', 'net_total' => 3000]);
+        $mk(['source' => 'self_declared', 'category' => 'payroll', 'invoice_type' => '17.1', 'issue_date' => '2026-06-30', 'net_total' => 3200]);
+        $mk(['source' => 'self_declared', 'category' => 'social_security', 'invoice_type' => '14.5', 'issue_date' => '2026-05-15', 'net_total' => 700]);
+        $mk(['source' => 'self_declared', 'category' => null, 'invoice_type' => '17.9', 'issue_date' => '2026-04-01', 'net_total' => 10]);
+        $mk(['source' => 'manual', 'issue_date' => '2026-01-05', 'net_total' => 50]);
+        // 17.3 «τακτοποίηση εσόδων»: lives in expenses, but is booked as INCOME.
+        $mk(['source' => 'self_declared', 'category' => 'adjustments', 'invoice_type' => '17.3', 'issue_date' => '2026-04-10', 'net_total' => 80]);
+
+        $res = (new IncomeVsExpenseTool)->run($this->tenant, ['from' => '2026-01-01', 'to' => '2026-12-31']);
+        $by = collect($res['expense_breakdown'])->keyBy('bucket');
+
+        // Fixed order: suppliers, manual, then the self-declared taxonomy order.
+        $this->assertSame(['suppliers', 'manual', 'social_security', 'payroll', 'other'], array_column($res['expense_breakdown'], 'bucket'));
+
+        $this->assertEqualsWithDelta(300.0, $by['suppliers']['net'], 0.01);   // 400 − credit 100
+        $this->assertSame(2, $by['suppliers']['count']);
+        $this->assertEqualsWithDelta(6200.0, $by['payroll']['net'], 0.01);
+        $this->assertSame('2026-06-30', $by['payroll']['last_date']);          // «posted up to Q2»
+        $this->assertSame('Μισθοδοσία', $by['payroll']['label']);
+        $this->assertEqualsWithDelta(700.0, $by['social_security']['net'], 0.01);
+        $this->assertEqualsWithDelta(10.0, $by['other']['net'], 0.01);        // null category → «Λοιπά»
+        $this->assertEqualsWithDelta(50.0, $by['manual']['net'], 0.01);
+
+        $this->assertEqualsWithDelta(80.0, $res['income']['net'], 0.01);         // the 17.3, on the income side
+        $this->assertArrayNotHasKey('adjustments', $by->all());
+
+        // The split adds back up to the headline expense total — no row lost or doubled.
+        $this->assertEqualsWithDelta($res['expense']['net'], array_sum(array_column($res['expense_breakdown'], 'net')), 0.01);
+        $this->assertEqualsWithDelta($res['expense']['vat'], array_sum(array_column($res['expense_breakdown'], 'vat')), 0.01);
+        $this->assertSame($res['expense']['count'], array_sum(array_column($res['expense_breakdown'], 'count')));
+    }
+
     public function test_top_products_ranks_by_frequency(): void
     {
         // «Hosting» sold on two invoices, «SSL» on one → hosting first.

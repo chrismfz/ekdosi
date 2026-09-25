@@ -2,6 +2,8 @@
 
 namespace App\Services\Accounting;
 
+use App\Support\MyData\Codes;
+
 /**
  * The Βιβλίο Εσόδων-Εξόδων for a period: the chronological rows plus the
  * totals the accountant reads off the bottom. Pure value object — totals are
@@ -67,6 +69,18 @@ class LedgerBookResult
         return round($this->incomeVat() - $this->expenseVat(), 2);
     }
 
+    /** Φόροι που μας παρακράτησαν οι πελάτες (net of credit notes) — offsets the income tax. */
+    public function incomeWithheld(): float
+    {
+        return $this->sum('income', 'withheld');
+    }
+
+    /** Αγορές παγίων (E3_882/883) inside the expenses — in the book, not deductible. */
+    public function expenseCapex(): float
+    {
+        return $this->sum('expense', 'capex');
+    }
+
     public function incomeCount(): int
     {
         return count($this->incomeRows());
@@ -119,6 +133,55 @@ class LedgerBookResult
 
             return $b;
         }, $buckets));
+    }
+
+    /**
+     * The expense side split by ECONOMIC bucket — supplier invoices vs manual
+     * entries vs what the accountant self-declares (μισθοδοσία 17.1, ΕΦΚΑ 14.5,
+     * αποσβέσεις 17.2 …) — so a payroll quarter doesn't read as one opaque
+     * «έξοδα» total. `last_date` = the latest entry in the bucket, i.e. how far
+     * the accountant has posted it (payroll is often filed per quarter). Sums
+     * match expenseNet()/Vat()/Gross() exactly (same signed rows).
+     *
+     * @return list<array{bucket:string,label:string,count:int,net:float,vat:float,gross:float,last_date:?string}>
+     */
+    public function expenseBreakdown(): array
+    {
+        $buckets = [];
+        foreach ($this->expenseRows() as $row) {
+            $key = $row->expenseBucket ?? 'manual';
+            $b = $buckets[$key] ?? ['bucket' => $key, 'label' => self::expenseBucketLabel($key),
+                'count' => 0, 'net' => 0.0, 'vat' => 0.0, 'gross' => 0.0, 'last_date' => null];
+            $b['count']++;
+            $b['net'] += $row->net;
+            $b['vat'] += $row->vat;
+            $b['gross'] += $row->gross;
+            $date = $row->date->toDateString();
+            if ($b['last_date'] === null || $date > $b['last_date']) {
+                $b['last_date'] = $date;
+            }
+            $buckets[$key] = $b;
+        }
+
+        $order = array_flip(['suppliers', 'manual', ...array_keys(Codes::selfDeclaredVatCategoryOptions())]);
+        uksort($buckets, fn ($a, $b) => ($order[$a] ?? PHP_INT_MAX) <=> ($order[$b] ?? PHP_INT_MAX) ?: strcmp($a, $b));
+
+        return array_values(array_map(function (array $b) {
+            $b['net'] = round($b['net'], 2);
+            $b['vat'] = round($b['vat'], 2);
+            $b['gross'] = round($b['gross'], 2);
+
+            return $b;
+        }, $buckets));
+    }
+
+    private static function expenseBucketLabel(string $key): string
+    {
+        return match ($key) {
+            'suppliers' => 'Τιμολόγια προμηθευτών (myDATA)',
+            'manual' => 'Χειροκίνητες καταχωρίσεις',
+            default => Codes::selfDeclaredVatCategoryLabel($key) ?? $key,
+        };
     }
 
     private function sum(string $book, string $field): float

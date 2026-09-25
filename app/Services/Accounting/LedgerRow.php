@@ -39,5 +39,15 @@ class LedgerRow
         public readonly ?int $recordId = null,
         public readonly ?string $accountCode = null,   // ΕΓΛΣ default account (indicative)
         public readonly ?string $accountName = null,
+        // Expense rows only: the economic bucket — 'suppliers' (myDATA sync),
+        // 'manual', or the self-declared `expenses.category` key (payroll /
+        // social_security / depreciation / …, see Codes::selfDeclaredVatCategoryKey).
+        public readonly ?string $expenseBucket = null,
+        // Income rows only: the tax the customer withheld on this document
+        // (invoices.withhold_amount), signed like net — a credit note gives it back.
+        public readonly float $withheld = 0.0,
+        // Expense rows only: the part of net classified as «Αγορές παγίων» (E3_882/883,
+        // Codes::isCapexClassification), signed like net — kept in the book, not deductible.
+        public readonly float $capex = 0.0,
     ) {}
 }
