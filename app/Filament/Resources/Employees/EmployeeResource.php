@@ -7,6 +7,7 @@ use App\Enums\LeaveType;
 use App\Filament\Resources\Employees\Pages\CreateEmployee;
 use App\Filament\Resources\Employees\Pages\EditEmployee;
 use App\Filament\Resources\Employees\Pages\ListEmployees;
+use App\Models\Company;
 use App\Models\Employee;
 use App\Models\User;
 use BackedEnum;
@@ -57,6 +58,14 @@ class EmployeeResource extends Resource
     protected static ?int $navigationSort = 30;
 
     protected static bool $isGloballySearchable = false;
+
+    /** Only for tenants with the Προσωπικό / ΕΡΓΑΝΗ pillar enabled (Company → «ΕΡΓΑΝΗ»). */
+    public static function canAccess(): bool
+    {
+        return Filament::getTenant() instanceof Company
+            && Filament::getTenant()->hasErgani()
+            && parent::canAccess();
+    }
 
     public static function getEloquentQuery(): Builder
     {

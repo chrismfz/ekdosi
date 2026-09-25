@@ -17,6 +17,7 @@ use App\Models\InvoiceType;
 use App\Services\AadeRegistryLookup;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\NullProviderTransport;
+use App\Services\Ergani\ErganiClient;
 use App\Services\MyDataSubmitter;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
@@ -42,6 +43,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -1175,6 +1177,89 @@ class CompanyForm
                                 Toggle::make('enable_domain_management')
                                     ->label('Ενεργή διαχείριση domains')
                                     ->helperText('Ενεργοποιεί τον πυλώνα Domains (Πυλώνας A) για αυτή την εταιρεία: το μενού «Domains», τις συνδέσεις registrar και (σταδιακά) καταχωρήσεις/ανανεώσεις/μεταφορές. Ανενεργό = τελείως κρυμμένο.'),
+                            ]),
+                        // Προσωπικό / ΕΡΓΑΝΗ (docs/ergani/README.md) — same kill-switch
+                        // pattern as Support/Domains, plus the ΕΡΓΑΝΗ ΙΙ environment,
+                        // the e-ΕΦΚΑ credentials and the accountant address.
+                        Tab::make('ΕΡΓΑΝΗ')
+                            ->visible(fn (callable $get) => $get('country_code') === 'GR')
+                            ->schema([
+                                Toggle::make('ergani_enabled')
+                                    ->label('Ενεργό «Προσωπικό» (άδειες / ΕΡΓΑΝΗ)')
+                                    ->helperText('Ενεργοποιεί τον πυλώνα Προσωπικό για αυτή την εταιρεία: εργαζόμενοι, άδειες, ημερολόγιο αδειών, τοπικές αργίες και τον ρόλο «Προσωπικό (μόνο άδειες)». Ανενεργό = τελείως κρυμμένο.')
+                                    ->live(),
+                                Section::make('Ενημέρωση λογιστή')
+                                    ->visible(fn (callable $get): bool => (bool) $get('ergani_enabled'))
+                                    ->schema([
+                                        TextInput::make('leave_notify_email')
+                                            ->label('Email λογιστή για τις άδειες')
+                                            ->email()
+                                            ->maxLength(191)
+                                            ->helperText('Κάθε άδεια που εγκρίνεται ή ανακαλείται στέλνεται εδώ, για να δηλωθεί (μία φορά) στο ΕΡΓΑΝΗ. Κενό = δεν στέλνεται τίποτα.'),
+                                    ]),
+                                Section::make('Σύνδεση ΕΡΓΑΝΗ ΙΙ')
+                                    ->description('Κωδικοί e-ΕΦΚΑ του εργοδότη. Είναι ΟΙ ΙΔΙΟΙ στο δοκιμαστικό και στην παραγωγή — το περιβάλλον αποφασίζει αν μια υποβολή είναι πραγματική. (Η αυτόματη υποβολή αδειών έρχεται στη Φάση 2· προς το παρόν μόνο δοκιμή σύνδεσης.)')
+                                    ->visible(fn (callable $get): bool => (bool) $get('ergani_enabled'))
+                                    ->schema([
+                                        Select::make('ergani_mode')
+                                            ->label('Περιβάλλον')
+                                            ->options([
+                                                'trial' => 'Δοκιμαστικό (trialv2eservices — οι υποβολές φέρουν «ΑΚΥΡΟ»)',
+                                                'production' => 'Παραγωγή (πραγματικές υποβολές)',
+                                            ])
+                                            ->default('trial')
+                                            ->required()
+                                            ->native(false),
+                                        TextInput::make('ergani_username')
+                                            ->label('Username e-ΕΦΚΑ')
+                                            ->maxLength(120)
+                                            ->autocomplete('off'),
+                                        TextInput::make('ergani_password')
+                                            ->label('Password e-ΕΦΚΑ')
+                                            ->password()
+                                            ->revealable()
+                                            ->autocomplete('new-password')
+                                            ->helperText('Κρυπτογραφημένο. Κενό = κρατά τον υπάρχοντα.')
+                                            ->dehydrated(fn (?string $state): bool => filled($state))
+                                            ->maxLength(255),
+                                    ])
+                                    ->columns(3)
+                                    ->footerActions([
+                                        FormAction::make('test_ergani')
+                                            ->label('Test σύνδεσης')
+                                            ->icon('heroicon-o-bolt')
+                                            ->action(function (callable $get, ?Company $record): void {
+                                                if (! $record) {
+                                                    Notification::make()->title('Αποθηκεύστε πρώτα την εταιρεία.')->warning()->send();
+
+                                                    return;
+                                                }
+                                                // Test what's on screen (unsaved edits included); a blank
+                                                // password field means «keep the stored one».
+                                                $probe = $record->replicate()->forceFill([
+                                                    'ergani_mode' => $get('ergani_mode') ?: 'trial',
+                                                    'ergani_username' => $get('ergani_username'),
+                                                    'ergani_password' => filled($get('ergani_password')) ? $get('ergani_password') : $record->ergani_password,
+                                                ]);
+                                                try {
+                                                    $info = (new ErganiClient($probe))->employerInfo();
+                                                    $afmMismatch = filled($info['afm']) && filled($record->afm) && $info['afm'] !== $record->afm;
+                                                    Notification::make()
+                                                        ->title('Συνδέθηκε στο ΕΡΓΑΝΗ ('.$info['environment'].')')
+                                                        ->body(sprintf('%s — ΑΦΜ %s. Ψηφιακή κάρτα εργασίας: %s.%s',
+                                                            $info['name'] ?? '—', $info['afm'] ?? '—',
+                                                            $info['in_card_sector'] ? 'ΥΠΟΧΡΕΟΣ' : 'όχι υπόχρεος',
+                                                            $afmMismatch ? ' ⚠ Ο ΑΦΜ δεν ταιριάζει με τον ΑΦΜ της εταιρείας!' : ''))
+                                                        ->status($afmMismatch ? 'warning' : 'success')
+                                                        ->persistent()
+                                                        ->send();
+                                                } catch (\RuntimeException $e) {
+                                                    Notification::make()->title('Αποτυχία σύνδεσης ΕΡΓΑΝΗ')->body($e->getMessage())->danger()->send();
+                                                } catch (ConnectionException) {
+                                                    Notification::make()->title('Το ΕΡΓΑΝΗ δεν απαντά')->body('Πρόβλημα δικτύου — δοκιμάστε ξανά αργότερα.')->warning()->send();
+                                                }
+                                            }),
+                                    ]),
                             ]),
                     ]),
             ]);
