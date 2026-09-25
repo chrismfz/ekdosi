@@ -12,9 +12,9 @@ use Filament\Widgets\Widget;
 
 /**
  * «Ξεκίνημα Προσωπικού» — first-run checklist on the Εργαζόμενοι list: what is
- * still missing for leaves (and the card) to work end-to-end. Disappears once
- * every applicable step is done. Read-only; links only to screens the viewer
- * can open.
+ * still missing for leaves (and the card) to work end-to-end. When every step
+ * is done it stays, collapsed, as «✓ όλα έτοιμα» (a reference, not a nag).
+ * Read-only; links only to screens the viewer can open.
  */
 class StaffSetupChecklist extends Widget
 {

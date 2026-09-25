@@ -451,7 +451,7 @@ class WorkCardTest extends HrTestCase
         $this->assertFalse((new \ReflectionMethod(StaffSetupChecklist::class, 'steps'))->isPublic());
     }
 
-    public function test_setup_checklist_lists_missing_steps_and_disappears_when_done(): void
+    public function test_setup_checklist_lists_missing_steps_and_collapses_when_done(): void
     {
         $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
         $this->enable();
@@ -465,6 +465,6 @@ class WorkCardTest extends HrTestCase
         $this->company->forceFill(['leave_notify_email' => 'acc@example.test'])->save();
         WorkCardKioskDevice::activate($this->company, 'Ρεσεψιόν', null);
 
-        Livewire::test(StaffSetupChecklist::class)->assertDontSee('Ξεκίνημα Προσωπικού');
+        Livewire::test(StaffSetupChecklist::class)->assertSee('όλα έτοιμα')->assertSee('Ξεκίνημα Προσωπικού');
     }
 }

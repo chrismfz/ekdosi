@@ -1,5 +1,4 @@
 <x-filament-widgets::widget>
-    @unless ($complete)
         <style>
             .ssc { list-style:none; margin:0; padding:0; display:grid; gap:.5rem; }
             .ssc li { display:flex; gap:.6rem; align-items:flex-start; font-size:.9rem; }
@@ -11,7 +10,11 @@
             .ssc .opt { font-size:.75rem; color:#6b7280; } .dark .ssc .opt { color:#9ca3af; }
             .ssc a { color:#2563eb; text-decoration:underline; } .dark .ssc a { color:#60a5fa; }
         </style>
-        <x-filament::section heading="Ξεκίνημα Προσωπικού" description="Τι λείπει ακόμη για να δουλεύουν άδειες και κάρτα από άκρη σε άκρη. Κρύβεται όταν ολοκληρωθούν όλα." collapsible>
+        <x-filament::section
+            :heading="'Ξεκίνημα Προσωπικού'.($complete ? ' — ✓ όλα έτοιμα' : '')"
+            :description="$complete ? 'Όλα τα βήματα έχουν ολοκληρωθεί — ανοίξτε για να τα ξαναδείτε.' : 'Τι λείπει ακόμη για να δουλεύουν άδειες και κάρτα από άκρη σε άκρη.'"
+            collapsible
+            :collapsed="$complete">
             <ol class="ssc">
                 @foreach ($steps as $s)
                     <li>
@@ -28,5 +31,4 @@
                 @endforeach
             </ol>
         </x-filament::section>
-    @endunless
 </x-filament-widgets::widget>
