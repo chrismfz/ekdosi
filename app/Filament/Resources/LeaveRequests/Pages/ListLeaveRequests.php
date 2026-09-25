@@ -6,6 +6,7 @@ use App\Enums\LeaveStatus;
 use App\Filament\BaseListRecords;
 use App\Filament\Pages\LeaveCalendar;
 use App\Filament\Resources\LeaveRequests\LeaveRequestResource;
+use App\Policies\LeaveRequestPolicy;
 use Filament\Actions\Action;
 use Filament\Actions\CreateAction;
 use Filament\Schemas\Components\Tabs\Tab;
@@ -45,8 +46,9 @@ class ListLeaveRequests extends BaseListRecords
         ];
     }
 
+    /** Approvers land on the queue; staff on their own full history. */
     public function getDefaultActiveTab(): string|int|null
     {
-        return 'pending';
+        return LeaveRequestPolicy::isApprover(auth()->user()) ? 'pending' : 'all';
     }
 }

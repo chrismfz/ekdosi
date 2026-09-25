@@ -183,7 +183,7 @@ class LeaveCalendar extends Page
             foreach ($list as $leave) {
                 $full = $approver || $mine;
                 $pending = $leave->isPending();
-                $label = $full ? (string) $leave->type?->value : 'Άδεια';
+                $label = $full ? (string) $leave->type?->shortLabel() : '•';
                 $title = ($full ? $leave->type?->getLabel() : 'Άδεια').' · '.$leave->periodLabel()
                     .($pending ? ' (σε αναμονή)' : '');
                 $class = $pending ? 'lvc-pending' : 'lvc-'.($full ? ($leave->type?->getColor() ?? 'info') : 'info');

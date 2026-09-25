@@ -60,9 +60,9 @@
                         <span class="n">{{ $e['name'] }}</span>
                         <span class="s">
                             <span class="dot" style="background: {{ $e['in'] ? '#22c55e' : '#64748b' }}"></span>
-                            {{ $e['in'] ? 'Μέσα από '.$e['since'] : 'Εκτός' }}
+                            {{ $e['in'] ? 'Μέσα από '.$e['since'] : 'Εκτός γραφείου' }}
                         </span>
-                        @unless ($e['has_pin']) <span class="s">(χωρίς PIN)</span> @endunless
+                        @unless ($e['has_pin']) <span class="s">(χωρίς PIN — ζητήστε το από τον διαχειριστή)</span> @endunless
                     </button>
                 @endforeach
             </div>
@@ -87,7 +87,7 @@
         </div>
         <div class="actions">
             <button type="button" class="cancel" id="cancelBtn">Άκυρο</button>
-            <button type="button" class="ok" id="okBtn">OK</button>
+            <button type="button" class="ok" id="okBtn">Καταχώριση</button>
         </div>
         <div class="msg" id="msg"></div>
     </dialog>
@@ -102,13 +102,17 @@
         let current = null, pin = '', busy = false;
         const pinView = document.getElementById('pinView'), msg = document.getElementById('msg');
         const render = () => pinView.textContent = '•'.repeat(pin.length);
-        const close = () => { dlg.close(); current = null; pin = ''; msg.textContent = ''; };
+        let idle = null;
+        const close = () => { clearTimeout(idle); dlg.close(); current = null; pin = ''; msg.textContent = ''; };
+        // Someone walked away mid-PIN: close after 30'' so the board refreshes again.
+        const armIdle = () => { clearTimeout(idle); idle = setTimeout(() => { if (! busy) close(); }, 30000); };
+        dlg.addEventListener('click', armIdle);
 
         document.querySelectorAll('.emp').forEach(b => b.addEventListener('click', () => {
             current = { id: b.dataset.id, next: b.dataset.next };
             document.getElementById('who').textContent = b.dataset.name;
             document.getElementById('act').textContent = b.dataset.next === 'out' ? 'ΕΞΟΔΟΣ — πληκτρολογήστε το PIN σας' : 'ΕΙΣΟΔΟΣ — πληκτρολογήστε το PIN σας';
-            pin = ''; render(); msg.textContent = ''; dlg.showModal();
+            pin = ''; render(); msg.textContent = ''; dlg.showModal(); armIdle();
         }));
         dlg.querySelectorAll('[data-d]').forEach(b => b.addEventListener('click', () => { if (pin.length < 6) { pin += b.dataset.d; render(); } }));
         dlg.querySelector('[data-back]').addEventListener('click', () => { pin = pin.slice(0, -1); render(); });

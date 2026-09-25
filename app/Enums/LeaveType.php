@@ -58,6 +58,26 @@ enum LeaveType: string implements HasColor, HasLabel
         };
     }
 
+    /** Distinct 3-letter code for the calendar cells (the ΕΡΓΑΝΗ codes share prefixes). */
+    public function shortLabel(): string
+    {
+        return match ($this) {
+            self::Annual => 'ΚΑΝ',
+            self::Sick => 'ΑΣΘ',
+            self::Unpaid => 'ΑΝΑ',
+            self::Marriage => 'ΓΑΜ',
+            self::Bereavement => 'ΠΕΝ',
+            self::Exams => 'ΕΞΕ',
+            self::BloodDonation => 'ΑΙΜ',
+            self::Maternity => 'ΜΗΤ',
+            self::Paternity => 'ΠΑΤ',
+            self::Childcare => 'ΦΡΟ',
+            self::Parental => 'ΓΟΝ',
+            self::ChildSickness => 'ΑΣΠ',
+            self::Other => 'ΑΛΛ',
+        };
+    }
+
     /** Only κανονική άδεια counts against the yearly entitlement. */
     public function consumesAnnualBalance(): bool
     {

@@ -91,6 +91,10 @@ class CompanySettings extends Page implements HasForms
         'auto_email_on_issue',
         'mail_from_address',
         'mail_from_name',
+        // Προσωπικό / ΕΡΓΑΝΗ — the safe, non-credential knobs (the e-ΕΦΚΑ creds,
+        // environment and auto-submission switches stay super_admin, Company form).
+        'leave_notify_email',
+        'ergani_card_requires_kiosk',
         // i18n Slice 0: the tenant's fallback communication language (drives emails
         // when a customer has no explicit language/country). Business identity, not
         // a credential → safe to self-serve.
@@ -234,6 +238,21 @@ class CompanySettings extends Page implements HasForms
                             ->rules(['nullable', 'in:el,en,both'])
                             ->placeholder('Αυτόματο (Ελληνικά)')
                             ->helperText('Fallback γλώσσα όταν ο πελάτης δεν έχει ρητή γλώσσα ούτε χώρα (ο πελάτης/η χώρα του υπερισχύουν). Ισχύει στα email· το PDF μένει «παγωμένο» στο έγγραφο.'),
+                    ])
+                    ->columns(2),
+
+                Section::make('Προσωπικό — ΕΡΓΑΝΗ')
+                    ->description('Άδειες και ψηφιακή κάρτα. Οι κωδικοί ΕΡΓΑΝΗ και η αυτόματη υποβολή ρυθμίζονται από τον διαχειριστή συστήματος.')
+                    ->visible(fn (): bool => $this->tenant()->hasErgani())
+                    ->schema([
+                        TextInput::make('leave_notify_email')
+                            ->label('Email λογιστή για τις άδειες')
+                            ->email()
+                            ->maxLength(191)
+                            ->helperText('Κάθε άδεια που εγκρίνεται ή ανακαλείται στέλνεται εδώ. Κενό = δεν στέλνεται τίποτα.'),
+                        Toggle::make('ergani_card_requires_kiosk')
+                            ->label('Κάρτα μόνο στο γραφείο (tablet / QR)')
+                            ->helperText('Αν είναι ενεργό, η κάρτα χτυπιέται μόνο από το tablet του γραφείου ή σκανάροντας το QR του — όχι με απλό κουμπί από το κινητό.'),
                     ])
                     ->columns(2),
 

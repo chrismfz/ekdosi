@@ -70,9 +70,9 @@ class WorkCardEvent extends Model
     public function sourceLabel(): string
     {
         return match ($this->source) {
-            'kiosk' => 'QR γραφείου',
+            'kiosk' => 'Γραφείο (tablet/QR)',
             'admin' => 'Διαχειριστής',
-            default => 'Κουμπί',
+            default => 'Κινητό / υπολογιστής',
         };
     }
 

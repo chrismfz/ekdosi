@@ -78,10 +78,11 @@ class LeaveRequestsTable
                 SelectFilter::make('status')->label('Κατάσταση')->options(LeaveStatus::class),
             ])
             ->recordActions([
+                // Pending requests: approve/reject right on the row (one click).
+                LeaveRequestActions::approve(),
+                LeaveRequestActions::reject(),
                 ViewAction::make(),
                 ActionGroup::make([
-                    LeaveRequestActions::approve(),
-                    LeaveRequestActions::reject(),
                     LeaveRequestActions::cancel(),
                 ]),
             ]);
@@ -89,16 +90,16 @@ class LeaveRequestsTable
 
     public static function erganiLabel(LeaveRequest $record): string
     {
-        $trial = $record->ergani_env === 'trial' ? ' (δοκ.)' : '';
+        $trial = $record->ergani_env === 'trial' ? ' (δοκιμαστικό)' : '';
 
         return match ($record->ergani_status) {
             'submitted' => 'Δηλώθηκε'.$trial,
             'cancelled' => 'Ανακλήθηκε'.$trial,
-            'failed' => 'Αποτυχία',
-            'cancel_failed' => 'Αποτυχία ανάκλησης',
+            'failed' => 'Δεν δηλώθηκε',
+            'cancel_failed' => 'Η ανάκληση απέτυχε',
             'submitting' => 'Σε εξέλιξη…',
             'cancelling' => 'Ανάκληση…',
-            'unknown' => 'Άγνωστο — έλεγχος',
+            'unknown' => 'Αβέβαιο — ελέγξτε στο ΕΡΓΑΝΗ',
             default => '—',
         };
     }

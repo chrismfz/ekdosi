@@ -70,7 +70,7 @@
                                 <td class="{{ $cell ? $cell['class'] : ($d['holiday'] ? 'lvc-hol' : ($d['weekend'] ? 'lvc-off' : 'lvc-cell')) }} {{ $d['today'] ? 'lvc-today' : '' }}"
                                     title="{{ $cell ? $cell['title'] : ($d['holiday'] ?? '') }}">
                                     @if ($cell && ! $d['weekend'] && ! $d['holiday'])
-                                        {{ mb_substr($cell['label'], 0, 3) }}
+                                        {{ $cell['label'] }}
                                     @endif
                                 </td>
                             @endforeach
@@ -83,8 +83,8 @@
         </div>
 
         <div class="lvc-legend">
-            <span><span class="lvc-sw lvc-success"></span>Κανονική</span>
-            <span><span class="lvc-sw lvc-danger"></span>Ασθένεια</span>
+            <span><span class="lvc-sw lvc-success"></span>ΚΑΝ = Κανονική</span>
+            <span><span class="lvc-sw lvc-danger"></span>ΑΣΘ = Ασθένεια</span>
             <span><span class="lvc-sw lvc-info"></span>Άλλη άδεια</span>
             <span><span class="lvc-sw lvc-pending"></span>Σε αναμονή</span>
             <span><span class="lvc-sw lvc-hol"></span>Αργία</span>
@@ -97,6 +97,6 @@
                 {{ $holidays->map(fn ($d) => $d['date']->format('d/m').' '.$d['holiday'])->implode(' · ') }}
             </p>
         @endif
-        <p class="lvc-note">Περάστε τον δείκτη πάνω από ένα κελί για λεπτομέρειες. Οι άδειες συναδέλφων εμφανίζονται ως «Άδεια» χωρίς είδος.</p>
+        <p class="lvc-note">Περάστε τον δείκτη πάνω από ένα κελί για λεπτομέρειες. Οι άδειες συναδέλφων εμφανίζονται ως «•» χωρίς είδος.</p>
     </x-filament::section>
 </x-filament-panels::page>
