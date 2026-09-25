@@ -85,7 +85,8 @@ class OvertimeService
             // An older FAILED attempt for these hours is replaced by this one — retire
             // it so its «Δήλωση στο ΕΡΓΑΝΗ» retry can never declare the same hours again.
             self::overlapping((int) $employee->getKey(), $starts->toDateString(), $from, $to, $mode, ['failed'])
-                ->update(['ergani_status' => 'superseded', 'updated_at' => now()]);
+                ->update(['ergani_status' => 'superseded', 'updated_at' => now(),
+                    'ergani_error' => 'Αντικαταστάθηκε από νέα δήλωση '.$from.'–'.$to.' — ώρες εκτός αυτής ΔΕΝ δηλώθηκαν.']);
 
             return OvertimeDeclaration::create([
                 'company_id' => $employee->company_id,
@@ -130,10 +131,18 @@ class OvertimeService
                     ->when($confirmedUnknown, fn ($q) => $q->where('ergani_status', 'unknown')
                         ->orWhere(fn ($q) => $q->where('ergani_status', 'submitting')
                             ->where('updated_at', '<', now()->subMinutes(LeaveErganiSubmitter::CLAIM_STALE_MINUTES)))))
+                // A maybe-landed row is retried only in the environment it went to —
+                // never «moved» to another one (its possible declaration would be lost).
+                ->when($confirmedUnknown, fn ($q) => $q->where(fn ($q) => $q->whereNull('ergani_env')->orWhere('ergani_env', $company->ergani_mode)))
                 ->update(['ergani_status' => 'submitting', 'ergani_env' => $company->ergani_mode, 'updated_at' => now()]);
         });
         if ($claimed === 'clash') {
-            $declaration->forceFill(['ergani_status' => 'superseded', 'ergani_error' => 'Οι ίδιες ώρες είναι ήδη σε άλλη δήλωση υπερωρίας — δεν ξαναστάλθηκε.'])->saveQuietly();
+            $why = 'Οι ίδιες ώρες είναι ήδη σε άλλη δήλωση υπερωρίας — δεν ξαναστάλθηκε.';
+            // Only a row that was certainly NOT declared is retired; an «unknown» (may
+            // have landed) keeps its state so it still blocks those hours.
+            in_array($declaration->ergani_status, [null, 'failed'], true)
+                ? $declaration->forceFill(['ergani_status' => 'superseded', 'ergani_error' => $why])->saveQuietly()
+                : $declaration->forceFill(['ergani_error' => $why])->saveQuietly();
 
             return false;
         }

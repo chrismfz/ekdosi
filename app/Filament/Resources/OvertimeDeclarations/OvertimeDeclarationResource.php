@@ -6,6 +6,7 @@ use App\Filament\Resources\OvertimeDeclarations\Pages\ListOvertimeDeclarations;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\OvertimeDeclaration;
+use App\Services\Ergani\LeaveErganiSubmitter;
 use App\Services\Ergani\OvertimeService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -53,6 +54,10 @@ class OvertimeDeclarationResource extends Resource
     {
         $trial = $record->ergani_env === 'trial' ? ' (δοκιμαστικό)' : '';
 
+        if (self::staleClaim($record)) {
+            return 'Αβέβαιο — ελέγξτε στο ΕΡΓΑΝΗ';   // a crashed attempt: may have landed
+        }
+
         return match ($record->ergani_status) {
             'submitted' => 'Δηλώθηκε'.$trial,
             'failed' => 'Δεν δηλώθηκε',
@@ -76,7 +81,7 @@ class OvertimeDeclarationResource extends Resource
                     ->searchable(['last_name', 'first_name']),
                 TextColumn::make('ergani_status')->label('ΕΡΓΑΝΗ')->badge()
                     ->formatStateUsing(fn (?string $state, OvertimeDeclaration $record): string => self::erganiLabel($record))
-                    ->color(fn (?string $state): string => match ($state) {
+                    ->color(fn (?string $state, OvertimeDeclaration $record): string => self::staleClaim($record) ? 'warning' : match ($state) {
                         'submitted' => 'success',
                         'failed' => 'danger',
                         'unknown', 'submitting' => 'warning',
@@ -139,7 +144,7 @@ class OvertimeDeclarationResource extends Resource
         return $record->ergani_status === 'unknown' || self::staleClaim($record);
     }
 
-    private static function staleClaim(OvertimeDeclaration $record): bool
+    public static function staleClaim(OvertimeDeclaration $record): bool
     {
         return $record->ergani_status === 'submitting'
             && $record->updated_at?->lt(now()->subMinutes(LeaveErganiSubmitter::CLAIM_STALE_MINUTES));

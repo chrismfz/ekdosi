@@ -165,7 +165,7 @@ class ErganiOvertimeTest extends HrTestCase
         $this->assertFalse(OvertimeDeclarationResource::retryAction()->record($a->fresh())->isVisible());
     }
 
-    public function test_an_unknown_retry_is_refused_when_other_hours_overlap(): void
+    public function test_retries_never_send_when_other_hours_overlap(): void
     {
         $this->fake();
         $e = $this->employee();
@@ -177,7 +177,14 @@ class ErganiOvertimeTest extends HrTestCase
 
         $this->assertFalse(app(OvertimeService::class)->submit($a, confirmedUnknown: true));
         $this->assertSame([], $this->sent);
-        $this->assertSame('superseded', $a->fresh()->ergani_status);
+        $this->assertSame('unknown', $a->fresh()->ergani_status, 'a maybe-landed row keeps blocking its hours');
+
+        // The realistic clash: a FAILED row retried while another row holds the hours → retired, nothing sent.
+        $c = OvertimeDeclaration::create(['company_id' => $this->company->id, 'employee_id' => $e->id, 'work_date' => '2026-09-28', 'from_time' => '19:30', 'to_time' => '21:00']);
+        $c->forceFill(['ergani_status' => 'failed', 'ergani_env' => 'trial'])->saveQuietly();
+        $this->assertFalse(app(OvertimeService::class)->submit($c));
+        $this->assertSame([], $this->sent);
+        $this->assertSame('superseded', $c->fresh()->ergani_status);
     }
 
     public function test_a_trial_declaration_never_blocks_the_real_one(): void
@@ -192,11 +199,42 @@ class ErganiOvertimeTest extends HrTestCase
         $this->assertSame(['submitted', 'production'], [$real->ergani_status, $real->ergani_env]);
     }
 
-    public function test_failure_email_tells_the_accountant_not_to_declare_it_themselves(): void
+    public function test_trial_failure_still_asks_the_accountant_to_declare_production_does_not(): void
     {
         $this->fake(400, ['message' => 'Λάθος']);
-        app(OvertimeService::class)->declare($this->employee(), '2026-09-28', '18:00', '19:00', null);
+        $trial = app(OvertimeService::class)->declare($this->employee(), '2026-09-28', '18:00', '19:00', null);
+        $this->assertStringContainsString('παρακαλούμε για τη δήλωσή της', (new OvertimeAccountantMail($trial, 'a@b.c', 'X'))->intro());
 
-        Mail::assertSent(OvertimeAccountantMail::class, fn (OvertimeAccountantMail $m) => str_contains($m->intro(), 'ΜΗΝ τη δηλώσετε εσείς'));
+        $trial->forceFill(['ergani_env' => 'production'])->saveQuietly();
+        $this->assertStringContainsString('ΜΗΝ τη δηλώσετε εσείς', (new OvertimeAccountantMail($trial->fresh(), 'a@b.c', 'X'))->intro());
+    }
+
+    public function test_a_maybe_landed_row_is_never_retried_in_another_environment(): void
+    {
+        $this->fake();
+        $e = $this->employee();
+        $a = OvertimeDeclaration::create(['company_id' => $this->company->id, 'employee_id' => $e->id, 'work_date' => '2026-09-28', 'from_time' => '18:00', 'to_time' => '20:00']);
+        $a->forceFill(['ergani_status' => 'unknown', 'ergani_env' => 'production'])->saveQuietly();   // company is in trial now
+
+        $this->assertFalse(app(OvertimeService::class)->submit($a, confirmedUnknown: true));
+        $this->assertSame([], $this->sent);
+        $this->assertSame(['unknown', 'production'], [$a->fresh()->ergani_status, $a->fresh()->ergani_env]);
+    }
+
+    public function test_declare_is_refused_over_an_unknown_row_and_a_stale_claim_reads_as_uncertain(): void
+    {
+        $this->fake();
+        $e = $this->employee();
+        $a = OvertimeDeclaration::create(['company_id' => $this->company->id, 'employee_id' => $e->id, 'work_date' => '2026-09-28', 'from_time' => '18:00', 'to_time' => '20:00']);
+        $a->forceFill(['ergani_status' => 'unknown', 'ergani_env' => 'trial'])->saveQuietly();
+        try {
+            app(OvertimeService::class)->declare($e, '2026-09-28', '19:00', '21:00', null);
+            $this->fail('expected refusal');
+        } catch (OvertimeRefused) {
+        }
+
+        $a->forceFill(['ergani_status' => 'submitting'])->saveQuietly();
+        $this->travel(15)->minutes();
+        $this->assertSame('Αβέβαιο — ελέγξτε στο ΕΡΓΑΝΗ', OvertimeDeclarationResource::erganiLabel($a->fresh()));
     }
 }
