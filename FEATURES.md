@@ -286,6 +286,11 @@
   ή 10) → snapshot `taric_code`/`item_code` (SKU) στη γραμμή (InvoiceLine/DeliveryNoteLine `saving`: μόνο νέα γραμμή ή αλλαγή
   είδους) → `TaricNo`/`itemCode` σε ΤΔΑ (`AadeInvoiceDocument`) και 9.3 (`DeliveryNoteSubmitter`)· `Taric::appliesTo` =
   `Codes::allowsItemDescr` (ΤΔΑ/9.x μόνο). Sandbox-validated 2026-09-25 (9.3 + ΤΔΑ).
+- **Κατάλογος ΣΟ / TARIC** (`cn_codes`, `App\Services\Taric\CnCatalog`): 9.791 κωδικοί ΣΟ 2026 με ελληνική διαδρομή 4 › 6 › 8
+  ψηφίων (bundled `database/data/cn2026_el.csv.gz`, από την επίσημη SKOS/RDF της ΕΕ). Αναζήτηση στη φόρμα είδους· σελίδα
+  «Κωδικοί ΣΟ / TARIC» (`CnCatalogPage`, perm `View:CnCatalogPage`) με καταργημένους κωδικούς ανά εταιρεία και (super_admin)
+  «Ενημέρωση από ΕΕ» → `ImportCnCatalog` job (data.europa.eu «combined-nomenclature-{έτος}», streaming XMLReader, αρνείται αρχείο
+  < 1.000 κωδικών). CLI `cn:import`.
 - **Αυτόματος «Έλεγχος κατάστασης»** (`delivery:refresh-status`, scheduler κάθε 3 ώρες, «Χρονοπρογραμματιστής» → Ψηφιακή
   Διακίνηση): read-only επανάγνωση των ανοιχτών δελτίων/ΤΔΑ (`DeliveryLifecycleService::OPEN_STATES`), 90 ημέρες, ≤40/tenant/run.
 - **Δήλωση επιστροφής (ConfirmDeliveryReturn, myDATA v2.0.2)** — όταν ο μεταφορέας δεν παρέδωσε και

@@ -42,7 +42,7 @@ class Product extends Model
     /**
      * TARIC is stored NORMALISED (10 chars: an 8-digit ΣΟ code +«00») whatever the entry
      * path — form, CSV import, inline create, API. An unparseable value is kept trimmed so
-     * the bad input stays visible (the form rejects it; AADE would too) rather than vanish.
+     * the bad input stays visible (the form only offers catalog codes; AADE would reject it) rather than vanish.
      */
     public function setTaricCodeAttribute(?string $value): void
     {
