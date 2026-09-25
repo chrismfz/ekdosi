@@ -13,8 +13,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 Ο κανόνας της σειράς: **η προτεραιότητα ενός finding δεν είναι ιδιότητά του — είναι finding × αυτή η επιχείρηση ×
 αυτή η ημερομηνία.** Λεπτομέρειες ανά item στο «🗺️ Roadmap».
 
-1. **Delivery notes (ΔΑ)** — **TARIC στα είδη πριν την 1/1/2027** (βλ. Roadmap) · πλήρη **9.1 / 9.2** (το inbound inbox
-   4b είναι ήδη χτισμένο). Η Β' Φάση (12/10/2026: φόρτωση/μεταφόρτωση/παραλαβή) καλύπτεται από την πλευρά του εκδότη.
+1. **Delivery notes (ΔΑ) — ΣΕ ΕΞΕΛΙΞΗ:** **«ίδια μέσα»** (Nexon παραδίδει με δικό της όχημα) πριν τις **12/10/2026** +
+   **TARIC στα είδη** πριν την **1/1/2027** (βλ. Roadmap «Delivery notes») · μετά πλήρη **9.1 / 9.2**.
 2. **Migration / money tooling:** Bank-statement import → CSV εξόδων (αν χρειαστεί) → Cashflow /
    recurring-expenses (accountant-gated).
 3. **Strategic epic «Αντικατάσταση WHMCS» → `PLAN.md`:** Domains (A4/A5) → Payment connectors → Provisioning →
@@ -32,9 +32,17 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **POS-1(c) — πραγματική POS διασύνδεση (ν.5073/2023).** Σύλληψη `ProvidersSignature` + `tid` + `transactionId` από το
   Cardlink/Eurobank vPOS return → πέρασμα σε `InvoSignDocument`/`AadeInvoiceDocument` ώστε να φιλάρει το type-7.
   Μέχρι τότε card/vPOS/PayPal → §8.12 **1**, 3, 6 ή 8.
-- **Payment connectors — IRIS + card-POS** → `payment-connectors.md` (IRIS πρώτα· card-POS/Stripe μετά). Η υποχρέωση
-  αποδοχής IRIS είναι ήδη σε ισχύ (αναφέρεται από τους ανταγωνιστές, π.χ. kiros)· φυσική θέση = «Πλήρωσε» στην πύλη
-  δίπλα στο vPOS, μέσω του υπάρχοντος `PaymentGateway` seam.
+- **IRIS (έρευνα 2026-09-25).** Υποχρέωση αποδοχής για ΝΠ/ΟΕ **μόνο B2C** από **31/10/2025** (ν.5193/2025 άρθ.219 →
+  άρθ.65 παρ.5 ν.4446/2016· τεχνικές ΚΥΑ Α.1147/1159/1160/1161/1162/2025 από 1/12/2025). Καλύπτει και e-shops· **όχι**
+  B2B τιμολόγια. **Online ήδη καλυμμένο:** η σελίδα Eurobank/Cardlink του vPOS προσφέρει IRIS. **Επί τόπου** (π.χ. B2C
+  στην εγκατάσταση) = QR IRIS της τράπεζας — χωρίς τερματικό, χωρίς κώδικα. Η διασύνδεση POS (Ε.2044/2024) εξαιρεί
+  e-commerce → η πληρωμή της πύλης ΔΕΝ θέλει `ProvidersSignature`.
+  **Λείπει (P2):** το settle να γράφει §8.12 κωδ. **8** (IRIS) όταν η Cardlink επιστρέφει πληρωμή IRIS — ⚠ επιβεβαίωσε ότι
+  το return της Cardlink δηλώνει τη μέθοδο. **P3:** άμεσο IRIS request-to-pay / QR στο PDF → `payment-connectors.md`.
+  Πηγές: https://www.lsa.gr/portal/draseis/anakoinoseis/10913-31-10-2025-iris-b2c ·
+  https://www.taxheaven.gr/law/5193/2025 · https://www.taxheaven.gr/news/72117/iris-apo-112-stis-lianikes-synallages-b2c-nees-texnikes-prodiagrafes-diasyndeshs ·
+  https://www.taxheaven.gr/news/67829/diasyndesh-fhm-pos-nees-dieykriniseis-kai-erwtapanthseis
+- **Payment connectors — card-POS** → `payment-connectors.md` (POS-1(c) parked).
 - **Bank-statement import → match πληρωμών** — ανέβασμα κίνησης (CSV/MT940) → auto-match σε ανοιχτά τιμολόγια
   (ποσό/ημερομηνία/ΑΦΜ) → προτεινόμενες `Payment` εγγραφές προς έγκριση. **DEFERRED (owner, 2026-09-23)** — θέλει
   πρώτα δείγμα export από την τράπεζα (format/στήλες) για να σχεδιαστεί ο parser.
@@ -55,11 +63,29 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   απαντήσει ο λογιστής (σήμερα οι παρακρατήσεις μας είναι 0 → χωρίς πρακτική επίπτωση).
 
 ### 🚚 Delivery notes (Ψηφιακό ΔΑ)
+- **«Ίδια μέσα» — ο εκδότης μεταφέρει ο ίδιος (έρευνα 2026-09-25, ΣΕ ΕΞΕΛΙΞΗ).** Β' Φάση από **12/10/2026** (Α.1094/2026,
+  ΦΕΚ Β' 2445/30.04.2026 → φόρτωση/μεταφόρτωση/παραλαβή). Ρόλοι με ίδια μέσα: εκδότης = αποστολέας, **χωρίς μεταφορέα**
+  (Ε.2030/2025 Πίνακας 1 παρ. 1). Έναρξη = `RegisterTransfer` από όποιον μεταφέρει (DGM v2.0.2 §3.2.1, πραγματικό
+  `vehicleNumber`)· **παράδοση = ο ΠΑΡΑΛΗΠΤΗΣ σκανάρει το QR** (Α.1122/2024 άρθ.3 §4) — ο εκδότης δεν κλείνει ([833],
+  sandbox 13/9). **B2C με ΑΛΠ = χωρίς ΔΑ** (Α.1122 άρθ.2 περ. ι). `withoutDigitalTransportTracking` **δεν** είναι νόμιμη
+  διέξοδος για B2B ίδια μέσα (καμία διάταξη δεν το προβλέπει). Αν ο λήπτης δεν σκανάρει: μένει «σε διακίνηση», χωρίς
+  auto-close/πρόστιμο που να εντοπίστηκε.
+  **Να χτιστεί:** ροή ίδια μέσα (έναρξη + πινακίδα, ευκρινές QR στο PDF για τον πελάτη, λίστα ανεπιβεβαίωτων > Ν ημέρες,
+  refreshStatus) · προειδοποίηση στο «Χωρίς Ψηφιακή Παρακολούθηση» για B2B · **sandbox:** `nonObligatedRecipient` (μη
+  υπόχρεος λήπτης) → μπορεί ο εκδότης-μεταφορέας να δώσει FULL ([832] λέει «μόνο ο μεταφορέας»);
+  Πηγές: https://www.aade.gr/sites/default/files/2026-05/a1094ada.pdf · https://www.taxheaven.gr/circulars/47725/a-1122-2024 ·
+  https://www.aade.gr/sites/default/files/2024-08/A.1123_2024_fek.pdf · https://www.taxheaven.gr/news/70944/pshfiaka-deltia-apostolhs-dieykriniseis-efarmoghs ·
+  https://www.aade.gr/sites/default/files/2026-07/ADA%20%20E%202038.pdf ·
+  https://www.aade.gr/sites/default/files/2026-09/myDATA%20API%20Documentation_DeliveryNote_v2.0.2_official_0.pdf
 - **TARIC / κωδικός είδους στις γραμμές (υποχρεωτικό από 1/1/2027 — Ενιαία Κωδικοποίηση Ειδών, ΚΥΑ ΥΠΕΘΟΟ-ΑΑΔΕ
   30/4/2026).** myDATA `invoiceDetails.TaricNo` (ακριβώς 10 χαρ.) + `itemCode` (≤50), δεκτά ΜΟΝΟ σε τιμολόγια + δελτία
   αποστολής/διακίνησης (9.3) — `docs/aade/myDATA_API_Documentation_v2.0.2_official_erp.md` §5.4 (γρ. ~1039). Το firebed
   έχει ήδη `InvoiceDetails::setTaricNo()/setItemCode()`· λείπει πεδίο στο προϊόν (+ snapshot στη γραμμή) και emit στους
   builders (τιμολόγιο/ΤΔΑ/9.3). Αφορά αγαθά — οι υπηρεσίες hosting δεν έχουν TARIC.
+  **ΣΕ ΕΞΕΛΙΞΗ.** ⚠ Η Α.1123 άρθ.6 λέει **Συνδυασμένη Ονοματολογία (8ψήφια)**, το myDATA θέλει **10** → η επέκταση «00»
+  είναι η συνήθης αλλά **δεν** υπάρχει οδηγία ΑΑΔΕ (το FAQ TARIC v2.0 είναι τελωνειακό) → δοκιμή sandbox. Όλοι οι υπόχρεοι,
+  B2B και B2C, χωρίς εξαίρεση μικρών· αν η επιχείρηση έχει δικούς κωδικούς ειδών, στέλνονται κι αυτοί (άρθ.6 παρ.2 →
+  `itemCode`). Πηγή: https://www.aade.gr/sites/default/files/2026-07/FAQS_tARIC_0.pdf
 - **Β' Φάση (12/10/2026) — από την πλευρά του ΠΑΡΑΛΗΠΤΗ:** η επιβεβαίωση παραλαβής + ποσοτικός/ποιοτικός έλεγχος
   (`ConfirmDeliveryOutcome`, qrUrl-only) = Slice 4c παρακάτω· χρειάζεται μόνο αν tenant παραλαμβάνει αγαθά με ψηφιακό ΔΑ.
 - **Inbound «Εισερχόμενα Διακίνησης»** — 4a+4b ✅ ΧΤΙΣΜΕΝΑ (#540/#566: fetch + Απόρριψη/Έλεγχος/Παραλήφθηκε).
@@ -171,6 +197,17 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 
 **Scope / product**
 - **Απορρίπτονται:** αξιόγραφα/επιταγές (καμία από το 2007) · αποθήκη/απογραφή · λιανική (Χ/Ζ) · τα ~120 settings του Epsilon.
+- **Ψηφιακό Πελατολόγιο — ΔΕΝ μας αφορά (έρευνα 2026-09-25· watch).** Α.1057/2025 (ΦΕΚ Β' 1828/14-04-2025), από 1/7/2025
+  **μόνο κλάδος οχημάτων** (συνεργεία, φανοποιεία, πλυντήρια, στάθμευση, ενοικιάσεις)· ανακοινωμένα επόμενα (χωρίς ΦΕΚ):
+  εκδηλώσεις/catering, ξενοδοχεία, υγεία/ομορφιά/γυμναστήρια/εκπαίδευση/νομικές. Όχι IT/hosting/επισκευή Η/Υ. Αν ενταχθεί
+  κλάδος μας: μικρό REST API (DCL: `SendClient`/`UpdateClient`/`CancelClient`/`ClientCorrelations`/`RequestClients`)
+  στα ίδια myDATA creds. Άρα **η λιανική (Χ/Ζ) μένει απορριφθείσα** — οι ΑΠΥ μέσω παρόχου αρκούν.
+  Πηγές: https://www.aade.gr/psifiako-pelatologio · https://www.taxheaven.gr/circulars/50129/a-1057-2025 ·
+  https://www.aade.gr/en/mydata/technical-specifications-digital-client-list-portal-publications
+- **Διαχειριστικά (όχι κώδικας), έρευνα 2026-09-25:** (1) **Η/Τ B2B Β' περίοδος 1/10/2026** — επιβεβαίωσε ότι η InvoSign
+  έκανε τη δήλωση παρόχου ανά tenant (https://www.taxheaven.gr/news/74429/hlektronikh-timologhsh-b-periodos-analytiko-xronodiagramma-paradeigmata-erwthseis-kai-prostima)·
+  (2) **ΚΑΔ Rev.2.1** (Α.1003/2026, από 1/3/2026) — ενημέρωσε τον ΚΑΔ εκδότη στα στοιχεία εταιρίας (τον ζητά ο πάροχος)
+  (https://www.taxheaven.gr/codes/kad2026).
 - **Per-product τιμοκατάλογος — DROPPED:** per-line έκπτωση + per-customer default discount αρκούν (re-open μόνο με πραγματικό use case).
 - **Η/Τ B2B (κύματα 2/2/2026 · 1/10/2026) = ιστορικό:** η παραγωγή ΗΔΗ φιλάρει μέσω παρόχου (InvoSign — invoicer.myip.gr, ekdosi.nexon.gr).
 - **«Μοιάζει κενό αλλά δεν είναι»:** E3 overview υπάρχει (`MyDataE3Overview`) · `TenantScopedUnique` redundant (DB unique) · stock/ΣΔΕΠ/WHMCS sentinels = dead legacy code.
