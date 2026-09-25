@@ -1329,7 +1329,12 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
 - **Καρτέλα «ΕΡΓΑΝΗ» στην Εταιρεία** (super_admin): on/off πυλώνα (`ergani_enabled`, default off), email λογιστή,
   περιβάλλον Δοκιμαστικό/Παραγωγή (`ergani_mode` — ίδιοι κωδικοί e-ΕΦΚΑ και στα δύο), κωδικοί (encrypted), «Test σύνδεσης»
   (`ErganiClient`, `EX_BASE_01`).
-- Επόμενα (BACKLOG): υποβολή `WTOLeave` στο ΕΡΓΑΝΗ, ψηφιακή κάρτα (`WRKCardSE`), υπερωρία (`WTOOv`).
+- **Αυτόματη δήλωση αδειών στο ΕΡΓΑΝΗ** (Φάση 2, opt-in `ergani_submit_leaves`): έγκριση → `WTOLeave` (ανά εργάσιμη ημέρα,
+  ονόματα κεφαλαία χωρίς τόνους, `f_req_days` = δικαιούμενες), ανάκληση → `CancelSubmittedDocument` στο περιβάλλον της
+  δήλωσης· `LeaveErganiSubmitter` + `ergani_submissions` (append-only audit)· PDF ΕΡΓΑΝΗ· retry actions· race-safe
+  (ανάκληση κατά τη διάρκεια δήλωσης → ανακαλείται)· καταστάσεις submitted / failed (σίγουρα όχι) / **unknown** (timeout·
+  επανάληψη μόνο με επιβεβαίωση ή «Καταχώριση πρωτοκόλλου») / cancelled / cancel_failed. E2E validated στο trial.
+- Επόμενα (BACKLOG): ψηφιακή κάρτα (`WRKCardSE`), υπερωρία (`WTOOv`), `WTOLeaveC` (ορθή επανάληψη), import εργαζομένων (`EX_BASE_05`).
 
 ## Καταργήθηκαν σκόπιμα (δεν τα ξανακάνουμε)
 CS-Cart bridge · ΕΑΦΔΣΣ (`EAFDSS_SCRIPT`) · FastReport `.fr3` (→ Blade PDF) ·

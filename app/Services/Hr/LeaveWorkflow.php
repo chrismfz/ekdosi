@@ -9,6 +9,7 @@ use App\Models\Company;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
 use App\Models\User;
+use App\Services\Ergani\LeaveErganiSubmitter;
 use App\Services\TenantMailerFactory;
 use Filament\Actions\Action;
 use Filament\Notifications\Notification;
@@ -23,7 +24,8 @@ use Spatie\Permission\PermissionRegistrar;
  * The ONE place a leave request changes state (approve / reject / cancel) —
  * so the side effects can't be skipped by another code path:
  *
- *   - approve  → email the accountant (companies.leave_notify_email) + bell the requester
+ *   - approve  → declare to ΕΡΓΑΝΗ (WTOLeave, if the tenant opted in) + email the
+ *                accountant (companies.leave_notify_email) + bell the employee
  *   - reject   → bell the requester
  *   - cancel   → of an APPROVED leave the accountant was told about: email the
  *                cancellation; bell the employee when someone else cancels
@@ -36,7 +38,10 @@ use Spatie\Permission\PermissionRegistrar;
  */
 class LeaveWorkflow
 {
-    public function __construct(private readonly TenantMailerFactory $mailers) {}
+    public function __construct(
+        private readonly TenantMailerFactory $mailers,
+        private readonly LeaveErganiSubmitter $ergani,
+    ) {}
 
     public function approve(LeaveRequest $leave, User $by, ?string $note = null, ?int $days = null): LeaveRequest
     {
@@ -66,6 +71,9 @@ class LeaveWorkflow
             ])->save();
         });
 
+        // ΕΡΓΑΝΗ first (when the tenant opted in), so the accountant email can
+        // carry the protocol number instead of asking for a declaration.
+        $this->ergani->submit($leave, (int) $by->getKey());
         $this->notifyAccountant($leave, 'approved');
         $this->bellRequester($leave, 'Η άδειά σας εγκρίθηκε', 'success');
 
@@ -112,6 +120,8 @@ class LeaveWorkflow
             ])->save();
         });
 
+        // Withdraw the ΕΡΓΑΝΗ declaration if one was made (CancelSubmittedDocument).
+        $this->ergani->cancel($leave, (int) $by->getKey());
         if ($leave->accountant_owed_event === 'cancelled') {
             $this->notifyAccountant($leave, 'cancelled');
         }
@@ -158,13 +168,14 @@ class LeaveWorkflow
      * Email the accountant. Returns false (and logs) when no address is set or
      * the send fails — the decision itself stands either way.
      *
-     * @param  'approved'|'cancelled'  $event
+     * @param  'approved'|'cancelled'|'declared'  $event  declared = ekdosi declared it
+     *                                                    LATE, after the accountant was asked to
      */
     public function notifyAccountant(LeaveRequest $leave, string $event): bool
     {
         $company = $leave->company;
         $to = trim((string) $company?->leave_notify_email);
-        if (! $company instanceof Company || $to === '' || ! in_array($event, ['approved', 'cancelled'], true)) {
+        if (! $company instanceof Company || $to === '' || ! in_array($event, ['approved', 'cancelled', 'declared'], true)) {
             return false;
         }
 
@@ -185,10 +196,12 @@ class LeaveWorkflow
                     return;
                 }
                 $raced = $event === 'approved' && $row->status === LeaveStatus::Cancelled;
-                $row->forceFill([
-                    'accountant_notified_at' => now(),
-                    'accountant_owed_event' => $raced ? 'cancelled' : null,
-                ])->saveQuietly();
+                // «declared» is an FYI on top — it must never clear an owed
+                // approval/revocation email.
+                $row->forceFill($event === 'declared'
+                    ? ['accountant_notified_at' => now()]
+                    : ['accountant_notified_at' => now(), 'accountant_owed_event' => $raced ? 'cancelled' : null],
+                )->saveQuietly();
                 $leave->setRawAttributes($row->getAttributes(), true);
             });
 

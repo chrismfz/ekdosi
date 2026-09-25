@@ -99,7 +99,7 @@ class CompanyExporter
         // Προσωπικό (HR) — personal data of staff, not part of the accounting
         // bundle; re-entered on the target (v1). employees.user_id points at a
         // panel-global user anyway.
-        'employees', 'leave_requests', 'company_holidays',
+        'employees', 'leave_requests', 'company_holidays', 'ergani_submissions',
         // Backup config + run log are VM-specific (destinations/paths/passphrase
         // are reconfigured on the target VM) — never travel inside a bundle.
         'company_backup_settings',

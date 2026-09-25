@@ -10,6 +10,7 @@ use Carbon\CarbonInterface;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * Αίτημα άδειας. `days` = working days (Mon–Fri minus national + company
@@ -78,6 +79,11 @@ class LeaveRequest extends Model
         return $this->belongsTo(User::class, 'requested_by_user_id');
     }
 
+    public function erganiSubmissions(): HasMany
+    {
+        return $this->hasMany(ErganiSubmission::class)->latest('id');
+    }
+
     public function decidedBy(): BelongsTo
     {
         return $this->belongsTo(User::class, 'decided_by_user_id');
@@ -111,6 +117,15 @@ class LeaveRequest extends Model
     public function accountantOwed(): ?string
     {
         return filled($this->company?->leave_notify_email) ? $this->accountant_owed_event : null;
+    }
+
+    /**
+     * ΕΡΓΑΝΗ's submit date as its cancel/PDF endpoints want it (yyyymmdd, in
+     * ΕΡΓΑΝΗ's own Greek local time — never the app timezone's idea of the day).
+     */
+    public function erganiSubmitDateYmd(): ?string
+    {
+        return $this->ergani_submitted_at?->copy()->setTimezone('Europe/Athens')->format('Ymd');
     }
 
     public function periodLabel(): string

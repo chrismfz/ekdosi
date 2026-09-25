@@ -102,7 +102,7 @@
 2. ✅ **Φάση 1 — Εργαζόμενοι + Άδειες** (έγκριση, email λογιστή, ημερολόγιο, υπόλοιπο, τοπικές αργίες, ρόλος `ergani`). Χωρίς ΕΡΓΑΝΗ API· ICS feed → BACKLOG.
 3. **Φάση 2 — ΕΡΓΑΝΗ client + κάρτα** (panel κουμπί + αποστολή + ιστορικό + ειδοποίηση), validated στο trial.
 4. **Φάση 3 — QR tablet + σελίδα προσωπικού** (κινητό).
-5. **Φάση 4 — υποβολή Αδειών/Υπερωρίας στο ΕΡΓΑΝΗ** + ημερήσιος έλεγχος ασυμφωνιών (ωράριο ↔ χτυπήματα ↔ άδειες).
+5. ✅ **Φάση 2 (έγινε νωρίτερα) — υποβολή Αδειών στο ΕΡΓΑΝΗ** (`LeaveErganiSubmitter`, §7)· μένει **υπερωρία** + ημερήσιος έλεγχος ασυμφωνιών (ωράριο ↔ χτυπήματα ↔ άδειες).
 
 ## 6. Αποφάσεις (ιδιοκτήτης, 2026-09-25)
 
@@ -123,3 +123,23 @@
 - Πλήρης πίνακας ΚΑΔ — https://germanlis.gr/psifiaki-karta/pinakas-kad/
 - Οδηγός API (PDF) — https://static-ypakp-gr-gefufeabdmg3ggcs.a01.azurefd.net/staticfiles/trialv2/
 - SDK αναφοράς — https://github.com/withlogicco/ergani-python-sdk
+
+## 7. Επαληθευμένα στο δοκιμαστικό ΕΡΓΑΝΗ (2026-09-25)
+
+Φανταστικός εργαζόμενος «ΔΟΚΙΜΑΣΤΙΚΟΣ ΥΠΑΛΛΗΛΟΣ», ΑΦΜ 123456783, «προσλήφθηκε» ΜΟΝΟ στο trial (`WebE3N`, ΑΚ - ΑΠ3904) — για
+end-to-end δοκιμές. Τα trial δεν έχουν τους πραγματικούς εργαζόμενους (EX_BASE_04/05 κενά) → χωρίς πρόσληψη: «Δεν υπάρχει
+σχέση εργασίας στις ημερομηνίες…».
+
+- **WTOLeave**: μία `ErgazomenoiWTO` εγγραφή **ανά ημέρα** (`f_date`)· το ΕΡΓΑΝΗ καταγράφει ΜΟΝΟ τις ημέρες που στέλνεις (δεν
+  ελέγχει ότι καλύπτουν το εύρος). `f_req_days` = **δικαιούμενες** ημέρες (3 ψηφία, «020»). Απάντηση
+  `200 [{"id":"359880","protocol":"ΑΚ - ΟΡ359880","submitDate":"25/09/2026 11:47"}]` (το πρωτόκολλο έχει κενά).
+- **CancelSubmittedDocument**: `{"TypeOfDocument":"WTOLeave","Protocol":"ΑΚ - ΟΡ359881","SubmittedDate":"20260925"}` →
+  `200 "Η ακύρωση ολοκληρώθηκε επιτυχώς"` (γυμνό JSON string). Ο τύπος = το κείμενο (όχι «84»)· για `WTOLeaveC` → «WTOLeaveC».
+  Ημερομηνία ΜΟΝΟ `yyyymmdd`. Ξανά-ακύρωση → `400 No objects found`.
+- **PDF**: `GET Documents/WTOLeave?protocol=…&submittedDate=yyyymmdd` → `{"message":null,"document":"<base64>"}`.
+- **WTOLeaveC** (ορθή επανάληψη): `f_rel_protocol` + `f_rel_date` (dd/mm/yyyy) του αρχικού· **αντικαθιστά** το αρχικό (το
+  αρχικό γίνεται «No objects found»)· ακύρωση του C ΔΕΝ επαναφέρει το αρχικό. (Δεν χρησιμοποιείται ακόμα.)
+- **WebE3N** (πρόσληψη, μόνο για δοκιμές): σειρά πεδίων = XSD sequence (το GET template έχει λάθος σειρά γύρω από
+  `f_kyria_asfalisi`/`EpikourikiSelections`)· code lists μέσω `EX_BASE_03` με `Parameter` = Sepe, Oaed, Stakod,
+  KallikratisKoinothta, Doy, Step92, Nationality, TyposTaytotitas, EpipedoMorfosis, WorkTimeType …
+- Τα μηνύματα σφάλματος περιέχουν literal `\n` μεταξύ γραμμών.

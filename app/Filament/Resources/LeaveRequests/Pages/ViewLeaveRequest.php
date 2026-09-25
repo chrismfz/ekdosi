@@ -17,6 +17,10 @@ class ViewLeaveRequest extends ViewRecord
             LeaveRequestActions::reject(),
             LeaveRequestActions::cancel(),
             LeaveRequestActions::resendAccountant(),
+            LeaveRequestActions::submitToErgani(),
+            LeaveRequestActions::recordErganiProtocol(),
+            LeaveRequestActions::erganiPdf(),
+            LeaveRequestActions::cancelInErgani(),
         ];
     }
 }

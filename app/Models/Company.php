@@ -87,6 +87,8 @@ class Company extends Model
         'ergani_mode',
         'ergani_username',
         'ergani_password',
+        // Φάση 2: explicit opt-in to submit approved leaves (WTOLeave) — creds alone never do.
+        'ergani_submit_leaves',
         // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
         'mydata_send_item_descr',
         'gsis_username',
@@ -182,6 +184,7 @@ class Company extends Model
             'support_enabled' => 'boolean',
             'enable_domain_management' => 'boolean',
             'ergani_enabled' => 'boolean',
+            'ergani_submit_leaves' => 'boolean',
             'ergani_password' => MaybeEncrypted::class,
             'ai_monthly_token_cap' => 'integer',
             'ai_api_key' => MaybeEncrypted::class,

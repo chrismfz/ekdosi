@@ -134,7 +134,7 @@ class CreateLeaveRequest extends CreateRecord
 
             if ($approveNow) {
                 try {
-                    LeaveRequestActions::warnIfAccountantMissed($workflow->approve($leave, $user));
+                    LeaveRequestActions::warnAboutFailedSideEffects($workflow->approve($leave, $user));
                     $this->approvedNow = true;
 
                     return;
