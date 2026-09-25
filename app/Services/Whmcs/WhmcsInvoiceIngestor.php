@@ -8,6 +8,7 @@ use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
+use App\Support\Hr\ErganiStaff;
 use Filament\Notifications\Notification;
 use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
@@ -270,7 +271,7 @@ class WhmcsInvoiceIngestor
                 return;
             }
 
-            $recipients = $tenant->users;
+            $recipients = ErganiStaff::staffRecipients($tenant);
             if ($recipients->isEmpty()) {
                 return;
             }

@@ -2,6 +2,9 @@
 
 namespace App\Filament\Pages;
 
+use App\Models\Company;
+use App\Support\Hr\ErganiStaff;
+use Filament\Facades\Filament;
 use Filament\Pages\Dashboard as BaseDashboard;
 
 /**
@@ -24,5 +27,13 @@ class Dashboard extends BaseDashboard
     public static function getNavigationLabel(): string
     {
         return 'Πίνακας ελέγχου';
+    }
+
+    /** The money widgets are ungated by design — never for the leave-only staff role. */
+    public static function canAccess(): bool
+    {
+        $tenant = Filament::getTenant();
+
+        return ! ($tenant instanceof Company && ErganiStaff::isRestricted(auth()->user(), $tenant));
     }
 }

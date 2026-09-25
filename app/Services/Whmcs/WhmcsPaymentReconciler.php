@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\InvoiceBalance;
+use App\Support\Hr\ErganiStaff;
 use App\Support\Whmcs\WhmcsPaymentSyncCache;
 use Filament\Notifications\Notification;
 use Throwable;
@@ -150,7 +151,7 @@ class WhmcsPaymentReconciler
     private function notify(Company $tenant, array $invoiceIds): void
     {
         try {
-            $recipients = $tenant->users;
+            $recipients = ErganiStaff::staffRecipients($tenant);
             if ($recipients->isEmpty()) {
                 return;
             }

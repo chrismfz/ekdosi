@@ -96,6 +96,10 @@ class CompanyExporter
         'stock_movements',         // re-derived from invoices/delivery notes.
         'service_contracts',       // deferred bucket-C (recurring-billing layer).
         'firebird_import_runs',    // ETL run log — operational, not portable data.
+        // Προσωπικό (HR) — personal data of staff, not part of the accounting
+        // bundle; re-entered on the target (v1). employees.user_id points at a
+        // panel-global user anyway.
+        'employees', 'leave_requests', 'company_holidays',
         // Backup config + run log are VM-specific (destinations/paths/passphrase
         // are reconfigured on the target VM) — never travel inside a bundle.
         'company_backup_settings',

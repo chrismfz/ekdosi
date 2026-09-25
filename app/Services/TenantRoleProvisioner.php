@@ -49,6 +49,26 @@ class TenantRoleProvisioner
     public const ROLE_OPERATOR = 'operator';
 
     /**
+     * «Προσωπικό (μόνο άδειες)» — staff who are NOT operators (e.g. a junior who
+     * must not issue documents) but request their own leave. Holds ONLY
+     * ERGANI_PERMISSION_MAP; App\Http\Middleware\RestrictErganiStaff confines them
+     * to those screens (default-deny for every other panel page), and
+     * PanelRecipients keeps them off the operator bell broadcasts.
+     */
+    public const ROLE_ERGANI = 'ergani';
+
+    /**
+     * The ERGANI (staff-only) role's permissions — own leave requests + the team
+     * leave calendar. Nothing else.
+     *
+     * @var array<string, list<string>>
+     */
+    public const ERGANI_PERMISSION_MAP = [
+        'LeaveRequest' => ['ViewAny', 'View', 'Create'],
+        'LeaveCalendar' => ['View'],
+    ];
+
+    /**
      * The OPERATOR role's permissions, as an explicit per-resource action map
      * (resources have heterogeneous action sets — the WHMCS inbox has no Create,
      * the MARK-detail page is a single read-only View). {action}:{resource}
@@ -89,6 +109,11 @@ class TenantRoleProvisioner
         // access model honest; the live-AADE orphan lookup inside the page is
         // separately gated on View:MyDataConsole (admin-only).
         'MyDataMarkDetail' => ['View'],
+        // Προσωπικό: operators are staff too — request their OWN leave + see the
+        // team calendar. Approving (Update:LeaveRequest) and the roster/holidays
+        // stay company_admin.
+        'LeaveRequest' => ['ViewAny', 'View', 'Create'],
+        'LeaveCalendar' => ['View'],
     ];
 
     /**
@@ -203,6 +228,9 @@ class TenantRoleProvisioner
 
         $operator = $this->upsertRole(self::ROLE_OPERATOR, $guard, $company);
         $operator->syncPermissions($this->operatorPermissions($guard));
+
+        $ergani = $this->upsertRole(self::ROLE_ERGANI, $guard, $company);
+        $ergani->syncPermissions($this->mapPermissions(self::ERGANI_PERMISSION_MAP, $guard));
     }
 
     /**
@@ -252,6 +280,7 @@ class TenantRoleProvisioner
         return match ($name) {
             self::ROLE_COMPANY_ADMIN => $this->companyAdminPermissions($guard),
             self::ROLE_OPERATOR => $this->operatorPermissions($guard),
+            self::ROLE_ERGANI => $this->mapPermissions(self::ERGANI_PERMISSION_MAP, $guard),
             default => collect(),
         };
     }
@@ -342,8 +371,19 @@ class TenantRoleProvisioner
      */
     private function operatorPermissions(string $guard): Collection
     {
+        return $this->mapPermissions(self::OPERATOR_PERMISSION_MAP, $guard);
+    }
+
+    /**
+     * The existing global Permission rows named by a {Resource => [actions]} map.
+     *
+     * @param  array<string, list<string>>  $map
+     * @return Collection<int, Permission>
+     */
+    private function mapPermissions(array $map, string $guard): Collection
+    {
         $wanted = [];
-        foreach (self::OPERATOR_PERMISSION_MAP as $resource => $actions) {
+        foreach ($map as $resource => $actions) {
             foreach ($actions as $action) {
                 $wanted[] = "{$action}:{$resource}";
             }
@@ -384,7 +424,7 @@ class TenantRoleProvisioner
      */
     public function assignStandardRole(User $user, Company $company, string $roleName): void
     {
-        if (! in_array($roleName, [self::ROLE_COMPANY_ADMIN, self::ROLE_OPERATOR], true)) {
+        if (! in_array($roleName, [self::ROLE_COMPANY_ADMIN, self::ROLE_OPERATOR, self::ROLE_ERGANI], true)) {
             throw new \InvalidArgumentException("Unknown standard role: {$roleName}");
         }
 
@@ -399,7 +439,7 @@ class TenantRoleProvisioner
     // and set that single role within a team.
 
     /**
-     * The three roles the picker manages, in privilege order. super_admin is
+     * The roles the picker manages, in privilege order. super_admin is
      * resolved dynamically from Shield config (its name is configurable).
      *
      * @return list<string>
@@ -410,6 +450,7 @@ class TenantRoleProvisioner
             ShieldUtils::getSuperAdminName(),
             self::ROLE_COMPANY_ADMIN,
             self::ROLE_OPERATOR,
+            self::ROLE_ERGANI,
         ];
     }
 

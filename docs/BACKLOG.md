@@ -185,11 +185,11 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   να μη σπάσει το per-customer `customer_contacts` που χρησιμοποιεί ο Sendable statement.
 
 ### 👥 Προσωπικό / ΕΡΓΑΝΗ (`ergani/README.md`)
-- **Άδειες + Ψηφιακή Κάρτα — DESIGN (Φάση 0 + trial probe 2026-09-25).** MyIP **δεν** είναι υπόχρεη κάρτας —
-  επιβεβαιωμένο από το ίδιο το ΕΡΓΑΝΗ (`EX_BASE_01.IsInCardSector=0`, trial). Πραγματικό πρόβλημα = **άδειες** (Google
-  Calendar, ξεχνιέται ο λογιστής) → Φάση 1 = εργαζόμενοι (import `EX_BASE_05`) + άδειες (ρόλος `employee`, έγκριση,
-  ημερολόγιο μέσα στο ekdosi, email λογιστή → μετά `WTOLeave`)· μετά κάρτα (`WRKCardSE`) + υπερωρία (`WTOOv`, ελαφρύ).
-  Κωδικοί/σχήματα επιβεβαιωμένα στο `ergani/schemas/`.
+- **Φάση 1 (εργαζόμενοι + άδειες + ημερολόγιο + ρόλος `ergani`) → SHIPPED** (FEATURES §22). MyIP **δεν** είναι υπόχρεη
+  κάρτας (`EX_BASE_01.IsInCardSector=0`, trial). Επόμενα: (α) **υποβολή `WTOLeave`** από το ekdosi (`companies.ergani_mode` trial|production όπως
+  `mydata_mode` — ίδια e-ΕΦΚΑ creds και στα δύο, μόνο το URL αλλάζει → default trial, διακόπτης μόνο super_admin, το
+  περιβάλλον γράφεται σε κάθε υποβολή· `Usertype 01`, creds κρυπτογραφημένα, token cache — 429)· (β) import εργαζομένων από `EX_BASE_05`· (γ) κάρτα `WRKCardSE` +
+  υπερωρία `WTOOv` (ελαφρύ). Ανοιχτά: άδεια που διασχίζει έτος χρεώνεται όλη στο έτος έναρξης· ICS feed· ανά-παράρτημα αργίες.
 
 ---
 

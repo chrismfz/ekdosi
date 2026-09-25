@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Concerns\InteractsWithAssistant;
 use App\Models\Company;
+use App\Support\Hr\ErganiStaff;
 use App\Support\Settings\SystemSettings;
 use BackedEnum;
 use Filament\Facades\Filament;
@@ -54,7 +55,9 @@ class Assistant extends Page
         return app(SystemSettings::class)->bool('system.ai_enabled', (bool) config('ekdosi.ai.enabled'))
             && Filament::getTenant() instanceof Company
             && (bool) Filament::getTenant()?->ai_assistant_enabled
-            && auth()->check();
+            && auth()->check()
+            // The assistant's tools read the books — not for leave-only staff.
+            && ! ErganiStaff::isRestricted(auth()->user(), Filament::getTenant());
     }
 
     public function send(): void

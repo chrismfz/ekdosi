@@ -64,7 +64,7 @@ class RolesReprovision extends Command
 
         // The managed roles that actually hold permissions (super_admin holds
         // none — the global Gate::before bypass covers it).
-        $roles = [TenantRoleProvisioner::ROLE_COMPANY_ADMIN, TenantRoleProvisioner::ROLE_OPERATOR];
+        $roles = [TenantRoleProvisioner::ROLE_COMPANY_ADMIN, TenantRoleProvisioner::ROLE_OPERATOR, TenantRoleProvisioner::ROLE_ERGANI];
 
         /** @var list<array{company: Company, role: string, missing: list<string>, extra: list<string>}> $plan */
         $plan = [];

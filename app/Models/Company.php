@@ -94,6 +94,7 @@ class Company extends Model
         // «Υπόλοιπο πελάτη» on the invoice PDF — per-tenant default (off).
         'show_customer_balance_on_pdf',
         'mail_from_address',
+        'leave_notify_email',
         'mail_from_name',
         'invoice_audit_bcc',
         'auto_email_on_mydata_accept',
