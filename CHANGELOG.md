@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-09-25
+
 ### Security
 - **`TRUSTED_PROXIES` από το `.env` αγνοούνταν — τώρα εφαρμόζεται, με default `local`.** Διαβαζόταν με `env()` μέσα στο
   `bootstrap/app.php` πριν φορτωθεί το `.env`, άρα πίσω από edge το log συνδέσεων/«Τελ. σύνδεση» και τα per-IP throttles
