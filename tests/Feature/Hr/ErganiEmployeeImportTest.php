@@ -172,4 +172,23 @@ class ErganiEmployeeImportTest extends HrTestCase
         Livewire::test(ListEmployees::class)->mountAction('importFromErgani')->call('$refresh')->unmountAction();
         $this->assertCount(1, array_filter($this->urls, fn (string $u) => str_ends_with($u, '/ExecuteService')), 'open + re-render + cancel = one ΕΡΓΑΝΗ read');
     }
+
+    public function test_service_parameters_use_the_verified_parametername_shape(): void
+    {
+        $sent = null;
+        Http::fake(function (Request $r) use (&$sent) {
+            if (str_ends_with($r->url(), '/Authentication')) {
+                return Http::response(['accessToken' => 'tok']);
+            }
+            $sent = $r->data();
+
+            return Http::response(['EX_BASE_08' => []]);
+        });
+        (new ErganiClient($this->company))->service('EX_BASE_08', ['PararthmaAa' => '0', 'Date' => '28/09/2026']);
+
+        $this->assertSame(['ServiceCode' => 'EX_BASE_08', 'Parameters' => [
+            ['ParameterName' => 'PararthmaAa', 'ParameterValue' => '0'],
+            ['ParameterName' => 'Date', 'ParameterValue' => '28/09/2026'],
+        ]], $sent);
+    }
 }

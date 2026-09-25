@@ -16,7 +16,7 @@ class ErganiSubmission extends Model
     use BelongsToCompany;
 
     protected $fillable = [
-        'company_id', 'leave_request_id', 'work_card_event_id', 'user_id', 'document', 'action', 'environment',
+        'company_id', 'leave_request_id', 'work_card_event_id', 'overtime_declaration_id', 'user_id', 'document', 'action', 'environment',
         'ok', 'http_status', 'protocol', 'ergani_id', 'submit_date', 'message', 'request', 'response',
     ];
 

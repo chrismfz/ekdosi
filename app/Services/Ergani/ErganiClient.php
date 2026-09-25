@@ -75,7 +75,7 @@ class ErganiClient
     {
         $response = $this->call(fn (PendingRequest $http) => $http->post($this->baseUrl().'/WebServices/ExecuteService', [
             'ServiceCode' => $code,
-            'Parameters' => array_map(fn (string $name, string $value): array => ['Name' => $name, 'Value' => $value],
+            'Parameters' => array_map(fn (string $name, string $value): array => ['ParameterName' => $name, 'ParameterValue' => $value],
                 array_keys($parameters), array_values($parameters)),
         ]));
 

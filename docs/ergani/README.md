@@ -53,7 +53,10 @@
 - **`WTOLeave`**: `WTOS.WTO[]{f_aa_pararthmatos, f_rel_protocol, f_rel_date, f_comments, f_from_date, f_to_date,
   Ergazomenoi.ErgazomenoiWTO[]{f_afm, f_eponymo, f_onoma, f_date, ErgazomenosAnalytics.ErgazomenosWTOAnalytics[]{f_type
   (π.χ. ΑΔΚΑΝ), f_from, f_to, f_year, f_req_days}}}`. Ημερομηνίες **`dd/mm/yyyy`**, ώρες `HH:MM`, `f_req_days` 3 ψηφία.
-- **`WTOOv`**: ίδιο σχήμα χωρίς `f_year`/`f_req_days` (`f_type` = `ΥΠ`/`ΧΥΠ`) — **ελαφρύ**, το κουμπί υπερωρίας είναι εύκολο.
+- **`WTOOv`** (✅ υλοποιήθηκε — `OvertimeService`): ίδιο σχήμα χωρίς `f_year`/`f_req_days`. **Επαληθεύτηκε στο trial
+  2026-09-26:** `f_type` **`ΥΠ`** δεκτό (πρωτ. `ΑΚ - ΟΡ…`)· slot που έχει ήδη ξεκινήσει → **400 «Η υποβολή σας θεωρείται
+  εκπρόθεσμη»** → το ekdosi το απορρίπτει πριν καλέσει. Δεν ανακαλείται μέσω API (μόνο `WTOLeave`/`WTOLeaveC`).
+- **Παράμετροι services:** `Parameters: [{ParameterName, ParameterValue}]` (επαληθευμένο — ΟΧΙ `Name`/`Value`).
 - **Services** (`schemas/ServicesList.json`): `EX_BASE_05` τρέχον δυναμικό (`afm` προαιρετικό) → **import εργαζομένων**
   (✅ υλοποιήθηκε — `ErganiEmployeeImporter`). **Επαληθεύτηκε στην Παραγωγή 2026-09-25** (μόνο ανάγνωση): απάντηση
   `{"EX_BASE_05":{"Cur":[…]}}`, ανά εργαζόμενο `afm`, `Eponimo`, `Onoma` (κεφαλαία χωρίς τόνους), `PararthmaAa`, `DateFrom`
