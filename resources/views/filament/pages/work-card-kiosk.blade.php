@@ -12,10 +12,13 @@
     </style>
 
     <x-filament::section heading="Συσκευές (tablet γραφείου)">
-        <p class="wk-note" style="text-align:left">
-            Κάθε tablet ανοίγει <span class="wk-url">{{ $kioskUrl }}</span> <strong>χωρίς σύνδεση</strong> — την εταιρεία την ξέρει από την ενεργοποίηση.
-            Για νέο tablet: συνδεθείτε σε αυτό μία φορά, πατήστε «Ενεργοποίηση αυτής της συσκευής» και μετά <strong>αποσυνδεθείτε</strong>.
-        </p>
+        <p class="wk-note" style="text-align:left">Νέο tablet «ρολόι» σε 3 βήματα:</p>
+        <ol class="wk-note" style="text-align:left; margin:0; padding-left:1.25rem">
+            <li>Στο tablet, ανοίξτε το ekdosi και συνδεθείτε <strong>μία φορά</strong> ως διαχειριστής → «Προσωπικό → Σημείο κάρτας (QR)».</li>
+            <li>Πατήστε «Ενεργοποίηση αυτής της συσκευής» και δώστε ένα όνομα (π.χ. «Είσοδος γραφείου»). Η σύνδεσή σας κλείνει αυτόματα.</li>
+            <li>Το tablet μένει στο <span class="wk-url">{{ $kioskUrl }}</span>: οι εργαζόμενοι πατούν το όνομά τους και δίνουν το PIN τους. Κλείδωμα οθόνης: ποτέ (ρυθμίσεις tablet).</li>
+        </ol>
+        <p class="wk-note" style="text-align:left">Χάθηκε ή άλλαξε χέρια ένα tablet; «Ανάκληση» στη γραμμή του — σταματά αμέσως.</p>
         @if ($devices->isEmpty())
             <p class="wk-note" style="text-align:left">Δεν υπάρχει ενεργοποιημένη συσκευή.</p>
         @else

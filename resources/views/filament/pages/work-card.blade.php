@@ -7,6 +7,10 @@
         .wc-badge { display:inline-block; font-size:.75rem; padding:.15rem .5rem; border-radius:999px; background:#dcfce7; color:#166534; } .dark .wc-badge { background:rgba(74,222,128,.2); color:#bbf7d0; }
         .wc-warn { background:#fef3c7; color:#92400e; } .dark .wc-warn { background:rgba(251,191,36,.2); color:#fde68a; }
         .wc-list { width:100%; max-width:32rem; border-collapse:collapse; font-size:.9rem; }
+        .wc-state { font-size:1.05rem; font-weight:600; }
+        .wc-in { color:#15803d; } .dark .wc-in { color:#4ade80; }
+        .wc-tips { width:100%; max-width:32rem; text-align:left; font-size:.85rem; color:#6b7280; margin:0; padding-left:1.1rem; } .dark .wc-tips { color:#9ca3af; }
+        .wc-tips li { margin:.2rem 0; }
         .wc-list td { padding:.4rem .5rem; border-bottom:1px solid #e5e7eb; text-align:left; } .dark .wc-list td { border-color:rgba(255,255,255,.1); }
     </style>
 
@@ -18,6 +22,14 @@
                 <p class="wc-note">Δεν υπάρχει καρτέλα εργαζομένου για τον λογαριασμό σας — ζητήστε από τον διαχειριστή να σας συνδέσει (Προσωπικό → Εργαζόμενοι).</p>
             @else
                 <div class="wc-name">{{ $employee->full_name }}</div>
+                @if ($next === \App\Models\WorkCardEvent::OUT)
+                    <div class="wc-state wc-in">● Είστε ΜΕΣΑ{{ $inSince ? ' από '.$inSince->format($inSince->isToday() ? 'H:i' : 'd/m H:i') : '' }}</div>
+                @else
+                    <div class="wc-state">○ Είστε ΕΚΤΟΣ</div>
+                @endif
+                @if ($qrExpired)
+                    <span class="wc-badge wc-warn">Το QR που σκανάρατε έληξε (αλλάζει κάθε λεπτό) — σκανάρετε ξανά το QR του γραφείου.</span>
+                @endif
                 @if ($viaKiosk)
                     <span class="wc-badge">✓ QR γραφείου</span>
                 @elseif ($kioskRequired)
@@ -39,11 +51,17 @@
                                 <td>{{ $e->occurred_at->format('H:i') }}</td>
                                 <td>{{ $e->typeLabel() }}</td>
                                 <td>{{ $e->sourceLabel() }}</td>
-                                <td>{{ match ($e->ergani_status) { 'submitted' => 'ΕΡΓΑΝΗ ✓', 'failed' => 'ΕΡΓΑΝΗ ✗', 'unknown' => 'ΕΡΓΑΝΗ ?', 'submitting' => '…', default => '—' } }}</td>
+                                <td>{{ match ($e->ergani_status) { 'submitted' => 'ΕΡΓΑΝΗ ✓', 'failed' => 'ΕΡΓΑΝΗ ✗ (ο διαχειριστής ειδοποιήθηκε)', 'unknown' => 'ΕΡΓΑΝΗ ? (ελέγχεται)', 'submitting' => '…', default => '' } }}</td>
                             </tr>
                         @endforeach
                     </table>
                 @endif
+
+                <ul class="wc-tips">
+                    <li>Πατήστε <strong>{{ $next === \App\Models\WorkCardEvent::OUT ? 'Έξοδος' : 'Είσοδος' }}</strong> όταν {{ $next === \App\Models\WorkCardEvent::OUT ? 'φεύγετε' : 'ξεκινάτε τη βάρδια' }} — η ώρα μπαίνει αυτόματα.</li>
+                    <li>Στο γραφείο μπορείτε να χτυπήσετε και από το tablet με το PIN σας.</li>
+                    <li>Λάθος κίνηση; Μην την «διορθώσετε» με νέο χτύπημα — ενημερώστε τον διαχειριστή.</li>
+                </ul>
             @endif
         </div>
     </x-filament::section>

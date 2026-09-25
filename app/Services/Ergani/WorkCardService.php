@@ -202,7 +202,7 @@ class WorkCardService
                 ->icon('heroicon-o-exclamation-triangle')
                 ->danger()
                 ->actions([
-                    Action::make('view')->label('Κάρτες εργασίας')
+                    Action::make('view')->label('Κινήσεις κάρτας')
                         ->url(WorkCardEventResource::getUrl('index', tenant: $company))
                         ->markAsRead(),
                 ])

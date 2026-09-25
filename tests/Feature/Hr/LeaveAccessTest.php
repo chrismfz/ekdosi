@@ -147,14 +147,14 @@ class LeaveAccessTest extends HrTestCase
         $rows = collect($page->viewData('rows'))->keyBy('id');
         $cells = $rows[$colleague->id]['cells'];
 
-        $this->assertSame('Άδεια', $cells['2026-10-05']['label']);
+        $this->assertSame('•', $cells['2026-10-05']['label']);
         $this->assertStringNotContainsString('ασθένειας', $cells['2026-10-05']['title']);
         $this->assertArrayNotHasKey('2026-10-20', $cells, 'colleague pending hidden');
         $this->assertNull($rows[$colleague->id]['remaining']);
 
         $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
         $rows = collect(Livewire::test(LeaveCalendar::class)->set('month', '2026-10')->viewData('rows'))->keyBy('id');
-        $this->assertSame(LeaveType::Sick->value, $rows[$colleague->id]['cells']['2026-10-05']['label']);
+        $this->assertSame('ΑΣΘ', $rows[$colleague->id]['cells']['2026-10-05']['label']);
         $this->assertArrayHasKey('2026-10-20', $rows[$colleague->id]['cells']);
     }
 
@@ -237,5 +237,14 @@ class LeaveAccessTest extends HrTestCase
         Livewire::test(ViewLeaveRequest::class, ['record' => $leave->getRouteKey()])
             ->assertActionHidden('cancelLeave')
             ->assertActionHidden('approve');
+    }
+
+    public function test_staff_land_on_all_their_leaves_approvers_on_the_queue(): void
+    {
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_ERGANI));
+        $this->assertSame('all', Livewire::test(ListLeaveRequests::class)->get('activeTab'));
+
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        $this->assertSame('pending', Livewire::test(ListLeaveRequests::class)->get('activeTab'));
     }
 }

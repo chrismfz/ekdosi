@@ -4,6 +4,9 @@ namespace Tests\Feature\Hr;
 
 use App\Filament\Pages\WorkCard;
 use App\Filament\Pages\WorkCardKiosk;
+use App\Filament\Resources\Employees\Pages\EditEmployee;
+use App\Filament\Resources\Employees\Pages\ListEmployees;
+use App\Filament\Resources\Employees\Widgets\StaffSetupChecklist;
 use App\Filament\Resources\WorkCardEvents\WorkCardEventResource;
 use App\Models\Company;
 use App\Models\Employee;
@@ -312,7 +315,7 @@ class WorkCardTest extends HrTestCase
         $other = Employee::create(['company_id' => $this->company->id, 'last_name' => 'Χωρίς', 'first_name' => 'Pin', 'afm' => '123456783']);
         $this->activatedTablet();
 
-        $this->get('/card-kiosk')->assertOk()->assertSee('Κάρτας Δοκιμή')->assertSee('Εκτός')->assertSee('(χωρίς PIN)', false);
+        $this->get('/card-kiosk')->assertOk()->assertSee('Κάρτας Δοκιμή')->assertSee('Εκτός γραφείου')->assertSee('(χωρίς PIN', false);
 
         $this->withoutMiddleware(PreventRequestForgery::class)
             ->postJson('/card-kiosk/punch', ['employee' => $e->id, 'pin' => '4321', 'seen' => 'in'])
@@ -402,5 +405,66 @@ class WorkCardTest extends HrTestCase
         $this->activatedTablet();
         $this->get('/card-kiosk')->assertCookie('ergani_kiosk');
         $this->assertArrayNotHasKey('ergani_password', $this->company->fresh()->toArray());
+    }
+
+    public function test_activating_a_tablet_logs_the_admin_out(): void
+    {
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+
+        Livewire::test(WorkCardKiosk::class)
+            ->callAction('activateDevice', data: ['name' => 'Ρεσεψιόν'])
+            ->assertRedirect(route('ergani.card-kiosk'));
+
+        $this->assertGuest();
+        $this->assertSame(1, WorkCardKioskDevice::query()->withoutGlobalScopes()->count());
+    }
+
+    public function test_an_admin_can_unlock_a_locked_pin_and_a_new_pin_clears_the_lock(): void
+    {
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        $e = $this->cardEmployee();
+        $e->forceFill(['card_pin_hash' => Hash::make('1111'), 'card_pin_failures' => 5, 'card_pin_locked_until' => now()->addMinutes(15)])->save();
+
+        Livewire::test(ListEmployees::class)->callTableAction('unlockPin', $e);
+        $this->assertNull($e->fresh()->card_pin_locked_until);
+        $this->assertSame(0, $e->fresh()->card_pin_failures);
+
+        $e->forceFill(['card_pin_failures' => 5, 'card_pin_locked_until' => now()->addMinutes(15)])->save();
+        Livewire::test(EditEmployee::class, ['record' => $e->getRouteKey()])
+            ->fillForm(['card_pin_hash' => '2468'])->call('save')->assertHasNoFormErrors();
+        $this->assertNull($e->fresh()->card_pin_locked_until, 'a new PIN clears the lockout');
+        $this->assertTrue(Hash::check('2468', $e->fresh()->card_pin_hash));
+    }
+
+    public function test_punch_page_shows_in_out_state_expired_qr_and_is_hidden_from_the_menu_without_an_employee(): void
+    {
+        $user = $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_ERGANI));
+        $this->assertFalse(WorkCard::shouldRegisterNavigation(), 'no employee record → not in the menu');
+
+        $e = $this->cardEmployee($user);
+        $this->assertTrue(WorkCard::shouldRegisterNavigation());
+        Livewire::test(WorkCard::class)->assertSee('Είστε ΕΚΤΟΣ');
+        Livewire::test(WorkCard::class, ['kiosk' => 'stale-token'])->assertSee('Το QR που σκανάρατε έληξε');
+
+        app(WorkCardService::class)->punch($e, 'self');
+        Livewire::test(WorkCard::class)->assertSee('Είστε ΜΕΣΑ από')->assertDontSee('έληξε');
+        $this->assertFalse((new \ReflectionMethod(StaffSetupChecklist::class, 'steps'))->isPublic());
+    }
+
+    public function test_setup_checklist_lists_missing_steps_and_disappears_when_done(): void
+    {
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        $this->enable();
+
+        Livewire::test(StaffSetupChecklist::class)
+            ->assertSee('Ξεκίνημα Προσωπικού')->assertSee('Email λογιστή')->assertSee('Tablet γραφείου');
+
+        $u = $this->makeUser(TenantRoleProvisioner::ROLE_ERGANI);
+        $e = $this->cardEmployee($u);
+        $e->forceFill(['card_pin_hash' => Hash::make('2468')])->save();
+        $this->company->forceFill(['leave_notify_email' => 'acc@example.test'])->save();
+        WorkCardKioskDevice::activate($this->company, 'Ρεσεψιόν', null);
+
+        Livewire::test(StaffSetupChecklist::class)->assertDontSee('Ξεκίνημα Προσωπικού');
     }
 }

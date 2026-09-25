@@ -163,7 +163,7 @@ final class ManageTenantRoleAction
             ShieldUtils::getSuperAdminName() => 'Super admin (όλα τα δικαιώματα)',
             TenantRoleProvisioner::ROLE_COMPANY_ADMIN => 'Διαχειριστής εταιρίας',
             TenantRoleProvisioner::ROLE_OPERATOR => 'Χειριστής',
-            TenantRoleProvisioner::ROLE_ERGANI => 'Προσωπικό (μόνο άδειες)',
+            TenantRoleProvisioner::ROLE_ERGANI => 'Προσωπικό (άδειες & κάρτα)',
             default => 'Κανένας ρόλος',
         };
     }

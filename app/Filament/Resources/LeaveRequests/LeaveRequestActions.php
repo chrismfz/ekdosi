@@ -36,7 +36,7 @@ final class LeaveRequestActions
             ->modalDescription(fn (LeaveRequest $record): string => $record->periodLabel().' · '.$record->type?->getLabel()
                 .($record->company?->leave_notify_email
                     ? ' — θα σταλεί email στον λογιστή ('.$record->company->leave_notify_email.').'
-                    : ' — ΔΕΝ έχει οριστεί email λογιστή (Εταιρεία → καρτέλα «ΕΡΓΑΝΗ»): ενημερώστε τον χειροκίνητα.'))
+                    : ' — ΔΕΝ έχει οριστεί email λογιστή (Ρυθμίσεις εταιρείας → «Προσωπικό — ΕΡΓΑΝΗ»): ενημερώστε τον χειροκίνητα.'))
             ->fillForm(fn (LeaveRequest $record): array => ['days' => $record->days])
             ->schema([
                 TextInput::make('days')->label('Εργάσιμες ημέρες')->numeric()->integer()->minValue(0)->maxValue(366)->required(),

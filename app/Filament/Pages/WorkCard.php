@@ -31,7 +31,7 @@ class WorkCard extends Page
 
     protected static string|UnitEnum|null $navigationGroup = 'Προσωπικό';
 
-    protected static ?string $navigationLabel = 'Κάρτα εργασίας';
+    protected static ?string $navigationLabel = 'Χτύπημα κάρτας';
 
     protected static ?int $navigationSort = 5;
 
@@ -57,18 +57,27 @@ class WorkCard extends Page
             && (bool) auth()->user()?->can('View:WorkCard');
     }
 
+    /** In the menu only for people who have an employee record (admins without one don't punch). */
     public static function shouldRegisterNavigation(): bool
     {
-        return static::canAccess();
+        return static::canAccess()
+            && Employee::forUser(auth()->user(), (int) Filament::getTenant()->getKey()) !== null;
     }
 
     protected function getViewData(): array
     {
         $employee = $this->employee();
+        $next = $employee ? app(WorkCardService::class)->nextType($employee) : null;
 
         return [
             'employee' => $employee,
-            'next' => $employee ? app(WorkCardService::class)->nextType($employee) : null,
+            'next' => $next,
+            // «Μέσα από 09:02» — the open «in» (can be yesterday's, a night shift).
+            'inSince' => $next === WorkCardEvent::OUT ? WorkCardEvent::query()
+                ->where('employee_id', $employee->getKey())->where('type', WorkCardEvent::IN)
+                ->latest('occurred_at')->value('occurred_at') : null,
+            // A QR link whose token has rotated (the photo/tab is older than ~1').
+            'qrExpired' => filled($this->kiosk) && ! $this->viaKiosk(),
             'today' => $employee ? $this->todayEvents($employee) : collect(),
             'viaKiosk' => $this->viaKiosk(),
             'kioskRequired' => (bool) $this->tenant()->ergani_card_requires_kiosk,
@@ -86,7 +95,10 @@ class WorkCard extends Page
             ->visible(fn (): bool => $this->employee() !== null)
             ->requiresConfirmation()
             ->modalHeading(fn (): string => 'Επιβεβαίωση: '.(($e = $this->employee()) && app(WorkCardService::class)->nextType($e) === WorkCardEvent::OUT ? 'ΕΞΟΔΟΣ' : 'ΕΙΣΟΔΟΣ').' '.now()->format('H:i'))
-            ->modalDescription('Η κίνηση δηλώνεται στο ΕΡΓΑΝΗ και ΔΕΝ ανακαλείται.')
+            ->modalDescription(fn (): string => WorkCardService::enabledFor($this->tenant()) && (bool) $this->employee()?->has_work_card
+                ? 'Η κίνηση δηλώνεται αμέσως στο ΕΡΓΑΝΗ και ΔΕΝ ανακαλείται — βεβαιωθείτε ότι είναι σωστή.'
+                : 'Η κίνηση καταγράφεται με την τρέχουσα ώρα.')
+            ->modalSubmitActionLabel('Καταχώριση')
             // Bind the confirmation to the movement the modal SHOWED (another tab /
             // a re-scan may have punched meanwhile).
             ->fillForm(fn (): array => ['seen_type' => ($e = $this->employee()) ? app(WorkCardService::class)->nextType($e) : null])
@@ -105,23 +117,37 @@ class WorkCard extends Page
                     return;
                 } catch (\Throwable $e) {
                     report($e);
-                    Notification::make()->title('Αβέβαιο αποτέλεσμα — η κίνηση ίσως καταγράφηκε. Ενημερώστε τον διαχειριστή (Κάρτες εργασίας) πριν ξαναχτυπήσετε.')->danger()->persistent()->send();
+                    Notification::make()->title('Αβέβαιο αποτέλεσμα — η κίνηση ίσως καταγράφηκε. Ενημερώστε τον διαχειριστή (Προσωπικό → Κινήσεις κάρτας) πριν ξαναχτυπήσετε.')->danger()->persistent()->send();
 
                     return;
                 }
 
+                // The QR proved presence for THIS punch; the token rotates within the
+                // minute, so drop it (no stale «QR έληξε», next punch re-scans).
+                $this->kiosk = null;
+
                 $title = $event->typeLabel().' '.$event->occurred_at->format('H:i').' καταχωρήθηκε';
                 match ($event->ergani_status) {
                     'submitted' => Notification::make()->title($title)->body('ΕΡΓΑΝΗ: πρωτ. '.$event->ergani_protocol.($event->ergani_env === 'trial' ? ' (δοκιμαστικό)' : ''))->success()->send(),
-                    'failed', 'unknown' => Notification::make()->title($title.' — ΑΠΟΤΥΧΙΑ ΕΡΓΑΝΗ')->body($event->ergani_error.' Ενημερώστε τον διαχειριστή.')->danger()->persistent()->send(),
+                    'failed', 'unknown' => Notification::make()->title($title.' — δεν δηλώθηκε στο ΕΡΓΑΝΗ')->body($event->ergani_error.' Η κίνηση κρατήθηκε και ο διαχειριστής ειδοποιήθηκε — μην ξαναχτυπήσετε.')->danger()->persistent()->send(),
                     default => Notification::make()->title($title)->success()->send(),
                 };
             });
     }
 
+    /** Per-request memo (label/colour/heading/form all ask) — protected props aren't dehydrated. */
+    protected ?Employee $employeeMemo = null;
+
+    protected bool $employeeResolved = false;
+
     protected function employee(): ?Employee
     {
-        return Employee::forUser(auth()->user(), (int) $this->tenant()->getKey());
+        if (! $this->employeeResolved) {
+            $this->employeeMemo = Employee::forUser(auth()->user(), (int) $this->tenant()->getKey());
+            $this->employeeResolved = true;
+        }
+
+        return $this->employeeMemo;
     }
 
     private function viaKiosk(): bool

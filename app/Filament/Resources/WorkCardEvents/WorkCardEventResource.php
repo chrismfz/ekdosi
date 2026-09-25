@@ -37,7 +37,7 @@ class WorkCardEventResource extends Resource
 
     protected static string|UnitEnum|null $navigationGroup = 'Προσωπικό';
 
-    protected static ?string $navigationLabel = 'Κάρτες εργασίας';
+    protected static ?string $navigationLabel = 'Κινήσεις κάρτας';
 
     protected static ?string $modelLabel = 'κίνηση κάρτας';
 
@@ -61,12 +61,12 @@ class WorkCardEventResource extends Resource
 
     public static function erganiLabel(WorkCardEvent $record): string
     {
-        $trial = $record->ergani_env === 'trial' ? ' (δοκ.)' : '';
+        $trial = $record->ergani_env === 'trial' ? ' (δοκιμαστικό)' : '';
 
         return match ($record->ergani_status) {
             'submitted' => 'Δηλώθηκε'.$trial.($record->late_reason ? ' · εκπρόθεσμα' : ''),
-            'failed' => 'Αποτυχία',
-            'unknown' => 'Άγνωστο — έλεγχος',
+            'failed' => 'Δεν δηλώθηκε',
+            'unknown' => 'Αβέβαιο — ελέγξτε στο ΕΡΓΑΝΗ',
             'submitting' => 'Σε εξέλιξη…',
             default => '—',
         };

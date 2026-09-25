@@ -87,13 +87,20 @@ class WorkCardKiosk extends Page
             Action::make('activateDevice')
                 ->label('Ενεργοποίηση αυτής της συσκευής')
                 ->icon('heroicon-o-device-tablet')
-                ->modalDescription('Κάντε το ΑΠΟ ΤΟ TABLET του γραφείου. Μετά αποσυνδεθείτε — η συσκευή θα συνεχίσει να δείχνει μόνο το ρολόι/QR στο '.route('ergani.card-kiosk').'.')
+                ->modalDescription('Κάντε το ΑΠΟ ΤΟ TABLET του γραφείου. Θα αποσυνδεθείτε αυτόματα — η συσκευή θα συνεχίσει να δείχνει μόνο το ρολόι/QR στο '.route('ergani.card-kiosk').', χωρίς λογαριασμό.')
                 ->schema([
                     TextInput::make('name')->label('Όνομα συσκευής')->placeholder('π.χ. Tablet ρεσεψιόν')->required()->maxLength(80),
                 ])
+                ->modalSubmitActionLabel('Ενεργοποίηση & αποσύνδεση')
                 ->action(function (array $data) {
                     [, $token] = WorkCardKioskDevice::activate($this->tenantRecord(), (string) $data['name'], (int) auth()->id());
                     Cookie::queue(CardKioskController::deviceCookie($token, request()->isSecure()));
+
+                    // A wall tablet must never keep the admin's session: log out
+                    // here, the device cookie alone keeps /card-kiosk working.
+                    Filament::auth()->logout();
+                    session()->invalidate();
+                    session()->regenerateToken();
 
                     return redirect()->route('ergani.card-kiosk');
                 }),

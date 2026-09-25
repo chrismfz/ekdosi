@@ -27,6 +27,7 @@ class ManageCompanyHolidays extends ManageRecords
     {
         return [
             CreateAction::make()
+                ->label('Νέα τοπική αργία')
                 ->mutateDataUsing(function (array $data): array {
                     $data['company_id'] ??= Filament::getTenant()?->getKey();
 
