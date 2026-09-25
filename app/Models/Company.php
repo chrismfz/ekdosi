@@ -91,6 +91,7 @@ class Company extends Model
         'ergani_submit_leaves',
         // Φάση 3: Ψηφιακή Κάρτα Εργασίας (WRKCardSE) opt-in + «μόνο μέσω QR γραφείου».
         'ergani_submit_cards',
+        'ergani_submit_overtime',
         'ergani_card_requires_kiosk',
         // Opt-in: also transmit the per-line description (<itemDescr>) to myDATA.
         'mydata_send_item_descr',
@@ -191,6 +192,7 @@ class Company extends Model
             'ergani_enabled' => 'boolean',
             'ergani_submit_leaves' => 'boolean',
             'ergani_submit_cards' => 'boolean',
+            'ergani_submit_overtime' => 'boolean',
             'ergani_card_requires_kiosk' => 'boolean',
             'ergani_password' => MaybeEncrypted::class,
             'ai_monthly_token_cap' => 'integer',
