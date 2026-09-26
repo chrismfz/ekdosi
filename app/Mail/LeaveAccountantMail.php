@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\LeaveRequest;
+use App\Services\Ergani\ErganiPdf;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
@@ -103,5 +104,11 @@ class LeaveAccountantMail extends Mailable
                 'erganiLine' => $this->erganiLine(),
             ],
         );
+    }
+
+    /** The official ΕΡΓΑΝΗ PDF, for a PRODUCTION declaration only (never breaks the send). */
+    public function attachments(): array
+    {
+        return app(ErganiPdf::class)->attachmentFor($this->leave);
     }
 }

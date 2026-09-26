@@ -3,6 +3,7 @@
 namespace App\Mail;
 
 use App\Models\OvertimeDeclaration;
+use App\Services\Ergani\ErganiPdf;
 use Illuminate\Mail\Mailable;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Mail\Mailables\Content;
@@ -73,5 +74,11 @@ class OvertimeAccountantMail extends Mailable
                     : $o->ergani_error,
             ],
         );
+    }
+
+    /** The official ΕΡΓΑΝΗ PDF, for a PRODUCTION declaration only (never breaks the send). */
+    public function attachments(): array
+    {
+        return app(ErganiPdf::class)->attachmentFor($this->overtime);
     }
 }

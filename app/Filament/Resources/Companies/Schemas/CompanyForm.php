@@ -18,6 +18,7 @@ use App\Services\AadeRegistryLookup;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\NullProviderTransport;
 use App\Services\Ergani\ErganiClient;
+use App\Services\Ergani\ErganiGoLive;
 use App\Services\MyDataSubmitter;
 use App\Services\TenantMailerFactory;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
@@ -28,6 +29,7 @@ use App\Support\EInvoice\ProviderEndpointGuard;
 use App\Support\EInvoice\SendChannel;
 use App\Support\MyData\ClassificationGuidance;
 use Filament\Actions\Action as FormAction;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\FileUpload;
 use Filament\Forms\Components\KeyValue;
@@ -1198,9 +1200,13 @@ class CompanyForm
                                             ->helperText('Κάθε άδεια που εγκρίνεται ή ανακαλείται στέλνεται εδώ, για να δηλωθεί (μία φορά) στο ΕΡΓΑΝΗ. Κενό = δεν στέλνεται τίποτα.'),
                                     ]),
                                 Section::make('Σύνδεση ΕΡΓΑΝΗ ΙΙ')
+                                    ->key('ergani-connection')
                                     ->description('Κωδικοί e-ΕΦΚΑ του εργοδότη. Είναι ΟΙ ΙΔΙΟΙ στο δοκιμαστικό και στην παραγωγή — το περιβάλλον αποφασίζει αν μια υποβολή είναι πραγματική.')
                                     ->visible(fn (callable $get): bool => (bool) $get('ergani_enabled'))
                                     ->schema([
+                                        // Display only: the switch to REAL declarations goes through the
+                                        // «Πέρασμα σε Παραγωγή» wizard below (checks + the accountant must
+                                        // stop declaring by hand — a double declaration can't be undone).
                                         Select::make('ergani_mode')
                                             ->label('Περιβάλλον')
                                             ->options([
@@ -1208,7 +1214,11 @@ class CompanyForm
                                                 'production' => 'Παραγωγή (πραγματικές υποβολές)',
                                             ])
                                             ->default('trial')
-                                            ->required()
+                                            ->disabled()
+                                            ->dehydrated(false)
+                                            ->helperText(fn (?Company $record): string => $record?->ergani_mode === 'production'
+                                                ? 'Σε Παραγωγή από '.($record->ergani_production_since?->format('d/m/Y H:i') ?? '—').'. Αλλαγή μόνο με «Επιστροφή σε Δοκιμαστικό».'
+                                                : 'Αλλάζει μόνο με τον οδηγό «Πέρασμα σε Παραγωγή» (κάτω).')
                                             ->native(false),
                                         TextInput::make('ergani_username')
                                             ->label('Username e-ΕΦΚΑ')
@@ -1251,6 +1261,8 @@ class CompanyForm
                                     ])
                                     ->columns(3)
                                     ->footerActions([
+                                        self::erganiGoLiveAction(),
+                                        self::erganiBackToTrialAction(),
                                         FormAction::make('test_ergani')
                                             ->label('Test σύνδεσης')
                                             ->icon('heroicon-o-bolt')
@@ -1289,6 +1301,81 @@ class CompanyForm
                             ]),
                     ]),
             ]);
+    }
+
+    /**
+     * «Πέρασμα σε Παραγωγή» — the only way to start REAL ΕΡΓΑΝΗ declarations: live
+     * production login, every active employee has a ΑΦΜ, a list of future items
+     * that exist only in the trial, and a mandatory «ο λογιστής ενημερώθηκε».
+     * Uses the SAVED company (save pending edits first).
+     */
+    private static function erganiGoLiveAction(): FormAction
+    {
+        return FormAction::make('ergani_go_live')
+            ->label('Πέρασμα σε Παραγωγή…')
+            ->icon('heroicon-o-rocket-launch')
+            ->color('danger')
+            ->visible(fn (?Company $record): bool => $record !== null && $record->ergani_mode !== 'production')
+            ->modalHeading('Πέρασμα σε Παραγωγή ΕΡΓΑΝΗ')
+            ->modalDescription('Από εδώ και πέρα το ekdosi δηλώνει ΠΡΑΓΜΑΤΙΚΑ στο ΕΡΓΑΝΗ ό,τι είναι ενεργό (άδειες / κάρτα / υπερωρίες). Ελέγχονται τα αποθηκευμένα στοιχεία — αποθηκεύστε πρώτα αλλαγές.')
+            ->modalSubmitActionLabel('Πέρασμα σε Παραγωγή')
+            ->schema(fn (?Company $record): array => [
+                // The live checks run ONLY when the modal content renders (never on a plain
+                // page render — Filament may build action schemas then), once per request.
+                Placeholder::make('checks')->hiddenLabel()
+                    ->content(fn (): HtmlString => once(fn (): HtmlString => self::goLiveChecksHtml($record)))
+                    ->html(),
+                Checkbox::make('accountant_told')
+                    ->label('Ο λογιστής ενημερώθηκε ότι από σήμερα δηλώνει το ekdosi — και ΔΕΝ δηλώνει πια ο ίδιος')
+                    ->accepted()
+                    ->validationMessages(['accepted' => 'Χωρίς αυτό υπάρχει κίνδυνος διπλής δήλωσης.']),
+                Checkbox::make('email_accountant')
+                    ->label('Στείλε και email στον λογιστή ('.($record?->leave_notify_email ?: 'δεν έχει οριστεί email').')')
+                    ->default(filled($record?->leave_notify_email))
+                    ->disabled(blank($record?->leave_notify_email)),
+            ])
+            ->action(function (array $data, ?Company $record, $livewire): void {
+                $error = app(ErganiGoLive::class)->goLive($record, auth()->user(), (bool) ($data['email_accountant'] ?? false));
+                if ($error !== null) {
+                    Notification::make()->title('Δεν έγινε το πέρασμα')->body($error)->danger()->persistent()->send();
+
+                    return;
+                }
+                $livewire->refreshFormData(['ergani_mode']);
+                Notification::make()->title('ΕΡΓΑΝΗ σε Παραγωγή')->body('Οι επόμενες δηλώσεις είναι πραγματικές.')->success()->persistent()->send();
+            });
+    }
+
+    private static function goLiveChecksHtml(Company $record): HtmlString
+    {
+        $c = app(ErganiGoLive::class)->checks($record);
+        $li = fn (bool $ok, string $text): string => '<li>'.($ok ? '✅ ' : '❌ ').e($text).'</li>';
+        $html = '<ul style="list-style:none;padding:0;margin:0;display:grid;gap:.35rem">'
+            .$li($c['connection']['ok'], $c['connection']['text'])
+            .$li($c['missing_afm'] === [], $c['missing_afm'] === [] ? 'Όλοι οι ενεργοί εργαζόμενοι έχουν ΑΦΜ' : 'Λείπει ΑΦΜ σε: '.implode(', ', $c['missing_afm']))
+            .'</ul>';
+        if ($c['trial_only'] !== []) {
+            $html .= '<p style="margin-top:.8rem"><strong>⚠ Μελλοντικά, δηλωμένα ΜΟΝΟ στο δοκιμαστικό</strong> (χωρίς νομική ισχύ) — βεβαιωθείτε ότι τα δήλωσε ο λογιστής:</p><ul>'
+                .implode('', array_map(fn (string $t): string => '<li>'.e($t).'</li>', $c['trial_only'])).'</ul>';
+        }
+
+        return new HtmlString($html);
+    }
+
+    private static function erganiBackToTrialAction(): FormAction
+    {
+        return FormAction::make('ergani_back_to_trial')
+            ->label('Επιστροφή σε Δοκιμαστικό')
+            ->icon('heroicon-o-arrow-uturn-left')
+            ->color('gray')
+            ->visible(fn (?Company $record): bool => $record?->ergani_mode === 'production')
+            ->requiresConfirmation()
+            ->modalDescription('Οι επόμενες δηλώσεις πάνε στο δοκιμαστικό (χωρίς νομική ισχύ) — ο λογιστής πρέπει να ξαναρχίσει να δηλώνει ο ίδιος. Ενημερώστε τον.')
+            ->action(function (?Company $record, $livewire): void {
+                app(ErganiGoLive::class)->backToTrial($record);
+                $livewire->refreshFormData(['ergani_mode']);
+                Notification::make()->title('ΕΡΓΑΝΗ σε Δοκιμαστικό — ενημερώστε τον λογιστή')->warning()->persistent()->send();
+            });
     }
 
     /**

@@ -170,10 +170,12 @@ final class LeaveRequestActions
             ->label('PDF ΕΡΓΑΝΗ')
             ->icon('heroicon-o-document-arrow-down')
             ->color('gray')
+            // The employee's own proof that the leave was declared («Οι άδειές μου») —
+            // `view` = the approver OR the leave's owner (LeaveRequestPolicy).
             ->visible(fn (LeaveRequest $record): bool => $record->ergani_status === 'submitted'
                 && filled($record->ergani_protocol)
-                && (auth()->user()?->can('update', $record) ?? false))
-            ->authorize(fn (LeaveRequest $record): bool => auth()->user()?->can('update', $record) ?? false)
+                && (auth()->user()?->can('view', $record) ?? false))
+            ->authorize(fn (LeaveRequest $record): bool => auth()->user()?->can('view', $record) ?? false)
             ->action(function (LeaveRequest $record) {
                 $company = $record->company->replicate()->forceFill(['ergani_mode' => $record->ergani_env ?: $record->company->ergani_mode]);
                 try {
