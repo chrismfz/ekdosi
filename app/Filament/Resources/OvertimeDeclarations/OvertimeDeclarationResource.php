@@ -29,7 +29,7 @@ class OvertimeDeclarationResource extends Resource
 {
     protected static ?string $model = OvertimeDeclaration::class;
 
-    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedClock;
+    protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedPlusCircle;
 
     protected static string|UnitEnum|null $navigationGroup = 'Προσωπικό';
 
@@ -99,7 +99,10 @@ class OvertimeDeclarationResource extends Resource
                         ->orderBy('last_name')->get()->mapWithKeys(fn (Employee $e): array => [$e->id => $e->full_name])->all()),
             ])
             ->emptyStateHeading('Καμία υπερωρία')
-            ->emptyStateDescription('Η υπερωρία δηλώνεται στο ΕΡΓΑΝΗ ΠΡΙΝ ξεκινήσει — πατήστε «Νέα υπερωρία» μόλις αποφασιστεί.')
+            // Say what to do — the «Νέα υπερωρία» button only exists once the opt-in is on.
+            ->emptyStateDescription(fn (): string => OvertimeService::enabledFor(Filament::getTenant())
+                ? 'Η υπερωρία δηλώνεται στο ΕΡΓΑΝΗ ΠΡΙΝ ξεκινήσει — πατήστε «Νέα υπερωρία» μόλις αποφασιστεί.'
+                : 'Η δήλωση υπερωριών δεν είναι ενεργή. Ο διαχειριστής συστήματος την ανοίγει στο Εταιρεία → καρτέλα «ΕΡΓΑΝΗ» → «Δήλωση υπερωριών στο ΕΡΓΑΝΗ».')
             ->recordActions([self::retryAction()]);
     }
 

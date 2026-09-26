@@ -96,13 +96,40 @@ class EmployeeAccountMatcher
         return $a !== '' && $a === self::nameKey($userName);
     }
 
-    /** «Δημήτρης Κωστόπουλος» == «ΚΩΣΤΟΠΟΥΛΟΣ δημητρης» (word order, case, accents ignored). */
+    /**
+     * A spelling-insensitive key: «Δημήτρης Κωστόπουλος» == «ΚΩΣΤΟΠΟΥΛΟΣ δημητρης» ==
+     * «Dimitris Kostopoulos» (word order, case, accents, Greek↔greeklish ignored).
+     * Both scripts are reduced to one phonetic skeleton, because greeklish is written
+     * many ways (η/ι/υ/ει/οι → i, ου → u, αι/ε → e, ω/ο → o, χ → x, ξ/ks → x …).
+     */
     public static function nameKey(string $name): string
     {
         $plain = preg_replace('/\p{Mn}/u', '', Normalizer::normalize(mb_strtolower($name), Normalizer::FORM_D)) ?? '';
-        $words = preg_split('/[^\p{L}\p{N}]+/u', str_replace('ς', 'σ', $plain), -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $latin = strtr(str_replace('ς', 'σ', $plain), self::GREEK_TO_LATIN);
+        $words = preg_split('/[^\p{L}\p{N}]+/u', $latin, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+        $words = array_map(fn (string $w): string => self::skeleton($w), $words);
         sort($words);
 
         return implode(' ', $words);
+    }
+
+    /** Multi-letter first (strtr picks the longest match). */
+    private const GREEK_TO_LATIN = [
+        'ου' => 'u', 'ει' => 'i', 'οι' => 'i', 'υι' => 'i', 'αι' => 'e', 'μπ' => 'b', 'ντ' => 'd', 'γκ' => 'g', 'γγ' => 'g',
+        'α' => 'a', 'β' => 'v', 'γ' => 'g', 'δ' => 'd', 'ε' => 'e', 'ζ' => 'z', 'η' => 'i', 'θ' => 'th', 'ι' => 'i',
+        'κ' => 'k', 'λ' => 'l', 'μ' => 'm', 'ν' => 'n', 'ξ' => 'x', 'ο' => 'o', 'π' => 'p', 'ρ' => 'r', 'σ' => 's',
+        'τ' => 't', 'υ' => 'i', 'φ' => 'f', 'χ' => 'x', 'ψ' => 'ps', 'ω' => 'o',
+    ];
+
+    /** Latin spellings folded to the same skeleton as the Greek map above. */
+    private static function skeleton(string $w): string
+    {
+        $w = strtr($w, [
+            'ou' => 'u', 'ei' => 'i', 'oi' => 'i', 'ai' => 'e', 'ch' => 'x', 'kh' => 'x', 'ks' => 'x', 'ph' => 'f',
+            'mp' => 'b', 'nt' => 'd', 'gk' => 'g', 'gg' => 'g', 'y' => 'i', 'w' => 'o', 'c' => 'k', 'h' => 'i',
+        ]);
+        $w = strtr($w, ['b' => 'v']);
+
+        return (string) preg_replace('/(.)\1+/u', '$1', $w);   // «Pappas» == «Papas»
     }
 }

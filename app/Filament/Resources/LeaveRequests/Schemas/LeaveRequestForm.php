@@ -2,9 +2,11 @@
 
 namespace App\Filament\Resources\LeaveRequests\Schemas;
 
+use App\Enums\LeaveStatus;
 use App\Enums\LeaveType;
 use App\Filament\Resources\LeaveRequests\Pages\CreateLeaveRequest;
 use App\Models\Employee;
+use App\Models\LeaveRequest;
 use App\Policies\LeaveRequestPolicy;
 use App\Support\Hr\WorkingDays;
 use Carbon\CarbonImmutable;
@@ -19,6 +21,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 /**
  * «Νέο αίτημα άδειας». Staff file for themselves (employee picker hidden — the
@@ -91,8 +94,9 @@ class LeaveRequestForm
                         ->helperText('Χωρίς Σαββατοκύριακα, εθνικές και τοπικές αργίες της εταιρείας.'),
 
                     Placeholder::make('balance')
-                        ->label('Υπόλοιπο κανονικής άδειας')
-                        ->content(fn (Get $get): string => self::balanceText($get)),
+                        ->label('Το υπόλοιπο κανονικής άδειας')
+                        ->content(fn (Get $get): HtmlString => self::balanceText($get))
+                        ->html(),
 
                     Textarea::make('reason')
                         ->label('Σημείωση')
@@ -128,8 +132,12 @@ class LeaveRequestForm
             $to = $from;
         }
 
-        $from = CarbonImmutable::parse($from);
-        $to = CarbonImmutable::parse($to);
+        try {
+            $from = CarbonImmutable::parse($from);
+            $to = CarbonImmutable::parse($to);
+        } catch (\Throwable) {
+            return;   // not a date (crafted state) — validation rejects it on submit
+        }
         if ($from->diffInDays($to) > CreateLeaveRequest::MAX_SPAN_DAYS) {
             return; // the create page refuses it anyway — don't walk the span
         }
@@ -137,7 +145,13 @@ class LeaveRequestForm
         $set('days', WorkingDays::for((int) $tenant->getKey())->count($from, $to));
     }
 
-    private static function balanceText(Get $get): string
+    /**
+     * «Το υπόλοιπό μου»: what is left of the κανονική now AND after this request,
+     * per year it touches (a request crossing New Year is split by working days,
+     * like the balance itself). Never blocks — an overdraft is only flagged, the
+     * approver decides.
+     */
+    private static function balanceText(Get $get): HtmlString
     {
         $tenant = Filament::getTenant();
         $employee = self::approver()
@@ -145,11 +159,50 @@ class LeaveRequestForm
             : Employee::forUser(auth()->user(), (int) $tenant?->getKey());
 
         if (! $employee instanceof Employee) {
-            return '—';
+            return new HtmlString('—');
         }
 
-        $year = blank($get('starts_on')) ? (int) now()->format('Y') : (int) CarbonImmutable::parse($get('starts_on'))->format('Y');
+        // Live state is not bounded by the pickers' min/max (those apply on submit):
+        // a garbage date or a huge span must never 500 or walk millions of days.
+        try {
+            $from = blank($get('starts_on')) ? CarbonImmutable::today() : CarbonImmutable::parse($get('starts_on'));
+            $to = blank($get('ends_on')) ? $from : CarbonImmutable::parse($get('ends_on'));
+        } catch (\Throwable) {
+            return new HtmlString('—');
+        }
+        $invalidSpan = $to->lt($from) || $from->diffInDays($to) > CreateLeaveRequest::MAX_SPAN_DAYS;
+        if ($invalidSpan) {
+            $to = $from;   // show only the current balance — «days» wasn't recounted for this range
+        }
+        $days = $invalidSpan ? 0 : (int) $get('days');
+        $annual = in_array($get('type'), [LeaveType::Annual, LeaveType::Annual->value], true);
+        $entitlement = (int) $employee->annual_leave_days;
 
-        return sprintf('%d από %d ημέρες (%d)', $employee->annualLeaveRemaining($year), $employee->annual_leave_days, $year);
+        $years = range((int) $from->format('Y'), max((int) $from->format('Y'), min((int) $to->format('Y'), (int) $from->format('Y') + 1)));
+        $request = new LeaveRequest(['starts_on' => $from->toDateString(), 'ends_on' => $to->toDateString(), 'days' => $days]);
+
+        $parts = [];
+        foreach ($years as $year) {
+            $left = $employee->annualLeaveRemaining($year);
+            $line = sprintf('Μένουν <strong>%d</strong> από %d (%d)', $left, $entitlement, $year);
+            if ($annual && $days > 0) {
+                $after = $left - Employee::daysInYear($request, $year, (int) $employee->company_id);
+                $line .= $after < 0
+                    ? sprintf(' → με αυτή την αίτηση <strong style="color:#b91c1c">%d</strong> — ⚠ ξεπερνά το υπόλοιπο κατά %d (το αποφασίζει ο διαχειριστής)', $after, -$after)
+                    : sprintf(' → με αυτή την αίτηση <strong>%d</strong>', $after);
+            }
+            $parts[] = $line;
+        }
+        // Only APPROVED leave is deducted — say so when other requests are still pending.
+        $pending = (int) LeaveRequest::query()->where('employee_id', $employee->getKey())
+            ->where('status', LeaveStatus::Pending->value)->where('type', LeaveType::Annual->value)->sum('days');
+        if ($annual && $pending > 0) {
+            $parts[] = sprintf('<span style="opacity:.75">Εκκρεμούν ακόμη %d ημέρες κανονικής σε άλλες αιτήσεις (δεν έχουν αφαιρεθεί).</span>', $pending);
+        }
+        if (! $annual) {
+            $parts[] = '<span style="opacity:.75">Αυτό το είδος άδειας δεν αφαιρείται από την κανονική.</span>';
+        }
+
+        return new HtmlString(implode('<br>', $parts));
     }
 }
