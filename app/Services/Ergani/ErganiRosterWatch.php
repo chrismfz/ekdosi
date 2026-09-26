@@ -28,7 +28,7 @@ class ErganiRosterWatch
         $local = Employee::query()->withTrashed()->where('company_id', $company->getKey())->get();
         if ($rows->isEmpty() && $local->contains(fn (Employee $e): bool => ! $e->trashed() && $e->is_active && filled($e->afm))) {
             // Maintenance / a glitch must never read as «everyone left — deactivate them».
-            throw new \RuntimeException('Το ΕΡΓΑΝΗ επέστρεψε κενό δυναμικό ενώ υπάρχουν ενεργοί εργαζόμενοι — δεν αποθηκεύτηκε τίποτα.');
+            throw new \RuntimeException('Το ΕΡΓΑΝΗ επέστρεψε κενό δυναμικό ενώ υπάρχουν ενεργοί εργαζόμενοι — δεν αποθηκεύτηκε τίποτα. Αν αποχώρησαν όντως όλοι, ορίστε τους «Ενεργός: όχι».');
         }
         $byAfm = $local->filter(fn (Employee $e): bool => filled($e->afm))->keyBy('afm');
 
@@ -83,7 +83,7 @@ class ErganiRosterWatch
             ($diff['new'] ?? []) ? count($diff['new']).' νέος/οι στο ΕΡΓΑΝΗ που δεν υπάρχουν εδώ: '.$names($diff['new']).' → «Εισαγωγή από ΕΡΓΑΝΗ»' : null,
             ($diff['inactive'] ?? []) ? 'Ενεργοί στο ΕΡΓΑΝΗ αλλά ανενεργοί/διαγραμμένοι εδώ: '.$names($diff['inactive']) : null,
             ($diff['missing'] ?? []) ? 'Ενεργοί εδώ αλλά όχι στο ΕΡΓΑΝΗ: '.$names($diff['missing']).' — αποχώρησαν; ορίστε «Ενεργός: όχι»' : null,
-            ($diff['no_afm'] ?? []) ? 'Χωρίς ΑΦΜ (δεν συγκρίνονται): '.$names($diff['no_afm']) : null,
+            ($diff['no_afm'] ?? []) ? 'Με ψηφιακή κάρτα αλλά χωρίς ΑΦΜ (δεν δηλώνονται — συμπληρώστε τον): '.$names($diff['no_afm']) : null,
         ]));
     }
 

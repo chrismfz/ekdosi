@@ -140,4 +140,16 @@ class ErganiRosterWatchTest extends HrTestCase
         $this->artisan('ergani:watch')->assertSuccessful();
         $this->assertSame(1, User::find($admin->id)->notifications()->count(), 'shrinking is quiet');
     }
+
+    public function test_an_empty_roster_with_no_comparable_locals_is_stored_and_malformed_fails_the_watch(): void
+    {
+        $this->emp('', 'Χωρίςαφμ');   // active, no ΑΦΜ, no card → nothing to compare
+        $this->roster = [];
+        $this->artisan('ergani:watch')->assertSuccessful();
+        $this->assertSame(0, ErganiRosterWatch::count($this->company->fresh()->ergani_roster_diff));
+        $this->assertNotNull($this->company->fresh()->ergani_roster_checked_at);
+
+        $this->malformed = true;
+        $this->artisan('ergani:watch')->assertFailed();
+    }
 }
