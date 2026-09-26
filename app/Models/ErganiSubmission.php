@@ -44,6 +44,11 @@ class ErganiSubmission extends Model
         return $this->belongsTo(WorkCardEvent::class);
     }
 
+    public function overtimeDeclaration(): BelongsTo
+    {
+        return $this->belongsTo(OvertimeDeclaration::class);
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

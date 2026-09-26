@@ -331,6 +331,12 @@ class CompanyImporter
         // Re-attach the assigned operators now the company + its roles exist.
         // Best-effort (a single user failure never aborts a committed import).
         $summary['users'] = $this->importUsers($company, $bundle['users'] ?? []);
+        // Restored into ΕΡΓΑΝΗ TRIAL (see companyAttributes) — say so loudly: a
+        // production tenant stops declaring for real until the wizard is re-run.
+        if (($bundle['company']['ergani_mode'] ?? null) === 'production') {
+            $summary['ergani_downgraded'] = true;
+            Log::warning('CompanyImporter: ΕΡΓΑΝΗ was in PRODUCTION in the bundle — restored in TRIAL. Re-run «Πέρασμα σε Παραγωγή».', ['company' => $company->getKey()]);
+        }
 
         return $summary;
     }
@@ -1162,6 +1168,19 @@ class CompanyImporter
             Log::warning('CompanyImporter: dropped non-column attributes from the company payload.', [
                 'dropped' => $dropped,
             ]);
+        }
+
+        // ΕΡΓΑΝΗ: a restored tenant ALWAYS lands in the trial environment — real
+        // declarations start only through the «Πέρασμα σε Παραγωγή» wizard on THIS
+        // VM (a restore onto a test box must never declare for real). The go-live
+        // audit refers to a user of the source VM → dropped, never remapped blindly.
+        if (array_key_exists('ergani_mode', $filtered)) {
+            $filtered['ergani_mode'] = 'trial';
+        }
+        foreach (['ergani_production_since', 'ergani_production_by_user_id'] as $col) {
+            if (array_key_exists($col, $filtered)) {
+                $filtered[$col] = null;
+            }
         }
 
         return $filtered;

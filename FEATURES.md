@@ -1353,6 +1353,10 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   email λογιστή + καμπανάκι σε αποτυχία. Δεν επεξεργάζεται/διαγράφεται (δεν ανακαλείται μέσω API).
 - **«Η ομάδα σήμερα»** (`TeamTodayWidget`, dashboard — ίδιος κανόνας ιδιωτικότητας με το ημερολόγιο) · **«Το υπόλοιπό μου»**
   (φόρμα άδειας: υπόλοιπο πριν/μετά ανά έτος, σήμανση υπέρβασης).
+- **Ιστορικό ΕΡΓΑΝΗ + PDF** (`ErganiSubmissionResource`, `ErganiPdf`): UI πάνω στο append-only `ergani_submissions`, επίσημο
+  PDF (WTOLeave/WTOOv/WRKCardSE, trial-verified) στο ιστορικό, στο email λογιστή (μόνο Παραγωγή) και στην άδεια του εργαζομένου.
+- **Οδηγός «Πέρασμα σε Παραγωγή»** (`ErganiGoLive`, `ErganiGoLiveMail`): έλεγχοι + υποχρεωτική επιβεβαίωση λογιστή + email·
+  `companies.ergani_production_since/_by_user_id`. Το `ergani_mode` αλλάζει μόνο από εκεί.
 - **Ορατότητα ΕΡΓΑΝΗ**: `ErganiStatusWidget` (dashboard — «Θέλει προσοχή» + υπερωρίες σήμερα/αύριο), υπερωρίες στο
   ημερολόγιο αδειών, `ErganiTrialBar` (render hook στις σελίδες που δηλώνουν), φύλακας `ergani:watch` (`IsInCardSector`
   από Παραγωγή, εβδομαδιαίο, ειδοποίηση στην αλλαγή).

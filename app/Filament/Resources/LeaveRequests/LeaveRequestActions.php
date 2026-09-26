@@ -125,6 +125,8 @@ final class LeaveRequestActions
             ->modalDescription(fn (LeaveRequest $record): string => (match (true) {
                 self::accountantWasAsked($record) => '⚠ Ο ΛΟΓΙΣΤΗΣ έχει ήδη ενημερωθεί με email να δηλώσει ο ίδιος αυτή την άδεια. Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ τη δήλωσε — αλλιώς θα δηλωθεί δύο φορές (θα του σταλεί ενημέρωση). ',
                 self::needsConfirmation($record) => '⚠ Η προηγούμενη δήλωση έχει ΑΓΝΩΣΤΟ αποτέλεσμα (το ΕΡΓΑΝΗ δεν απάντησε). Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ καταχωρήθηκε — αλλιώς θα δηλωθεί δύο φορές. ',
+                // Approved while still in trial: the accountant was the real declarer then.
+                $record->company?->ergani_production_since !== null && $record->decided_at?->lt($record->company->ergani_production_since) => '⚠ Εγκρίθηκε ΠΡΙΝ το πέρασμα σε Παραγωγή — τότε δήλωνε ο λογιστής. Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ τη δήλωσε. ',
                 default => '',
             })
                 .($record->company?->ergani_mode === 'production'
@@ -170,10 +172,12 @@ final class LeaveRequestActions
             ->label('PDF ΕΡΓΑΝΗ')
             ->icon('heroicon-o-document-arrow-down')
             ->color('gray')
+            // The employee's own proof that the leave was declared («Οι άδειές μου») —
+            // `view` = the approver OR the leave's owner (LeaveRequestPolicy).
             ->visible(fn (LeaveRequest $record): bool => $record->ergani_status === 'submitted'
                 && filled($record->ergani_protocol)
-                && (auth()->user()?->can('update', $record) ?? false))
-            ->authorize(fn (LeaveRequest $record): bool => auth()->user()?->can('update', $record) ?? false)
+                && (auth()->user()?->can('view', $record) ?? false))
+            ->authorize(fn (LeaveRequest $record): bool => auth()->user()?->can('view', $record) ?? false)
             ->action(function (LeaveRequest $record) {
                 $company = $record->company->replicate()->forceFill(['ergani_mode' => $record->ergani_env ?: $record->company->ergani_mode]);
                 try {

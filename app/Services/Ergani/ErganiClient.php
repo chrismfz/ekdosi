@@ -145,7 +145,8 @@ class ErganiClient
      */
     public function pdf(string $documentCode, string $protocol, string $submittedDate): ?string
     {
-        $response = $this->call(fn (PendingRequest $http) => $http->get($this->baseUrl().'/Documents/'.rawurlencode($documentCode), [
+        // Short timeouts: the PDF is a nice-to-have fetched inside a mail send / a click.
+        $response = $this->call(fn (PendingRequest $http) => $http->connectTimeout(5)->timeout(8)->get($this->baseUrl().'/Documents/'.rawurlencode($documentCode), [
             'protocol' => $protocol,
             'submittedDate' => $submittedDate,
         ]));

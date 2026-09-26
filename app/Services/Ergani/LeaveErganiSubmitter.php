@@ -211,7 +211,8 @@ class LeaveErganiSubmitter
         }
         $leave->setRawAttributes(LeaveRequest::query()->withoutGlobalScopes()->whereKey($leave->getKey())->firstOrFail()->getAttributes(), true);
         $this->audit($leave, 'manual', ['protocol' => trim($protocol), 'submitted_on' => $submittedOn->format('d/m/Y')],
-            ['ok' => true, 'status' => 0, 'protocol' => trim($protocol), 'message' => 'Καταχωρίστηκε χειροκίνητα', 'response' => ''], $userId);
+            ['ok' => true, 'status' => 0, 'protocol' => trim($protocol), 'submitted_at' => $submittedOn->format('d/m/Y'),
+                'message' => 'Καταχωρίστηκε χειροκίνητα', 'response' => ''], $userId);
 
         $this->withdrawIfRevokedMeanwhile($leave, $userId);
 
