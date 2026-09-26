@@ -3,6 +3,7 @@
 namespace App\Filament\Pages;
 
 use App\Filament\Resources\OvertimeDeclarations\OvertimeDeclarationResource;
+use App\Filament\Support\CalendarFeedAction;
 use App\Models\Company;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
@@ -240,5 +241,10 @@ class LeaveCalendar extends Page
         $tenant = Filament::getTenant();
 
         return $tenant;
+    }
+
+    protected function getHeaderActions(): array
+    {
+        return [CalendarFeedAction::make()];
     }
 }

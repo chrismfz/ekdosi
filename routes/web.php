@@ -3,6 +3,7 @@
 use App\Http\Controllers\CompanyBackupDownloadController;
 use App\Http\Controllers\Ergani\CardKioskController;
 use App\Http\Controllers\ExpenseDocumentDownloadController;
+use App\Http\Controllers\Hr\CalendarFeedController;
 use App\Http\Controllers\Portal\DocumentPdfController as PortalDocumentPdfController;
 use App\Http\Controllers\Portal\DocumentShowController as PortalDocumentShowController;
 use App\Http\Controllers\Portal\HomeController as PortalHomeController;
@@ -19,7 +20,12 @@ use App\Http\Controllers\TicketFeedbackController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use App\Http\Middleware\ResolvePortalHost;
 use App\Http\Middleware\SetPortalLocale;
+use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 // Two wholly separate surfaces: the operator/Filament panel at /admin and the
 // customer portal at /user. The root `/` is an INTENTIONAL blank placeholder —
@@ -31,6 +37,21 @@ Route::view('/', 'root-placeholder');
 
 // Office tablet QR display for the Ψηφιακή Κάρτα Εργασίας — no login; the device
 // is ACTIVATED once by an admin (httpOnly cookie), the URL carries no secret.
+// «Το ημερολόγιό μου» — read-only ICS subscription (calendar apps can't log in;
+// the token in the URL is the credential, revocable/rotatable by its owner).
+Route::get('/calendar/{token}.ics', [CalendarFeedController::class, 'show'])
+    ->where('token', '[A-Za-z0-9]{32,64}')
+    ->middleware('throttle:calendar-feed')
+    // Calendar apps keep no cookies: no session row / Set-Cookie per hourly poll.
+    ->withoutMiddleware([
+        StartSession::class,
+        ShareErrorsFromSession::class,
+        PreventRequestForgery::class,
+        AddQueuedCookiesToResponse::class,
+        EncryptCookies::class,
+    ])
+    ->name('calendar.feed');
+
 Route::get('/card-kiosk', [CardKioskController::class, 'show'])
     ->middleware('throttle:card-kiosk-view')
     ->name('ergani.card-kiosk');

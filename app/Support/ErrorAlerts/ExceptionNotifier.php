@@ -108,7 +108,10 @@ class ExceptionNotifier
 
         $request = request();
 
-        return 'HTTP '.strtoupper((string) $request?->method()).' '.(string) $request?->path();
+        // The ICS link's token IS the credential — never mail it around.
+        $path = (string) preg_replace('#^calendar/[^/]+\.ics$#', 'calendar/[token].ics', (string) $request?->path());
+
+        return 'HTTP '.strtoupper((string) $request?->method()).' '.$path;
     }
 
     /** Trim the absolute base path so the location line reads app/… not /var/www/…. */

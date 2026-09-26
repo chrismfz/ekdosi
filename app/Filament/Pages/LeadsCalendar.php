@@ -4,6 +4,7 @@ namespace App\Filament\Pages;
 
 use App\Filament\Pages\Concerns\InteractsWithLeadViews;
 use App\Filament\Resources\Leads\LeadResource;
+use App\Filament\Support\CalendarFeedAction;
 use App\Models\Company;
 use App\Models\Lead;
 use App\Support\TableFilterUrl;
@@ -248,6 +249,7 @@ class LeadsCalendar extends Page
     protected function getHeaderActions(): array
     {
         return [
+            CalendarFeedAction::make(),
             Action::make('list')
                 ->label('Λίστα')
                 ->icon('heroicon-o-list-bullet')
