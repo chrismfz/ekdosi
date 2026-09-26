@@ -316,7 +316,8 @@ class WorkCardService
                 'id' => (int) $e->getKey(),
                 'name' => $e->full_name,
                 'in' => $in,
-                'since' => $in ? $last->occurred_at->format('H:i') : null,
+                // «21:53» alone reads as today; a still-open punch from yesterday says so.
+                'since' => $in ? $last->occurred_at->format($last->occurred_at->isToday() ? 'H:i' : 'd/m H:i') : null,
                 'next' => $in ? WorkCardEvent::OUT : WorkCardEvent::IN,
                 'has_pin' => filled($e->card_pin_hash),
             ];

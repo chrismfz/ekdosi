@@ -142,4 +142,16 @@ class EmployeeLinkingTest extends HrTestCase
 
         $this->assertNull(app(EmployeeAccountMatcher::class)->suggestionFor($dup));
     }
+
+    public function test_greek_employees_match_greeklish_accounts(): void
+    {
+        $ilias = $this->named('Ilias Antivalidis');
+        $e = $this->employee('Αντιβαλιδης', 'Ηλιας');            // as imported from ΕΡΓΑΝΗ (no accents)
+        $other = $this->employee('Παπαδόπουλος', 'Γιάννης');
+        $this->named('Nikos Papadopoulos');                      // different first name → never suggested
+
+        $this->assertSame($ilias->id, app(EmployeeAccountMatcher::class)->suggestionFor($e)?->id);
+        $this->assertNull(app(EmployeeAccountMatcher::class)->suggestionFor($other));
+        $this->assertSame(EmployeeAccountMatcher::nameKey('Χρήστος Παππάς'), EmployeeAccountMatcher::nameKey('Christos Papas'));
+    }
 }
