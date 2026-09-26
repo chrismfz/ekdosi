@@ -12,6 +12,7 @@ use App\Models\LeaveRequest;
 use App\Models\OvertimeDeclaration;
 use App\Models\Scopes\CompanyScope;
 use App\Models\User;
+use App\Policies\LeaveRequestPolicy;
 use App\Support\Hr\WorkingDays;
 use Carbon\CarbonImmutable;
 use Spatie\Permission\PermissionRegistrar;
@@ -42,14 +43,16 @@ class CalendarFeedBuilder
 
         $events = [];
         if ($feed->include_leads && $user->can('ViewAny:Lead')) {
-            $events = array_merge($events, $this->leads($company, $user, $from, $to));
+            // «All leads» = what the panel's lead list already shows this user (ViewAny:Lead).
+            $events = array_merge($events, $this->leads($company, $user, $from, $to, (bool) $feed->include_all_leads));
         }
         if ($canLeaves && $company->hasErgani()) {
             if ($feed->include_leaves && $employee) {
                 $events = array_merge($events, $this->myLeaves($employee, $from, $to));
             }
             if ($feed->include_team && $canCalendar) {
-                $events = array_merge($events, $this->teamLeaves($company, $employee, $from, $to));
+                $events = array_merge($events, $this->teamLeaves($company, $employee, $from, $to,
+                    LeaveRequestPolicy::isApprover($user)));
             }
             if ($feed->include_holidays) {
                 $events = array_merge($events, $this->holidays($company, $from, $to));
@@ -63,11 +66,12 @@ class CalendarFeedBuilder
     }
 
     /** @return list<array<string, string>> */
-    private function leads(Company $company, User $user, CarbonImmutable $from, CarbonImmutable $to): array
+    private function leads(Company $company, User $user, CarbonImmutable $from, CarbonImmutable $to, bool $all): array
     {
         return Lead::query()->withoutGlobalScopes()
             ->where('company_id', $company->getKey())
-            ->where('assigned_user_id', $user->getKey())
+            ->when(! $all, fn ($q) => $q->where('assigned_user_id', $user->getKey()))
+            ->with('assignedTo')
             ->open()
             ->whereNotNull('next_action_at')
             ->whereBetween('next_action_at', [$from, $to->endOfDay()])
@@ -76,7 +80,8 @@ class CalendarFeedBuilder
                 'uid' => 'lead-'.$l->getKey(),
                 'start' => CarbonImmutable::parse($l->next_action_at)->utc()->format('Ymd\THis\Z'),
                 'end' => CarbonImmutable::parse($l->next_action_at)->addMinutes(30)->utc()->format('Ymd\THis\Z'),
-                'summary' => 'Lead: '.$l->name.' — επόμενο βήμα',
+                'summary' => 'Lead: '.$l->name.' — επόμενο βήμα'
+                    .($all && (int) $l->assigned_user_id !== (int) $user->getKey() ? ' ('.($l->assignedTo?->name ?? 'χωρίς χειριστή').')' : ''),
                 'description' => trim(($l->contact_person ? 'Επαφή: '.$l->contact_person : '')),
                 'url' => LeadResource::getUrl('edit', ['record' => $l], panel: 'admin', tenant: $company),
             ])->values()->all();
@@ -95,12 +100,17 @@ class CalendarFeedBuilder
             ->values()->all();
     }
 
-    /** Colleagues' APPROVED leaves — name only, never the type. @return list<array<string, string>> */
-    private function teamLeaves(Company $company, ?Employee $me, CarbonImmutable $from, CarbonImmutable $to): array
+    /**
+     * Colleagues' leaves — name only, NEVER the type (health data must not land in a
+     * third-party calendar, whoever subscribes). Approvers also see PENDING ones.
+     *
+     * @return list<array<string, string>>
+     */
+    private function teamLeaves(Company $company, ?Employee $me, CarbonImmutable $from, CarbonImmutable $to, bool $approver): array
     {
         return LeaveRequest::query()->withoutGlobalScopes()
             ->where('company_id', $company->getKey())
-            ->where('status', LeaveStatus::Approved->value)
+            ->whereIn('status', $approver ? [LeaveStatus::Approved->value, LeaveStatus::Pending->value] : [LeaveStatus::Approved->value])
             ->when($me !== null, fn ($q) => $q->where('employee_id', '!=', $me->getKey()))
             ->overlapping($from, $to)
             // Only the company filter is lifted (no ambient tenant here) — the soft-delete
@@ -110,7 +120,7 @@ class CalendarFeedBuilder
             ->with(['employee' => fn ($q) => $q->withoutGlobalScope(CompanyScope::class)])
             ->get()
             ->map(fn (LeaveRequest $l): array => $this->allDay('team-leave-'.$l->getKey(), $l->starts_on, $l->ends_on,
-                'Άδεια — '.$l->employee?->full_name))
+                'Άδεια'.($l->isPending() ? ' (σε αναμονή)' : '').' — '.$l->employee?->full_name))
             ->values()->all();
     }
 

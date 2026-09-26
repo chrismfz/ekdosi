@@ -104,5 +104,6 @@
             </p>
         @endif
         <p class="lvc-note">Περάστε τον δείκτη πάνω από ένα κελί για λεπτομέρειες. Οι άδειες συναδέλφων εμφανίζονται ως «•» χωρίς είδος.</p>
+        <p class="lvc-note"><a href="#" wire:click.prevent="mountAction('calendarFeed')" style="color:#2563eb;text-decoration:underline">📅 Βάλε αυτό το ημερολόγιο στο κινητό σου / Thunderbird / Google</a></p>
     </x-filament::section>
 </x-filament-panels::page>

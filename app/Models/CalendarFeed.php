@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
+use Spatie\Permission\PermissionRegistrar;
 
 /**
  * A user's personal ICS subscription for one company («Το ημερολόγιό μου»).
@@ -17,7 +18,7 @@ class CalendarFeed extends Model
 {
     use BelongsToCompany;
 
-    protected $fillable = ['include_leads', 'include_leaves', 'include_team', 'include_holidays', 'include_overtime'];
+    protected $fillable = ['include_leads', 'include_all_leads', 'include_leaves', 'include_team', 'include_holidays', 'include_overtime'];
 
     protected $hidden = ['token', 'token_hash'];
 
@@ -26,6 +27,7 @@ class CalendarFeed extends Model
         return [
             'token' => 'encrypted',
             'include_leads' => 'boolean',
+            'include_all_leads' => 'boolean',
             'include_leaves' => 'boolean',
             'include_team' => 'boolean',
             'include_holidays' => 'boolean',
@@ -55,13 +57,33 @@ class CalendarFeed extends Model
         }
         try {
             return tap(new static, function (self $f) use ($user, $company): void {
-                $f->forceFill(['company_id' => $company->getKey(), 'user_id' => $user->getKey()]);
+                $f->forceFill([
+                    'company_id' => $company->getKey(),
+                    'user_id' => $user->getKey(),
+                    // Admins/approvers see the whole picture by default (they still choose).
+                    'include_all_leads' => self::isApprover($user, $company),
+                ]);
                 $f->rotate();
             });
         } catch (UniqueConstraintViolationException) {
             // Two tabs opened the modal at once — use the one that won.
             return static::query()->withoutGlobalScopes()
                 ->where('company_id', $company->getKey())->where('user_id', $user->getKey())->firstOrFail();
+        }
+    }
+
+    /** Rights in $company — the registrar's team id is restored afterwards (no leak into the rest of the request). */
+    private static function isApprover(User $user, Company $company): bool
+    {
+        $registrar = app(PermissionRegistrar::class);
+        $previous = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
+        $user->unsetRelation('roles')->unsetRelation('permissions');
+        try {
+            return $user->can('Update:LeaveRequest');
+        } finally {
+            $registrar->setPermissionsTeamId($previous);
+            $user->unsetRelation('roles')->unsetRelation('permissions');
         }
     }
 

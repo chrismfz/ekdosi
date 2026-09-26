@@ -28,7 +28,7 @@ final class CalendarFeedAction
             ->modalHeading('Το ημερολόγιό μου (συνδρομή ICS)')
             ->modalDescription('Ένα προσωπικό link, μόνο για ανάγνωση: το προσθέτετε μία φορά στο Thunderbird / Google Calendar / κινητό και ενημερώνεται μόνο του. Όποιος έχει το link βλέπει το ημερολόγιό σας — μην το μοιράζεστε· αν διαρρεύσει, «Νέο link».')
             ->modalSubmitActionLabel('Αποθήκευση επιλογών')
-            ->fillForm(fn (): array => self::feed()->only(['include_leads', 'include_leaves', 'include_team', 'include_holidays', 'include_overtime']))
+            ->fillForm(fn (): array => self::feed()->only(['include_leads', 'include_all_leads', 'include_leaves', 'include_team', 'include_holidays', 'include_overtime']))
             ->schema(fn (): array => [
                 Placeholder::make('link')->hiddenLabel()->html()
                     ->content(fn (): HtmlString => new HtmlString(
@@ -37,9 +37,11 @@ final class CalendarFeedAction
                         .'<small style="opacity:.8">Thunderbird: Νέο ημερολόγιο → «Στο δίκτυο» → επικόλληση. Google: Άλλα ημερολόγια → + → «Από URL». '
                         .'iPhone: Ρυθμίσεις → Ημερολόγιο → Λογαριασμοί → Προσθήκη → Άλλο → «Συνδρομή ημερολογίου». Ανανεώνεται περίπου κάθε ώρα.</small></div>')),
                 Section::make('Τι περιλαμβάνει')->columns(2)->schema([
-                    Toggle::make('include_leads')->label('Τα επόμενα βήματα των leads μου'),
+                    Toggle::make('include_leads')->label('Επόμενα βήματα leads')->live(),
+                    Toggle::make('include_all_leads')->label('Όλα τα leads της εταιρείας (με τον χειριστή) — όχι μόνο τα δικά μου')
+                        ->visible(fn (callable $get): bool => (bool) $get('include_leads')),
                     Toggle::make('include_leaves')->label('Οι άδειές μου')->visible(self::hasHr()),
-                    Toggle::make('include_team')->label('Ποιοι συνάδελφοι λείπουν (χωρίς είδος άδειας)')->visible(self::hasHr()),
+                    Toggle::make('include_team')->label('Ποιοι συνάδελφοι λείπουν (χωρίς είδος άδειας — δεδομένο υγείας)')->visible(self::hasHr()),
                     Toggle::make('include_holidays')->label('Αργίες')->visible(self::hasHr()),
                     Toggle::make('include_overtime')->label('Οι υπερωρίες μου')->visible(self::hasHr()),
                 ]),
@@ -68,7 +70,7 @@ final class CalendarFeedAction
             ])
             ->action(function (array $data): void {
                 self::feed()->forceFill(array_map('boolval', array_intersect_key($data,
-                    array_flip(['include_leads', 'include_leaves', 'include_team', 'include_holidays', 'include_overtime']))))->save();
+                    array_flip(['include_leads', 'include_all_leads', 'include_leaves', 'include_team', 'include_holidays', 'include_overtime']))))->save();
                 Notification::make()->title('Αποθηκεύτηκε')->success()->send();
             });
     }

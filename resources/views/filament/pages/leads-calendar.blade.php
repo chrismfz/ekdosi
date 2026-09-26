@@ -133,4 +133,5 @@
             @endforeach
         </div>
     </div>
+    <p style="margin-top:.75rem;font-size:.85rem"><a href="#" wire:click.prevent="mountAction('calendarFeed')" style="color:#2563eb;text-decoration:underline">📅 Βάλε αυτό το ημερολόγιο στο κινητό σου / Thunderbird / Google</a></p>
 </x-filament-panels::page>

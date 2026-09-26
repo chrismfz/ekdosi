@@ -190,4 +190,35 @@ class CalendarFeedTest extends HrTestCase
         $this->assertNotSame($oldHash, $feed->fresh()->token_hash, 'a fresh link was issued');
         $this->get(parse_url($url, PHP_URL_PATH))->assertOk();
     }
+
+    public function test_admins_see_all_leads_and_pending_team_leaves_but_never_the_type(): void
+    {
+        $admin = $this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
+        $op = $this->makeUser(TenantRoleProvisioner::ROLE_OPERATOR);
+        $op->forceFill(['name' => 'Ηλίας Χειριστής'])->save();
+        $colleague = $this->employeeFor(null, 'Συνάδελφος', 'Γιάννης');
+        LeaveRequest::create(['company_id' => $this->company->id, 'employee_id' => $colleague->id, 'type' => LeaveType::Sick,
+            'starts_on' => '2026-11-02', 'ends_on' => '2026-11-02', 'days' => 1, 'status' => LeaveStatus::Pending]);
+        Lead::create(['company_id' => $this->company->id, 'name' => 'Πελάτης του Ηλία', 'assigned_user_id' => $op->id,
+            'next_action_at' => '2026-10-12 10:00:00', 'status' => 'contacted']);
+
+        $adminFeed = CalendarFeed::for($admin, $this->company);
+        $this->assertTrue($adminFeed->include_all_leads, 'admins get the whole picture by default');
+        $ics = str_replace("\r\n ", '', $this->ics($adminFeed));   // unfold (RFC 5545 §3.1) — calendar apps do the same
+        $this->assertStringContainsString('SUMMARY:Lead: Πελάτης του Ηλία — επόμενο βήμα (Ηλίας Χειριστής)', $ics);
+        $this->assertStringContainsString('SUMMARY:Άδεια (σε αναμονή) — Συνάδελφος Γιάννης', $ics);
+        $this->assertStringNotContainsString('ασθένειας', $ics, 'the type never leaves ekdosi — not even for admins');
+
+        $opFeed = CalendarFeed::for($this->makeUser(TenantRoleProvisioner::ROLE_OPERATOR), $this->company);
+        $this->assertFalse($opFeed->include_all_leads);
+        $ics = str_replace("\r\n ", '', $this->ics($opFeed));
+        $this->assertStringNotContainsString('Πελάτης του Ηλία', $ics, 'an operator sees only their own leads by default');
+        $this->assertStringNotContainsString('σε αναμονή) — Συνάδελφος', $ics, 'non-approvers never see pending colleagues');
+    }
+
+    public function test_the_calendar_pages_offer_the_second_entry_link(): void
+    {
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_OPERATOR));
+        Livewire::test(LeaveCalendar::class)->assertSee('Βάλε αυτό το ημερολόγιο στο κινητό σου')->assertSeeHtml("mountAction('calendarFeed')");
+    }
 }
