@@ -72,12 +72,19 @@ class CalendarFeed extends Model
         }
     }
 
+    /** Rights in $company — the registrar's team id is restored afterwards (no leak into the rest of the request). */
     private static function isApprover(User $user, Company $company): bool
     {
-        app(PermissionRegistrar::class)->setPermissionsTeamId($company->getKey());
+        $registrar = app(PermissionRegistrar::class);
+        $previous = $registrar->getPermissionsTeamId();
+        $registrar->setPermissionsTeamId($company->getKey());
         $user->unsetRelation('roles')->unsetRelation('permissions');
-
-        return $user->can('Update:LeaveRequest');
+        try {
+            return $user->can('Update:LeaveRequest');
+        } finally {
+            $registrar->setPermissionsTeamId($previous);
+            $user->unsetRelation('roles')->unsetRelation('permissions');
+        }
     }
 
     /** New token — the old link stops working immediately. */
