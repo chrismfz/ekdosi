@@ -1353,6 +1353,8 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   email λογιστή + καμπανάκι σε αποτυχία. Δεν επεξεργάζεται/διαγράφεται (δεν ανακαλείται μέσω API).
 - **«Η ομάδα σήμερα»** (`TeamTodayWidget`, dashboard — ίδιος κανόνας ιδιωτικότητας με το ημερολόγιο) · **«Το υπόλοιπό μου»**
   (φόρμα άδειας: υπόλοιπο πριν/μετά ανά έτος, σήμανση υπέρβασης).
+- **ICS «Το ημερολόγιό μου»** (`CalendarFeed`, `CalendarFeedBuilder`, `GET /calendar/{token}.ics`, `CalendarFeedAction`): ανά
+  χρήστη/εταιρεία, token (lookup με SHA-256), rotate/revoke, δικαιώματα ανά fetch, RFC 5545 (escape, fold 75 octets, UTC).
 - **Φύλακας προσωπικού** (`ErganiRosterWatch`, `companies.ergani_roster_diff`): εβδομαδιαία διαφορά ΕΡΓΑΝΗ ↔ Εργαζόμενοι,
   καμπανάκι μόνο σε αλλαγή, γραμμή στο dashboard· μηδενικές αυτόματες αλλαγές.
 - **Ιστορικό ΕΡΓΑΝΗ + PDF** (`ErganiSubmissionResource`, `ErganiPdf`): UI πάνω στο append-only `ergani_submissions`, επίσημο

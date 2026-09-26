@@ -3,6 +3,7 @@
 use App\Http\Controllers\CompanyBackupDownloadController;
 use App\Http\Controllers\Ergani\CardKioskController;
 use App\Http\Controllers\ExpenseDocumentDownloadController;
+use App\Http\Controllers\Hr\CalendarFeedController;
 use App\Http\Controllers\Portal\DocumentPdfController as PortalDocumentPdfController;
 use App\Http\Controllers\Portal\DocumentShowController as PortalDocumentShowController;
 use App\Http\Controllers\Portal\HomeController as PortalHomeController;
@@ -31,6 +32,13 @@ Route::view('/', 'root-placeholder');
 
 // Office tablet QR display for the Ψηφιακή Κάρτα Εργασίας — no login; the device
 // is ACTIVATED once by an admin (httpOnly cookie), the URL carries no secret.
+// «Το ημερολόγιό μου» — read-only ICS subscription (calendar apps can't log in;
+// the token in the URL is the credential, revocable/rotatable by its owner).
+Route::get('/calendar/{token}.ics', [CalendarFeedController::class, 'show'])
+    ->where('token', '[A-Za-z0-9]{32,64}')
+    ->middleware('throttle:calendar-feed')
+    ->name('calendar.feed');
+
 Route::get('/card-kiosk', [CardKioskController::class, 'show'])
     ->middleware('throttle:card-kiosk-view')
     ->name('ergani.card-kiosk');

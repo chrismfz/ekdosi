@@ -101,6 +101,7 @@ class CompanyExporter
         // panel-global user anyway.
         'employees', 'leave_requests', 'company_holidays', 'ergani_submissions', 'work_card_events', 'overtime_declarations',
         'work_card_kiosk_devices', // activated tablets are per-VM devices — re-activated on the target
+        'calendar_feeds',          // personal ICS subscription secrets — each user re-creates their link on the target
         // Backup config + run log are VM-specific (destinations/paths/passphrase
         // are reconfigured on the target VM) — never travel inside a bundle.
         'company_backup_settings',

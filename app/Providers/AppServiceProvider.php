@@ -200,6 +200,11 @@ class AppServiceProvider extends ServiceProvider
         // 15'' page reloads must never spend the punch budget (a 429 on a real punch
         // risks ΕΡΓΑΝΗ's 15' deadline). Punches are keyed per activated device.
         RateLimiter::for('card-kiosk-view', fn (Request $request): Limit => Limit::perMinute(30)->by('ckv|'.$request->ip()));
+        // ICS subscriptions poll every ~15–60': generous per token, tight per IP for guessing.
+        RateLimiter::for('calendar-feed', fn (Request $request): array => [
+            Limit::perMinute(20)->by('calf|'.sha1((string) $request->route('token'))),
+            Limit::perMinute(60)->by('calf-ip|'.$request->ip()),
+        ]);
         // Above the per-tablet wrong-PIN pause (20/15'), so a burst meets THAT (clear
         // message + admin bell), not a generic 429.
         RateLimiter::for('card-kiosk-punch', fn (Request $request): Limit => Limit::perMinute(40)
