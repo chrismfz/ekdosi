@@ -19,6 +19,8 @@
     </source>
     <php>
         <env name="APP_ENV" value="testing"/>
+        <!-- Tests assert on UI strings: pin the locale CI uses (.env.example), whatever the local .env says. -->
+        <env name="APP_LOCALE" value="el"/>
         <!-- Throwaway key so encryption-dependent tests (credential casts,
              Livewire render smoke tests) run green without a host .env. A
              real APP_KEY in the environment still wins (env is non-forcing). -->
