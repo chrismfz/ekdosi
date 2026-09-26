@@ -67,7 +67,11 @@ class ErganiSubmissionResource extends Resource
                 TextColumn::make('created_at')->label('Πότε')->dateTime('d/m/Y H:i:s')->sortable(),
                 TextColumn::make('document')->label('Τι')
                     ->formatStateUsing(fn (string $state, ErganiSubmission $record): string => (self::DOCUMENT_LABELS[$state] ?? $state)
-                        .($record->action === 'cancel' ? ' — ανάκληση' : '')),
+                        .match ($record->action) {
+                            'cancel' => ' — ανάκληση',
+                            'manual' => ' — καταχώριση πρωτοκόλλου (χειροκίνητα)',
+                            default => '',
+                        }),
                 TextColumn::make('subject')->label('Εργαζόμενος')
                     ->state(fn (ErganiSubmission $record): string => (string) ($record->leaveRequest?->employee?->full_name
                         ?? $record->workCardEvent?->employee?->full_name
@@ -110,7 +114,7 @@ class ErganiSubmissionResource extends Resource
             ->label('PDF')
             ->icon('heroicon-o-document-arrow-down')
             ->color('gray')
-            ->visible(fn (ErganiSubmission $record): bool => $record->ok && $record->action === 'submit'
+            ->visible(fn (ErganiSubmission $record): bool => $record->ok && in_array($record->action, ['submit', 'manual'], true)
                 && filled($record->protocol) && in_array($record->document, ErganiPdf::DOCUMENTS, true))
             ->authorize(fn (ErganiSubmission $record): bool => auth()->user()?->can('view', $record) ?? false)
             ->action(function (ErganiSubmission $record) {

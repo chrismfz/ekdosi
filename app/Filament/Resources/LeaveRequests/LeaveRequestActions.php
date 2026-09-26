@@ -125,6 +125,8 @@ final class LeaveRequestActions
             ->modalDescription(fn (LeaveRequest $record): string => (match (true) {
                 self::accountantWasAsked($record) => '⚠ Ο ΛΟΓΙΣΤΗΣ έχει ήδη ενημερωθεί με email να δηλώσει ο ίδιος αυτή την άδεια. Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ τη δήλωσε — αλλιώς θα δηλωθεί δύο φορές (θα του σταλεί ενημέρωση). ',
                 self::needsConfirmation($record) => '⚠ Η προηγούμενη δήλωση έχει ΑΓΝΩΣΤΟ αποτέλεσμα (το ΕΡΓΑΝΗ δεν απάντησε). Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ καταχωρήθηκε — αλλιώς θα δηλωθεί δύο φορές. ',
+                // Approved while still in trial: the accountant was the real declarer then.
+                $record->company?->ergani_production_since !== null && $record->decided_at?->lt($record->company->ergani_production_since) => '⚠ Εγκρίθηκε ΠΡΙΝ το πέρασμα σε Παραγωγή — τότε δήλωνε ο λογιστής. Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ τη δήλωσε. ',
                 default => '',
             })
                 .($record->company?->ergani_mode === 'production'

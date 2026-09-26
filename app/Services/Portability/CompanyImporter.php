@@ -1164,6 +1164,19 @@ class CompanyImporter
             ]);
         }
 
+        // ΕΡΓΑΝΗ: a restored tenant ALWAYS lands in the trial environment — real
+        // declarations start only through the «Πέρασμα σε Παραγωγή» wizard on THIS
+        // VM (a restore onto a test box must never declare for real). The go-live
+        // audit refers to a user of the source VM → dropped, never remapped blindly.
+        if (array_key_exists('ergani_mode', $filtered)) {
+            $filtered['ergani_mode'] = 'trial';
+        }
+        foreach (['ergani_production_since', 'ergani_production_by_user_id'] as $col) {
+            if (array_key_exists($col, $filtered)) {
+                $filtered[$col] = null;
+            }
+        }
+
         return $filtered;
     }
 

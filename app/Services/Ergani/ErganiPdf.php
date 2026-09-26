@@ -51,7 +51,7 @@ class ErganiPdf
         if ($record->ergani_status !== 'submitted' || $record->ergani_env !== 'production' || blank($record->ergani_protocol)) {
             return [];
         }
-        $submission = $record->erganiSubmissions()->where('ok', true)->where('action', 'submit')
+        $submission = $record->erganiSubmissions()->where('ok', true)->whereIn('action', ['submit', 'manual'])
             ->where('protocol', $record->ergani_protocol)->latest('id')->first();
         $pdf = $submission ? $this->fetch($submission) : null;
         if ($pdf === null) {

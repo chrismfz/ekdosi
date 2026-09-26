@@ -17,10 +17,16 @@ use Illuminate\Mail\Mailables\Envelope;
  */
 class ErganiGoLiveMail extends Mailable
 {
+    /**
+     * @param  list<string>  $trialOnly  future items declared only in the trial
+     * @param  list<string>  $undeclared  future approved items not declared by ekdosi
+     */
     public function __construct(
         public Company $company,
         public string $fromAddress,
         public string $fromName,
+        public array $trialOnly = [],
+        public array $undeclared = [],
     ) {}
 
     public function envelope(): Envelope
@@ -46,7 +52,8 @@ class ErganiGoLiveMail extends Mailable
         return new Content(
             view: 'mail.hr.ergani-golive',
             text: 'mail.hr.ergani-golive_text',
-            with: ['company' => $this->company, 'items' => $this->declared(), 'companyName' => $this->fromName],
+            with: ['company' => $this->company, 'items' => $this->declared(), 'companyName' => $this->fromName,
+                'pending' => array_merge($this->trialOnly, $this->undeclared)],
         );
     }
 }

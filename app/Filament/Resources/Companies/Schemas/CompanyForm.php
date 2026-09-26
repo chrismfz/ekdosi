@@ -1335,14 +1335,19 @@ class CompanyForm
                     ->disabled(blank($record?->leave_notify_email)),
             ])
             ->action(function (array $data, ?Company $record, $livewire): void {
-                $error = app(ErganiGoLive::class)->goLive($record, auth()->user(), (bool) ($data['email_accountant'] ?? false));
-                if ($error !== null) {
-                    Notification::make()->title('Δεν έγινε το πέρασμα')->body($error)->danger()->persistent()->send();
+                $result = app(ErganiGoLive::class)->goLive($record, auth()->user(), (bool) ($data['email_accountant'] ?? false));
+                if ($result['error'] !== null) {
+                    Notification::make()->title('Δεν έγινε το πέρασμα')->body($result['error'])->danger()->persistent()->send();
 
                     return;
                 }
                 $livewire->refreshFormData(['ergani_mode']);
                 Notification::make()->title('ΕΡΓΑΝΗ σε Παραγωγή')->body('Οι επόμενες δηλώσεις είναι πραγματικές.')->success()->persistent()->send();
+                if ($result['mailed'] === false) {
+                    Notification::make()->title('Το email στον λογιστή ΔΕΝ στάλθηκε')
+                        ->body('Ενημερώστε τον αλλιώς (τηλέφωνο/γραπτώς) ότι από σήμερα δεν δηλώνει ο ίδιος — αλλιώς κίνδυνος διπλής δήλωσης.')
+                        ->danger()->persistent()->send();
+                }
             });
     }
 
@@ -1354,9 +1359,14 @@ class CompanyForm
             .$li($c['connection']['ok'], $c['connection']['text'])
             .$li($c['missing_afm'] === [], $c['missing_afm'] === [] ? 'Όλοι οι ενεργοί εργαζόμενοι έχουν ΑΦΜ' : 'Λείπει ΑΦΜ σε: '.implode(', ', $c['missing_afm']))
             .'</ul>';
-        if ($c['trial_only'] !== []) {
-            $html .= '<p style="margin-top:.8rem"><strong>⚠ Μελλοντικά, δηλωμένα ΜΟΝΟ στο δοκιμαστικό</strong> (χωρίς νομική ισχύ) — βεβαιωθείτε ότι τα δήλωσε ο λογιστής:</p><ul>'
-                .implode('', array_map(fn (string $t): string => '<li>'.e($t).'</li>', $c['trial_only'])).'</ul>';
+        foreach ([
+            'trial_only' => '⚠ Μελλοντικά, δηλωμένα ΜΟΝΟ στο δοκιμαστικό (χωρίς νομική ισχύ)',
+            'undeclared' => '⚠ Μελλοντικά εγκεκριμένα που το ekdosi ΔΕΝ δήλωσε',
+        ] as $key => $heading) {
+            if ($c[$key] !== []) {
+                $html .= '<p style="margin-top:.8rem"><strong>'.e($heading).'</strong> — βεβαιωθείτε ότι τα δήλωσε ο λογιστής (αλλιώς δηλώστε τα, ΜΟΝΟ αφού το ελέγξετε):</p><ul>'
+                    .implode('', array_map(fn (string $t): string => '<li>'.e($t).'</li>', $c[$key])).'</ul>';
+            }
         }
 
         return new HtmlString($html);
@@ -1372,7 +1382,7 @@ class CompanyForm
             ->requiresConfirmation()
             ->modalDescription('Οι επόμενες δηλώσεις πάνε στο δοκιμαστικό (χωρίς νομική ισχύ) — ο λογιστής πρέπει να ξαναρχίσει να δηλώνει ο ίδιος. Ενημερώστε τον.')
             ->action(function (?Company $record, $livewire): void {
-                app(ErganiGoLive::class)->backToTrial($record);
+                app(ErganiGoLive::class)->backToTrial($record, auth()->user());
                 $livewire->refreshFormData(['ergani_mode']);
                 Notification::make()->title('ΕΡΓΑΝΗ σε Δοκιμαστικό — ενημερώστε τον λογιστή')->warning()->persistent()->send();
             });

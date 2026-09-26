@@ -10,12 +10,15 @@ use App\Filament\Resources\ErganiSubmissions\Pages\ListErganiSubmissions;
 use App\Filament\Resources\LeaveRequests\Pages\ViewLeaveRequest;
 use App\Mail\ErganiGoLiveMail;
 use App\Mail\LeaveAccountantMail;
+use App\Models\Activity;
 use App\Models\Employee;
 use App\Models\ErganiSubmission;
 use App\Models\LeaveRequest;
 use App\Models\User;
 use App\Services\Ergani\ErganiClient;
 use App\Services\Ergani\ErganiGoLive;
+use App\Services\Portability\CompanyImporter;
+use App\Services\TenantMailerFactory;
 use App\Services\TenantRoleProvisioner;
 use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
@@ -127,11 +130,11 @@ class ErganiHistoryGoLiveTest extends HrTestCase
         $checks = app(ErganiGoLive::class)->checks($this->company->fresh());
         $this->assertTrue($checks['connection']['ok']);
         $this->assertTrue($checks['blocking'], 'an active employee without ΑΦΜ blocks');
-        $this->assertNotNull(app(ErganiGoLive::class)->goLive($this->company->fresh(), $by, true));
+        $this->assertNotNull(app(ErganiGoLive::class)->goLive($this->company->fresh(), $by, true)['error']);
         $this->assertSame('trial', $this->company->fresh()->ergani_mode);
 
         Employee::query()->update(['afm' => '123456783']);
-        $this->assertNull(app(ErganiGoLive::class)->goLive($this->company->fresh(), $by, true));
+        $this->assertSame(['error' => null, 'mailed' => true], app(ErganiGoLive::class)->goLive($this->company->fresh(), $by, true));
         $fresh = $this->company->fresh();
         $this->assertSame(['production', $by->id], [$fresh->ergani_mode, $fresh->ergani_production_by_user_id]);
         $this->assertNotNull($fresh->ergani_production_since);
@@ -176,5 +179,46 @@ class ErganiHistoryGoLiveTest extends HrTestCase
             ->callMountedAction()
             ->assertHasActionErrors(['accountant_told']);
         $this->assertSame('trial', $this->company->fresh()->ergani_mode);
+    }
+
+    public function test_go_live_fails_closed_without_an_employer_afm(): void
+    {
+        $this->fake('0', '');   // ΕΡΓΑΝΗ returns no employer ΑΦΜ
+        $this->assertFalse(app(ErganiGoLive::class)->checks($this->company->fresh())['connection']['ok'], 'no ΑΦΜ from ΕΡΓΑΝΗ → never «OK»');
+    }
+
+    public function test_an_empty_employee_afm_blocks_and_an_unsent_mail_is_reported(): void
+    {
+        $this->fake();
+        $this->employeeFor(null)->forceFill(['afm' => ''])->save();
+        $this->assertTrue(app(ErganiGoLive::class)->checks($this->company->fresh())['blocking'], 'an empty ΑΦΜ counts as missing');
+
+        Employee::query()->update(['afm' => '123456783']);
+        $this->mock(TenantMailerFactory::class, fn ($m) => $m->shouldReceive('for')->andThrow(new \RuntimeException('smtp down')));
+        $result = app(ErganiGoLive::class)->goLive($this->company->fresh(), $this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN), true);
+        $this->assertSame(['error' => null, 'mailed' => false], $result, 'switched, and the page is told the mail failed');
+        $this->assertSame('production', $this->company->fresh()->ergani_mode);
+    }
+
+    public function test_a_restored_tenant_always_lands_in_trial_without_a_foreign_user(): void
+    {
+        $by = $this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
+        $ref = new \ReflectionMethod(CompanyImporter::class, 'companyAttributes');
+        $attrs = $ref->invoke(app(CompanyImporter::class),
+            ['name' => 'X', 'ergani_mode' => 'production', 'ergani_production_since' => now()->toDateTimeString(), 'ergani_production_by_user_id' => $by->id], []);
+
+        $this->assertSame(['trial', null, null], [$attrs['ergani_mode'], $attrs['ergani_production_since'], $attrs['ergani_production_by_user_id']]);
+    }
+
+    public function test_switches_are_recorded_in_the_activity_log(): void
+    {
+        Mail::fake();
+        $this->fake();
+        $by = $this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
+        app(ErganiGoLive::class)->goLive($this->company->fresh(), $by, false);
+        app(ErganiGoLive::class)->backToTrial($this->company->fresh(), $by);
+
+        $log = Activity::query()->where('log_name', 'ergani')->where('company_id', $this->company->id)->pluck('description')->all();
+        $this->assertSame(['ΕΡΓΑΝΗ: πέρασμα σε Παραγωγή', 'ΕΡΓΑΝΗ: επιστροφή σε Δοκιμαστικό'], $log);
     }
 }
