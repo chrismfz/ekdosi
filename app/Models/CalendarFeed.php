@@ -3,8 +3,10 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use Illuminate\Contracts\Encryption\DecryptException;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Str;
 
 /**
@@ -48,10 +50,19 @@ class CalendarFeed extends Model
         $feed = static::query()->withoutGlobalScopes()
             ->where('company_id', $company->getKey())->where('user_id', $user->getKey())->first();
 
-        return $feed ?? tap(new static, function (self $f) use ($user, $company): void {
-            $f->forceFill(['company_id' => $company->getKey(), 'user_id' => $user->getKey()]);
-            $f->rotate();
-        });
+        if ($feed !== null) {
+            return $feed;
+        }
+        try {
+            return tap(new static, function (self $f) use ($user, $company): void {
+                $f->forceFill(['company_id' => $company->getKey(), 'user_id' => $user->getKey()]);
+                $f->rotate();
+            });
+        } catch (UniqueConstraintViolationException) {
+            // Two tabs opened the modal at once — use the one that won.
+            return static::query()->withoutGlobalScopes()
+                ->where('company_id', $company->getKey())->where('user_id', $user->getKey())->firstOrFail();
+        }
     }
 
     /** New token — the old link stops working immediately. */
@@ -72,6 +83,13 @@ class CalendarFeed extends Model
 
     public function url(): string
     {
-        return route('calendar.feed', ['token' => $this->token]);
+        try {
+            $token = $this->token;
+        } catch (DecryptException) {
+            $this->rotate();   // APP_KEY changed: the old copy can't be read — issue a new link
+            $token = $this->token;
+        }
+
+        return route('calendar.feed', ['token' => $token]);
     }
 }

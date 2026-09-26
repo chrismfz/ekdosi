@@ -18,12 +18,19 @@ class CalendarFeedController extends Controller
     public function show(string $token): Response
     {
         $feed = CalendarFeed::forToken($token);
-        if ($feed === null || $feed->company === null || $feed->user === null
-            || ! $feed->company->users()->whereKey($feed->user_id)->exists()) {
+        if ($feed === null || $feed->company === null || $feed->user === null) {
+            abort(404);
+        }
+        if (! $feed->company->users()->whereKey($feed->user_id)->exists()) {
+            // Removed from the company: the link dies for good — a re-added user gets
+            // a NEW link, never the old (possibly leaked) one back.
+            $feed->delete();
             abort(404);
         }
 
-        $feed->forceFill(['last_accessed_at' => now()])->saveQuietly();
+        if ($feed->last_accessed_at === null || $feed->last_accessed_at->lt(now()->subHour())) {
+            $feed->forceFill(['last_accessed_at' => now()])->saveQuietly();
+        }
 
         return response(app(CalendarFeedBuilder::class)->build($feed), 200, [
             'Content-Type' => 'text/calendar; charset=utf-8',

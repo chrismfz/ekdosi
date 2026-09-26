@@ -20,7 +20,12 @@ use App\Http\Controllers\TicketFeedbackController;
 use App\Http\Middleware\EnsurePortalAuthenticated;
 use App\Http\Middleware\ResolvePortalHost;
 use App\Http\Middleware\SetPortalLocale;
+use Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse;
+use Illuminate\Cookie\Middleware\EncryptCookies;
+use Illuminate\Foundation\Http\Middleware\PreventRequestForgery;
+use Illuminate\Session\Middleware\StartSession;
 use Illuminate\Support\Facades\Route;
+use Illuminate\View\Middleware\ShareErrorsFromSession;
 
 // Two wholly separate surfaces: the operator/Filament panel at /admin and the
 // customer portal at /user. The root `/` is an INTENTIONAL blank placeholder —
@@ -37,6 +42,14 @@ Route::view('/', 'root-placeholder');
 Route::get('/calendar/{token}.ics', [CalendarFeedController::class, 'show'])
     ->where('token', '[A-Za-z0-9]{32,64}')
     ->middleware('throttle:calendar-feed')
+    // Calendar apps keep no cookies: no session row / Set-Cookie per hourly poll.
+    ->withoutMiddleware([
+        StartSession::class,
+        ShareErrorsFromSession::class,
+        PreventRequestForgery::class,
+        AddQueuedCookiesToResponse::class,
+        EncryptCookies::class,
+    ])
     ->name('calendar.feed');
 
 Route::get('/card-kiosk', [CardKioskController::class, 'show'])

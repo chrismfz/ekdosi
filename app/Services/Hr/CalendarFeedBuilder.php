@@ -10,6 +10,7 @@ use App\Models\Employee;
 use App\Models\Lead;
 use App\Models\LeaveRequest;
 use App\Models\OvertimeDeclaration;
+use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Support\Hr\WorkingDays;
 use Carbon\CarbonImmutable;
@@ -36,7 +37,8 @@ class CalendarFeedBuilder
         app(PermissionRegistrar::class)->setPermissionsTeamId($company->getKey());
         $user->unsetRelation('roles')->unsetRelation('permissions');
         $employee = Employee::forUser($user, (int) $company->getKey());
-        $canLeaves = $user->can('View:LeaveCalendar') || $user->can('ViewAny:LeaveRequest');
+        $canCalendar = $user->can('View:LeaveCalendar');            // colleagues' absences = what the panel grid shows
+        $canLeaves = $canCalendar || $user->can('ViewAny:LeaveRequest');   // own leaves / overtime
 
         $events = [];
         if ($feed->include_leads && $user->can('ViewAny:Lead')) {
@@ -46,7 +48,7 @@ class CalendarFeedBuilder
             if ($feed->include_leaves && $employee) {
                 $events = array_merge($events, $this->myLeaves($employee, $from, $to));
             }
-            if ($feed->include_team) {
+            if ($feed->include_team && $canCalendar) {
                 $events = array_merge($events, $this->teamLeaves($company, $employee, $from, $to));
             }
             if ($feed->include_holidays) {
@@ -101,7 +103,11 @@ class CalendarFeedBuilder
             ->where('status', LeaveStatus::Approved->value)
             ->when($me !== null, fn ($q) => $q->where('employee_id', '!=', $me->getKey()))
             ->overlapping($from, $to)
-            ->with(['employee' => fn ($q) => $q->withoutGlobalScopes()->withTrashed()])
+            // Only the company filter is lifted (no ambient tenant here) — the soft-delete
+            // scope stays, so ex-employees (deleted) drop out, like the panel grid.
+            // (the relation itself is withTrashed() — say it explicitly)
+            ->whereHas('employee', fn ($q) => $q->withoutGlobalScope(CompanyScope::class)->withoutTrashed())
+            ->with(['employee' => fn ($q) => $q->withoutGlobalScope(CompanyScope::class)])
             ->get()
             ->map(fn (LeaveRequest $l): array => $this->allDay('team-leave-'.$l->getKey(), $l->starts_on, $l->ends_on,
                 'Άδεια — '.$l->employee?->full_name))

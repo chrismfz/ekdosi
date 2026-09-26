@@ -38,10 +38,10 @@ final class CalendarFeedAction
                         .'iPhone: Ρυθμίσεις → Ημερολόγιο → Λογαριασμοί → Προσθήκη → Άλλο → «Συνδρομή ημερολογίου». Ανανεώνεται περίπου κάθε ώρα.</small></div>')),
                 Section::make('Τι περιλαμβάνει')->columns(2)->schema([
                     Toggle::make('include_leads')->label('Τα επόμενα βήματα των leads μου'),
-                    Toggle::make('include_leaves')->label('Οι άδειές μου'),
-                    Toggle::make('include_team')->label('Ποιοι συνάδελφοι λείπουν (χωρίς είδος άδειας)'),
-                    Toggle::make('include_holidays')->label('Αργίες'),
-                    Toggle::make('include_overtime')->label('Οι υπερωρίες μου'),
+                    Toggle::make('include_leaves')->label('Οι άδειές μου')->visible(self::hasHr()),
+                    Toggle::make('include_team')->label('Ποιοι συνάδελφοι λείπουν (χωρίς είδος άδειας)')->visible(self::hasHr()),
+                    Toggle::make('include_holidays')->label('Αργίες')->visible(self::hasHr()),
+                    Toggle::make('include_overtime')->label('Οι υπερωρίες μου')->visible(self::hasHr()),
                 ]),
             ])
             ->extraModalFooterActions([
@@ -71,6 +71,13 @@ final class CalendarFeedAction
                     array_flip(['include_leads', 'include_leaves', 'include_team', 'include_holidays', 'include_overtime']))))->save();
                 Notification::make()->title('Αποθηκεύτηκε')->success()->send();
             });
+    }
+
+    private static function hasHr(): bool
+    {
+        $tenant = Filament::getTenant();
+
+        return $tenant instanceof Company && $tenant->hasErgani();
     }
 
     /** The CURRENT user's feed in the CURRENT company — never anyone else's. */

@@ -13,6 +13,8 @@ use App\Models\LeaveRequest;
 use App\Models\OvertimeDeclaration;
 use App\Services\Hr\CalendarFeedBuilder;
 use App\Services\TenantRoleProvisioner;
+use App\Support\ErrorAlerts\ExceptionNotifier;
+use Illuminate\Http\Request;
 use Livewire\Livewire;
 use Spatie\Permission\Models\Permission;
 
@@ -115,12 +117,12 @@ class CalendarFeedTest extends HrTestCase
         $this->get('/calendar/'.$feed->token.'.ics')->assertOk();
 
         $me->companies()->detach($this->company->id);
-        $this->get('/calendar/'.$feed->token.'.ics')->assertNotFound();
+        $token = $feed->token;
+        $this->get('/calendar/'.$token.'.ics')->assertNotFound();
 
         $me->companies()->attach($this->company->id);
-        $token = $feed->token;
-        $feed->delete();
-        $this->get('/calendar/'.$token.'.ics')->assertNotFound();
+        $this->get('/calendar/'.$token.'.ics')->assertNotFound('a removed user\'s link never comes back on re-add');
+        $this->assertNull(CalendarFeed::query()->withoutGlobalScopes()->find($feed->id));
     }
 
     public function test_long_lines_fold_on_utf8_boundaries(): void
@@ -148,5 +150,28 @@ class CalendarFeedTest extends HrTestCase
         Livewire::test(LeaveCalendar::class)->callAction([['name' => 'calendarFeed'], ['name' => 'revokeCalendarFeed']]);
         $this->assertNull(CalendarFeed::query()->withoutGlobalScopes()->find($feed->id));
         $this->assertNotNull(CalendarFeed::query()->withoutGlobalScopes()->find($other->id), 'someone else\'s link untouched');
+    }
+
+    public function test_polls_create_no_session_and_ex_employees_drop_out(): void
+    {
+        $me = $this->makeUser(TenantRoleProvisioner::ROLE_OPERATOR);
+        $gone = $this->employeeFor(null, 'Πρώην', 'Υπάλληλος');
+        LeaveRequest::create(['company_id' => $this->company->id, 'employee_id' => $gone->id, 'type' => LeaveType::Annual,
+            'starts_on' => '2026-10-07', 'ends_on' => '2026-10-07', 'days' => 1, 'status' => LeaveStatus::Approved]);
+        $gone->delete();
+
+        $response = $this->get('/calendar/'.CalendarFeed::for($me, $this->company)->token.'.ics')->assertOk();
+        $this->assertStringNotContainsString('Πρώην', $response->getContent());
+        $this->assertEmpty($response->headers->getCookies(), 'no Set-Cookie for a calendar poll');
+    }
+
+    public function test_the_token_is_redacted_from_error_alert_context(): void
+    {
+        $token = CalendarFeed::for($this->makeUser(TenantRoleProvisioner::ROLE_OPERATOR), $this->company)->token;
+        $this->app->instance('request', Request::create('/calendar/'.$token.'.ics'));
+        $ctx = (new \ReflectionMethod(ExceptionNotifier::class, 'currentContext'))
+            ->invoke(app(ExceptionNotifier::class));
+        // The test runs in console, so the HTTP branch is exercised directly:
+        $this->assertStringNotContainsString($token, $ctx);
     }
 }
