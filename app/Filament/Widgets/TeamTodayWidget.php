@@ -74,10 +74,15 @@ class TeamTodayWidget extends Widget
             ->where('occurred_at', '>=', now()->subHours(WorkCardService::OPEN_SHIFT_HOURS))->exists()) {
             $board = collect(app(WorkCardService::class)->presence($c));
             // Denominator = people who use the card (if any are marked), not every employee.
-            $cardUsers = Employee::query()->where('company_id', $c->getKey())->where('is_active', true)->where('has_work_card', true)->count();
+            // Count in/total over the SAME set: card users when any are marked, else everyone.
+            $cardIds = Employee::query()->where('company_id', $c->getKey())->where('is_active', true)
+                ->where('has_work_card', true)->pluck('id')->map(fn ($id): int => (int) $id)->all();
+            if ($cardIds !== []) {
+                $board = $board->filter(fn (array $e): bool => in_array($e['id'], $cardIds, true));
+            }
             $presence = [
                 'in' => $board->where('in', true)->map(fn (array $e): string => $e['name'].' ('.$e['since'].')')->values()->all(),
-                'total' => $cardUsers > 0 ? $cardUsers : $board->count(),
+                'total' => $board->count(),
             ];
         }
 

@@ -110,4 +110,14 @@ class TeamTodayTest extends HrTestCase
             ->set('data.starts_on', '0001-01-01')->set('data.ends_on', '9999-12-31')
             ->assertOk();
     }
+
+    public function test_an_ongoing_leave_still_shows_on_a_weekend(): void
+    {
+        $this->travelTo('2026-10-10 10:00:00');   // Saturday
+        $a = $this->employeeFor(null, 'Αλφα', 'Νίκος');
+        $this->leave($a, '2026-10-08', '2026-10-14');
+
+        $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));
+        Livewire::test(TeamTodayWidget::class)->assertSee('σε άδεια που συνεχίζεται')->assertSee('Αλφα Νίκος');
+    }
 }

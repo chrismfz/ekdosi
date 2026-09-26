@@ -170,10 +170,11 @@ class LeaveRequestForm
         } catch (\Throwable) {
             return new HtmlString('—');
         }
-        if ($to->lt($from) || $from->diffInDays($to) > CreateLeaveRequest::MAX_SPAN_DAYS) {
-            $to = $from;
+        $invalidSpan = $to->lt($from) || $from->diffInDays($to) > CreateLeaveRequest::MAX_SPAN_DAYS;
+        if ($invalidSpan) {
+            $to = $from;   // show only the current balance — «days» wasn't recounted for this range
         }
-        $days = (int) $get('days');
+        $days = $invalidSpan ? 0 : (int) $get('days');
         $annual = in_array($get('type'), [LeaveType::Annual, LeaveType::Annual->value], true);
         $entitlement = (int) $employee->annual_leave_days;
 

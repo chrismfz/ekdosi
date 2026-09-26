@@ -18,12 +18,13 @@
             <div>
                 <h4>Λείπουν σήμερα</h4>
                 @if ($holiday)
-                    <div class="tt-none">Αργία: {{ $holiday }}</div>
+                    <div class="tt-none">Αργία: {{ $holiday }}@if ($awayToday) — σε άδεια που συνεχίζεται:@endif</div>
                 @elseif ($weekend)
-                    <div class="tt-none">Σαββατοκύριακο</div>
-                @elseif ($awayToday)
+                    <div class="tt-none">Σαββατοκύριακο@if ($awayToday) — σε άδεια που συνεχίζεται:@endif</div>
+                @endif
+                @if ($awayToday)
                     <ul>@foreach ($awayToday as $line)<li>{{ $line }}</li>@endforeach</ul>
-                @else
+                @elseif (! $holiday && ! $weekend)
                     <div class="tt-none">Κανείς — όλοι εδώ.</div>
                 @endif
             </div>
