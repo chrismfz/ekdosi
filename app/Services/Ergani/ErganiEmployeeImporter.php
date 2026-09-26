@@ -36,7 +36,12 @@ class ErganiEmployeeImporter
         $production = clone $company;
         $production->ergani_mode = 'production';   // in memory only — never saved
 
-        $rows = (array) data_get((new ErganiClient($production))->service('EX_BASE_05'), 'EX_BASE_05.Cur', []);
+        $response = (new ErganiClient($production))->service('EX_BASE_05');
+        if (! is_array(data_get($response, 'EX_BASE_05'))) {
+            // An unexpected shape is an ERROR, never «nobody works here».
+            throw new \RuntimeException('Απρόσμενη απάντηση ΕΡΓΑΝΗ (EX_BASE_05) — δεν διαβάστηκε δυναμικό.');
+        }
+        $rows = (array) data_get($response, 'EX_BASE_05.Cur', []);
         if (isset($rows['afm'])) {
             $rows = [$rows];   // a single employee may come back as an object, not a list
         }

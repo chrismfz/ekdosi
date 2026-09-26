@@ -3,6 +3,7 @@
 namespace App\Filament\Widgets;
 
 use App\Enums\LeaveStatus;
+use App\Filament\Resources\Employees\EmployeeResource;
 use App\Filament\Resources\LeaveRequests\LeaveRequestResource;
 use App\Filament\Resources\OvertimeDeclarations\OvertimeDeclarationResource;
 use App\Filament\Resources\WorkCardEvents\WorkCardEventResource;
@@ -11,6 +12,7 @@ use App\Models\ErganiSubmission;
 use App\Models\LeaveRequest;
 use App\Models\OvertimeDeclaration;
 use App\Models\WorkCardEvent;
+use App\Services\Ergani\ErganiRosterWatch;
 use App\Services\Ergani\LeaveErganiSubmitter;
 use App\Services\Ergani\OvertimeService;
 use App\Services\Ergani\WorkCardService;
@@ -90,6 +92,13 @@ class ErganiStatusWidget extends Widget
                 ->where('occurred_at', '>=', now()->subDays(7))->where($uncertain)->count();
             if ($n > 0) {
                 $attention[] = ['text' => $n.' κίνηση/εις κάρτας (7 ημ.) χωρίς επιβεβαιωμένη δήλωση', 'url' => WorkCardEventResource::getUrl('index')];
+            }
+        }
+
+        // Roster watch (weekly, ergani:watch): ΕΡΓΑΝΗ ↔ Εργαζόμενοι differences.
+        if (ErganiRosterWatch::count($c->ergani_roster_diff) > 0 && EmployeeResource::canAccess()) {
+            foreach (ErganiRosterWatch::lines($c->ergani_roster_diff) as $line) {
+                $attention[] = ['text' => 'ΕΡΓΑΝΗ ↔ Εργαζόμενοι: '.$line.' (έλεγχος '.$c->ergani_roster_checked_at?->format('d/m').')', 'url' => EmployeeResource::getUrl('index')];
             }
         }
 
