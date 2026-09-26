@@ -122,6 +122,10 @@ class OvertimeDeclarationResource extends Resource
             ->modalDescription(fn (OvertimeDeclaration $record): string => (self::needsConfirmation($record)
                     ? '⚠ Η προηγούμενη δήλωση έχει ΑΓΝΩΣΤΟ αποτέλεσμα. Συνεχίστε ΜΟΝΟ αν ελέγξατε στο ΕΡΓΑΝΗ ότι ΔΕΝ καταχωρήθηκε — δεν ανακαλείται. '
                     : '')
+                // Created while still in trial: the accountant may have declared it by hand (the go-live mail listed it).
+                .($record->company?->ergani_production_since !== null && $record->created_at?->lt($record->company->ergani_production_since)
+                    ? '⚠ Καταχωρήθηκε ΠΡΙΝ το πέρασμα σε Παραγωγή — ίσως τη δήλωσε ήδη ο λογιστής. Ελέγξτε στο ΕΡΓΑΝΗ πρώτα. '
+                    : '')
                 .($record->company?->ergani_mode === 'production' ? '⚠ ΠΑΡΑΓΩΓΗ — πραγματική δήλωση.' : 'Δοκιμαστικό περιβάλλον.'))
             ->fillForm(fn (OvertimeDeclaration $record): array => [
                 'seen' => self::needsConfirmation($record) ? 'unknown' : 'plain',

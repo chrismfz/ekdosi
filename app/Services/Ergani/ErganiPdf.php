@@ -65,7 +65,9 @@ class ErganiPdf
     /** «25/09/2026 21:45» (as ΕΡΓΑΝΗ returned it) → «20260925». */
     public static function submitDateYmd(ErganiSubmission $submission): ?string
     {
-        if (preg_match('#^(\d{2})/(\d{2})/(\d{4})#', (string) $submission->submit_date, $m)) {
+        // A manually recorded protocol carries its real date in the request (older rows).
+        $raw = $submission->submit_date ?: ($submission->action === 'manual' ? data_get($submission->request, 'submitted_on') : null);
+        if (preg_match('#^(\d{2})/(\d{2})/(\d{4})#', (string) $raw, $m)) {
             return $m[3].$m[2].$m[1];
         }
 

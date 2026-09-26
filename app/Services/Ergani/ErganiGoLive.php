@@ -35,11 +35,12 @@ class ErganiGoLive
         try {
             $info = (new ErganiClient($prod))->employerInfo();
             // Fail CLOSED: the gate to real declarations needs a positive ΑΦΜ match.
-            $afmOk = filled($info['afm']) && filled($company->afm) && $info['afm'] === $company->afm;
+            $norm = fn (mixed $afm): string => ($d = preg_replace('/\D/', '', (string) $afm)) === '' ? '' : str_pad((string) $d, 9, '0', STR_PAD_LEFT);
+            $afmOk = $norm($info['afm']) !== '' && $norm($info['afm']) === $norm($company->afm);
             $connection = ['ok' => $afmOk, 'text' => match (true) {
                 $afmOk => 'Σύνδεση Παραγωγής OK — '.($info['name'] ?? '—').' (ΑΦΜ '.$info['afm'].')',
-                blank($company->afm) => 'Η εταιρεία δεν έχει ΑΦΜ — συμπληρώστε τον πρώτα.',
-                blank($info['afm']) => 'Το ΕΡΓΑΝΗ δεν επέστρεψε ΑΦΜ εργοδότη — δεν μπορεί να επιβεβαιωθεί ο λογαριασμός.',
+                $norm($company->afm) === '' => 'Η εταιρεία δεν έχει ΑΦΜ — συμπληρώστε τον πρώτα.',
+                $norm($info['afm']) === '' => 'Το ΕΡΓΑΝΗ δεν επέστρεψε ΑΦΜ εργοδότη — δεν μπορεί να επιβεβαιωθεί ο λογαριασμός.',
                 default => 'Ο ΑΦΜ του ΕΡΓΑΝΗ ('.$info['afm'].') δεν ταιριάζει με της εταιρείας ('.$company->afm.') — λάθος κωδικοί;',
             }];
         } catch (\RuntimeException $e) {

@@ -17,6 +17,7 @@ use App\Models\LeaveRequest;
 use App\Models\User;
 use App\Services\Ergani\ErganiClient;
 use App\Services\Ergani\ErganiGoLive;
+use App\Services\Ergani\ErganiPdf;
 use App\Services\Portability\CompanyImporter;
 use App\Services\TenantMailerFactory;
 use App\Services\TenantRoleProvisioner;
@@ -220,5 +221,14 @@ class ErganiHistoryGoLiveTest extends HrTestCase
 
         $log = Activity::query()->where('log_name', 'ergani')->where('company_id', $this->company->id)->pluck('description')->all();
         $this->assertSame(['ΕΡΓΑΝΗ: πέρασμα σε Παραγωγή', 'ΕΡΓΑΝΗ: επιστροφή σε Δοκιμαστικό'], $log);
+    }
+
+    public function test_afm_match_is_normalised_and_manual_protocol_pdf_uses_its_real_date(): void
+    {
+        $this->fake('0', 'EL 800561849');
+        $this->assertTrue(app(ErganiGoLive::class)->checks($this->company->fresh())['connection']['ok'], 'spacing/prefix does not block a legit tenant');
+
+        $manual = $this->submission(['action' => 'manual', 'submit_date' => null, 'request' => ['protocol' => 'ΑΚ - ΟΡ5', 'submitted_on' => '20/09/2026']]);
+        $this->assertSame('20260920', ErganiPdf::submitDateYmd($manual));
     }
 }

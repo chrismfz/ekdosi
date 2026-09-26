@@ -331,6 +331,12 @@ class CompanyImporter
         // Re-attach the assigned operators now the company + its roles exist.
         // Best-effort (a single user failure never aborts a committed import).
         $summary['users'] = $this->importUsers($company, $bundle['users'] ?? []);
+        // Restored into ΕΡΓΑΝΗ TRIAL (see companyAttributes) — say so loudly: a
+        // production tenant stops declaring for real until the wizard is re-run.
+        if (($bundle['company']['ergani_mode'] ?? null) === 'production') {
+            $summary['ergani_downgraded'] = true;
+            Log::warning('CompanyImporter: ΕΡΓΑΝΗ was in PRODUCTION in the bundle — restored in TRIAL. Re-run «Πέρασμα σε Παραγωγή».', ['company' => $company->getKey()]);
+        }
 
         return $summary;
     }
