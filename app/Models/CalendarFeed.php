@@ -68,6 +68,9 @@ class CalendarFeed extends Model
     /** New token — the old link stops working immediately. */
     public function rotate(): void
     {
+        // Forget the stored ciphertext first: save()'s dirty check would otherwise
+        // DECRYPT the old value — and throw if APP_KEY changed (the case url() recovers from).
+        $this->setRawAttributes(array_merge($this->getAttributes(), ['token' => null]), true);
         $token = Str::random(48);
         $this->forceFill(['token' => $token, 'token_hash' => hash('sha256', $token)])->save();
     }

@@ -14,7 +14,9 @@ use App\Models\OvertimeDeclaration;
 use App\Services\Hr\CalendarFeedBuilder;
 use App\Services\TenantRoleProvisioner;
 use App\Support\ErrorAlerts\ExceptionNotifier;
+use Illuminate\Encryption\Encrypter;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Livewire\Livewire;
 use Spatie\Permission\Models\Permission;
 
@@ -173,5 +175,19 @@ class CalendarFeedTest extends HrTestCase
             ->invoke(app(ExceptionNotifier::class));
         // The test runs in console, so the HTTP branch is exercised directly:
         $this->assertStringNotContainsString($token, $ctx);
+    }
+
+    public function test_an_undecryptable_token_after_an_app_key_change_issues_a_new_link(): void
+    {
+        $feed = CalendarFeed::for($this->makeUser(TenantRoleProvisioner::ROLE_OPERATOR), $this->company);
+        $oldHash = $feed->token_hash;
+        DB::table('calendar_feeds')->where('id', $feed->id)
+            ->update(['token' => (new Encrypter(random_bytes(32), 'AES-256-CBC'))->encrypt('x')]);   // another key
+
+        $url = CalendarFeed::query()->withoutGlobalScopes()->find($feed->id)->url();
+
+        $this->assertStringContainsString('/calendar/', $url);
+        $this->assertNotSame($oldHash, $feed->fresh()->token_hash, 'a fresh link was issued');
+        $this->get(parse_url($url, PHP_URL_PATH))->assertOk();
     }
 }
