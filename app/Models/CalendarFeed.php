@@ -22,6 +22,16 @@ class CalendarFeed extends Model
 
     protected $hidden = ['token', 'token_hash'];
 
+    /** Same as the column defaults — a just-created feed has them too (the modal's first open reads them). */
+    protected $attributes = [
+        'include_leads' => true,
+        'include_all_leads' => false,
+        'include_leaves' => true,
+        'include_team' => true,
+        'include_holidays' => true,
+        'include_overtime' => true,
+    ];
+
     protected function casts(): array
     {
         return [

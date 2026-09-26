@@ -46,7 +46,14 @@ class CalendarFeedTest extends HrTestCase
         $this->assertSame(0, CalendarFeed::query()->withoutGlobalScopes()->count(), 'a plain render creates no token');
 
         Livewire::test(LeaveCalendar::class)->mountAction('calendarFeed')
-            ->assertMountedActionModalSee('/calendar/');
+            ->assertMountedActionModalSee('/calendar/')
+            // the brand-new link shows the real defaults (all on) — not blank toggles a «Αποθήκευση» would persist
+            ->assertSet('mountedActions.0.data.include_leads', true)
+            ->assertSet('mountedActions.0.data.include_leaves', true)
+            ->assertSet('mountedActions.0.data.include_team', true)
+            ->assertSet('mountedActions.0.data.include_holidays', true)
+            ->assertSet('mountedActions.0.data.include_overtime', true)
+            ->assertSet('mountedActions.0.data.include_all_leads', false);
         $this->assertSame(1, CalendarFeed::query()->withoutGlobalScopes()->count());
     }
 
