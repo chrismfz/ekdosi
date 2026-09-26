@@ -5,6 +5,7 @@ namespace App\Filament\Resources\LeaveRequests\Schemas;
 use App\Enums\LeaveType;
 use App\Filament\Resources\LeaveRequests\Pages\CreateLeaveRequest;
 use App\Models\Employee;
+use App\Models\LeaveRequest;
 use App\Policies\LeaveRequestPolicy;
 use App\Support\Hr\WorkingDays;
 use Carbon\CarbonImmutable;
@@ -19,6 +20,7 @@ use Filament\Schemas\Components\Section;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Illuminate\Support\HtmlString;
 
 /**
  * «Νέο αίτημα άδειας». Staff file for themselves (employee picker hidden — the
@@ -91,8 +93,9 @@ class LeaveRequestForm
                         ->helperText('Χωρίς Σαββατοκύριακα, εθνικές και τοπικές αργίες της εταιρείας.'),
 
                     Placeholder::make('balance')
-                        ->label('Υπόλοιπο κανονικής άδειας')
-                        ->content(fn (Get $get): string => self::balanceText($get)),
+                        ->label('Το υπόλοιπο κανονικής άδειας')
+                        ->content(fn (Get $get): HtmlString => self::balanceText($get))
+                        ->html(),
 
                     Textarea::make('reason')
                         ->label('Σημείωση')
@@ -137,7 +140,13 @@ class LeaveRequestForm
         $set('days', WorkingDays::for((int) $tenant->getKey())->count($from, $to));
     }
 
-    private static function balanceText(Get $get): string
+    /**
+     * «Το υπόλοιπό μου»: what is left of the κανονική now AND after this request,
+     * per year it touches (a request crossing New Year is split by working days,
+     * like the balance itself). Never blocks — an overdraft is only flagged, the
+     * approver decides.
+     */
+    private static function balanceText(Get $get): HtmlString
     {
         $tenant = Filament::getTenant();
         $employee = self::approver()
@@ -145,11 +154,34 @@ class LeaveRequestForm
             : Employee::forUser(auth()->user(), (int) $tenant?->getKey());
 
         if (! $employee instanceof Employee) {
-            return '—';
+            return new HtmlString('—');
         }
 
-        $year = blank($get('starts_on')) ? (int) now()->format('Y') : (int) CarbonImmutable::parse($get('starts_on'))->format('Y');
+        $from = blank($get('starts_on')) ? CarbonImmutable::today() : CarbonImmutable::parse($get('starts_on'));
+        $to = blank($get('ends_on')) ? $from : CarbonImmutable::parse($get('ends_on'));
+        $days = (int) $get('days');
+        $annual = in_array($get('type'), [LeaveType::Annual, LeaveType::Annual->value], true);
+        $entitlement = (int) $employee->annual_leave_days;
 
-        return sprintf('%d από %d ημέρες (%d)', $employee->annualLeaveRemaining($year), $employee->annual_leave_days, $year);
+        $years = range((int) $from->format('Y'), max((int) $from->format('Y'), min((int) $to->format('Y'), (int) $from->format('Y') + 1)));
+        $request = new LeaveRequest(['starts_on' => $from->toDateString(), 'ends_on' => $to->toDateString(), 'days' => $days]);
+
+        $parts = [];
+        foreach ($years as $year) {
+            $left = $employee->annualLeaveRemaining($year);
+            $line = sprintf('Μένουν <strong>%d</strong> από %d (%d)', $left, $entitlement, $year);
+            if ($annual && $days > 0) {
+                $after = $left - Employee::daysInYear($request, $year, (int) $employee->company_id);
+                $line .= $after < 0
+                    ? sprintf(' → με αυτή την αίτηση <strong style="color:#b91c1c">%d</strong> — ⚠ ξεπερνά το υπόλοιπο κατά %d (το αποφασίζει ο διαχειριστής)', $after, -$after)
+                    : sprintf(' → με αυτή την αίτηση <strong>%d</strong>', $after);
+            }
+            $parts[] = $line;
+        }
+        if (! $annual) {
+            $parts[] = '<span style="opacity:.75">Αυτό το είδος άδειας δεν αφαιρείται από την κανονική.</span>';
+        }
+
+        return new HtmlString(implode('<br>', $parts));
     }
 }
