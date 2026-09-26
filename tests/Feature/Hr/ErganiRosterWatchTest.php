@@ -6,6 +6,7 @@ use App\Filament\Widgets\ErganiStatusWidget;
 use App\Models\Employee;
 use App\Models\User;
 use App\Services\Ergani\ErganiClient;
+use App\Services\Ergani\ErganiEmployeeImporter;
 use App\Services\Ergani\ErganiRosterWatch;
 use App\Services\TenantRoleProvisioner;
 use Illuminate\Http\Client\Request;
@@ -26,6 +27,8 @@ class ErganiRosterWatchTest extends HrTestCase
 
     private string $sector = '0';
 
+    private bool $malformed = false;
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -36,6 +39,7 @@ class ErganiRosterWatchTest extends HrTestCase
 
             return match (true) {
                 str_ends_with($r->url(), '/Authentication') => Http::response(['accessToken' => 'tok']),
+                $this->malformed => Http::response(['Something' => 'else']),
                 ($r->data()['ServiceCode'] ?? null) === 'EX_BASE_05' => $this->rosterStatus === 200
                     ? Http::response(['EX_BASE_05' => ['Cur' => $this->roster]])
                     : Http::response(['message' => 'boom'], $this->rosterStatus),
@@ -61,6 +65,8 @@ class ErganiRosterWatchTest extends HrTestCase
         $back = $this->emp('333333333', 'Γύρισε', false);
         $gone = $this->emp('444444444', 'Έφυγε');
         $noAfm = $this->emp('', 'Χωρίςαφμ');
+        $noAfm->forceFill(['has_work_card' => true])->save();
+        $this->emp('', 'Χωρίςκάρτα');   // ΑΦΜ optional without a card → not reported
 
         $diff = app(ErganiRosterWatch::class)->diff($this->company);
 
@@ -68,7 +74,7 @@ class ErganiRosterWatchTest extends HrTestCase
         $this->assertSame(['333333333'], array_column($diff['inactive'], 'afm'));
         $this->assertSame([$gone->id], array_column($diff['missing'], 'id'));
         $this->assertSame([$noAfm->id], array_column($diff['no_afm'], 'id'));
-        $this->assertSame(4, Employee::count(), 'nothing created');
+        $this->assertSame(5, Employee::count(), 'nothing created');
         $this->assertFalse($back->fresh()->is_active, 'nothing re-activated');
         $this->assertTrue($gone->fresh()->is_active, 'nothing deactivated');
         foreach ($this->urls as $u) {
@@ -105,5 +111,33 @@ class ErganiRosterWatchTest extends HrTestCase
         $this->artisan('ergani:watch')->assertFailed();
         $this->assertTrue($this->company->fresh()->ergani_card_sector, 'card check still ran');
         $this->assertNull($this->company->fresh()->ergani_roster_checked_at, 'failed roster read stores nothing');
+    }
+
+    public function test_an_empty_or_malformed_roster_is_an_error_not_everyone_left(): void
+    {
+        $this->emp('222222222', 'Ίδιος');
+        $this->roster = [];
+        $this->artisan('ergani:watch')->assertFailed();
+        $this->assertNull($this->company->fresh()->ergani_roster_diff, 'nothing stored');
+
+        $this->malformed = true;
+        $this->expectException(\RuntimeException::class);
+        app(ErganiEmployeeImporter::class)->fetch($this->company);
+    }
+
+    public function test_a_shrinking_difference_is_quiet_and_bells_carry_no_names(): void
+    {
+        $admin = $this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
+        $this->emp('222222222', 'Ίδιος');
+        $this->roster = [$this->row('222222222', 'ΙΔΙΟΣ', 'Χ'), $this->row('111111111', 'ΝΕΟΣ', 'Α'), $this->row('333333333', 'ΝΕΟΣ', 'Β')];
+        $this->artisan('ergani:watch')->assertSuccessful();
+        $this->assertSame(1, User::find($admin->id)->notifications()->count());
+        $body = (string) (User::find($admin->id)->notifications()->first()->data['body'] ?? '');
+        $this->assertStringContainsString('2 νέος/οι στο ΕΡΓΑΝΗ', $body);
+        $this->assertStringNotContainsString('Νεος', $body, 'no names in the notification row');
+
+        $this->emp('111111111', 'Νέος');   // one imported → the list shrinks
+        $this->artisan('ergani:watch')->assertSuccessful();
+        $this->assertSame(1, User::find($admin->id)->notifications()->count(), 'shrinking is quiet');
     }
 }

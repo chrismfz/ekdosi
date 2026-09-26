@@ -26,6 +26,10 @@ class ErganiRosterWatch
     {
         $rows = collect($this->importer->fetch($company))->keyBy('afm');
         $local = Employee::query()->withTrashed()->where('company_id', $company->getKey())->get();
+        if ($rows->isEmpty() && $local->contains(fn (Employee $e): bool => ! $e->trashed() && $e->is_active && filled($e->afm))) {
+            // Maintenance / a glitch must never read as «everyone left — deactivate them».
+            throw new \RuntimeException('Το ΕΡΓΑΝΗ επέστρεψε κενό δυναμικό ενώ υπάρχουν ενεργοί εργαζόμενοι — δεν αποθηκεύτηκε τίποτα.');
+        }
         $byAfm = $local->filter(fn (Employee $e): bool => filled($e->afm))->keyBy('afm');
 
         $new = $inactive = [];
@@ -42,7 +46,8 @@ class ErganiRosterWatch
         $active = $local->filter(fn (Employee $e): bool => ! $e->trashed() && $e->is_active);
         $missing = $active->filter(fn (Employee $e): bool => filled($e->afm) && ! $rows->has($e->afm))
             ->map(fn (Employee $e): array => ['id' => (int) $e->getKey(), 'name' => $e->full_name])->values()->all();
-        $noAfm = $active->filter(fn (Employee $e): bool => blank($e->afm))
+        // ΑΦΜ is optional without a work card — only card holders NEED one to be declared.
+        $noAfm = $active->filter(fn (Employee $e): bool => blank($e->afm) && $e->has_work_card)
             ->map(fn (Employee $e): array => ['id' => (int) $e->getKey(), 'name' => $e->full_name])->values()->all();
 
         return ['new' => $new, 'inactive' => $inactive, 'missing' => $missing, 'no_afm' => $noAfm];
@@ -52,12 +57,14 @@ class ErganiRosterWatch
     public function check(Company $company): array
     {
         $diff = $this->diff($company);
-        $was = $company->ergani_roster_diff;
-        $company->forceFill(['ergani_roster_diff' => $diff, 'ergani_roster_checked_at' => now()])->saveQuietly();
+        $was = is_array($company->ergani_roster_diff) ? $company->ergani_roster_diff : null;
 
-        if (self::count($diff) > 0 && self::signature($diff) !== self::signature(is_array($was) ? $was : null)) {
+        // Bell only when a difference APPEARS (a shrinking list — e.g. some imported — is quiet),
+        // and BEFORE storing: a failed bell is retried next week instead of being swallowed.
+        if (array_diff(self::keys($diff), self::keys($was)) !== []) {
             $this->notify($company, $diff);
         }
+        $company->forceFill(['ergani_roster_diff' => $diff, 'ergani_roster_checked_at' => now()])->saveQuietly();
 
         return $diff;
     }
@@ -80,18 +87,20 @@ class ErganiRosterWatch
         ]));
     }
 
-    private static function signature(?array $diff): string
+    /** One key per difference, bucket-qualified («new:123456789», «missing:7»). @return list<string> */
+    private static function keys(?array $diff): array
     {
         if ($diff === null) {
-            return '';
+            return [];
         }
-        $keys = [
-            array_column($diff['new'] ?? [], 'afm'), array_column($diff['inactive'] ?? [], 'afm'),
-            array_column($diff['missing'] ?? [], 'id'), array_column($diff['no_afm'] ?? [], 'id'),
-        ];
-        array_walk($keys, fn (array &$k) => sort($k));
+        $keys = [];
+        foreach (['new' => 'afm', 'inactive' => 'afm', 'missing' => 'id', 'no_afm' => 'id'] as $bucket => $field) {
+            foreach ($diff[$bucket] ?? [] as $item) {
+                $keys[] = $bucket.':'.$item[$field];
+            }
+        }
 
-        return md5((string) json_encode($keys));
+        return $keys;
     }
 
     private function notify(Company $company, array $diff): void
@@ -102,7 +111,13 @@ class ErganiRosterWatch
         }
         Notification::make()
             ->title('ΕΡΓΑΝΗ ↔ Εργαζόμενοι: '.self::count($diff).' διαφορά/ές')
-            ->body(implode(' · ', self::lines($diff)))
+            // Counts only: personal names don't belong in long-lived notification rows.
+            ->body(implode(' · ', array_filter([
+                ($n = count($diff['new'])) ? $n.' νέος/οι στο ΕΡΓΑΝΗ' : null,
+                ($n = count($diff['inactive'])) ? $n.' ενεργός/οί εκεί αλλά ανενεργός/οί εδώ' : null,
+                ($n = count($diff['missing'])) ? $n.' ενεργός/οί εδώ αλλά όχι στο ΕΡΓΑΝΗ' : null,
+                ($n = count($diff['no_afm'])) ? $n.' με κάρτα χωρίς ΑΦΜ' : null,
+            ])).'. Λεπτομέρειες στον Πίνακα ελέγχου (κάρτα ΕΡΓΑΝΗ).')
             ->icon('heroicon-o-user-group')
             ->warning()
             ->actions([
