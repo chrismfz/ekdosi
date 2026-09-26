@@ -121,9 +121,11 @@ class ErganiVisibilityTest extends HrTestCase
         Http::fake(function (Request $r) use (&$urls, &$sector) {
             $urls[] = $r->url();
 
-            return str_ends_with($r->url(), '/Authentication')
-                ? Http::response(['accessToken' => 'tok'])
-                : Http::response(['EX_BASE_01' => ['Ergodotis' => ['Afm' => '800561849', 'Eponimia' => 'X', 'IsInCardSector' => $sector]]]);
+            return match (true) {
+                str_ends_with($r->url(), '/Authentication') => Http::response(['accessToken' => 'tok']),
+                ($r->data()['ServiceCode'] ?? null) === 'EX_BASE_05' => Http::response(['EX_BASE_05' => ['Cur' => []]]),
+                default => Http::response(['EX_BASE_01' => ['Ergodotis' => ['Afm' => '800561849', 'Eponimia' => 'X', 'IsInCardSector' => $sector]]]),
+            };
         });
 
         $this->artisan('ergani:watch')->assertSuccessful();
@@ -144,9 +146,11 @@ class ErganiVisibilityTest extends HrTestCase
 
     public function test_watch_never_stores_a_guess_when_ergani_omits_the_flag(): void
     {
-        Http::fake(fn (Request $r) => str_ends_with($r->url(), '/Authentication')
-            ? Http::response(['accessToken' => 'tok'])
-            : Http::response(['EX_BASE_01' => ['Ergodotis' => ['Afm' => '800561849']]]));
+        Http::fake(fn (Request $r) => match (true) {
+            str_ends_with($r->url(), '/Authentication') => Http::response(['accessToken' => 'tok']),
+            ($r->data()['ServiceCode'] ?? null) === 'EX_BASE_05' => Http::response(['EX_BASE_05' => ['Cur' => []]]),
+            default => Http::response(['EX_BASE_01' => ['Ergodotis' => ['Afm' => '800561849']]]),
+        });
 
         $this->artisan('ergani:watch')->assertFailed();
         $this->assertNull($this->company->fresh()->ergani_card_sector);

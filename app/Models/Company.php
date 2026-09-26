@@ -196,6 +196,8 @@ class Company extends Model
             'ergani_card_sector' => 'boolean',
             'ergani_card_sector_checked_at' => 'datetime',
             'ergani_production_since' => 'datetime',
+            'ergani_roster_diff' => 'array',
+            'ergani_roster_checked_at' => 'datetime',
             'ergani_card_requires_kiosk' => 'boolean',
             'ergani_password' => MaybeEncrypted::class,
             'ai_monthly_token_cap' => 'integer',
