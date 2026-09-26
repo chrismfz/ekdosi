@@ -48,6 +48,7 @@ class TeamTodayTest extends HrTestCase
             ->assertSee('Αλφα Νίκος · Άδεια ασθένειας', false)
             ->assertSee('Βήτα Ηλίας')
             ->assertSee('Πε 8/10', false)
+            ->assertSee('Επόμενες 7 ημέρες')
             ->assertSee('Περιμένουν έγκριση')
             ->assertSee('Μέσα τώρα (κάρτα)')
             ->assertSee('Βήτα Ηλίας (09:00)');
@@ -94,5 +95,19 @@ class TeamTodayTest extends HrTestCase
             ->fillForm(['type' => LeaveType::Annual->value, 'starts_on' => '2026-12-29', 'ends_on' => '2027-01-05'])
             ->assertSee('(2026) → με αυτή την αίτηση <strong>17</strong>', false)
             ->assertSee('(2027) → με αυτή την αίτηση <strong>18</strong>', false);
+    }
+
+    public function test_balance_survives_a_huge_span_and_mentions_pending_requests(): void
+    {
+        $user = $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_ERGANI));
+        $me = $this->employeeFor($user);
+        $this->leave($me, '2026-11-02', '2026-11-04', status: LeaveStatus::Pending, days: 3);
+
+        Livewire::test(CreateLeaveRequest::class)
+            ->fillForm(['type' => LeaveType::Annual->value, 'starts_on' => '2026-10-12', 'ends_on' => '2026-10-12'])
+            ->assertSee('Εκκρεμούν ακόμη 3 ημέρες')
+            // A crafted huge span must not walk millions of days (our guard; the pickers' min/max only apply on submit).
+            ->set('data.starts_on', '0001-01-01')->set('data.ends_on', '9999-12-31')
+            ->assertOk();
     }
 }

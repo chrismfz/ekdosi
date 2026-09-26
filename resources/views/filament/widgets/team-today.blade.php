@@ -28,7 +28,7 @@
                 @endif
             </div>
             <div>
-                <h4>Υπόλοιπη εβδομάδα</h4>
+                <h4>Επόμενες 7 ημέρες</h4>
                 @if ($laterThisWeek)
                     <ul>@foreach ($laterThisWeek as $line)<li>{{ $line }}</li>@endforeach</ul>
                 @else

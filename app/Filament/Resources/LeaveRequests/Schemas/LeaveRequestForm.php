@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\LeaveRequests\Schemas;
 
+use App\Enums\LeaveStatus;
 use App\Enums\LeaveType;
 use App\Filament\Resources\LeaveRequests\Pages\CreateLeaveRequest;
 use App\Models\Employee;
@@ -131,8 +132,12 @@ class LeaveRequestForm
             $to = $from;
         }
 
-        $from = CarbonImmutable::parse($from);
-        $to = CarbonImmutable::parse($to);
+        try {
+            $from = CarbonImmutable::parse($from);
+            $to = CarbonImmutable::parse($to);
+        } catch (\Throwable) {
+            return;   // not a date (crafted state) — validation rejects it on submit
+        }
         if ($from->diffInDays($to) > CreateLeaveRequest::MAX_SPAN_DAYS) {
             return; // the create page refuses it anyway — don't walk the span
         }
@@ -157,8 +162,17 @@ class LeaveRequestForm
             return new HtmlString('—');
         }
 
-        $from = blank($get('starts_on')) ? CarbonImmutable::today() : CarbonImmutable::parse($get('starts_on'));
-        $to = blank($get('ends_on')) ? $from : CarbonImmutable::parse($get('ends_on'));
+        // Live state is not bounded by the pickers' min/max (those apply on submit):
+        // a garbage date or a huge span must never 500 or walk millions of days.
+        try {
+            $from = blank($get('starts_on')) ? CarbonImmutable::today() : CarbonImmutable::parse($get('starts_on'));
+            $to = blank($get('ends_on')) ? $from : CarbonImmutable::parse($get('ends_on'));
+        } catch (\Throwable) {
+            return new HtmlString('—');
+        }
+        if ($to->lt($from) || $from->diffInDays($to) > CreateLeaveRequest::MAX_SPAN_DAYS) {
+            $to = $from;
+        }
         $days = (int) $get('days');
         $annual = in_array($get('type'), [LeaveType::Annual, LeaveType::Annual->value], true);
         $entitlement = (int) $employee->annual_leave_days;
@@ -177,6 +191,12 @@ class LeaveRequestForm
                     : sprintf(' → με αυτή την αίτηση <strong>%d</strong>', $after);
             }
             $parts[] = $line;
+        }
+        // Only APPROVED leave is deducted — say so when other requests are still pending.
+        $pending = (int) LeaveRequest::query()->where('employee_id', $employee->getKey())
+            ->where('status', LeaveStatus::Pending->value)->where('type', LeaveType::Annual->value)->sum('days');
+        if ($annual && $pending > 0) {
+            $parts[] = sprintf('<span style="opacity:.75">Εκκρεμούν ακόμη %d ημέρες κανονικής σε άλλες αιτήσεις (δεν έχουν αφαιρεθεί).</span>', $pending);
         }
         if (! $annual) {
             $parts[] = '<span style="opacity:.75">Αυτό το είδος άδειας δεν αφαιρείται από την κανονική.</span>';

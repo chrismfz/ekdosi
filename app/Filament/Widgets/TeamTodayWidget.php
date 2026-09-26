@@ -6,6 +6,7 @@ use App\Enums\LeaveStatus;
 use App\Filament\Pages\LeaveCalendar;
 use App\Filament\Resources\LeaveRequests\LeaveRequestResource;
 use App\Models\Company;
+use App\Models\Employee;
 use App\Models\LeaveRequest;
 use App\Models\WorkCardEvent;
 use App\Policies\LeaveRequestPolicy;
@@ -44,14 +45,14 @@ class TeamTodayWidget extends Widget
         $c = Filament::getTenant();
         $approver = LeaveRequestPolicy::isApprover(auth()->user());
         $today = CarbonImmutable::today();
-        $weekEnd = $today->endOfWeek(CarbonImmutable::SUNDAY);
+        $weekEnd = $today->addDays(7);   // «next 7 days» — on a Friday «this week» would be only the weekend
 
         $leaves = LeaveRequest::query()
             ->where('company_id', $c->getKey())
             ->where('status', LeaveStatus::Approved->value)
             ->whereDate('starts_on', '<=', $weekEnd->toDateString())
             ->whereDate('ends_on', '>=', $today->toDateString())
-            ->with('employee')
+            ->with(['employee' => fn ($q) => $q->withTrashed()])   // a deleted employee's leave still shows a name
             ->orderBy('starts_on')
             ->get();
 
@@ -72,9 +73,11 @@ class TeamTodayWidget extends Widget
         if ($approver && WorkCardEvent::query()->where('company_id', $c->getKey())
             ->where('occurred_at', '>=', now()->subHours(WorkCardService::OPEN_SHIFT_HOURS))->exists()) {
             $board = collect(app(WorkCardService::class)->presence($c));
+            // Denominator = people who use the card (if any are marked), not every employee.
+            $cardUsers = Employee::query()->where('company_id', $c->getKey())->where('is_active', true)->where('has_work_card', true)->count();
             $presence = [
                 'in' => $board->where('in', true)->map(fn (array $e): string => $e['name'].' ('.$e['since'].')')->values()->all(),
-                'total' => $board->count(),
+                'total' => $cardUsers > 0 ? $cardUsers : $board->count(),
             ];
         }
 
@@ -85,7 +88,7 @@ class TeamTodayWidget extends Widget
             'laterThisWeek' => $laterThisWeek,
             'approver' => $approver,
             'pending' => $pending,
-            'pendingUrl' => $pending > 0 ? LeaveRequestResource::getUrl('index') : null,
+            'pendingUrl' => $pending > 0 ? LeaveRequestResource::getUrl('index', ['tab' => 'pending']) : null,
             'calendarUrl' => LeaveCalendar::canAccess() ? LeaveCalendar::getUrl() : null,
             'presence' => $presence,
         ];
