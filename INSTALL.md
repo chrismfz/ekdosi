@@ -1008,7 +1008,10 @@ Once the scheduler cron above is in place, the **whole-DB backup** (nightly
 dump of ALL tenants + app files, 02:00) runs by default — `backup:run`,
 `backup:clean` and `backup:monitor` ship enabled (`EKDOSI_SCHEDULE_BACKUP_*`,
 see `config/ekdosi.php`). This is the disaster-recovery floor under the
-per-tenant exports. Three things to configure for production:
+per-tenant exports. If a night is missed (e.g. a deploy in maintenance mode at
+02:00 — the scheduler skips tasks while the app is down), an hourly catch-up at
+:20 runs `backup:run` late once the newest backup is older than `backup:monitor`
+allows (+1 h), at most every 6 h. Three things to configure for production:
 
 1. **Off-site destination** — the default writes to the `local` disk only,
    which dies with the VM. Point `BACKUP_DESTINATION_DISKS` at a

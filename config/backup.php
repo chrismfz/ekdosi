@@ -63,6 +63,10 @@ return [
                     // plaintext tenant data — possibly raw-secret bundles. Same reasoning;
                     // they're downloaded + deleted, not part of the backup set.
                     storage_path('app/exports'),
+                    // Scratch space (PDF-archive temp dirs, Livewire uploads in flight):
+                    // a killed export's leftovers there once grew a nightly backup 64 MB → 339 MB.
+                    storage_path('app/tmp'),
+                    storage_path('app/livewire-tmp'),
                 ],
 
                 /*

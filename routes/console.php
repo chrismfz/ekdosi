@@ -4,12 +4,14 @@ use App\Jobs\RecordQueueHeartbeat;
 use App\Models\AuthEvent;
 use App\Models\Company;
 use App\Models\UpdateRun;
+use App\Support\Backup\BackupOverdue;
 use App\Support\OperatorHealth\HealthRecorder;
 use App\Support\OperatorHealth\TenantScheduleSweep;
 use App\Support\Settings\ScheduleTiming;
 use App\Support\Settings\SystemSettings;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Schedule;
 
 Artisan::command('inspire', function () {
@@ -468,6 +470,23 @@ $trackSchedule(
         ->cron($scheduleCron('backup_run_cron', '0 2 * * *'))
         ->name('backup-run')
         ->when(fn () => $scheduleEnabled('backup_run_enabled'))
+        ->createMutexNameUsing('framework/schedule-ekdosi-backup-run')   // shared with the catch-up below
+        ->withoutOverlapping(120),
+    'backup_run'
+);
+
+// Catch-up: a deploy (maintenance mode) at the backup minute makes the scheduler
+// skip backup:run for the whole day. Hourly, run it late if the newest backup is
+// older than backup:monitor tolerates — a normal night never triggers this. One
+// attempt per 6 h: a backup that keeps FAILING must not dump the DB (and mail the
+// failure) every hour. Same mutex as the nightly run — never two at once.
+$trackSchedule(
+    Schedule::command('backup:run')
+        ->hourlyAt(20)
+        ->name('backup-run-catch-up')
+        ->when(fn () => $scheduleEnabled('backup_run_enabled') && BackupOverdue::check()
+            && Cache::add('ekdosi:backup-catch-up-attempt', true, now()->addHours(6)))
+        ->createMutexNameUsing('framework/schedule-ekdosi-backup-run')
         ->withoutOverlapping(120),
     'backup_run'
 );
