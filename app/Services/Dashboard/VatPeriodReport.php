@@ -81,7 +81,8 @@ class VatPeriodReport
      * πιστωτικό reduces deductible input VAT, so summing it positively would
      * overstate it. The sign is driven by Codes::CREDIT_NOTE_TYPES so the
      * "this type subtracts" rule lives in ONE place (same authority the myDATA
-     * VAT-picture aggregator uses).
+     * VAT-picture aggregator uses). The VAT sum leaves out 13.x/14.x (not
+     * deductible input VAT — see Codes::NON_DEDUCTIBLE_INPUT_VAT_PREFIXES).
      */
     private function expenseInput(CarbonInterface $start, CarbonInterface $end): object
     {
@@ -89,6 +90,13 @@ class VatPeriodReport
         $in = implode(',', array_fill(0, count($credit), '?'));
         // -1 for a credit-note invoice_type, +1 otherwise.
         $sign = "CASE WHEN invoice_type IN ($in) THEN -1 ELSE 1 END";
+        // VAT only: 13.x/14.x VAT is not deductible input VAT (reverse charge / ΑΛΠ —
+        // Codes::isDeductibleInputVatType). Net/gross still count every expense.
+        $nonDeductible = implode(' OR ', array_map(
+            fn (string $p) => "invoice_type LIKE '{$p}.%'",
+            Codes::NON_DEDUCTIBLE_INPUT_VAT_PREFIXES,
+        ));
+        $vat = "CASE WHEN {$nonDeductible} THEN 0 ELSE $sign * vat_total END";
 
         $row = DB::table('expenses')
             ->where('company_id', $this->tenant->getKey())
@@ -99,7 +107,7 @@ class VatPeriodReport
                 ->orWhere('mydata_state', '!=', 'CANCELLED'))
             ->selectRaw(
                 "COALESCE(SUM($sign * net_total), 0) net, "
-                ."COALESCE(SUM($sign * vat_total), 0) vat, "
+                ."COALESCE(SUM($vat), 0) vat, "
                 ."COALESCE(SUM($sign * gross_total), 0) gross, "
                 .'COUNT(*) cnt',
                 [...$credit, ...$credit, ...$credit],

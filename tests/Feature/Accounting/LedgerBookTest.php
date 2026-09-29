@@ -104,7 +104,7 @@ class LedgerBookTest extends TestCase
         ]);
 
         $this->expense('2026-01-12', 50, 12, 62);                                // expense net 50, vat 12
-        $this->expense('2026-01-15', 10, 2, 12, ['invoice_type' => '14.31']);    // πιστωτικό → −10 / −2
+        $this->expense('2026-01-15', 10, 2, 12, ['invoice_type' => '5.1']);     // πιστωτικό → −10 / −2
 
         $result = $this->book();
 
@@ -130,6 +130,19 @@ class LedgerBookTest extends TestCase
         foreach ($creditRows as $r) {
             $this->assertLessThan(0, $r->net);
         }
+    }
+
+    public function test_vat_balance_leaves_out_reverse_charge_and_retail_vat(): void
+    {
+        $this->invoice('2026-01-10 10:00:00', 100, 124);                          // output VAT 24
+        $this->expense('2026-01-12', 50, 12, 62, ['invoice_type' => '1.1']);      // deductible 12
+        $this->expense('2026-01-13', 100, 24, 124, ['invoice_type' => '14.3']);   // reverse charge
+        $this->expense('2026-01-14', 20, 2, 22, ['invoice_type' => '13.1']);      // ΑΛΠ
+
+        $result = $this->book();
+
+        $this->assertSame(38.0, $result->expenseVat());   // the book records every VAT…
+        $this->assertSame(12.0, $result->vatBalance());   // …but only 12 is deductible: 24 − 12
     }
 
     public function test_standalone_legacy_credit_type_signs_negative(): void

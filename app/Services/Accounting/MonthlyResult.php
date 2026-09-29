@@ -151,6 +151,14 @@ final class MonthlyResult
             $cell['payroll'] = $e['payroll'];
             $cell['contributions'] = $e['contributions'];
             $cell['from_e3']['payroll'] = $cell['from_e3']['contributions'] = true;
+        } elseif ($e['contributions'] > $l['contributions'] + 0.004) {
+            // The local total wins, but the SPLIT is the accountant's official one:
+            // a local 17.1 lands whole under «Μισθοδοσία» (its employer-contribution
+            // lines included), while the Ε3 books them apart (E3_581_002 / E3_585_007).
+            // Same total — only the contributions move out of the payroll column.
+            $cell['contributions'] = min($lp, $e['contributions']);
+            $cell['payroll'] = $lp - $cell['contributions'];
+            $cell['from_e3']['contributions'] = true;
         }
         self::track($groups['personnel'], $lp, $ep, max($lp, $ep));
 

@@ -120,7 +120,7 @@
                 <div class="lb-card__hint">ΦΠΑ εισροών {{ $money($result->expenseVat()) }} · μικτό {{ $money($result->expenseGross()) }}</div>
             </div>
             <div class="lb-card">
-                <div class="lb-card__label">ΦΠΑ εκροών − εισροών</div>
+                <div class="lb-card__label">ΦΠΑ εκροών − εκπιπτόμενων εισροών</div>
                 <div class="lb-card__value {{ $result->vatBalance() > 0 ? 'lb-neg' : 'lb-pos' }}">{{ $money(abs($result->vatBalance())) }}</div>
                 <div class="lb-card__hint">{{ $result->vatBalance() > 0 ? 'Προς απόδοση' : 'Πιστωτικό υπόλοιπο' }}</div>
             </div>
@@ -247,7 +247,7 @@
                             <td colspan="13" class="lb-foot-sum">
                                 Καθαρό αποτέλεσμα (έσοδα − έξοδα):
                                 <strong>{{ $money($result->incomeNet() - $result->expenseNet()) }}</strong>
-                                &nbsp;·&nbsp; ΦΠΑ {{ $result->vatBalance() > 0 ? 'προς απόδοση' : '(πιστωτικό)' }} (εκροών − εισροών):
+                                &nbsp;·&nbsp; ΦΠΑ {{ $result->vatBalance() > 0 ? 'προς απόδοση' : '(πιστωτικό)' }} (εκροών − εκπιπτόμενων εισροών):
                                 <strong>{{ $money(abs($result->vatBalance())) }}</strong>
                             </td>
                         </tr>

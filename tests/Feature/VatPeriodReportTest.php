@@ -197,8 +197,8 @@ class VatPeriodReportTest extends TestCase
     {
         $this->invoice('2026-04-10 10:00:00', 100, 124);                        // output VAT 24
 
-        $this->expense('2026-04-12', 1000, 240, 1240, invoiceType: '14.3');     // input VAT +240
-        $this->expense('2026-04-15', 100, 24, 124, invoiceType: '14.31');       // πιστωτικό → −24
+        $this->expense('2026-04-12', 1000, 240, 1240, invoiceType: '1.1');      // input VAT +240
+        $this->expense('2026-04-15', 100, 24, 124, invoiceType: '5.1');         // supplier πιστωτικό → −24
 
         $summary = (new VatPeriodReport($this->tenant))->forPeriod(
             Carbon::parse('2026-04-01')->startOfDay(),
@@ -209,6 +209,25 @@ class VatPeriodReportTest extends TestCase
         $this->assertSame(216.00, $summary->inputVat);
         $this->assertSame(900.00, $summary->inputNet);
         $this->assertSame(-192.00, $summary->netVat());        // 24 − 216
+    }
+
+    public function test_reverse_charge_and_retail_vat_is_not_deductible_input(): void
+    {
+        $this->invoice('2026-04-10 10:00:00', 1000, 1240);                      // output VAT 240
+
+        $this->expense('2026-04-12', 100, 24, 124, invoiceType: '1.1');         // deductible +24
+        $this->expense('2026-04-13', 1000, 240, 1240, invoiceType: '14.3');     // reverse charge — net 0 in the return
+        $this->expense('2026-04-14', 50, 12, 62, invoiceType: '13.1');          // ΑΛΠ — not deductible
+        $this->expense('2026-04-15', 10, 2.4, 12.4, invoiceType: '14.31');      // its credit — likewise neutral
+
+        $summary = (new VatPeriodReport($this->tenant))->forPeriod(
+            Carbon::parse('2026-04-01')->startOfDay(),
+            Carbon::parse('2026-04-30')->endOfDay(),
+        );
+
+        $this->assertSame(24.00, $summary->inputVat);
+        $this->assertSame(1140.00, $summary->inputNet);                         // the costs still count (100+1000+50−10)
+        $this->assertSame(216.00, $summary->netVat());
     }
 
     public function test_months_of_quarter_returns_three(): void

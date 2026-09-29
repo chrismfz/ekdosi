@@ -63,10 +63,19 @@ class LedgerBookResult
         return $this->sum('expense', 'gross');
     }
 
-    /** ΦΠΑ εκροών − εισροών. Positive = προς απόδοση. */
+    /**
+     * ΦΠΑ εκροών − ΕΚΠΙΠΤΟΜΕΝΩΝ εισροών. Positive = προς απόδοση. The 13.x/14.x VAT
+     * stays in expenseVat() (the book records it) but is not deductible
+     * (Codes::isDeductibleInputVatType) — same rule as VatPeriodReport.
+     */
     public function vatBalance(): float
     {
-        return round($this->incomeVat() - $this->expenseVat(), 2);
+        $deductible = array_sum(array_map(
+            fn (LedgerRow $r) => Codes::isDeductibleInputVatType($r->docType) ? $r->vat : 0.0,
+            $this->expenseRows(),
+        ));
+
+        return round($this->incomeVat() - $deductible, 2);
     }
 
     /** Φόροι που μας παρακράτησαν οι πελάτες (net of credit notes) — offsets the income tax. */

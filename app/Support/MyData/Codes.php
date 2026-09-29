@@ -676,6 +676,27 @@ final class Codes
      *
      * @var list<string>
      */
+    /**
+     * Expense doc types whose VAT is NOT deductible input VAT for «ΦΠΑ προς απόδοση»:
+     *   14.x — ενδοκοινοτικά / τρίτες χώρες: reverse-charge VAT, booked as BOTH output
+     *          and input in the ΦΠΑ return → net 0 (counting it as input alone
+     *          understated myip 2026 by 3.168,56);
+     *   13.x — αποδείξεις λιανικής (ΑΛΠ): no τιμολόγιο, so as a rule not deductible.
+     * A simplification (edge cases exist) — the authoritative mapping is AADE's
+     * RequestVatInfo (docs/BACKLOG.md). The book keeps the VAT as recorded; only the
+     * «προς απόδοση» sums leave it out.
+     *
+     * @var list<string>
+     */
+    public const NON_DEDUCTIBLE_INPUT_VAT_PREFIXES = ['13', '14'];
+
+    public static function isDeductibleInputVatType(?string $invoiceType): bool
+    {
+        $prefix = explode('.', (string) $invoiceType)[0];
+
+        return ! in_array($prefix, self::NON_DEDUCTIBLE_INPUT_VAT_PREFIXES, true);
+    }
+
     public const CAPEX_E3_PREFIXES = ['E3_882', 'E3_883'];
 
     public static function isCapexClassification(?string $type): bool
