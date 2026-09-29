@@ -8,6 +8,7 @@ use Carbon\Carbon;
 use Firebed\AadeMyData\Exceptions\RateLimitExceededException;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Log;
 use Throwable;
 
 /**
@@ -37,6 +38,7 @@ class MyDataImportExpenses extends Command
         {--tenant= : Company slug or id (required)}
         {--year=* : Calendar year(s) to import (required, repeatable)}
         {--only= : "suppliers" (RequestDocs) or "self" (our 13/14/17.x) — default both}
+        {--hold-manual : Leave docs that look like a hand-typed (MARK-less) expense for the operator — unattended runs}
         {--gap=2 : Seconds to wait between AADE calls}';
 
     protected $description = 'Back-fill expenses from myDATA for whole years (supplier docs + our self-declared 13/14/17.x), quarter by quarter. Idempotent.';
@@ -60,6 +62,8 @@ class MyDataImportExpenses extends Command
         }
         $directions = $only === '' ? ['suppliers', 'self'] : [$only];
         $gap = max(0, (int) $this->option('gap'));
+        $holdManual = (bool) $this->option('hold-manual');
+        $heldMarks = [];
 
         $importer = new ExpenseImporter($tenant, static::$testHandler);
         $rows = [];
@@ -84,8 +88,8 @@ class MyDataImportExpenses extends Command
 
                     try {
                         $r = $direction === 'suppliers'
-                            ? $importer->import($from->copy(), $to->copy())
-                            : $importer->importSelfDeclared($from->copy(), $to->copy());
+                            ? $importer->import($from->copy(), $to->copy(), holdManualLookalikes: $holdManual)
+                            : $importer->importSelfDeclared($from->copy(), $to->copy(), holdManualLookalikes: $holdManual);
                     } catch (RateLimitExceededException $e) {
                         $this->table(['Περίοδος', 'Είδος', 'Σαρώθηκαν', 'Νέα', 'Υπήρχαν'], $rows);
                         $this->warn("Όριο myDATA στο {$year} Τ{$q} ({$direction}). Ό,τι μπήκε κρατήθηκε — ξανατρέξτε αργότερα.");
@@ -98,6 +102,7 @@ class MyDataImportExpenses extends Command
                         return self::FAILURE;
                     }
 
+                    array_push($heldMarks, ...$r->heldManualMarks);
                     $rows[] = [
                         "{$year} Τ{$q}",
                         $direction === 'suppliers' ? 'Προμηθευτών' : 'Δικά μας (13/14/17.x)',
@@ -112,6 +117,16 @@ class MyDataImportExpenses extends Command
         $this->table(['Περίοδος', 'Είδος', 'Σαρώθηκαν', 'Νέα', 'Υπήρχαν'], $rows);
         $created = array_sum(array_column($rows, 3));
         $this->info("{$tenant->slug}: καταχωρήθηκαν {$created} νέα έξοδα.");
+        $heldMarks = array_values(array_unique($heldMarks));
+        if ($heldMarks !== []) {
+            // Logged too: under the scheduler nobody reads this output, and a held
+            // doc is a cost «Φορολογικά» doesn't see until an operator decides.
+            Log::warning('mydata:import-expenses held docs that look like a manual expense', [
+                'company_id' => $tenant->getKey(), 'marks' => $heldMarks,
+            ]);
+            $this->warn(count($heldMarks).' έγγραφο/α ΔΕΝ καταχωρήθηκαν γιατί μοιάζουν με χειροκίνητο έξοδο '
+                .'(ίδιο ΑΦΜ+ΑΑ ή ίδια ημερομηνία+ποσό) — δες «Κονσόλα myDATA → Έξοδα». MARK: '.implode(', ', $heldMarks));
+        }
 
         return self::SUCCESS;
     }

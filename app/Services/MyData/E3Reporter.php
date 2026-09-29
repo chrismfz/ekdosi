@@ -27,6 +27,18 @@ class E3Reporter
 
     public function report(?Carbon $from = null, ?Carbon $to = null): E3Report
     {
+        return $this->reportWithMonthly($from, $to)[0];
+    }
+
+    /**
+     * report() + the same figures split by the entries' IssueDate month, for the
+     * «Φορολογικά» month-by-month table. A separate return value (not a field on
+     * E3Report) so the console's cached E3Report objects keep their shape.
+     *
+     * @return array{0: E3Report, 1: array<int, list<array{type: string, category: ?string, value: float}>>}
+     */
+    public function reportWithMonthly(?Carbon $from = null, ?Carbon $to = null): array
+    {
         $from ??= now()->startOfQuarter();
         $to ??= now()->endOfQuarter();
 
@@ -37,6 +49,8 @@ class E3Reporter
 
         /** @var array<string, array{type: string, category: ?string, value: float, count: int}> $byKey */
         $byKey = [];
+        /** @var array<int, array<string, array{type: string, category: ?string, value: float}>> $byMonth */
+        $byMonth = [];
         $docCount = 0;
         $total = 0.0;
 
@@ -67,6 +81,13 @@ class E3Reporter
                     $byKey[$key]['value'] += $value;
                     $byKey[$key]['count']++;
 
+                    // An undated entry (never seen) lands in the window's last month
+                    // rather than vanishing from the month split.
+                    $issued = (string) ($item->getIssueDate() ?? '');
+                    $month = preg_match('/^\d{4}-(\d{2})/', $issued, $m) ? (int) $m[1] : (int) $to->month;
+                    $byMonth[$month][$key] ??= ['type' => $type, 'category' => $category, 'value' => 0.0];
+                    $byMonth[$month][$key]['value'] += $value;
+
                     $docCount++;
                     $total += $value;
                 }
@@ -92,12 +113,18 @@ class E3Reporter
         usort($rows, fn (E3ReportRow $a, E3ReportRow $b) => [$a->classType, $a->classCategory ?? '']
             <=> [$b->classType, $b->classCategory ?? '']);
 
-        return new E3Report(
+        ksort($byMonth);
+        $monthly = array_map(fn (array $rows) => array_values(array_map(
+            fn (array $r) => ['type' => $r['type'], 'category' => $r['category'], 'value' => round($r['value'], 2)],
+            $rows,
+        )), $byMonth);
+
+        return [new E3Report(
             from: $fromStr,
             to: $toStr,
             rows: $rows,
             docCount: $docCount,
             total: round($total, 2),
-        );
+        ), $monthly];
     }
 }

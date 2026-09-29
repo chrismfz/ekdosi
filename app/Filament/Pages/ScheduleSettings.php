@@ -71,6 +71,7 @@ class ScheduleSettings extends Page implements HasForms
         'mydata_reconcile_enabled' => ['myDATA — αντιπαραβολή πωλήσεων', 'Καθημερινός read-only έλεγχος local↔ΑΑΔΕ.', false],
         'mydata_vat_picture_enabled' => ['myDATA — εικόνα ΦΠΑ', 'Ανανεώνει το cache του widget «Εικόνα από myDATA» (βαρύ AADE pull).', false],
         'mydata_fetch_expenses_enabled' => ['myDATA — άντληση εξόδων (read-only)', 'Ανανεώνει την αντιπαραβολή εξόδων κάθε λίγες ώρες ώστε το badge «αδέσποτα έξοδα» να είναι φρέσκο. ΔΕΝ δημιουργεί εγγραφές. Διπλό κλειδί: ισχύει ΚΑΙ ανά εταιρεία → «Ρυθμίσεις εταιρείας» → «Αυτόματη άντληση εξόδων».', false],
+        'mydata_sync_expenses_enabled' => ['myDATA — εισαγωγή εξόδων + Ε3', 'Κάθε νύχτα ανανεώνει το Ε3 του έτους (μετράει και ό,τι περνά ο λογιστής με δικούς του κωδικούς) και καταχωρεί τα νέα έξοδα από το myDATA: τιμολόγια προμηθευτών ΚΑΙ τα δικά μας 13/14/17.x (μισθοδοσία, ΕΦΚΑ, αποσβέσεις) — ώστε τα «Φορολογικά» να μη δείχνουν τα αδήλωτα έξοδα ως κέρδος. Γράφει ΜΟΝΟ τοπικά (δεν δηλώνει/χαρακτηρίζει τίποτα στην ΑΑΔΕ)· idempotent. Έγγραφο που μοιάζει με χειροκίνητο έξοδο (ίδιο ΑΦΜ+ΑΑ ή ίδια ημερομηνία+ποσό) ΔΕΝ μπαίνει — μένει στην «Κονσόλα myDATA → Έξοδα». Παράθυρο: τρέχον έτος (+ το προηγούμενο έως τον Ιούλιο).', false],
         'mydata_console_refresh_enabled' => ['myDATA — ανανέωση κονσόλας (όλα)', 'Ζεσταίνει ΟΛΑ τα δεδομένα της Κονσόλας myDATA (Πωλήσεις/Έξοδα/Ε3/Εικόνα ΦΠΑ) ώστε να ανοίγει φρέσκια. Το βαρύτερο AADE pull — καλύπτει και τα «εικόνα ΦΠΑ»/«άντληση εξόδων», οπότε άφησέ τα κλειστά αν ανάψεις αυτό. ΔΕΝ δημιουργεί εγγραφές.', false],
         // Ψηφιακή Διακίνηση (ΔΑ)
         'delivery_fetch_inbound_enabled' => ['Ψηφιακό ΔΑ — άντληση εισερχόμενων', 'Φέρνει στο staging «Εισερχόμενα Διακίνησης» τα Δελτία Αποστολής που έκοψαν ΑΛΛΟΙ σε βάρος μας (παραλαβές), ανά myDATA-readable εταιρεία. Read-only — ΔΕΝ αποδέχεται/απορρίπτει/εκδίδει τίποτα (μένουν operator-gated).', false],
@@ -109,7 +110,7 @@ class ScheduleSettings extends Page implements HasForms
     private const SECTIONS = [
         'Email & ουρά εργασιών' => ['mail_sweep_enabled', 'queue_heartbeat_enabled', 'resend_failed_emails_enabled'],
         'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_fetch_unpaid_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
-        'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_console_refresh_enabled'],
+        'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_sync_expenses_enabled', 'mydata_console_refresh_enabled'],
         'Ψηφιακή Διακίνηση (ΔΑ)' => ['delivery_fetch_inbound_enabled', 'delivery_refresh_status_enabled'],
         'myDATA — μητρώα (προμηθευτές/πελάτες)' => ['suppliers_sync_enabled', 'customers_sync_enabled', 'aade_status_refresh_enabled'],
         'Αντίγραφα ασφαλείας' => ['backup_run_enabled', 'backup_cleanup_enabled', 'backup_monitor_enabled', 'company_backups_enabled'],
@@ -137,6 +138,7 @@ class ScheduleSettings extends Page implements HasForms
         'mydata_reconcile_time' => ['myDATA — αντιπαραβολή πωλήσεων', 'time'],
         'mydata_vat_picture_cron' => ['myDATA — εικόνα ΦΠΑ', 'cron'],
         'mydata_fetch_expenses_cron' => ['myDATA — άντληση εξόδων', 'cron'],
+        'mydata_sync_expenses_cron' => ['myDATA — εισαγωγή εξόδων + Ε3', 'cron'],
         'mydata_console_refresh_cron' => ['myDATA — ανανέωση κονσόλας', 'cron'],
         'delivery_fetch_inbound_cron' => ['Ψηφιακό ΔΑ — άντληση εισερχόμενων', 'cron'],
         'delivery_refresh_status_cron' => ['Ψηφιακό ΔΑ — έλεγχος κατάστασης', 'cron'],

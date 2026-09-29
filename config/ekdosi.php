@@ -245,10 +245,19 @@ return [
         // mydata:refresh-expenses — READ-ONLY refresh of the expenses
         // reconciliation snapshot (current quarter) per myDATA-readable tenant, so
         // the «Κονσόλα myDATA — Έξοδα» worklist + the «Άντληση» badge on the Έξοδα
-        // list stay fresh. Creates NO expense rows (import stays operator-gated) →
-        // safe, but default OFF (opt-in per deploy; it's a recurring AADE pull).
+        // list stay fresh. Creates NO expense rows (the IMPORT is mydata_sync_expenses
+        // below) → safe, but default OFF (opt-in per deploy; a recurring AADE pull).
         'mydata_fetch_expenses_enabled' => env('EKDOSI_SCHEDULE_MYDATA_FETCH_EXPENSES', false),
         'mydata_fetch_expenses_cron' => env('EKDOSI_MYDATA_FETCH_EXPENSES_CRON', '0 */6 * * *'),
+
+        // mydata:sync-expenses — refreshes the Ε3 snapshot of the year (the running-year
+        // «Φορολογικά» blend reads it) and IMPORTS new myDATA expenses (supplier docs + our
+        // self-declared 13/14/17.x — μισθοδοσία/ΕΦΚΑ/αποσβέσεις) per myDATA-readable
+        // tenant, nightly. Creates LOCAL expense rows only (never files/classifies at
+        // AADE); idempotent by MARK; look-alikes of hand-typed expenses are held for
+        // the operator. Default ON: without it «Φορολογικά» overstates profit.
+        'mydata_sync_expenses_enabled' => env('EKDOSI_SCHEDULE_MYDATA_SYNC_EXPENSES', true),
+        'mydata_sync_expenses_cron' => env('EKDOSI_MYDATA_SYNC_EXPENSES_CRON', '40 4 * * *'),
 
         // mydata:refresh-console — warms ALL «Κονσόλα myDATA» snapshots (Πωλήσεις /
         // Έξοδα / Ε3 / Εικόνα ΦΠΑ) for the current quarter per myDATA-readable

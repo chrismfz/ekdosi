@@ -39,7 +39,8 @@ use Illuminate\Support\Facades\DB;
  * `<invoiceDetails>`, so we parse the full firebed Invoice here. Same window,
  * same pagination/empty-window handling.
  *
- * Operator-gated (the caller decides when to run) and legally significant, so:
+ * Run by the operator (console / Έξοδα picker) AND unattended every night
+ * (mydata:sync-expenses → holdManualLookalikes), so:
  *   - IDEMPOTENT: an expense whose MARK already exists locally (even
  *     soft-deleted — operator removed it on purpose) is skipped, never
  *     duplicated or resurrected. The (company_id, mydata_mark) unique index
@@ -61,13 +62,13 @@ class ExpenseImporter
      * Import every supplier doc in the window (or just `$onlyMark` when given)
      * that has no local expense yet. Returns a per-run summary.
      */
-    public function import(Carbon $from, Carbon $to, ?string $onlyMark = null): ExpenseImportResult
+    public function import(Carbon $from, Carbon $to, ?string $onlyMark = null, bool $holdManualLookalikes = false): ExpenseImportResult
     {
         FirebedCredentials::init($this->tenant, $this->mockHandler);
 
         [$docs, $cancelledMarks] = $this->fetchFullDocs(new RequestDocs, $from->format('d/m/Y'), $to->format('d/m/Y'));
 
-        return $this->persistDocs($docs, $cancelledMarks, mode: 'sync', onlyMarks: self::markSet($onlyMark));
+        return $this->persistDocs($docs, $cancelledMarks, mode: 'sync', onlyMarks: self::markSet($onlyMark), holdManual: $holdManualLookalikes);
     }
 
     /**
@@ -103,7 +104,7 @@ class ExpenseImporter
      * (RequestTransmittedDocs) — see the class docblock. Real sales types are
      * filtered out so this never duplicates the income side.
      */
-    public function importSelfDeclared(Carbon $from, Carbon $to, ?string $onlyMark = null): ExpenseImportResult
+    public function importSelfDeclared(Carbon $from, Carbon $to, ?string $onlyMark = null, bool $holdManualLookalikes = false): ExpenseImportResult
     {
         FirebedCredentials::init($this->tenant, $this->mockHandler);
 
@@ -115,7 +116,7 @@ class ExpenseImporter
             fn ($doc): bool => Codes::transmittedDocBucket($doc->getInvoiceHeader()?->getInvoiceType()?->value) !== 'income',
         );
 
-        return $this->persistDocs($docs, $cancelledMarks, mode: 'self_declared', onlyMarks: self::markSet($onlyMark));
+        return $this->persistDocs($docs, $cancelledMarks, mode: 'self_declared', onlyMarks: self::markSet($onlyMark), holdManual: $holdManualLookalikes);
     }
 
     /**
@@ -126,9 +127,14 @@ class ExpenseImporter
      * @param  array<string, Invoice>  $docs
      * @param  array<string, true>  $cancelledMarks  MARKs AADE folds as cancelled
      * @param  array<string, true>|null  $onlyMarks  restrict to this MARK set (null = all)
+     * @param  bool  $holdManual  UNATTENDED runs: leave a doc that looks like an existing
+     *                            MARK-less (manual) expense for the operator — see
+     *                            manualLookalikeExists()
      */
-    private function persistDocs(array $docs, array $cancelledMarks, string $mode, ?array $onlyMarks): ExpenseImportResult
+    private function persistDocs(array $docs, array $cancelledMarks, string $mode, ?array $onlyMarks, bool $holdManual = false): ExpenseImportResult
     {
+        $held = 0;
+        $heldMarks = [];
         $created = 0;
         $skipped = 0;
         $suppliersCreated = 0;
@@ -165,16 +171,24 @@ class ExpenseImporter
                 continue;
             }
 
+            // sync: the supplier IS the issuer. self_declared: WE are the issuer,
+            // so the counterpart (when present) is the supplier.
+            $party = $mode === 'self_declared' ? $doc->getCounterpart() : $doc->getIssuer();
+
+            if ($holdManual && $this->manualLookalikeExists($doc, $party)) {
+                $held++;
+                $heldMarks[] = $mark;
+
+                continue;
+            }
+
             $supplierWasCreated = false;
             $createdExpense = null;
 
-            // sync: the supplier IS the issuer. self_declared: WE are the issuer,
-            // so the counterpart (when present) is the supplier. Resolve (and, for
-            // a new GR supplier, GSIS-enrich) it BEFORE opening the write
-            // transaction, so a registry SOAP lookup never holds the transaction
-            // open. A supplier row created here but orphaned by a rolled-back
-            // expense is benign — the next run links it.
-            $party = $mode === 'self_declared' ? $doc->getCounterpart() : $doc->getIssuer();
+            // Resolve (and, for a new GR supplier, GSIS-enrich) the supplier BEFORE
+            // opening the write transaction, so a registry SOAP lookup never holds
+            // the transaction open. A supplier row created here but orphaned by a
+            // rolled-back expense is benign — the next run links it.
             $supplier = $this->resolveSupplier($party, $supplierWasCreated);
 
             // Fold cancellation from both the inline <cancelledByMark> and the
@@ -256,7 +270,47 @@ class ExpenseImporter
             createdMarks: $createdMarks,
             skippedMarks: $skippedMarks,
             notFoundMarks: $notFoundMarks,
+            heldManual: $held,
+            heldManualMarks: $heldMarks,
         );
+    }
+
+    /**
+     * Does a MARK-less expense (typed in by hand — imports always carry a MARK)
+     * already look like this AADE doc? The MARK idempotency can't see it, so an
+     * UNATTENDED import would book the same cost twice and understate profit on
+     * «Φορολογικά». Match: same supplier ΑΦΜ + same ΑΑ, OR same issue date + same
+     * gross. Deliberately loose — a false positive only leaves the doc in the
+     * console worklist («αδέσποτα») for the operator; a false negative is a
+     * double-booked expense.
+     */
+    private function manualLookalikeExists(Invoice $doc, mixed $party): bool
+    {
+        $header = $doc->getInvoiceHeader();
+        $afm = $party instanceof Party ? trim((string) $party->getVatNumber()) : '';
+        $aa = trim((string) ($header?->getAa() ?? ''));
+        $date = $header?->getIssueDate();
+        $gross = $doc->getInvoiceSummary()?->getTotalGrossValue();
+
+        $byDoc = $afm !== '' && $aa !== '';
+        $byAmount = filled($date) && $gross !== null;
+        if (! $byDoc && ! $byAmount) {
+            return false;   // nothing to compare on — an empty OR-group would match every manual row
+        }
+
+        return Expense::query()
+            ->where('company_id', $this->tenant->getKey())
+            ->whereNull('mydata_mark')
+            ->where(function ($q) use ($byDoc, $byAmount, $afm, $aa, $date, $gross): void {
+                if ($byDoc) {
+                    $q->orWhere(fn ($w) => $w->where('supplier_afm', $afm)->where('aa', $aa));
+                }
+                if ($byAmount) {
+                    $q->orWhere(fn ($w) => $w->whereDate('issue_date', $date)
+                        ->where('gross_total', number_format((float) $gross, 2, '.', '')));
+                }
+            })
+            ->exists();
     }
 
     /**

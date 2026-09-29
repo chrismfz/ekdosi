@@ -6,6 +6,7 @@ use App\Console\Commands\MyDataE3Snapshot;
 use App\Filament\Pages\TaxOverview;
 use App\Models\Company;
 use App\Models\E3YearSnapshot;
+use App\Models\Expense;
 use App\Models\User;
 use App\Services\Accounting\E3YearTotals;
 use App\Services\Accounting\IncomeTaxEstimate;
@@ -132,6 +133,67 @@ class E3YearTotalsTest extends TestCase
         $this->assertSame('2026-09-25', $e['e3']['through']);                 // running year → up to today
     }
 
+    public function test_expense_groups_sum_to_the_totals_rule(): void
+    {
+        $stored = array_map(fn ($r) => ['type' => $r[1], 'category' => $r[0], 'value' => (float) $r[2], 'count' => 1], $this->myip2025());
+
+        $groups = E3YearTotals::groups($stored);
+        $totals = E3YearTotals::fromRows($this->rows($this->myip2025()));
+
+        // Real myip 2025 data: the column split loses / adds nothing vs the validated totals rule.
+        $this->assertEqualsWithDelta($totals['income'], $groups['income'], 0.01);
+        $this->assertEqualsWithDelta($totals['capex'], $groups['capex'], 0.01);
+        $this->assertEqualsWithDelta($totals['expense'], $groups['payroll'] + $groups['contributions'] + $groups['depreciation'] + $groups['rest'], 0.01);
+    }
+
+    public function test_the_running_year_takes_a_group_only_the_e3_has(): void
+    {
+        // Local: a supplier invoice 2.000 (the accountant has classified only 1.500
+        // of it so far) and NO payroll — the payroll (5.000) reached AADE under the
+        // accountant's credentials, so only the Ε3 carries it.
+        $this->localExpense('sync', null, '1.1', '2026-03-10', 2000);
+        E3YearTotals::refresh($this->tenant, 2026, $this->e3Mock([
+            ['category2_6', 'E3_581_001', 5000], ['category2_4', 'E3_585_016', 1500], ['category1_3', 'E3_561_001', 9999],
+        ]));
+
+        $e = (new IncomeTaxEstimate($this->tenant))->forYear(2026);
+
+        $this->assertSame('blend', $e['source']);
+        $this->assertEqualsWithDelta(7000.0, $e['expense_total'], 0.001);            // 5.000 Ε3 + 2.000 local — never 8.500
+        $groups = collect($e['expense_blend'])->keyBy('key');
+        $this->assertSame('e3', $groups['personnel']['source']);
+        $this->assertSame('local', $groups['rest']['source']);
+        $this->assertEqualsWithDelta(0.0, $e['income_total'], 0.001);                // income stays local
+    }
+
+    public function test_a_group_on_both_sides_is_counted_once(): void
+    {
+        // We imported the 17.1 ourselves AND the accountant classified it → same 3.000 twice in the data.
+        $this->localExpense('self_declared', 'payroll', '17.1', '2026-03-31', 3000);
+        E3YearTotals::refresh($this->tenant, 2026, $this->e3Mock([['category2_6', 'E3_581_001', 3000]]));
+
+        $e = (new IncomeTaxEstimate($this->tenant))->forYear(2026);
+
+        $this->assertSame('local', $e['source']);
+        $this->assertEqualsWithDelta(3000.0, $e['expense_total'], 0.001);
+    }
+
+    public function test_the_page_shows_the_blend(): void
+    {
+        Gate::before(fn () => true);
+        $this->actingAs(User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]));
+        Filament::setTenant($this->tenant);
+        $this->localExpense('sync', null, '1.1', '2026-03-10', 2000);
+        E3YearTotals::refresh($this->tenant, 2026, $this->e3Mock([['category2_6', 'E3_581_001', 5000]]));
+
+        Livewire::test(TaxOverview::class)
+            ->assertSee('Πηγή: τοπικά δεδομένα + Ε3 ΑΑΔΕ')
+            ->assertSee('Πώς μετρήθηκαν τα έξοδα')
+            ->assertSee('Από το Ε3 ΑΑΔΕ')
+            ->assertSee('Μόνο τα τοπικά. Η εκτίμηση προσθέτει')
+            ->assertSee('τοπικά + Ε3');
+    }
+
     public function test_refresh_overwrites_the_years_snapshot(): void
     {
         E3YearTotals::refresh($this->tenant, 2025, $this->e3Mock([['category1_3', 'E3_561_001', 100]]));
@@ -167,6 +229,15 @@ class E3YearTotalsTest extends TestCase
         $this->assertSame(1, E3YearSnapshot::query()->where('company_id', $this->tenant->id)->where('year', 2024)->count());
 
         $this->artisan('mydata:e3-snapshot', ['--tenant' => $this->tenant->slug, '--year' => ['2024,2025']])->assertFailed();
+    }
+
+    private function localExpense(string $source, ?string $category, ?string $type, string $date, float $net): Expense
+    {
+        return Expense::create([
+            'company_id' => $this->tenant->id, 'supplier_afm' => '123456789', 'supplier_name' => 'Χ',
+            'source' => $source, 'category' => $category, 'invoice_type' => $type, 'issue_date' => $date,
+            'net_total' => $net, 'vat_total' => 0, 'gross_total' => $net, 'currency' => 'EUR',
+        ]);
     }
 
     /** @param list<array{0:string,1:string,2:float}> $rows */

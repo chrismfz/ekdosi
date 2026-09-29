@@ -3,6 +3,9 @@
     @php($v = $this->vat())
     @php($p = $e['profile'])
     @php($payroll = collect($e['expense_breakdown'])->whereIn('bucket', ['payroll', 'social_security']))
+    {{-- What actually counted for payroll + contributions (local, Ε3, or blended per month). --}}
+    @php($yr = $e['monthly']['year'])
+    @php($personnelFromE3 = $yr['from_e3']['payroll'] || $yr['from_e3']['contributions'])
 
     <div class="flex gap-3 mb-4 items-center">
         <label class="text-sm">
@@ -15,7 +18,7 @@
             </select>
         </label>
         <div class="text-xs fi-color-gray">
-            Στοιχεία έως {{ \Illuminate\Support\Carbon::parse($e['through'])->format('d/m/Y') }} · τοπικά δεδομένα (παραστατικά + έξοδα myDATA)
+            Στοιχεία έως {{ \Illuminate\Support\Carbon::parse($e['through'])->format('d/m/Y') }} · τοπικά δεδομένα (παραστατικά + έξοδα myDATA)@if ($e['source'] === 'blend') + Ε3 ΑΑΔΕ (ανανέωση {{ \Illuminate\Support\Carbon::parse($e['e3']['fetched_at'])->format('d/m/Y H:i') }})@endif
         </div>
     </div>
 
@@ -46,10 +49,15 @@
         </div>
         <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
             <div class="text-xs fi-color-gray">Μισθοδοσία + ΕΦΚΑ {{ $this->year }}</div>
-            <div class="text-lg font-bold">{{ $this->fmt((float) $payroll->sum('net')) }}</div>
-            <div class="text-xs fi-color-gray">
-                @if ($payroll->isEmpty()) Δεν έχουν περαστεί εγγραφές @else Τελευταία εγγραφή {{ \Illuminate\Support\Carbon::parse($payroll->max('last_date'))->format('d/m/Y') }} @endif
-            </div>
+            @if ($personnelFromE3 || $e['source'] === 'e3')
+                <div class="text-lg font-bold">{{ $this->fmt($yr['payroll'] + $yr['contributions']) }}</div>
+                <div class="text-xs fi-color-gray">Από το Ε3 ΑΑΔΕ (έως {{ \Illuminate\Support\Carbon::parse($e['e3']['through'])->format('d/m/Y') }}) · μισθοδοσία {{ $this->fmt($yr['payroll']) }} · εισφορές {{ $this->fmt($yr['contributions']) }}</div>
+            @else
+                <div class="text-lg font-bold">{{ $this->fmt((float) $payroll->sum('net')) }}</div>
+                <div class="text-xs fi-color-gray">
+                    @if ($payroll->isEmpty()) Δεν έχουν περαστεί εγγραφές @else Τελευταία εγγραφή {{ \Illuminate\Support\Carbon::parse($payroll->max('last_date'))->format('d/m/Y') }} @endif
+                </div>
+            @endif
         </div>
     </div>
 
@@ -67,6 +75,8 @@
                             @foreach ($e['e3']['review'] as $label => $value){{ $label }} {{ $this->fmt($value) }}@if (! $loop->last) · @endif @endforeach.
                         </div>
                     @endif
+                @elseif ($e['source'] === 'blend')
+                    <span class="font-semibold">Πηγή: τοπικά δεδομένα + Ε3 ΑΑΔΕ</span> (για κάθε ομάδα εξόδων μετράει το μεγαλύτερο από τα δύο — βλ. πίνακα παρακάτω).
                 @else
                     <span class="font-semibold">Πηγή: τοπικά δεδομένα</span> (παραστατικά + έξοδα myDATA).
                     @if ($e['e3'] && ! $e['is_current'] && ! $e['e3']['full_year'])
@@ -123,6 +133,32 @@
                     </tbody>
                 </table>
             </div>
+            @if ($e['expense_blend'])
+                <div class="text-xs mt-2 font-semibold">Πώς μετρήθηκαν τα έξοδα (Ε3 έως {{ \Illuminate\Support\Carbon::parse($e['e3']['through'])->format('d/m/Y') }})</div>
+                <table class="min-w-full text-sm">
+                    <thead>
+                        <tr class="fi-color-gray text-xs">
+                            <th class="text-left py-1">Ομάδα</th>
+                            <th class="text-right py-1">Τοπικά</th>
+                            <th class="text-right py-1">Ε3 ΑΑΔΕ</th>
+                            <th class="text-right py-1">Μετράει</th>
+                        </tr>
+                    </thead>
+                    <tbody class="divide-y divide-gray-100 dark:divide-white/5">
+                        @foreach ($e['expense_blend'] as $g)
+                            <tr>
+                                <td class="py-1">{{ $g['label'] }}</td>
+                                <td class="text-right {{ $g['source'] === 'local' ? 'font-semibold' : 'fi-color-gray' }}">{{ $this->fmt($g['local']) }}</td>
+                                <td class="text-right {{ $g['source'] === 'e3' ? 'font-semibold' : 'fi-color-gray' }}">{{ $this->fmt($g['e3']) }}</td>
+                                <td class="text-right whitespace-nowrap">{{ $this->fmt($g['used']) }} <span class="text-xs fi-color-gray">{{ ['e3' => 'Ε3', 'mixed' => 'ανά μήνα'][$g['source']] ?? 'τοπικά' }}</span></td>
+                            </tr>
+                        @endforeach
+                    </tbody>
+                </table>
+                <div class="text-xs fi-color-gray mt-2">
+                    Το Ε3 περιέχει και τα τιμολόγια που έχουμε ήδη τοπικά (όταν τα χαρακτηρίσει ο λογιστής), γι' αυτό δεν προστίθεται — μετράει το μεγαλύτερο ανά ομάδα και μήνα («ανά μήνα» = άλλους μήνες τα τοπικά, άλλους το Ε3). Έτσι η μισθοδοσία/ΕΦΚΑ που περνά ο λογιστής με δικούς του κωδικούς μετράει, χωρίς διπλομέτρημα.
+                </div>
+            @endif
             @if ($e['expense_warning'])
                 <div class="text-xs text-danger-600 dark:text-danger-400 mt-2">
                     ⚠ Τα έξοδα του {{ $this->year }} είναι κάτω από το 10% των εσόδων. Ελέγξτε αν έχουν εισαχθεί όλα από το myDATA (Κονσόλα myDATA → Έξοδα). Αλλιώς το κέρδος και ο φόρος εδώ είναι υπερεκτιμημένα.
@@ -143,6 +179,8 @@
         <x-filament::section heading="Έξοδα ανά κατηγορία (τοπικά)">
             @if ($e['source'] === 'e3')
                 <div class="text-xs fi-color-gray mb-2">Η εκτίμηση του έτους βασίζεται στο Ε3 της ΑΑΔΕ, όχι σε αυτή την ανάλυση.</div>
+            @elseif ($e['source'] === 'blend')
+                <div class="text-xs fi-color-gray mb-2">Μόνο τα τοπικά. Η εκτίμηση προσθέτει ό,τι λείπει από εδώ και υπάρχει στο Ε3 της ΑΑΔΕ (βλ. «Πώς μετρήθηκαν τα έξοδα»).</div>
             @endif
             @if (count($e['expense_breakdown']) === 0)
                 <div class="fi-color-gray text-sm">Δεν υπάρχουν έξοδα για το {{ $this->year }}.</div>
@@ -220,6 +258,67 @@
         <div class="text-xs fi-color-gray mt-2">Το πιστωτικό υπόλοιπο ενός τριμήνου μεταφέρεται στο επόμενο. Η μεταφορά από το προηγούμενο έτος δεν υπολογίζεται εδώ.</div>
     </x-filament::section>
 
+    {{-- Έσοδα / έξοδα per quarter + month, by column --}}
+    @php($mr = $e['monthly'])
+    @php($cols = ['payroll' => 'Μισθοδοσία', 'contributions' => 'Εισφορές (εργοδοτικές, ΕΦΚΑ)', 'depreciation' => 'Αποσβέσεις', 'rest' => 'Λοιπά έξοδα'])
+    <x-filament::section heading="Έσοδα / έξοδα ανά τρίμηνο και μήνα" class="mb-4">
+        <div class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+                <thead>
+                    <tr class="fi-color-gray text-xs">
+                        <th class="text-left py-1">Περίοδος</th>
+                        <th class="text-right py-1">Έσοδα</th>
+                        @foreach ($cols as $label)<th class="text-right py-1">{{ $label }}</th>@endforeach
+                        <th class="text-right py-1">Σύνολο εξόδων</th>
+                        <th class="text-right py-1">Αποτέλεσμα</th>
+                        <th class="text-right py-1">Αγορές παγίων</th>
+                    </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-100 dark:divide-white/5">
+                    @foreach ($mr['quarters'] as $qrow)
+                        @foreach ([['cell' => $qrow['cell'], 'label' => $qrow['label'], 'quarter' => true], ...array_map(fn ($c, $m) => ['cell' => $c, 'label' => \App\Services\Accounting\MonthlyResult::MONTH_LABELS[$m], 'quarter' => false], $qrow['months'], array_keys($qrow['months']))] as $r)
+                            @php($c = $r['cell'])
+                            <tr class="{{ $r['quarter'] ? 'font-semibold bg-gray-50 dark:bg-white/5' : 'fi-color-gray' }}">
+                                <td class="py-1 {{ $r['quarter'] ? 'px-2' : 'pl-6' }}">{{ $r['label'] }}</td>
+                                <td class="text-right">{{ $this->fmt($c['income']) }}</td>
+                                @foreach (array_keys($cols) as $k)
+                                    <td class="text-right whitespace-nowrap">{{ $this->fmt($c[$k]) }}@if ($c['from_e3'][$k])<span class="text-xs fi-color-gray">*</span>@endif</td>
+                                @endforeach
+                                <td class="text-right">{{ $this->fmt($c['expense']) }}</td>
+                                <td class="text-right {{ $c['result'] < 0 ? 'text-danger-600 dark:text-danger-400' : '' }}">{{ $this->fmt($c['result']) }}</td>
+                                <td class="text-right fi-color-gray">{{ $this->fmt($c['capex']) }}@if ($c['from_e3']['capex'])<span class="text-xs">*</span>@endif</td>
+                            </tr>
+                        @endforeach
+                    @endforeach
+                    @php($c = $mr['year'])
+                    <tr class="font-bold border-t-2 border-gray-200 dark:border-white/10">
+                        <td class="py-2 px-2">Σύνολο {{ $this->year }}</td>
+                        <td class="text-right">{{ $this->fmt($c['income']) }}</td>
+                        @foreach (array_keys($cols) as $k)
+                            <td class="text-right whitespace-nowrap">{{ $this->fmt($c[$k]) }}@if ($c['from_e3'][$k])<span class="text-xs fi-color-gray">*</span>@endif</td>
+                        @endforeach
+                        <td class="text-right">{{ $this->fmt($c['expense']) }}</td>
+                        <td class="text-right {{ $c['result'] < 0 ? 'text-danger-600 dark:text-danger-400' : '' }}">{{ $this->fmt($c['result']) }}</td>
+                        <td class="text-right fi-color-gray">{{ $this->fmt($c['capex']) }}@if ($c['from_e3']['capex'])<span class="text-xs">*</span>@endif</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        <div class="text-xs fi-color-gray mt-2">
+            @if ($mr['mode'] === 'e3')
+                Πηγή: Ε3 ΑΑΔΕ (ο τελικός χαρακτηρισμός του λογιστή), ανά ημερομηνία παραστατικού.
+            @elseif ($mr['mode'] === 'blend')
+                Έσοδα: τα παραστατικά μας. Έξοδα: ανά μήνα το μεγαλύτερο από τα τοπικά και το Ε3 ΑΑΔΕ · <span>*</span> = από το Ε3 (π.χ. μισθοδοσία/ΕΦΚΑ που περνά ο λογιστής).
+            @else
+                Πηγή: τοπικά δεδομένα (παραστατικά + έξοδα myDATA).
+            @endif
+            @if (! $mr['monthly_available'])
+                <span class="text-danger-600 dark:text-danger-400">Το αποθηκευμένο Ε3 δεν έχει ανάλυση ανά μήνα: οι μήνες δείχνουν μόνο τα τοπικά, η γραμμή του έτους περιλαμβάνει το Ε3. Πατήστε «Ανανέωση Ε3 (ΑΑΔΕ)».</span>
+            @endif
+            Οι αγορές παγίων δεν αφαιρούνται από το αποτέλεσμα — εκπίπτουν μέσω των αποσβέσεων.
+        </div>
+    </x-filament::section>
+
     {{-- Multi-year --}}
     <x-filament::section heading="Ανά έτος">
         <div class="overflow-x-auto">
@@ -242,7 +341,7 @@
                             <td class="py-1">
                                 <button type="button" wire:click="$set('year', {{ $ys['year'] }})" class="underline">{{ $ys['year'] }}</button>
                                 @if ($ys['is_current'])<span class="text-xs fi-color-gray">(μέχρι σήμερα)</span>@endif
-                                <span class="text-xs fi-color-gray">· {{ $ys['source'] === 'e3' ? 'Ε3' : 'τοπικά' }}</span>
+                                <span class="text-xs fi-color-gray">· {{ ['e3' => 'Ε3', 'blend' => 'τοπικά + Ε3'][$ys['source']] ?? 'τοπικά' }}</span>
                                 @if ($ys['expense_warning'])<span class="text-xs text-danger-600 dark:text-danger-400" title="Έξοδα κάτω από 10% των εσόδων: πιθανώς δεν έχουν εισαχθεί">⚠ ελλιπή έξοδα</span>@endif
                             </td>
                             <td class="text-right">{{ $this->fmt($ys['income_total']) }}</td>

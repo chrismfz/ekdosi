@@ -15,7 +15,7 @@ class E3YearSnapshot extends Model
     use BelongsToCompany;
 
     protected $fillable = [
-        'company_id', 'year', 'income', 'expense', 'capex', 'doc_count', 'rows', 'through', 'fetched_at',
+        'company_id', 'year', 'income', 'expense', 'capex', 'doc_count', 'rows', 'monthly', 'through', 'fetched_at',
     ];
 
     protected function casts(): array
@@ -27,6 +27,7 @@ class E3YearSnapshot extends Model
             'capex' => 'decimal:2',
             'doc_count' => 'integer',
             'rows' => 'array',
+            'monthly' => 'array',
             'through' => 'date',
             'fetched_at' => 'datetime',
         ];
