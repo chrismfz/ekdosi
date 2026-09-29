@@ -9,6 +9,9 @@ use App\Services\Assistant\Tools\AppVersionTool;
 use App\Services\Assistant\Tools\AssistantTool;
 use App\Services\Assistant\Tools\CountSalesTool;
 use App\Services\Assistant\Tools\CreateReminderTool;
+use App\Services\Assistant\Tools\DataFreshnessTool;
+use App\Services\Assistant\Tools\E3SnapshotTool;
+use App\Services\Assistant\Tools\ExpenseListTool;
 use App\Services\Assistant\Tools\FindCustomerTool;
 use App\Services\Assistant\Tools\IncomeVsExpenseTool;
 use App\Services\Assistant\Tools\InvoiceGetTool;
@@ -22,6 +25,7 @@ use App\Services\Assistant\Tools\RecentInvoicesTool;
 use App\Services\Assistant\Tools\RecordPaymentTool;
 use App\Services\Assistant\Tools\SearchInvoicesTool;
 use App\Services\Assistant\Tools\SendCustomerStatementTool;
+use App\Services\Assistant\Tools\TaxOverviewTool;
 use App\Services\Assistant\Tools\TopProductsTool;
 use App\Services\Assistant\Tools\VatSummaryTool;
 use App\Services\Assistant\Tools\WhmcsInboxListTool;
@@ -59,6 +63,10 @@ class ToolRegistry
             new RecentActivityTool,
             new LeadsPulseTool,
             new IncomeVsExpenseTool,
+            new TaxOverviewTool,
+            new E3SnapshotTool,
+            new ExpenseListTool,
+            new DataFreshnessTool,
             new TopProductsTool,
             new WhmcsInboxTool,
             new WhmcsInboxListTool,

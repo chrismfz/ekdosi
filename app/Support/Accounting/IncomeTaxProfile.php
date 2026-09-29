@@ -15,6 +15,10 @@ use App\Models\Company;
  *   - assessed_prepayments : {year: amount} — the προκαταβολή actually ΒΕΒΑΙΩΘΗΚΕ
  *                       for that year (copied from the εκκαθαριστικό). The ONLY
  *                       prepayment the estimate subtracts — unset counts as 0.
+ *   - expected_partner_insurance : the partners' yearly ΕΦΚΑ (εισφορές αυτοαπασχολούμενων,
+ *                       Ε3 E3_585_007) the accountant posts only at the year's close.
+ *                       The running-year PROJECTION adds what of it hasn't appeared
+ *                       yet, so the estimate doesn't overstate the tax until December.
  *
  * Rates are settings, not constants in code: tax law moves, and the accountant
  * is the authority. Nothing here is legal advice — it drives a planning figure.
@@ -30,6 +34,7 @@ final readonly class IncomeTaxProfile
         public float $rate = self::DEFAULT_RATE,
         public float $prepaymentRate = self::DEFAULT_PREPAYMENT_RATE,
         public array $assessedPrepayments = [],
+        public float $expectedPartnerInsurance = 0.0,
     ) {}
 
     public static function for(Company $company): self
@@ -47,6 +52,8 @@ final readonly class IncomeTaxProfile
             rate: self::pct($p['rate'] ?? null, self::DEFAULT_RATE),
             prepaymentRate: self::pct($p['prepayment_rate'] ?? null, self::DEFAULT_PREPAYMENT_RATE),
             assessedPrepayments: $assessed,
+            expectedPartnerInsurance: is_numeric($p['expected_partner_insurance'] ?? null) && (float) $p['expected_partner_insurance'] > 0
+                ? round((float) $p['expected_partner_insurance'], 2) : 0.0,
         );
     }
 
@@ -60,6 +67,7 @@ final readonly class IncomeTaxProfile
             'rate' => $this->rate,
             'prepayment_rate' => $this->prepaymentRate,
             'assessed_prepayments' => array_map(fn ($v) => round((float) $v, 2), $assessed),
+            'expected_partner_insurance' => round($this->expectedPartnerInsurance, 2),
         ];
     }
 

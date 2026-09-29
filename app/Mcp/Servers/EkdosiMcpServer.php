@@ -7,7 +7,10 @@ use App\Mcp\Tools\AppHealthTool;
 use App\Mcp\Tools\AppVersionMcpTool;
 use App\Mcp\Tools\CountSalesMcpTool;
 use App\Mcp\Tools\CreateReminderMcpTool;
+use App\Mcp\Tools\DataFreshnessMcpTool;
+use App\Mcp\Tools\E3SnapshotMcpTool;
 use App\Mcp\Tools\ErrorLogTailTool;
+use App\Mcp\Tools\ExpenseListMcpTool;
 use App\Mcp\Tools\FailedJobsTool;
 use App\Mcp\Tools\FindCustomerMcpTool;
 use App\Mcp\Tools\IncomeVsExpenseMcpTool;
@@ -31,6 +34,7 @@ use App\Mcp\Tools\SearchInvoicesMcpTool;
 use App\Mcp\Tools\SendCustomerStatementMcpTool;
 use App\Mcp\Tools\StuckDocumentsMcpTool;
 use App\Mcp\Tools\SupportImapMcpTool;
+use App\Mcp\Tools\TaxOverviewMcpTool;
 use App\Mcp\Tools\TopProductsMcpTool;
 use App\Mcp\Tools\VatSummaryMcpTool;
 use App\Mcp\Tools\WhmcsInboxListMcpTool;
@@ -81,7 +85,20 @@ Business (tenant-scoped, offered only if your user holds the permission):
   check). Read-only, same bytes as the invoice's «Προβολή/Λήψη UBL» buttons. For «δες/έλεγξε το UBL/
   e-invoice του ΤΠΥ…». Provider-independent (every tenant, GR included); the actual send is Phase 2.
 - income_vs_expense — έσοδα vs έξοδα for a period (Βιβλίο Εσόδων-Εξόδων): net/VAT/gross per
-  side + the VAT balance (output − input). The expense side vat_summary doesn't cover.
+  side + the VAT balance (output − deductible input). The expense side vat_summary doesn't cover.
+- tax_overview — the «Φορολογικά» page for a year, exactly as shown: income-tax estimate (profit, tax,
+  prepayment, prior assessed prepayment, payable; running year → 31/12 projection), έσοδα/έξοδα per
+  month → quarter → year in columns (payroll, contributions, depreciation, rest, capex) with each cell's
+  SOURCE (`e3_columns` = the columns taken from the AADE Ε3; the rest is local), and ΦΠΑ per quarter with the credit carried forward.
+- e3_snapshot — the stored AADE Ε3 of a year (the accountant's classification, incl. entries filed under
+  THEIR credentials): totals + payroll/contributions/depreciation/rest per year and per month;
+  `detail` adds the raw (E3 type, category, value) rows per month.
+- expense_list — expenses with filters (period, category: suppliers/manual/payroll/social_security/
+  depreciation/intracommunity/retail_expense/…, myDATA type or prefix, supplier ΑΦΜ/name) + totals;
+  `with_lines` adds each line's E3 classification (e.g. is the employer contribution inside the 17.1?).
+- data_freshness — «is the picture complete?»: last posted date per expense category, trailing months
+  with NO payroll on either side (not filed yet), per-month local↔Ε3 gaps with what they mean.
+  Start here when a «Φορολογικά» figure looks wrong.
 - top_products — the company's best-selling products/services for a period (times, qty, net).
 - outstanding_receivables / list_top_debtors / find_customer — money owed & customers.
 - whmcs_inbox — how many WHMCS pre-invoices are waiting in «Εισερχόμενα» (pending_review / held).
@@ -163,6 +180,10 @@ class EkdosiMcpServer extends Server
         RecentActivityMcpTool::class,
         LeadsPulseMcpTool::class,
         IncomeVsExpenseMcpTool::class,
+        TaxOverviewMcpTool::class,
+        E3SnapshotMcpTool::class,
+        ExpenseListMcpTool::class,
+        DataFreshnessMcpTool::class,
         TopProductsMcpTool::class,
         WhmcsInboxMcpTool::class,
         WhmcsInboxListMcpTool::class,
