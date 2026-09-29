@@ -310,6 +310,28 @@ $trackSchedule(
     'mydata_fetch_expenses'
 );
 
+// mydata:sync-expenses — refreshes the Ε3 snapshot (it counts what the accountant
+// files under THEIR credentials) and IMPORTS new myDATA expenses (supplier docs + our
+// own 13/14/17.x: μισθοδοσία, ΕΦΚΑ, αποσβέσεις) per myDATA-readable tenant, so
+// «Φορολογικά» never reads un-imported costs as profit. Local rows only — never
+// files or classifies anything at AADE. Idempotent by MARK; a doc that looks like a
+// hand-typed expense is left for the operator (--hold-manual). Window: running year
+// (+ last year until July). Default ON.
+$trackSchedule(
+    Schedule::call(function () use ($sweepTenants) {
+        $sweepTenants(
+            Company::myDataReadable(),
+            'mydata:sync-expenses',
+            fn (Company $c) => null,
+        );
+    })
+        ->cron($scheduleCron('mydata_sync_expenses_cron', '40 4 * * *'))
+        ->name('mydata-sync-expenses-all')
+        ->when(fn () => $scheduleEnabled('mydata_sync_expenses_enabled'))
+        ->withoutOverlapping(30),
+    'mydata_sync_expenses'
+);
+
 // mydata:refresh-console — warm ALL Κονσόλα myDATA snapshots (Πωλήσεις/Έξοδα/Ε3/
 // εικόνα ΦΠΑ) per myDATA-readable tenant, so the console opens fresh. The heaviest
 // AADE pull (four endpoints); default OFF. READ-ONLY (seeds caches, no rows). For a

@@ -67,6 +67,52 @@ class MyDataImportExpensesCommandTest extends TestCase
         $this->assertSame(0, MyDataImportExpenses::$testHandler->count());
     }
 
+    public function test_hold_manual_leaves_a_lookalike_of_a_hand_typed_expense_for_the_operator(): void
+    {
+        // The operator typed the 17.1 payroll by hand (no MARK). The MARK idempotency
+        // can't see it, so an unattended import would book it twice.
+        $this->manualExpense(['issue_date' => '2025-03-31', 'gross_total' => 3000.00]);
+
+        MyDataImportExpenses::$testHandler = $this->responses(4, $this->payrollDoc());
+        $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2025'], '--only' => 'self', '--hold-manual' => true])
+            ->expectsOutputToContain('καταχωρήθηκαν 0 νέα έξοδα')
+            ->expectsOutputToContain('500000000000777')
+            ->assertSuccessful();
+        $this->assertNull(Expense::query()->where('company_id', $this->tenant->id)->whereNotNull('mydata_mark')->first());
+
+        // Without the flag (the operator-driven path) behaviour is unchanged.
+        MyDataImportExpenses::$testHandler = $this->responses(4, $this->payrollDoc());
+        $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2025'], '--only' => 'self'])
+            ->expectsOutputToContain('καταχωρήθηκαν 1 νέα έξοδα')
+            ->assertSuccessful();
+    }
+
+    public function test_hold_manual_matches_supplier_afm_and_aa_too(): void
+    {
+        // A SUPPLIER doc (issuer = the supplier): same ΑΦΜ + ΑΑ as a hand-typed
+        // expense, different date/amount (typo) → still a look-alike.
+        $this->manualExpense(['supplier_afm' => '801280908', 'aa' => '7', 'issue_date' => '2025-01-15', 'gross_total' => 10.00]);
+
+        MyDataImportExpenses::$testHandler = $this->responses(4, $this->payrollDoc());
+        $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2025'], '--only' => 'suppliers', '--hold-manual' => true])
+            ->expectsOutputToContain('καταχωρήθηκαν 0 νέα έξοδα')
+            ->assertSuccessful();
+    }
+
+    public function test_hold_manual_imports_when_no_manual_expense_looks_alike(): void
+    {
+        $this->manualExpense(['issue_date' => '2025-03-31', 'gross_total' => 45.00]);                 // same day, other amount
+        $this->manualExpense(['issue_date' => '2025-02-01', 'gross_total' => 3000.00]);               // same amount, other day
+        $other = Company::create(['name' => 'Άλλη', 'slug' => 'other-'.uniqid(), 'country_code' => 'GR']);
+        Expense::create(['company_id' => $other->id, 'source' => 'manual', 'issue_date' => '2025-03-31', 'gross_total' => 3000.00,
+            'net_total' => 3000.00, 'vat_total' => 0]);                                                  // other tenant
+
+        MyDataImportExpenses::$testHandler = $this->responses(4, $this->payrollDoc());
+        $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2025'], '--only' => 'self', '--hold-manual' => true])
+            ->expectsOutputToContain('καταχωρήθηκαν 1 νέα έξοδα')
+            ->assertSuccessful();
+    }
+
     public function test_bad_arguments_fail_without_calling_aade(): void
     {
         $this->artisan('mydata:import-expenses', ['--tenant' => 'nope', '--year' => ['2025']])->assertFailed();
@@ -74,6 +120,14 @@ class MyDataImportExpensesCommandTest extends TestCase
         $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2030']])->assertFailed();
         $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2025'], '--only' => 'x'])->assertFailed();
         $this->artisan('mydata:import-expenses', ['--tenant' => $this->tenant->slug, '--year' => ['2023,2024']])->assertFailed(); // not a silent «2023 only»
+    }
+
+    private function manualExpense(array $attrs): Expense
+    {
+        return Expense::create($attrs + [
+            'company_id' => $this->tenant->id, 'source' => 'manual',
+            'net_total' => $attrs['gross_total'] ?? 0, 'vat_total' => 0,
+        ]);
     }
 
     /** N DISTINCT responses — a Response body is a one-shot stream, so reusing one instance reads empty. */

@@ -32,8 +32,10 @@ use Carbon\CarbonInterface;
  *
  * SOURCE per year: a CLOSED year with an Ε3 snapshot ({@see E3YearTotals}) takes
  * income/expense/capex from AADE's Ε3 (the accountant's final classification);
- * otherwise — and always for the running year — from the local book. The other
- * side is returned alongside as a cross-check. Withholdings are always local.
+ * otherwise from the local book. The RUNNING year with an Ε3 snapshot blends the
+ * two per expense group and month ({@see MonthlyResult}: the larger side, never the sum) — the
+ * accountant's payroll/ΕΦΚΑ often reach AADE only under their credentials. The
+ * other side is returned alongside as a cross-check. Withholdings are always local.
  *
  * Read-only, tenant-scoped through LedgerBook (explicit company_id). NOT a tax
  * return: accounting profit ≠ taxable profit (non-deductibles, inventory,
@@ -227,13 +229,30 @@ class IncomeTaxEstimate
         $incomeTotal = $useE3 ? (float) $snapshot->income : $localIncome;
         $expense = $useE3 ? (float) $snapshot->expense : $localExpense;
         $capex = $useE3 ? (float) $snapshot->capex : $localCapex;
+
+        // Month-by-month έσοδα/έξοδα — and, for the RUNNING year with an Ε3 snapshot
+        // (refreshed nightly by mydata:sync-expenses), the blend with the Ε3: the
+        // accountant's entries often reach AADE under THEIR credentials, so our
+        // RequestTransmittedDocs never returns them, but the Ε3 counts them. The
+        // estimate reads its expense from the SAME computation as the page's table.
+        $mode = $useE3 ? 'e3' : ($isCurrent && $snapshot !== null ? 'blend' : 'local');
+        $monthly = MonthlyResult::build($book, $isCurrent ? $today->month : 12, $mode, $snapshot?->monthly, $snapshot?->rows ?? []);
+        $blendUsedE3 = collect($monthly['groups'])->contains(fn (array $g) => $g['source'] !== 'local');
+        if ($mode === 'blend') {
+            $expense = $monthly['year']['expense'];
+            $capex = $monthly['year']['capex'];
+        }
         $expenseAll = round($expense + $capex, 2);
 
         return $this->core[$year] = [
             'is_current' => $isCurrent,
             'through' => $through->toDateString(),
             'doc_count' => count($book->rows),
-            'source' => $useE3 ? 'e3' : 'local',
+            // 'e3' closed year from the Ε3 · 'blend' running year where the Ε3 filled a
+            // group the local book lacks · 'local' otherwise.
+            'source' => $useE3 ? 'e3' : ($mode === 'blend' && $blendUsedE3 ? 'blend' : 'local'),
+            'expense_blend' => $mode === 'blend' ? $monthly['groups'] : null,
+            'monthly' => $monthly,
             'e3' => $snapshot === null ? null : [
                 'income' => (float) $snapshot->income,
                 'expense' => (float) $snapshot->expense,

@@ -16,6 +16,8 @@ final readonly class ExpenseImportResult
      * @param  list<string>  $createdMarks
      * @param  list<string>  $skippedMarks
      * @param  list<string>  $notFoundMarks
+     * @param  list<string>  $heldManualMarks  unattended runs only: docs left for the
+     *                                         operator because they look like a manual expense
      */
     public function __construct(
         public int $scannedDocs = 0,
@@ -25,6 +27,8 @@ final readonly class ExpenseImportResult
         public array $createdMarks = [],
         public array $skippedMarks = [],
         public array $notFoundMarks = [],
+        public int $heldManual = 0,
+        public array $heldManualMarks = [],
     ) {}
 
     public function summary(): string

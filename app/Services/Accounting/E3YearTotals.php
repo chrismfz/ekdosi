@@ -71,6 +71,60 @@ class E3YearTotals
     }
 
     /**
+     * Stored Ε3 rows split into the columns of the «Φορολογικά» month-by-month table
+     * and the running-year blend ({@see MonthlyResult}). Same exclusions as fromRows()
+     * (1_7/1_95, 2_9/2_95; 2_14 subtracts), so income = fromRows income, capex =
+     * fromRows capex and payroll + contributions + depreciation + rest = fromRows expense.
+     *
+     *   contributions = E3_581_002 (εργοδοτικές) + E3_585_007 (ΕΦΚΑ αυτοαπασχολούμενων —
+     *                   the partners of an ΟΕ; NOT in category2_6, hence by TYPE)
+     *   payroll       = the rest of category2_6 / E3_581_* (μικτές αποδοχές, λοιπές παροχές)
+     *   depreciation  = category2_8 / E3_587
+     *
+     * @param  list<array{type: string, category: ?string, value: float}>  $storedRows
+     * @return array{income: float, payroll: float, contributions: float, depreciation: float, rest: float, capex: float}
+     */
+    public static function groups(array $storedRows): array
+    {
+        $out = ['income' => 0.0, 'payroll' => 0.0, 'contributions' => 0.0, 'depreciation' => 0.0, 'rest' => 0.0, 'capex' => 0.0];
+
+        foreach ($storedRows as $r) {
+            $category = (string) ($r['category'] ?? '');
+            $type = (string) ($r['type'] ?? '');
+            $value = (float) $r['value'];
+
+            if (str_starts_with($category, 'category1_')) {
+                if (! in_array($category, self::INCOME_EXCLUDED, true)) {
+                    $out['income'] += $value;
+                }
+
+                continue;
+            }
+            if (in_array($category, self::EXPENSE_EXCLUDED, true)) {
+                continue;
+            }
+            if ($category === 'category2_7' || Codes::isCapexClassification($type)) {
+                $out['capex'] += $value;
+
+                continue;
+            }
+            if (! str_starts_with($category, 'category2_')) {
+                continue;
+            }
+
+            $group = match (true) {
+                in_array($type, ['E3_581_002', 'E3_585_007'], true) => 'contributions',
+                $category === 'category2_6' || str_starts_with($type, 'E3_581') => 'payroll',
+                $category === 'category2_8' || $type === 'E3_587' => 'depreciation',
+                default => 'rest',
+            };
+            $out[$group] += $category === 'category2_14' ? -$value : $value;
+        }
+
+        return array_map(fn (float $v) => round($v, 2), $out);
+    }
+
+    /**
      * Categories whose face value is NOT what the tax sees and that the rule
      * passes through as-is — flagged on the page for the accountant: asset SALES
      * (the whole price counts, only the gain is taxable), prior/next-period items,
@@ -128,7 +182,7 @@ class E3YearTotals
             $to = now()->endOfDay();
         }
 
-        $report = (new E3Reporter($tenant, $handler))->report($from, $to);
+        [$report, $monthly] = (new E3Reporter($tenant, $handler))->reportWithMonthly($from, $to);
         $totals = self::fromRows($report->rows);
 
         return E3YearSnapshot::query()->updateOrCreate(
@@ -136,6 +190,7 @@ class E3YearTotals
             $totals + [
                 'doc_count' => $report->docCount,
                 'rows' => self::serializeRows($report),
+                'monthly' => $monthly,
                 'through' => $to->toDateString(),
                 'fetched_at' => now(),
             ],

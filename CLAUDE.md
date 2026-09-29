@@ -210,6 +210,7 @@ php artisan mydata:set-credentials --tenant=SLUG --test  # set sandbox creds (ke
 php artisan mydata:test-submit <invoiceId> [--execute]   # dry-run XML / --execute files to AADE
 php artisan mydata:reconcile-sales --tenant=SLUG [--raw] # READ-ONLY local↔AADE cross-check / raw XML dump
 php artisan mydata:import-expenses --tenant=SLUG --year=2025 [--year=…] [--only=suppliers|self]  # back-fill past years' expenses (idempotent, per quarter)
+php artisan mydata:sync-expenses --tenant=SLUG                # nightly (scheduled, default ON): running year (+ last until July), holds manual look-alikes
 php artisan mydata:e3-snapshot --tenant=SLUG --year=2025 [--year=…]    # store AADE's Ε3 per year → source of «Φορολογικά» for closed years
 php artisan delivery:refresh-status [--tenant=SLUG]      # READ-ONLY «Έλεγχος κατάστασης» of open δελτία/ΤΔΑ (scheduled every 3h)
 php artisan cn:import --year=2027 [--file=…]             # refresh the Συνδυασμένη Ονοματολογία (TARIC list) from the EU open data
