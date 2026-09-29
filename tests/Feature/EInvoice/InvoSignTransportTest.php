@@ -161,9 +161,9 @@ class InvoSignTransportTest extends TestCase
         ]);
         $invoice = $invoice->fresh('lines');
 
-        $this->assertCount(1, AadeInvoiceDocument::filedLines($invoice));
+        $this->assertCount(1, $invoice->filedLines());
         $invoice->is_delivery_note = true;
-        $this->assertCount(2, AadeInvoiceDocument::filedLines($invoice));
+        $this->assertCount(2, $invoice->filedLines());
     }
 
     public function test_all_zero_invoice_keeps_its_lines_for_aade_to_judge(): void
@@ -179,7 +179,7 @@ class InvoSignTransportTest extends TestCase
             'qty' => 1, 'price_per_item' => 0, 'vat_percent' => 24,
         ]);
 
-        $this->assertCount(1, AadeInvoiceDocument::filedLines($invoice->fresh('lines')));
+        $this->assertCount(1, $invoice->fresh('lines')->filedLines());
     }
 
     public function test_counterpart_email_is_withheld_unless_the_tenant_opts_in(): void

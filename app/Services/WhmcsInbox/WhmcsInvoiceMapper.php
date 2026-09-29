@@ -4,6 +4,7 @@ namespace App\Services\WhmcsInbox;
 
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
@@ -680,8 +681,17 @@ class WhmcsInvoiceMapper
      */
     private function zeroVatLineDescriptions(array $lines): array
     {
+        // A 0.00 line (free .gr transfer) is never filed (Invoice::filedLines), so
+        // its 0% rate needs no exemption and must not hold the invoice — unless
+        // EVERY line is zero-value, in which case they're all filed as-is.
+        $isZero = fn (array $l) => Invoice::isZeroValueLine((float) $l['net_price'], (float) $l['gross_price']);
+        $allZero = $lines !== [] && count(array_filter($lines, $isZero)) === count($lines);
+
         $out = [];
         foreach ($lines as $line) {
+            if (! $allZero && $isZero($line)) {
+                continue;
+            }
             if ((float) $line['vat_percent'] === 0.0) {
                 $out[] = (string) $line['product_descr'];
             }

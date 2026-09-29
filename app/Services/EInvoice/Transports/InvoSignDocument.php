@@ -5,7 +5,6 @@ namespace App\Services\EInvoice\Transports;
 use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
-use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Support\MyData\DeliveryCodes;
 use DOMDocument;
 use DOMElement;
@@ -47,7 +46,7 @@ class InvoSignDocument
         // filedLines(), not $invoice->lines: the AADE core omits zero-value lines,
         // so iterating every line would shift the twins onto the wrong <invoiceDetails>.
         $details = $invoiceNode->getElementsByTagNameNS(self::AADE_NS, 'invoiceDetails');
-        $lines = AadeInvoiceDocument::filedLines($invoice)->values();
+        $lines = $invoice->filedLines()->values();
         for ($i = 0; $i < $details->length; $i++) {
             $node = $details->item($i);
             $line = $lines[$i] ?? null;

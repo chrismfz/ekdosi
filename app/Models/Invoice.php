@@ -33,6 +33,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\URL;
 use RuntimeException;
 
@@ -620,6 +621,46 @@ class Invoice extends Model implements MovableDocument
         // guards fire, rather than filing a document under an empty series that
         // could never be matched back — at AADE or by the in-doubt recovery.
         return blank($series) ? null : (string) $series;
+    }
+
+    /**
+     * The lines FILED in <invoiceDetails>, in document order. A zero-value line
+     * (net 0 AND VAT 0 — e.g. a free .gr domain transfer a WHMCS invoice lists at
+     * 0.00) is left out: AADE rejects it on the income types we file with [222]
+     * «NetValue per line, which have recType != 6, must have value greater than 0»
+     * (prod ΤΠΥ7029, 2026-09-29). It adds nothing to any sum, so dropping it leaves
+     * totals/classification/[207]/[209] untouched; the line stays on the local
+     * invoice + our PDF. Kept as-is:
+     *   - a combined ΤΔΑ (is_delivery_note): every line is a goods MOVEMENT the
+     *     δελτίο must declare, priced or not — never silently drop moved goods;
+     *   - an all-zero invoice: nothing meaningful to file, AADE gives the verdict.
+     *
+     * Every reader of "what AADE got" goes through here (the AADE builder, the
+     * InvoSign positional api_* twins — via ->values() —, the local↔AADE line-count
+     * cross-check). WhmcsInvoiceMapper applies the same rule to its pre-model rows.
+     * Keyed by each line's 0-based position in `lines` (gaps where one was dropped),
+     * so `$i + 1` in a builder error is still the operator's line number.
+     *
+     * @return Collection<int, InvoiceLine>
+     */
+    public function filedLines(): Collection
+    {
+        $lines = $this->lines->values();
+        if ($this->is_delivery_note) {
+            return $lines;
+        }
+
+        $filed = $lines->reject(fn (InvoiceLine $line) => self::isZeroValueLine(
+            (float) $line->net_price, (float) $line->gross_price
+        ));
+
+        return $filed->isEmpty() ? $lines : $filed;
+    }
+
+    /** A line worth nothing (net AND gross 0 at 2dp) — see filedLines(). */
+    public static function isZeroValueLine(float $net, float $gross): bool
+    {
+        return round($net, 2) == 0.0 && round($gross, 2) == 0.0;
     }
 
     public function customer(): BelongsTo

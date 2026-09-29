@@ -47,7 +47,9 @@ class EnrichInvoiceFromAade
             // console for every withholding / multi-rate-discounted invoice.
             'net_total' => FiledInvoiceTotals::for($invoice)->net,
             'gross_total' => FiledInvoiceTotals::for($invoice)->gross,
-            'lines' => $invoice->lines()->count(),
+            // FILED lines, not all local lines: a zero-value line is never sent
+            // (Invoice::filedLines), so counting it would flag a false mismatch.
+            'lines' => $invoice->filedLines()->count(),
         ];
 
         $qr = $aade['qrCodeUrl'] ?? null;
