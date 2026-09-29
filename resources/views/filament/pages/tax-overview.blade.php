@@ -65,6 +65,9 @@
         {{-- Income tax estimate --}}
         <x-filament::section heading="Εκτίμηση φόρου εισοδήματος" class="lg:col-span-2">
             @php($proj = $e['projection'])
+            @foreach ($e['warnings'] as $w)
+                <div class="text-xs text-danger-600 dark:text-danger-400 mb-2">⚠ {{ $w }}</div>
+            @endforeach
             <div class="text-xs mb-2 {{ $e['source'] === 'e3' ? 'fi-color-gray' : '' }}">
                 @if ($e['source'] === 'e3')
                     <span class="font-semibold">Πηγή: Ε3 ΑΑΔΕ</span> (τελικός χαρακτηρισμός λογιστή · ανανέωση {{ \Illuminate\Support\Carbon::parse($e['e3']['fetched_at'])->format('d/m/Y H:i') }}).
@@ -165,8 +168,53 @@
                 </div>
             @endif
             @if ($proj)
+                @php($pm = $proj['method'])
+                <div class="text-xs mt-2 font-semibold">Πώς προβλέφθηκε η 31/12</div>
+                <table class="min-w-full text-sm">
+                    <tbody class="divide-y divide-gray-100 dark:divide-white/5">
+                        <tr>
+                            <td class="py-1">Έσοδα</td>
+                            <td class="text-xs fi-color-gray">
+                                @if ($pm['income']['method'] === 'seasonal')
+                                    με την εποχικότητα του {{ $this->year - 1 }} (Ε3): ως σήμερα είχε γίνει το {{ number_format($pm['income']['share_done'] * 100, 0, ',', '.') }}% των εσόδων της χρονιάς
+                                @else
+                                    γραμμικά, {{ $proj['elapsed_days'] }} από {{ $proj['year_days'] }} ημέρες
+                                @endif
+                            </td>
+                            <td class="text-right whitespace-nowrap">{{ $this->fmt($pm['income']['value']) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="py-1">Προσωπικό</td>
+                            <td class="text-xs fi-color-gray">
+                                @if ($pm['personnel']['method'] === 'none')
+                                    δεν υπάρχει μισθοδοσία
+                                @else
+                                    {{ $this->fmt($pm['personnel']['ytd']) }} ως τώρα + {{ $pm['personnel']['months_remaining'] }} μήνες × {{ $this->fmt($pm['personnel']['monthly_rate']) }}
+                                    ({{ $pm['personnel']['method'] === 'monthly_median' ? 'διάμεσος τελευταίων μηνών' : 'μέσος όρος ανά μήνα' }})@if ($pm['personnel']['christmas_bonus'] > 0) + δώρο Χριστουγέννων {{ $this->fmt($pm['personnel']['christmas_bonus']) }}@endif
+                                @endif
+                            </td>
+                            <td class="text-right whitespace-nowrap">{{ $this->fmt($pm['personnel']['value']) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="py-1">Αποσβέσεις</td>
+                            <td class="text-xs fi-color-gray">{{ ['linear' => 'γραμμικά', 'previous_year' => 'όσες πέρσι (περνιούνται στο κλείσιμο)', 'none' => '—'][$pm['depreciation']['method']] }}</td>
+                            <td class="text-right whitespace-nowrap">{{ $this->fmt($pm['depreciation']['value']) }}</td>
+                        </tr>
+                        <tr>
+                            <td class="py-1">Λοιπά έξοδα</td>
+                            <td class="text-xs fi-color-gray">γραμμικά, {{ $proj['elapsed_days'] }} από {{ $proj['year_days'] }} ημέρες</td>
+                            <td class="text-right whitespace-nowrap">{{ $this->fmt($pm['rest']['value']) }}</td>
+                        </tr>
+                        @if ($pm['partner_insurance']['added'] > 0)
+                            <tr>
+                                <td class="py-1">Εισφορές εταίρων</td>
+                                <td class="text-xs fi-color-gray">αναμενόμενες στο κλείσιμο (Φορολογικό προφίλ)</td>
+                                <td class="text-right whitespace-nowrap">{{ $this->fmt($pm['partner_insurance']['added']) }}</td>
+                            </tr>
+                        @endif
+                    </tbody>
+                </table>
                 <div class="text-xs fi-color-gray mt-2">
-                    Η προβολή αναγάγει γραμμικά το αποτέλεσμα των {{ $proj['elapsed_days'] }} ημερών σε {{ $proj['year_days'] }}. Αν ο λογιστής περνά τη μισθοδοσία ανά τρίμηνο, το αποτέλεσμα μέχρι σήμερα φαίνεται μεγαλύτερο μέχρι να περαστεί το τρίμηνο.
                     Το υπόλοιπο του τρέχοντος έτους βγαίνει μόνο στην προβολή: η περσινή προκαταβολή αφορά όλο το έτος, όχι το κομμάτι μέχρι σήμερα.
                 </div>
             @endif

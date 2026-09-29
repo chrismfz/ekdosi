@@ -5,12 +5,11 @@ namespace App\Filament\Pages;
 use App\Models\Company;
 use App\Services\Accounting\E3YearTotals;
 use App\Services\Accounting\IncomeTaxEstimate;
-use App\Services\Dashboard\VatPeriodReport;
 use App\Services\Dashboard\VatPeriodSummary;
+use App\Services\Dashboard\VatYearOverview;
 use App\Support\Accounting\IncomeTaxProfile;
 use App\Support\Money;
 use BackedEnum;
-use Carbon\CarbonImmutable;
 use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Repeater;
@@ -128,40 +127,14 @@ class TaxOverview extends Page
     }
 
     /**
-     * ΦΠΑ per quarter with its three months. `payable` = what the quarter's
-     * return actually asks for once an earlier πιστωτικό is carried forward
-     * (a credit never becomes a payment; it rolls into the next quarter).
+     * ΦΠΑ per quarter (+ months) with the πιστωτικό carried forward — see
+     * {@see VatYearOverview} (shared with the `tax_overview` tool).
      *
      * @return array{quarters: list<array{q: VatPeriodSummary, months: list<VatPeriodSummary>, carried_in: float, payable: float, carry_out: float}>, year: VatPeriodSummary, payable_total: float}
      */
     public function vat(): array
     {
-        $report = new VatPeriodReport($this->tenant());
-        $carry = 0.0;
-        $quarters = [];
-        $payableTotal = 0.0;
-
-        foreach ([1, 2, 3, 4] as $q) {
-            $start = CarbonImmutable::create($this->year, ($q - 1) * 3 + 1, 1);
-            $summary = $report->forPeriod($start, $start->addMonths(2)->endOfMonth(), "Τρίμηνο {$q}");
-            $afterCarry = round($summary->netVat() - $carry, 2);
-            $payable = max(0.0, $afterCarry);
-            $quarters[] = [
-                'q' => $summary,
-                'months' => $report->monthsOfQuarter($start),
-                'carried_in' => $carry,
-                'payable' => $payable,
-                'carry_out' => $afterCarry < 0 ? -$afterCarry : 0.0,
-            ];
-            $carry = $afterCarry < 0 ? -$afterCarry : 0.0;
-            $payableTotal += $payable;
-        }
-
-        return [
-            'quarters' => $quarters,
-            'year' => $report->forPeriod(CarbonImmutable::create($this->year, 1, 1), CarbonImmutable::create($this->year, 12, 31)->endOfDay(), (string) $this->year),
-            'payable_total' => round($payableTotal, 2),
-        ];
+        return VatYearOverview::for($this->tenant(), $this->year);
     }
 
     public function fmt(float $v): string
@@ -240,7 +213,8 @@ class TaxOverview extends Page
                         $rows[] = ['year' => $y, 'amount' => $amount];
                     }
 
-                    return ['rate' => $p->rate, 'prepayment_rate' => $p->prepaymentRate, 'assessed' => $rows];
+                    return ['rate' => $p->rate, 'prepayment_rate' => $p->prepaymentRate, 'assessed' => $rows,
+                        'expected_partner_insurance' => $p->expectedPartnerInsurance ?: null];
                 })
                 ->schema([
                     TextInput::make('rate')->label('Συντελεστής φόρου')->numeric()->minValue(0)->maxValue(100)->suffix('%')->required(),
@@ -255,6 +229,9 @@ class TaxOverview extends Page
                         ->columns(2)
                         ->defaultItems(0)
                         ->addActionLabel('Προσθήκη έτους'),
+                    TextInput::make('expected_partner_insurance')
+                        ->label('Αναμενόμενες ετήσιες εισφορές εταίρων (ΕΦΚΑ)')->numeric()->minValue(0)->suffix('€')
+                        ->helperText('Αν ο λογιστής περνά τον ΕΦΚΑ των εταίρων στο κλείσιμο της χρονιάς: το ποσό για όλο το έτος. Η προβολή 31/12 προσθέτει όσο δεν έχει εμφανιστεί ακόμα (Ε3 E3_585_007 ή ΕΦΚΑ 14.5) — δεν μετράει διπλά όταν περαστεί.'),
                 ])
                 ->action(function (array $data): void {
                     abort_unless(static::canEditProfile(), 403);
@@ -265,7 +242,8 @@ class TaxOverview extends Page
                             $assessed[(int) $row['year']] = (float) $row['amount'];
                         }
                     }
-                    $profile = new IncomeTaxProfile((float) $data['rate'], (float) $data['prepayment_rate'], $assessed);
+                    $profile = new IncomeTaxProfile((float) $data['rate'], (float) $data['prepayment_rate'], $assessed,
+                        max(0.0, (float) ($data['expected_partner_insurance'] ?? 0)));
 
                     // Not fillable on purpose: written only here, as a validated whole.
                     $this->tenant()->forceFill(['income_tax_profile' => $profile->toArray()])->save();

@@ -79,26 +79,13 @@ class IncomeTaxEstimate
             'projection' => null,
         ];
 
-        // Running year: extrapolate the year-to-date result to 31/12 by elapsed days
-        // (only once there's a month of data to extrapolate from).
+        // Running year: project the year-to-date result to 31/12 PER CATEGORY (see
+        // project()) — only once there's a month of data to project from.
+        $out['warnings'] = [];
         if ($core['is_current']) {
-            // Calendar days (dayOfYear), not a float diff across the DST switch.
-            $days = $today->dayOfYear;
-            $yearDays = $today->daysInYear;
-            if ($days >= self::MIN_PROJECTION_DAYS && $days < $yearDays) {
-                $factor = $yearDays / max(1, $days);
-                $pIncome = round($core['income_total'] * $factor, 2);
-                $pExpense = round($core['expense_total'] * $factor, 2);
-                $pWithheld = round($core['withheld'] * $factor, 2);
-                $out['projection'] = [
-                    'elapsed_days' => $days,
-                    'year_days' => $yearDays,
-                    'income_total' => $pIncome,
-                    'expense_total' => $pExpense,
-                    'profit' => round($pIncome - $pExpense, 2),
-                    'withheld' => $pWithheld,
-                ] + $this->settle(round($pIncome - $pExpense, 2), $pWithheld, $prior, $profile);
-            }
+            $snapshot = E3YearSnapshot::query()->where('company_id', $this->tenant->getKey())->where('year', $year)->first();
+            $out['projection'] = $this->project($year, $core, $today, $profile, $prior, $snapshot);
+            $out['warnings'] = $this->warnings($core, $today, $profile, $snapshot);
         }
 
         // The HEADLINE «what we'll owe». A closed year: its payable. The running
@@ -120,6 +107,163 @@ class IncomeTaxEstimate
         }
 
         return $out;
+    }
+
+    /** Days after which a running-year Ε3 snapshot counts as stale (the nightly job should refresh it). */
+    public const E3_STALE_DAYS = 3;
+
+    /**
+     * The running-year 31/12 projection, PER CATEGORY instead of one linear factor —
+     * the linear one read a month the accountant hasn't filed yet (payroll) as zero
+     * cost for the rest of the year, and year-end postings (αποσβέσεις, ΕΦΚΑ εταίρων)
+     * as never coming:
+     *   - income       : last year's month pattern from its full-year Ε3 (the share of
+     *                    the year done by today), else linear by elapsed days;
+     *   - personnel    : the monthly rate (median of the last 3 posted months when
+     *                    posted monthly — a bonus month doesn't skew it; else the
+     *                    average per month since January) × the months after
+     *                    the last posted one, + one month for the δώρο Χριστουγέννων;
+     *   - depreciation : linear when posted during the year, else last year's (the
+     *                    accountant posts them at the close);
+     *   - rest         : linear by elapsed days;
+     *   - + the profile's expected partners' ΕΦΚΑ while none of it has appeared.
+     * Withholdings stay linear. Null before MIN_PROJECTION_DAYS or on 31/12.
+     */
+    private function project(int $year, array $core, CarbonImmutable $today, IncomeTaxProfile $profile, float $prior, ?E3YearSnapshot $snapshot): ?array
+    {
+        $days = $today->dayOfYear;
+        $yearDays = $today->daysInYear;
+        if ($days < self::MIN_PROJECTION_DAYS || $days >= $yearDays) {
+            return null;
+        }
+        $elapsed = $days / $yearDays;
+        $months = $core['monthly']['months'];
+        $previous = $this->fullYearSnapshot($year - 1);
+
+        // Income.
+        [$pIncome, $incomeMethod, $share] = [round($core['income_total'] / $elapsed, 2), 'linear', null];
+        if ($previous?->monthly !== null) {
+            $byMonth = [];
+            foreach ($previous->monthly as $m => $rows) {
+                $byMonth[(int) $m] = E3YearTotals::groups($rows)['income'];
+            }
+            $total = array_sum($byMonth);
+            $cur = (int) $today->month;
+            $done = array_sum(array_filter($byMonth, fn (int $m) => $m < $cur, ARRAY_FILTER_USE_KEY))
+                + ($byMonth[$cur] ?? 0.0) * $today->day / $today->daysInMonth;
+            // A share outside [¼, 1) means last year isn't a usable pattern (e.g. a partial first year).
+            if ($total > 0 && $done / $total >= 0.25 && $done / $total < 1) {
+                $share = round($done / $total, 4);
+                [$pIncome, $incomeMethod] = [round($core['income_total'] / $share, 2), 'seasonal'];
+            }
+        }
+
+        // Personnel.
+        $personnel = array_map(fn (array $c) => $c['payroll'] + $c['contributions'], $months);
+        $ytdPersonnel = array_sum($personnel);
+        $posted = array_keys(array_filter($personnel, fn (float $v) => $v > 0.004));
+        [$rate, $remaining, $bonus, $personnelMethod] = [0.0, 0, 0.0, 'none'];
+        if ($posted !== []) {
+            [$first, $last] = [min($posted), max($posted)];
+            // «Monthly» when payroll sits in ≥ ¾ of the months of its span — one month the
+            // accountant skipped doesn't flip it; a per-quarter batch (1 in 3) stays a batch.
+            if (count($posted) >= 0.75 * ($last - $first + 1)) {
+                $recent = array_slice(array_map(fn (int $m) => $personnel[$m], $posted), -3);
+                sort($recent);
+                $n = count($recent);
+                $rate = $n % 2 ? $recent[intdiv($n, 2)] : ($recent[$n / 2 - 1] + $recent[$n / 2]) / 2;
+                $personnelMethod = 'monthly_median';
+            } else {
+                // Posted in batches (e.g. per quarter, at its end): the months before
+                // the first batch are INSIDE it, so average over January → last.
+                $rate = $ytdPersonnel / $last;
+                $personnelMethod = 'average_per_month';
+            }
+            $remaining = 12 - $last;
+            $bonus = $remaining > 0 ? $rate : 0.0;   // δώρο Χριστουγέννων ≈ one month, paid in December
+        }
+        $pPersonnel = $ytdPersonnel + $rate * $remaining + $bonus;
+
+        // Depreciation.
+        $ytdDepreciation = array_sum(array_column($months, 'depreciation'));
+        [$pDepreciation, $depreciationMethod] = [0.0, 'none'];
+        if ($ytdDepreciation > 0.004) {
+            [$pDepreciation, $depreciationMethod] = [$ytdDepreciation / $elapsed, 'linear'];
+        } elseif ($previous !== null && ($lastYear = E3YearTotals::groups($previous->rows ?? [])['depreciation']) > 0.004) {
+            [$pDepreciation, $depreciationMethod] = [$lastYear, 'previous_year'];
+        }
+
+        // Rest (suppliers etc.).
+        $pRest = array_sum(array_column($months, 'rest')) / $elapsed;
+
+        // Partners' ΕΦΚΑ the accountant posts at the close: only while none has appeared.
+        $insurancePresent = $this->partnerInsurancePresent($core, $snapshot);
+        $insuranceAdded = $insurancePresent > 0.004 ? 0.0 : $profile->expectedPartnerInsurance;
+
+        $pExpense = round($pRest + $pPersonnel + $pDepreciation + $insuranceAdded, 2);
+        $pWithheld = round($core['withheld'] / $elapsed, 2);
+
+        return [
+            'elapsed_days' => $days,
+            'year_days' => $yearDays,
+            'income_total' => $pIncome,
+            'expense_total' => $pExpense,
+            'profit' => round($pIncome - $pExpense, 2),
+            'withheld' => $pWithheld,
+            'method' => [
+                'income' => ['method' => $incomeMethod, 'share_done' => $share, 'value' => $pIncome],
+                'personnel' => ['method' => $personnelMethod, 'ytd' => round($ytdPersonnel, 2), 'monthly_rate' => round($rate, 2),
+                    'months_remaining' => $remaining, 'christmas_bonus' => round($bonus, 2), 'value' => round($pPersonnel, 2)],
+                'depreciation' => ['method' => $depreciationMethod, 'value' => round($pDepreciation, 2)],
+                'rest' => ['method' => 'linear', 'value' => round($pRest, 2)],
+                'partner_insurance' => ['expected' => $profile->expectedPartnerInsurance, 'present' => round($insurancePresent, 2), 'added' => $insuranceAdded],
+            ],
+        ] + $this->settle(round($pIncome - $pExpense, 2), $pWithheld, $prior, $profile);
+    }
+
+    /**
+     * What should make the operator distrust the running-year figure, in plain Greek:
+     * payroll months not filed yet, a stale Ε3, partners' ΕΦΚΑ nowhere in sight.
+     *
+     * @return list<string>
+     */
+    private function warnings(array $core, CarbonImmutable $today, IncomeTaxProfile $profile, ?E3YearSnapshot $snapshot): array
+    {
+        $out = [];
+
+        $gaps = MonthlyResult::payrollGaps($core['monthly']['compare'], (int) $today->month - 1);
+        if ($gaps !== []) {
+            $out[] = 'Μισθοδοσία: δεν έχει περαστεί ακόμα για '.implode(', ', array_map(fn (int $m) => MonthlyResult::MONTH_LABELS[$m], $gaps))
+                .'. Η προβολή 31/12 τη μετρά με τον ρυθμό των τελευταίων μηνών.';
+        }
+
+        if ($snapshot !== null && $snapshot->fetched_at->lt($today->subDays(self::E3_STALE_DAYS))) {
+            $out[] = 'Το Ε3 ανανεώθηκε τελευταία στις '.$snapshot->fetched_at->format('d/m/Y')
+                .' — ελέγξτε το νυχτερινό «myDATA — εισαγωγή εξόδων + Ε3» (Χρονοπρογραμματιστής).';
+        }
+
+        if ($this->partnerInsurancePresent($core, $snapshot) < 0.005 && $profile->expectedPartnerInsurance <= 0) {
+            $out[] = 'Δεν έχουν εμφανιστεί εισφορές εταίρων (ΕΦΚΑ αυτοαπασχολούμενων). Αν τις περνά ο λογιστής στο κλείσιμο, '
+                .'ορίστε το αναμενόμενο ετήσιο ποσό στο «Φορολογικό προφίλ» ώστε να μετρά στην προβολή.';
+        }
+
+        return $out;
+    }
+
+    /** Partners' ΕΦΚΑ seen so far this year: the Ε3's E3_585_007 or our own 14.5 — whichever is larger (never both). */
+    private function partnerInsurancePresent(array $core, ?E3YearSnapshot $snapshot): float
+    {
+        $e3 = collect($snapshot?->rows ?? [])->where('type', 'E3_585_007')->sum('value');
+        $local = collect($core['expense_breakdown'])->where('bucket', 'social_security')->sum('net');
+
+        return max((float) $e3, (float) $local);
+    }
+
+    private function fullYearSnapshot(int $year): ?E3YearSnapshot
+    {
+        $s = E3YearSnapshot::query()->where('company_id', $this->tenant->getKey())->where('year', $year)->first();
+
+        return $s !== null && E3YearTotals::coversFullYear($s) ? $s : null;
     }
 
     /**

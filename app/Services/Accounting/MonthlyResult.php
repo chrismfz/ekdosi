@@ -50,7 +50,7 @@ final class MonthlyResult
      * @param  'local'|'e3'|'blend'  $mode
      * @param  array<int|string, list<array{type: string, category: ?string, value: float}>>|null  $e3Monthly  E3YearSnapshot::monthly
      * @param  list<array{type: string, category: ?string, value: float}>  $e3AnnualRows  E3YearSnapshot::rows (fallback when no monthly)
-     * @return array{mode: string, monthly_available: bool, months: array<int, array>, quarters: array<int, array>, year: array, groups: list<array>}
+     * @return array{mode: string, monthly_available: bool, months: array<int, array>, quarters: array<int, array>, year: array, groups: list<array>, compare: array<int, array{local: array, e3: ?array}>}
      */
     public static function build(LedgerBookResult $book, int $lastMonth, string $mode, ?array $e3Monthly, array $e3AnnualRows = []): array
     {
@@ -98,6 +98,14 @@ final class MonthlyResult
             }
         }
 
+        // Both sides per month, BEFORE any blend — for diagnostics (the data_freshness
+        // tool: «where does the Ε3 differ from what we hold, and by how much»).
+        $round = fn (array $c) => array_map(fn (float $v) => round($v, 2), $c);
+        $compare = [];
+        foreach (range(1, $lastMonth) as $m) {
+            $compare[$m] = ['local' => $round($local[$m]), 'e3' => $e3Monthly === null ? null : $round($e3[$m] ?? self::zero())];
+        }
+
         return [
             'mode' => $mode,
             'monthly_available' => $monthlyAvailable,
@@ -105,7 +113,41 @@ final class MonthlyResult
             'quarters' => $quarters,
             'year' => $year,
             'groups' => $mode === 'blend' ? self::groupRows($groups) : [],
+            'compare' => $compare,
         ];
+    }
+
+    /**
+     * Complete months (≤ $lastComplete) with NO personnel cost on either side, AFTER
+     * the last month that has one — i.e. the trailing months the accountant hasn't
+     * filed yet. A company that never had staff reports nothing; an earlier hole
+     * followed by payroll isn't «not filed yet».
+     *
+     * @param  array<int, array{local: array, e3: ?array}>  $compare  build()['compare']
+     * @return list<int> month numbers
+     */
+    public static function payrollGaps(array $compare, int $lastComplete): array
+    {
+        $seen = false;
+        $gaps = [];
+        foreach ($compare as $m => $c) {
+            if ($m > $lastComplete) {
+                break;
+            }
+            $amount = $c['local']['payroll'] + $c['local']['contributions']
+                + ($c['e3'] === null ? 0.0 : $c['e3']['payroll'] + $c['e3']['contributions']);
+            if ($amount > 0.004) {
+                $seen = true;
+                $gaps = [];
+
+                continue;
+            }
+            if ($seen) {
+                $gaps[] = (int) $m;
+            }
+        }
+
+        return $gaps;
     }
 
     /** @return array<int, array> month => raw local sums (income, the four columns, capex) */
