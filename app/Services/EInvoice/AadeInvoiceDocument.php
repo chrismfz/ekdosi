@@ -36,6 +36,7 @@ use Firebed\AadeMyData\Models\OtherDeliveryNoteHeader;
 use Firebed\AadeMyData\Models\PaymentMethodDetail;
 use Firebed\AadeMyData\Models\TaxTotals;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -197,7 +198,8 @@ class AadeInvoiceDocument
         // summary uses — see allocateDiscountedLineAmounts(). Emitting the
         // raw line values on a discounted invoice made Σ(lines) ≠ totals and
         // AADE rejected with [207]/[209].
-        $lineAmounts = $this->allocateDiscountedLineAmounts($invoice, $vatBreakdown);
+        $filedLines = self::filedLines($invoice);
+        $lineAmounts = $this->allocateDiscountedLineAmounts($invoice, $filedLines, $vatBreakdown);
 
         // G5: per-line <quantity> is FORBIDDEN for the service types we file
         // ([205]) but expected on goods παραστατικά. Spec §5.x: quantity is
@@ -212,7 +214,7 @@ class AadeInvoiceDocument
 
         $details = [];
         $lineNo = 1;
-        foreach ($invoice->lines->values() as $i => $line) {
+        foreach ($filedLines as $i => $line) {
             $rate = (float) $line->vat_percent;
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
@@ -426,6 +428,41 @@ class AadeInvoiceDocument
         return $aade;
     }
 
+    /**
+     * The invoice lines that go into <invoiceDetails>, in document order.
+     *
+     * A zero-value line (net 0 AND VAT 0 — e.g. a free .gr domain transfer a WHMCS
+     * invoice lists at 0.00) is NOT filed: AADE rejects it on the income types we
+     * file with [222] «NetValue per line, which have recType != 6, must have value
+     * greater than 0» (prod ΤΠΥ7029, 2026-09-29). It adds nothing to any sum, so
+     * dropping it leaves totals/classification/[207]/[209] untouched; the line stays
+     * on the local invoice + our PDF. Kept as-is:
+     *   - a combined ΤΔΑ (is_delivery_note): every line is a goods MOVEMENT the
+     *     δελτίο must declare, priced or not — never silently drop moved goods;
+     *   - an all-zero invoice: nothing meaningful to file, AADE gives the verdict.
+     *
+     * The ONE predicate for the filed line set: provider transports that decorate
+     * <invoiceDetails> by position (InvoSignDocument) MUST iterate this (->values()),
+     * not $invoice->lines, or their per-line extension shifts onto the wrong line.
+     *
+     * @return Collection<int, InvoiceLine> keyed by the line's 0-based position in
+     *                                      $invoice->lines (gaps where a line was
+     *                                      dropped), so `$i + 1` in errors = the
+     *                                      operator's line number
+     */
+    public static function filedLines(Invoice $invoice): Collection
+    {
+        $lines = $invoice->lines->values();
+        if ($invoice->is_delivery_note) {
+            return $lines;
+        }
+
+        $filed = $lines->reject(fn (InvoiceLine $line) => round((float) $line->net_price, 2) == 0.0
+            && round((float) $line->gross_price, 2) == 0.0);
+
+        return $filed->isEmpty() ? $lines : $filed;
+    }
+
     public function toXml(AadeInvoice $payload): string
     {
         return (new InvoicesDocWriter)->asXml(
@@ -453,12 +490,12 @@ class AadeInvoiceDocument
      * line values already sum exactly to the breakdown rows — so the
      * sandbox-validated payload shape is untouched.
      *
-     * @return list<array{net: float, vat: float}> indexed like $invoice->lines->values()
+     * @param  Collection<int, InvoiceLine>  $lines  self::filedLines($invoice)
+     * @return array<int, array{net: float, vat: float}> keyed like $lines
      */
-    private function allocateDiscountedLineAmounts(Invoice $invoice, InvoiceVatBreakdown $breakdown): array
+    private function allocateDiscountedLineAmounts(Invoice $invoice, Collection $lines, InvoiceVatBreakdown $breakdown): array
     {
         $factor = 1 - ((float) $invoice->header_discount_percent) / 100;
-        $lines = $invoice->lines->values();
 
         // Group line indexes by the same rate key InvoiceVatBreakdown groups by.
         $groups = [];
