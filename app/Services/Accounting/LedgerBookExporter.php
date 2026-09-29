@@ -94,7 +94,7 @@ class LedgerBookExporter
             $fmt($result->incomeNet()), $fmt($result->incomeVat()), $fmt($result->expenseNet()), $fmt($result->expenseVat()),
         ]), ';', escape: '');
         fputcsv($handle, ['Καθαρό αποτέλεσμα (έσοδα − έξοδα)', $fmt($result->incomeNet() - $result->expenseNet())], ';', escape: '');
-        fputcsv($handle, ['ΦΠΑ εκροών − εισροών', $fmt($result->vatBalance())], ';', escape: '');
+        fputcsv($handle, ['ΦΠΑ εκροών − εκπιπτόμενων εισροών', $fmt($result->vatBalance())], ';', escape: '');
 
         rewind($handle);
         $csv = stream_get_contents($handle);
@@ -135,11 +135,11 @@ class LedgerBookExporter
         $path = $base.'.xlsx';
         @unlink($base);
 
-        $writer = new XlsxWriter();
+        $writer = new XlsxWriter;
         $writer->openToFile($path);
 
-        $headerStyle = (new Style())->setFontBold()->setBackgroundColor('E5E7EB');
-        $boldStyle = (new Style())->setFontBold();
+        $headerStyle = (new Style)->setFontBold()->setBackgroundColor('E5E7EB');
+        $boldStyle = (new Style)->setFontBold();
 
         $writer->addRow(Row::fromValues($this->headers(), $headerStyle));
 
@@ -159,7 +159,7 @@ class LedgerBookExporter
             $result->incomeNet(), $result->incomeVat(), $result->expenseNet(), $result->expenseVat(),
         ]), $boldStyle));
         $writer->addRow(Row::fromValues(['Καθαρό αποτέλεσμα (έσοδα − έξοδα)', $result->incomeNet() - $result->expenseNet()], $boldStyle));
-        $writer->addRow(Row::fromValues(['ΦΠΑ εκροών − εισροών', $result->vatBalance()], $boldStyle));
+        $writer->addRow(Row::fromValues(['ΦΠΑ εκροών − εκπιπτόμενων εισροών', $result->vatBalance()], $boldStyle));
 
         $writer->close();
 

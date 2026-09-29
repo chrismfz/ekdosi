@@ -74,7 +74,7 @@ class LedgerBookExporterTest extends TestCase
         $this->assertStringContainsString('100,00', $csv);
         $this->assertStringContainsString('Σύνολα', $csv);
         $this->assertStringContainsString('Καθαρό αποτέλεσμα', $csv);
-        $this->assertStringContainsString('ΦΠΑ εκροών − εισροών', $csv);
+        $this->assertStringContainsString('ΦΠΑ εκροών − εκπιπτόμενων εισροών', $csv);
 
         // Column-count guard: header + a data row must parse to 16 fields, so a
         // future column shift can't silently mis-align the income/expense split.

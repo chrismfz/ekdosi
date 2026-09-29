@@ -57,6 +57,14 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   (Έσοδα − Έξοδα = καθαρή ροή + σωρευτικό αποθεματικό). **⚠ Κίνδυνος διπλομέτρησης:** πρότυπο «ΔΕΗ» + myDATA
   τιμολόγιο ΔΕΗ = 2× → κανόνας «το πρότυπο μετράει μόνο αν ΔΕΝ βρεθεί myDATA παραστατικό τον μήνα». Ερώτημα
   λογιστή: ποια foreign δηλώνονται ήδη. Λείπουν μόνο recurring-templates + cashflow widget + anti-double-count.
+- **«Φορολογικά» / ΦΠΑ: εκπιπτόμενες εισροές από το `RequestVatInfo` της ΑΑΔΕ** _(ΝΕΟΣ λόγος για το guardrail
+  «RequestVatInfo cross-check»)._ Σήμερα (`Codes::NON_DEDUCTIBLE_INPUT_VAT_PREFIXES`) το ΦΠΑ των 13.x (ΑΛΠ) και 14.x
+  (αντίστροφη επιβάρυνση) απλώς ΔΕΝ μετράει στις εισροές — απλοποίηση: χάνει εκπιπτόμενες εξαιρέσεις (π.χ. ΑΛΠ που
+  εκπίπτει) και μετράει ως εκπιπτόμενο ό,τι 1.x/2.x δεν εκπίπτει (π.χ. καύσιμα/ΙΧ). Το `RequestVatInfo` δίνει ανά
+  παραστατικό την αντιστοίχιση της ΑΑΔΕ στους κωδικούς του Φ2 (εκπιπτόμενο ΦΠΑ) — ό,τι το guardrail απέρριπτε ως
+  cross-check (μετράει το *deductible* → ψεύτικη διαφορά) είναι ΑΚΡΙΒΩΣ η σωστή πηγή για το «προς απόδοση». Ήδη το
+  τραβάμε (`MyDataVatAggregator` / «Εικόνα ΦΠΑ»). Σχέδιο: VatPeriodReport εισροές = RequestVatInfo εκπιπτόμενο όπου
+  υπάρχει snapshot, fallback ο κανόνας 13/14. Ερώτημα λογιστή: ποιοι κωδικοί Φ2 μετράνε.
 - **«Φορολογικά»: ποιες κατηγορίες παρακράτησης συμψηφίζονται με τον φόρο εισοδήματος** _(ερώτημα λογιστή)._ Η
   `IncomeTaxEstimate` αφαιρεί ΟΛΟ το `invoices.withhold_amount`, ανεξαρτήτως `withhold_category` (§8.4, 18 κατηγορίες)·
   αν κάποια δεν είναι προκαταβολή φόρου εισοδήματος, το υπόλοιπο βγαίνει μικρότερο. Φιλτράρισμα ανά κατηγορία όταν
@@ -269,7 +277,7 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **Per-product τιμοκατάλογος — DROPPED:** per-line έκπτωση + per-customer default discount αρκούν (re-open μόνο με πραγματικό use case).
 - **Η/Τ B2B (κύματα 2/2/2026 · 1/10/2026) = ιστορικό:** η παραγωγή ΗΔΗ φιλάρει μέσω παρόχου (InvoSign — invoicer.myip.gr, ekdosi.nexon.gr).
 - **«Μοιάζει κενό αλλά δεν είναι»:** E3 overview υπάρχει (`MyDataE3Overview`) · `TenantScopedUnique` redundant (DB unique) · stock/ΣΔΕΠ/WHMCS sentinels = dead legacy code.
-- **RequestVatInfo «ΦΠΑ cross-check» + E3↔local classification diff — deferred ON PURPOSE:** μετράει το Φ2 *deductible* → μόνιμη ψεύτικη διαφορά (η ΦΠΑ picture `MyDataVatAggregator` ΕΙΝΑΙ χτισμένη).
+- **RequestVatInfo «ΦΠΑ cross-check» + E3↔local classification diff — deferred ON PURPOSE:** μετράει το Φ2 *deductible* → μόνιμη ψεύτικη διαφορά (η ΦΠΑ picture `MyDataVatAggregator` ΕΙΝΑΙ χτισμένη). _(Ως **πηγή** εκπιπτόμενων εισροών όμως ξανανοίγει — βλ. Roadmap «ΦΠΑ: εκπιπτόμενες εισροές από το RequestVatInfo».)_
 - **Multi-branch (MYD-010):** issuer `branch=0` είναι η αλήθεια· counterpart branch per-invoice (`invoices.counterpart_branch`)· το πραγματικό fix είναι child table `customer_branches`.
 - **In-app update apply = DISARMED** (`deploy/update.sh <tag>` είναι το path)· re-arm μόνο με UPD-001…004 + κοινό resolver repo/token (UI override→env) και για τα δύο μονοπάτια.
 - **IA:** clusters ανά πυλώνα (βάθος, όχι πλάτος)· 2ο Filament panel μόνο αν αλλάζει το κοινό (`docs/menu-ia.md`).

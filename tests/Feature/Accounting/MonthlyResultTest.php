@@ -96,6 +96,13 @@ class MonthlyResultTest extends TestCase
 
         $this->assertEqualsWithDelta(3000.0, $e['expense_total'], 0.001);
         $this->assertSame('local', $e['source']);
+
+        // Same total, but the SPLIT is the accountant's official one from the Ε3.
+        $march = $e['monthly']['months'][3];
+        $this->assertEqualsWithDelta(2400.0, $march['payroll'], 0.001);
+        $this->assertEqualsWithDelta(600.0, $march['contributions'], 0.001);
+        $this->assertTrue($march['from_e3']['contributions']);
+        $this->assertFalse($march['from_e3']['payroll']);
     }
 
     public function test_a_closed_year_takes_every_month_from_the_e3(): void
