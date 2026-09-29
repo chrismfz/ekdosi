@@ -624,8 +624,27 @@ class WhmcsInvoiceMapperTest extends TestCase
             ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['totals'];
 
         $this->assertContains('Refund credit', $totals['zero_vat_lines']);
-        $this->assertContains('Goodwill', $totals['zero_vat_lines']);
+        // A 0.00 line is never filed (Invoice::filedLines — AADE [222]), so its 0%
+        // rate needs no exemption and must not hold/refuse the invoice.
+        $this->assertNotContains('Goodwill', $totals['zero_vat_lines']);
         $this->assertNotContains('Hosting', $totals['zero_vat_lines']);
+    }
+
+    public function test_all_zero_value_invoice_still_surfaces_its_zero_vat_lines(): void
+    {
+        // Every line 0.00 → Invoice::filedLines files them all as-is, so the 0%
+        // guard must still see them (they WOULD reach AADE).
+        $pending = $this->makePending([
+            'invoiceid' => 1011,
+            'items' => ['item' => [
+                ['description' => 'Μεταφορά Domain', 'amount' => '0.00', 'taxed' => '0'],
+            ]],
+        ]);
+
+        $totals = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType)['totals'];
+
+        $this->assertSame(['Μεταφορά Domain'], $totals['zero_vat_lines']);
     }
 
     public function test_maps_whmcs_gateway_to_the_declared_payment_method(): void

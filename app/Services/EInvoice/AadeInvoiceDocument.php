@@ -36,6 +36,7 @@ use Firebed\AadeMyData\Models\OtherDeliveryNoteHeader;
 use Firebed\AadeMyData\Models\PaymentMethodDetail;
 use Firebed\AadeMyData\Models\TaxTotals;
 use Firebed\AadeMyData\Xml\InvoicesDocWriter;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -197,7 +198,8 @@ class AadeInvoiceDocument
         // summary uses — see allocateDiscountedLineAmounts(). Emitting the
         // raw line values on a discounted invoice made Σ(lines) ≠ totals and
         // AADE rejected with [207]/[209].
-        $lineAmounts = $this->allocateDiscountedLineAmounts($invoice, $vatBreakdown);
+        $filedLines = $invoice->filedLines();
+        $lineAmounts = $this->allocateDiscountedLineAmounts($invoice, $filedLines, $vatBreakdown);
 
         // G5: per-line <quantity> is FORBIDDEN for the service types we file
         // ([205]) but expected on goods παραστατικά. Spec §5.x: quantity is
@@ -212,7 +214,7 @@ class AadeInvoiceDocument
 
         $details = [];
         $lineNo = 1;
-        foreach ($invoice->lines->values() as $i => $line) {
+        foreach ($filedLines as $i => $line) {
             $rate = (float) $line->vat_percent;
             $detail = (new InvoiceDetails)
                 ->setLineNumber($lineNo++)
@@ -453,12 +455,12 @@ class AadeInvoiceDocument
      * line values already sum exactly to the breakdown rows — so the
      * sandbox-validated payload shape is untouched.
      *
-     * @return list<array{net: float, vat: float}> indexed like $invoice->lines->values()
+     * @param  Collection<int, InvoiceLine>  $lines  $invoice->filedLines()
+     * @return array<int, array{net: float, vat: float}> keyed like $lines
      */
-    private function allocateDiscountedLineAmounts(Invoice $invoice, InvoiceVatBreakdown $breakdown): array
+    private function allocateDiscountedLineAmounts(Invoice $invoice, Collection $lines, InvoiceVatBreakdown $breakdown): array
     {
         $factor = 1 - ((float) $invoice->header_discount_percent) / 100;
-        $lines = $invoice->lines->values();
 
         // Group line indexes by the same rate key InvoiceVatBreakdown groups by.
         $groups = [];

@@ -89,6 +89,99 @@ class InvoSignTransportTest extends TestCase
         $this->assertNotFalse(simplexml_load_string($xml));
     }
 
+    public function test_zero_value_line_is_not_filed_and_twins_stay_aligned(): void
+    {
+        // Prod ΤΠΥ7029 (2026-09-29): a WHMCS invoice carried a free .gr domain transfer
+        // at 0.00 → AADE [222] «NetValue per line … must have value greater than 0».
+        // The zero line is dropped from the filing; the api_* twins must still land on
+        // the RIGHT <invoiceDetails> (they are matched by position).
+        $invoice = $this->makeInvoice();
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Μεταφορά Domain δωρεάν',
+            'qty' => 1, 'price_per_item' => 0, 'vat_percent' => 24,
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Φιλοξενία',
+            'qty' => 1, 'price_per_item' => 50, 'vat_percent' => 24,
+        ]);
+        $invoice = $invoice->fresh('lines');
+
+        $doc = new AadeInvoiceDocument($this->tenant);
+        $xml = InvoSignDocument::augment($doc->toXml($doc->build($invoice)), $invoice);
+        $sx = simplexml_load_string($xml);
+        $sx->registerXPathNamespace('a', 'http://www.aade.gr/myDATA/invoice/v1.0');
+
+        $details = $sx->xpath('//a:invoiceDetails');
+        $this->assertCount(2, $details, 'the zero-value line is not filed');
+        $this->assertSame(['1', '2'], array_map(fn ($d) => (string) $d->lineNumber, $details));
+        $this->assertSame(['100', '50'], array_map(fn ($d) => (string) $d->netValue, $details));
+        $this->assertSame(['Υπηρεσία', 'Φιλοξενία'], array_map(fn ($d) => (string) $d->api_lineDescription, $details));
+        $this->assertStringNotContainsString('Μεταφορά Domain δωρεάν', $xml);
+        $this->assertSame('150', (string) $sx->xpath('//a:invoiceSummary/a:totalNetValue')[0]);
+
+        // The line stays on the local invoice (and so on our PDF).
+        $this->assertCount(3, $invoice->lines);
+    }
+
+    public function test_zero_value_line_with_header_discount_still_sums_to_the_summary(): void
+    {
+        // MYD-1 path: the header discount is allocated per filed line; the dropped
+        // zero line must not soak up (or lose) a reconciliation cent → no [207]/[209].
+        $invoice = $this->makeInvoice();
+        $invoice->update(['header_discount_percent' => 10]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Δωρεάν',
+            'qty' => 1, 'price_per_item' => 0, 'vat_percent' => 24,
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Φιλοξενία',
+            'qty' => 1, 'price_per_item' => 33.33, 'vat_percent' => 24,
+        ]);
+        $invoice = $invoice->fresh('lines');
+
+        $doc = new AadeInvoiceDocument($this->tenant);
+        $sx = simplexml_load_string($doc->toXml($doc->build($invoice)));
+        $sx->registerXPathNamespace('a', 'http://www.aade.gr/myDATA/invoice/v1.0');
+
+        $details = $sx->xpath('//a:invoiceDetails');
+        $this->assertCount(2, $details);
+        $net = array_sum(array_map(fn ($d) => (float) $d->netValue, $details));
+        $vat = array_sum(array_map(fn ($d) => (float) $d->vatAmount, $details));
+        $this->assertEqualsWithDelta((float) $sx->xpath('//a:invoiceSummary/a:totalNetValue')[0], $net, 0.001);
+        $this->assertEqualsWithDelta((float) $sx->xpath('//a:invoiceSummary/a:totalVatAmount')[0], $vat, 0.001);
+    }
+
+    public function test_combined_tda_keeps_zero_value_goods_lines(): void
+    {
+        // A ΤΔΑ line is a goods MOVEMENT — a free sample still has to be declared.
+        $invoice = $this->makeInvoice();
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Δείγμα',
+            'qty' => 5, 'price_per_item' => 0, 'vat_percent' => 24,
+        ]);
+        $invoice = $invoice->fresh('lines');
+
+        $this->assertCount(1, $invoice->filedLines());
+        $invoice->is_delivery_note = true;
+        $this->assertCount(2, $invoice->filedLines());
+    }
+
+    public function test_all_zero_invoice_keeps_its_lines_for_aade_to_judge(): void
+    {
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'TPY2', 'code' => 2,
+            'invoice_type_id' => $this->type->id, 'customer_id' => $this->customer->id,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+            'company_name' => 'Πελάτης ΑΕ', 'vat_no' => '997073525',
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Δωρεάν',
+            'qty' => 1, 'price_per_item' => 0, 'vat_percent' => 24,
+        ]);
+
+        $this->assertCount(1, $invoice->fresh('lines')->filedLines());
+    }
+
     public function test_counterpart_email_is_withheld_unless_the_tenant_opts_in(): void
     {
         // The provider uses <CounterpartEmail> to EMAIL the document to the customer.

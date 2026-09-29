@@ -43,8 +43,10 @@ class InvoSignDocument
         }
 
         // 1) Per-line api_* twins — matched to <invoiceDetails> in document order.
+        // filedLines(), not $invoice->lines: the AADE core omits zero-value lines,
+        // so iterating every line would shift the twins onto the wrong <invoiceDetails>.
         $details = $invoiceNode->getElementsByTagNameNS(self::AADE_NS, 'invoiceDetails');
-        $lines = $invoice->lines->values();
+        $lines = $invoice->filedLines()->values();
         for ($i = 0; $i < $details->length; $i++) {
             $node = $details->item($i);
             $line = $lines[$i] ?? null;

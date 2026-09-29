@@ -171,6 +171,23 @@ class EnrichInvoiceFromAadeTest extends TestCase
         $this->assertTrue($net['match'], 'net agrees');
     }
 
+    public function test_line_count_ignores_an_unfiled_zero_value_line(): void
+    {
+        // A 0.00 line is never sent (Invoice::filedLines — AADE [222]); AADE holding
+        // one line fewer than local is the CORRECT state, not a divergence.
+        InvoiceLine::create([
+            'company_id' => $this->tenant->id, 'invoice_id' => $this->invoice->id,
+            'qty' => 1, 'price_per_item' => 0, 'vat_percent' => 24.00,
+            'net_price' => 0, 'gross_price' => 0, 'product_descr' => 'Μεταφορά Domain',
+        ]);
+
+        $report = app(EnrichInvoiceFromAade::class)->enrich($this->invoice->fresh(), $this->aadeDoc());
+
+        $lines = collect($report['comparison'])->firstWhere('label', 'Πλήθος γραμμών');
+        $this->assertSame('1', $lines['local']);
+        $this->assertTrue($lines['match']);
+    }
+
     public function test_money_comparison_uses_integer_cents_at_every_magnitude(): void
     {
         // The per-invoice «Σύγκριση με ΑΑΔΕ» must use the SAME integer-cent rule as
