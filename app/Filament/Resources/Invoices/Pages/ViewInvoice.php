@@ -1153,6 +1153,44 @@ class ViewInvoice extends ViewRecord
                     }
                 }),
 
+            // «Νέο από αυτό»: a repeat sale — a fresh draft with the same customer
+            // (live card details) and lines, dated today; the original is untouched
+            // and NOT linked (unlike «Επανέκδοση», which replaces it). Any document
+            // except a credit note.
+            Action::make('duplicate_as_new')
+                ->label('Νέο από αυτό')
+                ->icon('heroicon-o-document-plus')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null)
+                ->authorize(fn () => auth()->user()?->can('create', Invoice::class) ?? false)
+                ->requiresConfirmation()
+                ->modalIcon('heroicon-o-document-plus')
+                ->modalHeading('Νέο παραστατικό από αυτό')
+                ->modalDescription(fn (Invoice $record) => new HtmlString(
+                    'Δημιουργείται νέο <strong>ΠΡΟΧΕΙΡΟ</strong> ίδιου τύπου, με <strong>σημερινή ημερομηνία</strong>, '
+                    .'τον ίδιο πελάτη (με τα <strong>τρέχοντα</strong> στοιχεία της καρτέλας του) και τις ίδιες γραμμές. '
+                    .'Αλλάξτε ό,τι θέλετε (τιμή, ποσότητα, νέες γραμμές) και εκδώστε το κανονικά.'
+                    .'<br><br><strong>Πότε:</strong> η ίδια χρέωση ξανά. <em>Π.χ. μηνιαία συντήρηση στον ίδιο πελάτη.</em>'
+                    .'<br><strong>Δεν είναι αυτό;</strong> για διόρθωση λάθους του '.e($record->invcode)
+                    .' χρησιμοποιήστε «Ακύρωση &amp; επανέκδοση». Το '.e($record->invcode).' <strong>δεν</strong> αλλάζει.'
+                ))
+                ->modalSubmitActionLabel('Δημιουργία προχείρου')
+                ->action(function (Invoice $record) {
+                    try {
+                        $copy = app(ReissueInvoiceAsDraft::class)->newSale($record);
+                        Notification::make()
+                            ->title('Δημιουργήθηκε νέο πρόχειρο')
+                            ->body('Από το '.$record->invcode.' — ελέγξτε/αλλάξτε και εκδώστε το.')
+                            ->success()->send();
+                        $this->redirect(static::getResource()::getUrl('edit', ['record' => $copy, 'tenant' => $record->company]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία δημιουργίας')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
+                }),
+
             // Preview the would-be myDATA XML without submitting. Safe
             // on any mode — uses MyDataSubmitter::previewXml() which
             // never reaches initFirebed(). Helpful for spec-debugging
@@ -1727,6 +1765,9 @@ class ViewInvoice extends ViewRecord
         }
         if ($isProviderChannel && $which !== 'reissue') {
             $others[] = 'ακύρωση και σωστό νέο → «Ακύρωση &amp; επανέκδοση»';
+        }
+        if ($which === 'reissue') {
+            $others[] = 'η ίδια χρέωση ξανά, χωρίς ακύρωση → «Νέο από αυτό»';
         }
         // Direct myDATA (no provider): the MARK itself can be cancelled at AADE.
         if (! $isProviderChannel && $record->mydata_state === 'VALID' && $record->company?->submitsElectronically()) {

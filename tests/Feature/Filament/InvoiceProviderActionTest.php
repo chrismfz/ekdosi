@@ -3,6 +3,7 @@
 namespace Tests\Feature\Filament;
 
 use App\Actions\IssueCreditNote;
+use App\Actions\ReissueInvoiceAsDraft;
 use App\Filament\Pages\MyDataMarkDetail;
 use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Models\Company;
@@ -249,7 +250,7 @@ class InvoiceProviderActionTest extends TestCase
             ->assertMountedActionModalSee(['Ολικό πιστωτικό', 'διπλοεκδόθηκε', '«Έκδοση πιστωτικού»', '«Ακύρωση & επανέκδοση»']);
 
         $page()->mountAction('storno_and_reissue')
-            ->assertMountedActionModalSee(['νέο ΠΡΟΧΕΙΡΟ αντίγραφο', 'λάθος πελάτης/ΑΦΜ', '«Ακύρωση μέσω πιστωτικού»']);
+            ->assertMountedActionModalSee(['νέο ΠΡΟΧΕΙΡΟ αντίγραφο', 'λάθος πελάτης/ΑΦΜ', '«Ακύρωση μέσω πιστωτικού»', '«Νέο από αυτό»']);
     }
 
     public function test_direct_mydata_credit_popup_points_to_the_aade_cancel_not_the_provider_buttons(): void
@@ -374,6 +375,113 @@ class InvoiceProviderActionTest extends TestCase
         $this->assertNull($reissue->mydata_state);
         $this->assertSame($invoice->invoice_type_id, $reissue->invoice_type_id);
         $this->assertCount(1, $reissue->lines);
+    }
+
+    public function test_new_from_this_makes_an_unlinked_draft_for_a_repeat_sale_with_live_customer_details(): void
+    {
+        $tenant = $this->providerTenant();
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+        $this->travel(40)->days();
+        // The customer moved since the original was issued — the new document must
+        // state today's card, while the original's frozen snapshot stays as it was.
+        $invoice->customer->update(['address1' => 'Νέα διεύθυνση 5', 'city' => 'Θεσσαλονίκη']);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->assertActionVisible('duplicate_as_new')
+            ->callAction('duplicate_as_new')
+            ->assertHasNoActionErrors()
+            ->assertRedirect();
+
+        $copy = Invoice::where('company_id', $tenant->id)->where('id', '!=', $invoice->id)->sole();
+        $this->assertSame('draft', $copy->local_status);
+        $this->assertNull($copy->mydata_state);
+        $this->assertNull($copy->reissued_from_invoice_id, 'a new sale does not replace the original (no PROV-019 warning)');
+        $this->assertNull($copy->converted_from_invoice_id);
+        $this->assertSame($invoice->invoice_type_id, $copy->invoice_type_id);
+        $this->assertSame($invoice->customer_id, $copy->customer_id);
+        $this->assertTrue($copy->issued_at->isToday());
+        $this->assertSame('Νέα διεύθυνση 5', $copy->address1);
+        $this->assertSame('Θεσσαλονίκη', $copy->city);
+        $this->assertCount(1, $copy->lines);
+        $this->assertSame('Υπηρεσία', $copy->lines->first()->product_descr);
+        $this->assertEquals($invoice->gross_total, $copy->gross_total);
+
+        // The original is untouched.
+        $fresh = $invoice->fresh();
+        $this->assertSame('VALID', $fresh->mydata_state);
+        $this->assertNotSame('Νέα διεύθυνση 5', $fresh->address1);
+    }
+
+    public function test_copies_keep_the_movement_header_of_a_combined_tda(): void
+    {
+        // A ΤΔΑ copy that silently became a plain 1.1 would move goods without a
+        // Ψηφιακό ΔΑ — both copiers (new sale AND reissue) must carry the header.
+        $tenant = $this->providerTenant();
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '1.1');
+        $invoice->forceFill([
+            'is_delivery_note' => true, 'move_purpose' => 1, 'vehicle_number' => 'ΝΒΧ1234',
+            'loading_street' => 'Αποθήκη 1', 'loading_city' => 'Αθήνα', 'delivery_city' => 'Πάτρα',
+            'dispatch_at' => now()->subDays(10), 'transport_type' => 1,
+        ])->save();
+        $invoice->forceFill(['delivery_state' => 'COMPLETED'])->save();
+
+        foreach (['newSale', '__invoke'] as $method) {
+            $copy = app(ReissueInvoiceAsDraft::class)->{$method}($invoice->fresh());
+
+            $this->assertTrue($copy->is_delivery_note, $method);
+            $this->assertSame(1, (int) $copy->move_purpose, $method);
+            $this->assertSame('ΝΒΧ1234', $copy->vehicle_number, $method);
+            $this->assertSame('Πάτρα', $copy->delivery_city, $method);
+            $this->assertTrue($copy->dispatch_at->isToday(), $method.': dispatch starts now, not on the old date');
+            $this->assertNull($copy->delivery_state, $method.': the movement lifecycle belongs to the original');
+        }
+    }
+
+    public function test_new_from_this_refuses_an_archived_customer(): void
+    {
+        $tenant = $this->providerTenant();
+        Filament::setTenant($tenant);
+
+        $archived = $this->validInvoice($tenant, '2.1');
+        $archived->customer->delete();
+        try {
+            app(ReissueInvoiceAsDraft::class)->newSale($archived->fresh());
+            $this->fail('a new sale to an archived customer must be refused');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('αρχειοθετηθεί', $e->getMessage());
+        }
+
+    }
+
+    public function test_new_from_this_keeps_the_snapshot_for_a_walk_in_without_a_customer_card(): void
+    {
+        $tenant = $this->providerTenant();
+        Filament::setTenant($tenant);
+
+        // Walk-in (no customer card): the original's snapshot is all there is.
+        $walkIn = $this->validInvoice($tenant, '2.1');
+        $walkIn->forceFill(['customer_id' => null, 'company_name' => 'Πελάτης λιανικής', 'city' => 'Βόλος'])->save();
+        $copy = app(ReissueInvoiceAsDraft::class)->newSale($walkIn->fresh());
+        $this->assertNull($copy->customer_id);
+        $this->assertSame('Πελάτης λιανικής', $copy->company_name);
+        $this->assertSame('Βόλος', $copy->city);
+    }
+
+    public function test_new_from_this_is_not_offered_on_a_credit_note(): void
+    {
+        $tenant = $this->providerTenant();
+        $creditType = $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+        $credit = app(IssueCreditNote::class)->reverseRemaining($invoice, $creditType);
+
+        Livewire::test(ViewInvoice::class, ['record' => $credit->getRouteKey()])
+            ->assertActionHidden('duplicate_as_new');
+
+        $this->expectException(\RuntimeException::class);
+        app(ReissueInvoiceAsDraft::class)->newSale($credit);
     }
 
     public function test_filing_a_replacement_soft_warns_but_is_not_blocked_and_leaves_a_trace(): void
