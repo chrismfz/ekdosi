@@ -697,9 +697,7 @@ class ViewInvoice extends ViewRecord
                     && self::creditTypes($record)->isNotEmpty())
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Έκδοση πιστωτικού τιμολογίου')
-                ->modalDescription(fn (Invoice $record) => ($isProviderChannel && $record->mydata_state === 'VALID')
-                    ? 'Επιλέξτε τύπο πιστωτικού και ποσότητες ανά γραμμή (0 = εξαίρεση). Το εκδοθέν τιμολόγιο ΔΕΝ ακυρώνεται στον πάροχο — το πιστωτικό (5.1) είναι ο τρόπος αναστροφής: παίρνει δικό του ΜΑΡΚ, συσχετισμένο με το αρχικό, και το μηδενίζει λογιστικά. Αν ο πελάτης ζητήσει επιστροφή χρημάτων, καταχωρίστε «Πληρωμή» τύπου επιστροφής μετά την έκδοση.'
-                    : 'Επιλέξτε τύπο πιστωτικού και τις ποσότητες προς πίστωση ανά γραμμή (0 = εξαίρεση).')
+                ->modalDescription(fn (Invoice $record) => self::creditHelp('partial', $record, $isProviderChannel))
                 ->modalSubmitActionLabel('Έκδοση')
                 ->schema([
                     Select::make('credit_type_id')
@@ -728,7 +726,7 @@ class ViewInvoice extends ViewRecord
                             // «Error while loading page» with no PHP exception logged.
                             Hidden::make('label'),
                             Placeholder::make('line_label')
-                                ->label('')
+                                ->hiddenLabel()
                                 ->content(fn (Get $get) => $get('label') ?? ''),
                             TextInput::make('qty')
                                 ->label('Ποσότητα πίστωσης')
@@ -982,10 +980,7 @@ class ViewInvoice extends ViewRecord
                     && $record->invoiceType?->mydata_type !== '9.3')
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->modalHeading('Ακύρωση μέσω πιστωτικού')
-                ->modalDescription(fn (Invoice $record) => 'Για διαβίβαση μέσω Παρόχου ΔΕΝ ακυρώνεται παραστατικό που έχει λάβει ΜΑΡΚ — η ακύρωση γίνεται με ΟΛΙΚΟ πιστωτικό. Έτσι μένουν σωστά έσοδα/ΦΠΑ: το αρχικό μένει VALID στην ΑΑΔΕ, το πιστωτικό το μηδενίζει. Τα δύο παραστατικά δένονται μεταξύ τους (βλ. «Σχετικά παραστατικά»). '
-                    .(self::creditTypes($record)->isEmpty()
-                        ? '⚠ Δεν υπάρχει ρυθμισμένος τύπος πιστωτικού — ρυθμίστε έναν στο Setup → Τύποι Παραστατικών (is_credit) και ξαναδοκιμάστε.'
-                        : 'Για ταυτόχρονη επανέκδοση διορθωμένου, χρησιμοποιήστε «Ακύρωση & επανέκδοση». Αν ο πελάτης ζητήσει επιστροφή χρημάτων, καταχωρίστε «Πληρωμή» τύπου επιστροφής μετά.'))
+                ->modalDescription(fn (Invoice $record) => self::creditHelp('cancel', $record, $isProviderChannel))
                 // No credit type → info-only modal (hide the submit button).
                 ->modalSubmitAction(fn (Invoice $record) => self::creditTypes($record)->isEmpty() ? false : null)
                 ->modalSubmitActionLabel('Έκδοση πιστωτικού ακύρωσης')
@@ -1067,7 +1062,7 @@ class ViewInvoice extends ViewRecord
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
                 ->modalHeading('Ακύρωση & επανέκδοση')
-                ->modalDescription('Εκδίδεται ΟΛΙΚΟ πιστωτικό (αναστρέφει το αρχικό) και δημιουργείται νέο ΠΡΟΧΕΙΡΟ αντίγραφο για διόρθωση. Διορθώστε το πρόχειρο και εκδώστε το κανονικά.')
+                ->modalDescription(fn (Invoice $record) => self::creditHelp('reissue', $record, $isProviderChannel))
                 ->modalSubmitActionLabel('Ακύρωση & επανέκδοση')
                 ->schema([
                     Select::make('credit_type_id')
@@ -1153,6 +1148,44 @@ class ViewInvoice extends ViewRecord
                     } catch (Throwable $e) {
                         Notification::make()
                             ->title('Αποτυχία επανέκδοσης')
+                            ->body($e->getMessage())
+                            ->danger()->persistent()->send();
+                    }
+                }),
+
+            // «Νέο από αυτό»: a repeat sale — a fresh draft with the same customer
+            // (live card details) and lines, dated today; the original is untouched
+            // and NOT linked (unlike «Επανέκδοση», which replaces it). Any document
+            // except a credit note.
+            Action::make('duplicate_as_new')
+                ->label('Νέο από αυτό')
+                ->icon('heroicon-o-document-plus')
+                ->color('gray')
+                ->visible(fn (Invoice $record) => $record->credited_invoice_id === null)
+                ->authorize(fn () => auth()->user()?->can('create', Invoice::class) ?? false)
+                ->requiresConfirmation()
+                ->modalIcon('heroicon-o-document-plus')
+                ->modalHeading('Νέο παραστατικό από αυτό')
+                ->modalDescription(fn (Invoice $record) => new HtmlString(
+                    'Δημιουργείται νέο <strong>ΠΡΟΧΕΙΡΟ</strong> ίδιου τύπου, με <strong>σημερινή ημερομηνία</strong>, '
+                    .'τον ίδιο πελάτη (με τα <strong>τρέχοντα</strong> στοιχεία της καρτέλας του) και τις ίδιες γραμμές. '
+                    .'Αλλάξτε ό,τι θέλετε (τιμή, ποσότητα, νέες γραμμές) και εκδώστε το κανονικά.'
+                    .'<br><br><strong>Πότε:</strong> η ίδια χρέωση ξανά. <em>Π.χ. μηνιαία συντήρηση στον ίδιο πελάτη.</em>'
+                    .'<br><strong>Δεν είναι αυτό;</strong> για διόρθωση λάθους του '.e($record->invcode)
+                    .' χρησιμοποιήστε «Ακύρωση &amp; επανέκδοση». Το '.e($record->invcode).' <strong>δεν</strong> αλλάζει.'
+                ))
+                ->modalSubmitActionLabel('Δημιουργία προχείρου')
+                ->action(function (Invoice $record) {
+                    try {
+                        $copy = app(ReissueInvoiceAsDraft::class)->newSale($record);
+                        Notification::make()
+                            ->title('Δημιουργήθηκε νέο πρόχειρο')
+                            ->body('Από το '.$record->invcode.' — ελέγξτε/αλλάξτε και εκδώστε το.')
+                            ->success()->send();
+                        $this->redirect(static::getResource()::getUrl('edit', ['record' => $copy, 'tenant' => $record->company]));
+                    } catch (Throwable $e) {
+                        Notification::make()
+                            ->title('Αποτυχία δημιουργίας')
                             ->body($e->getMessage())
                             ->danger()->persistent()->send();
                     }
@@ -1692,6 +1725,81 @@ class ViewInvoice extends ViewRecord
 
         return $invoice->issued_at->copy()->setTimezone($tz)->toDateString()
             === now()->setTimezone($tz)->toDateString();
+    }
+
+    /**
+     * The «πότε/γιατί» help shown in the three credit popups — one place, so the
+     * three texts stay consistent and each points to the other two. All three
+     * issue a correlated credit note (5.1); they differ in HOW MUCH is credited
+     * and WHAT HAPPENS NEXT. The two cancel buttons exist only on a provider
+     * channel, so the cross-references to them appear only there.
+     *
+     * @param  'partial'|'cancel'|'reissue'  $which
+     */
+    protected static function creditHelp(string $which, Invoice $record, bool $isProviderChannel): HtmlString
+    {
+        $what = match ($which) {
+            'partial' => '<strong>Πιστωτικό με ποσότητες που διαλέγετε εσείς</strong> — ολικό ή <strong>μερικό</strong> '
+                .'(0 σε μια γραμμή = δεν πιστώνεται).',
+            'cancel' => '<strong>Ολικό πιστωτικό</strong> — πιστώνει αυτόματα ό,τι απομένει σε κάθε γραμμή. '
+                .'Μόλις υποβληθεί το πιστωτικό, το '.e($record->invcode).' θεωρείται ακυρωμένο.',
+            'reissue' => '<strong>Ολικό πιστωτικό + νέο ΠΡΟΧΕΙΡΟ αντίγραφο</strong> (ίδιος πελάτης/γραμμές) '
+                .'που ανοίγει αμέσως για διόρθωση· μετά το εκδίδετε κανονικά.',
+        };
+
+        $when = match ($which) {
+            'partial' => 'Έκπτωση ή μερική επιστροφή εκ των υστέρων. '
+                .'<em>Π.χ. χρεώσατε 10 ώρες αλλά έγιναν 7 → πιστωτικό 3 ωρών.</em>',
+            'cancel' => 'Το παραστατικό δεν έπρεπε να εκδοθεί και <strong>δεν</strong> θα ξαναβγεί. '
+                .'<em>Π.χ. διπλοεκδόθηκε, ή ο πελάτης ακύρωσε την παραγγελία.</em>',
+            'reissue' => 'Το παραστατικό είχε λάθος και πρέπει να ξαναβγεί σωστό. '
+                .'<em>Π.χ. λάθος ποσό, λάθος πελάτης/ΑΦΜ, λάθος περιγραφή ή ΦΠΑ.</em>',
+        };
+
+        $others = [];
+        if ($which !== 'partial') {
+            $others[] = 'μερική πίστωση → «Έκδοση πιστωτικού»';
+        }
+        if ($isProviderChannel && $which !== 'cancel') {
+            $others[] = 'ακύρωση χωρίς επανέκδοση → «Ακύρωση μέσω πιστωτικού»';
+        }
+        if ($isProviderChannel && $which !== 'reissue') {
+            $others[] = 'ακύρωση και σωστό νέο → «Ακύρωση &amp; επανέκδοση»';
+        }
+        if ($which === 'reissue') {
+            $others[] = 'η ίδια χρέωση ξανά, χωρίς ακύρωση → «Νέο από αυτό»';
+        }
+        // Direct myDATA (no provider): the MARK itself can be cancelled at AADE.
+        if (! $isProviderChannel && $record->mydata_state === 'VALID' && $record->company?->submitsElectronically()) {
+            $others[] = 'ολική ακύρωση → «Ακύρωση μέσω '.e($record->company->einvoiceChannelLabel()).'»';
+        }
+
+        $html = $what
+            .'<br><br><strong>Πότε:</strong> '.$when
+            .($others !== [] ? '<br><strong>Δεν είναι αυτό;</strong> '.implode(' · ', $others).'.' : '');
+
+        if ($record->company?->submitsElectronically()) {
+            $html .= '<br><br><strong>Στην ΑΑΔΕ:</strong> το αρχικό <strong>δεν</strong> ακυρώνεται — μένει VALID και το πιστωτικό '
+            .'(με δικό του ΜΑΡΚ, συσχετισμένο με το αρχικό) το αντισταθμίζει. '
+            .'Με κλειστό το «Υποβολή … τώρα» το πιστωτικό μένει <strong>πρόχειρο</strong> και η πίστωση '
+            .'<strong>δεν</strong> έχει γίνει ακόμα στην ΑΑΔΕ — υποβάλετέ το μετά από τη σελίδα του.';
+        }
+
+        $paid = (float) $record->paid_total;
+        if ($paid > 0) {
+            // Deliberately conditional: paid_total is synthesised (= owed) on a cash-term
+            // invoice with no payment rows, and a partial credit on a partly-paid invoice
+            // may not overpay at all — so never state an amount or a certain outcome.
+            $html .= '<br><strong>Πληρωμές:</strong> αν μετά την πίστωση οι καταχωρισμένες πληρωμές ξεπερνούν το νέο '
+                .'οφειλόμενο, η διαφορά εμφανίζεται ως <strong>υπερπληρωμή</strong> (υπόλοιπο υπέρ του πελάτη στην καρτέλα του). '
+                .'Αν του επιστρέψετε χρήματα, καταχωρίστε «Πληρωμή» τύπου επιστροφής.';
+        }
+
+        if (self::creditTypes($record)->isEmpty()) {
+            $html .= '<br><br>⚠ Δεν υπάρχει ρυθμισμένος τύπος πιστωτικού — ρυθμίστε έναν στο Setup → Τύποι Παραστατικών (is_credit) και ξαναδοκιμάστε.';
+        }
+
+        return new HtmlString($html);
     }
 
     /** Credit invoice types for the invoice's tenant. */
