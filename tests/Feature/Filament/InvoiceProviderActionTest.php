@@ -232,6 +232,42 @@ class InvoiceProviderActionTest extends TestCase
             ->assertActionHidden('cancel_via_credit');   // provider-only anyway
     }
 
+    public function test_each_credit_popup_explains_when_to_use_it_and_points_to_the_other_two(): void
+    {
+        $tenant = $this->providerTenant();
+        $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        $page = fn () => Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()]);
+
+        $page()->mountAction('issue_credit_note')
+            ->assertMountedActionModalSee(['μερικό', 'Π.χ. χρεώσατε 10 ώρες', '«Ακύρωση μέσω πιστωτικού»', '«Ακύρωση & επανέκδοση»'])
+            ->assertMountedActionModalSeeHtml('fi-in-entry-label fi-sr-only');   // «Line label» visually hidden
+
+        $page()->mountAction('cancel_via_credit')
+            ->assertMountedActionModalSee(['Ολικό πιστωτικό', 'διπλοεκδόθηκε', '«Έκδοση πιστωτικού»', '«Ακύρωση & επανέκδοση»']);
+
+        $page()->mountAction('storno_and_reissue')
+            ->assertMountedActionModalSee(['νέο ΠΡΟΧΕΙΡΟ αντίγραφο', 'λάθος πελάτης/ΑΦΜ', '«Ακύρωση μέσω πιστωτικού»']);
+    }
+
+    public function test_direct_mydata_credit_popup_points_to_the_aade_cancel_not_the_provider_buttons(): void
+    {
+        $tenant = Company::create([
+            'name' => 'myDATA ΑΕ', 'slug' => 'md-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox', 'afm' => '800561849',
+        ]);
+        $this->creditType($tenant);
+        Filament::setTenant($tenant);
+        $invoice = $this->validInvoice($tenant, '2.1');
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->mountAction('issue_credit_note')
+            ->assertMountedActionModalSee(['ολική ακύρωση → «Ακύρωση μέσω myDATA»', 'Στην ΑΑΔΕ:'])
+            ->assertMountedActionModalDontSee(['«Ακύρωση μέσω πιστωτικού»', '«Ακύρωση & επανέκδοση»']);
+    }
+
     public function test_cancel_via_credit_is_info_only_without_a_credit_type(): void
     {
         // No credit type configured → the button still shows (to surface the help),
