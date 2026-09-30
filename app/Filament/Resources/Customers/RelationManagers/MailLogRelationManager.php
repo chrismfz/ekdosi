@@ -119,7 +119,7 @@ class MailLogRelationManager extends RelationManager
                             ->columnSpanFull()
                             ->readOnly(),
                     ])
-                    ->modalHeading('Αποτυχία αποστολής'),
+                    ->modalHeading('Σφάλμα / προειδοποίηση αποστολής'),
             ])
             ->headerActions([])
             ->toolbarActions([])

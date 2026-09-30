@@ -162,7 +162,7 @@ class InvoiceReminderResource extends Resource
                     ->visible(fn (InvoiceReminder $r): bool => filled($r->error_message))
                     ->modalSubmitAction(false)
                     ->modalCancelActionLabel('Κλείσιμο')
-                    ->modalHeading('Αποτυχία αποστολής')
+                    ->modalHeading('Σφάλμα / προειδοποίηση αποστολής')
                     ->schema(fn (InvoiceReminder $r): array => [
                         Textarea::make('error_message')->label(false)->default($r->error_message)->rows(8)->readOnly(),
                     ]),

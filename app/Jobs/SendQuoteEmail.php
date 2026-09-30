@@ -5,6 +5,8 @@ namespace App\Jobs;
 use App\Mail\QuoteOfferMail;
 use App\Models\Quote;
 use App\Models\QuoteMailLog;
+use App\Services\Mail\PrimaryRecipientRejected;
+use App\Services\Mail\RecipientFallbackSender;
 use App\Services\QuotePdfRenderer;
 use App\Services\TenantMailerFactory;
 use App\Support\CustomerLanguage;
@@ -36,6 +38,7 @@ class SendQuoteEmail implements ShouldQueue
     public function handle(
         QuotePdfRenderer $renderer,
         TenantMailerFactory $mailerFactory,
+        RecipientFallbackSender $fallbackSender,
     ): void {
         $quote = Quote::query()->whereKey($this->quote->getKey())
             ->with(['lines', 'customer', 'lead', 'company'])
@@ -78,17 +81,29 @@ class SendQuoteEmail implements ShouldQueue
 
             $pdfBytes = $renderer->render($quote);
 
-            $mailerFactory->for($tenant)
-                ->to($email)
-                // i18n: stamp the recipient's language — the quote email subject +
-                // body render in that language (both→en). PDF stays frozen.
-                ->send((new QuoteOfferMail($quote, $pdfBytes))->locale(CustomerLanguage::forDocumentMail($quote)));
+            // i18n: stamp the recipient's language — the quote email subject +
+            // body render in that language (both→en). PDF stays frozen.
+            $locale = CustomerLanguage::forDocumentMail($quote);
+            // A rejected Cc/Bcc must not stop the mail reaching the To.
+            $dropped = $fallbackSender->send(
+                $mailerFactory->for($tenant),
+                $email,
+                fn (bool $primaryOnly) => (new QuoteOfferMail($quote, $pdfBytes, $primaryOnly))->locale($locale),
+            );
 
-            $log->update(['status' => 'sent', 'sent_at' => now()]);
+            $log->update(['status' => 'sent', 'sent_at' => now()] + RecipientFallbackSender::droppedLogFields($dropped));
 
             // The offer reached them: Draft → Sent, and a lead's quote becomes
             // a real contact on the lead (idempotent).
             $quote->markSent();
+        } catch (PrimaryRecipientRejected $e) {
+            // The To doesn't exist — no retries; alert so the email gets fixed.
+            $log->update([
+                'status' => 'failed',
+                'error_message' => $e->getMessage(),
+                'failed_at' => now(),
+            ]);
+            report($e);
         } catch (Throwable $e) {
             $log->update([
                 'status' => 'failed',

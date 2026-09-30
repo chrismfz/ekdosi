@@ -11,6 +11,7 @@ use App\Models\Customer;
 use App\Models\Lead;
 use App\Models\Quote;
 use App\Models\QuoteLine;
+use App\Services\Mail\RecipientFallbackSender;
 use App\Services\QuoteNumberer;
 use App\Services\QuotePdfRenderer;
 use App\Services\QuoteTotals;
@@ -70,6 +71,7 @@ class QuotePdfEmailTest extends TestCase
         (new SendQuoteEmail($quote, 'manual', null))->handle(
             app(QuotePdfRenderer::class),
             app(TenantMailerFactory::class),
+            app(RecipientFallbackSender::class),
         );
 
         Mail::assertSent(QuoteOfferMail::class);
@@ -96,7 +98,7 @@ class QuotePdfEmailTest extends TestCase
         $this->assertSame(LeadStatus::Contacted, $lead->fresh()->status);
         $this->assertSame(0, $lead->timeline()->count());
 
-        (new SendQuoteEmail($quote, 'manual', null))->handle(app(QuotePdfRenderer::class), app(TenantMailerFactory::class));
+        (new SendQuoteEmail($quote, 'manual', null))->handle(app(QuotePdfRenderer::class), app(TenantMailerFactory::class), app(RecipientFallbackSender::class));
 
         Mail::assertSent(QuoteOfferMail::class, fn (QuoteOfferMail $m) => $m->hasTo('lead@x.gr'));
         $this->assertDatabaseHas('quote_mail_logs', ['quote_id' => $quote->id, 'status' => 'sent', 'recipient' => 'lead@x.gr']);
@@ -109,7 +111,7 @@ class QuotePdfEmailTest extends TestCase
         $this->assertNotNull($lead->last_activity_at);
 
         // Re-sending logs another mail but never a second contact row.
-        (new SendQuoteEmail($quote->fresh(), 'manual', null))->handle(app(QuotePdfRenderer::class), app(TenantMailerFactory::class));
+        (new SendQuoteEmail($quote->fresh(), 'manual', null))->handle(app(QuotePdfRenderer::class), app(TenantMailerFactory::class), app(RecipientFallbackSender::class));
         $this->assertSame(1, $lead->timeline()->where('type', 'quote')->count());
     }
 
@@ -121,6 +123,7 @@ class QuotePdfEmailTest extends TestCase
         (new SendQuoteEmail($quote, 'manual', null))->handle(
             app(QuotePdfRenderer::class),
             app(TenantMailerFactory::class),
+            app(RecipientFallbackSender::class),
         );
 
         Mail::assertNotSent(QuoteOfferMail::class);

@@ -8,6 +8,7 @@ use App\Models\InvoiceReminder;
 use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Services\InvoicePdfRenderer;
+use App\Services\Mail\RecipientFallbackSender;
 use App\Services\TenantMailerFactory;
 use App\Support\CustomerLanguage;
 use Carbon\CarbonImmutable;
@@ -29,6 +30,7 @@ final class ReminderSender
         private readonly InvoiceBalance $balances,
         private readonly InvoicePdfRenderer $pdf,
         private readonly TenantMailerFactory $mailers,
+        private readonly RecipientFallbackSender $fallbackSender,
     ) {}
 
     public function send(int $reminderId): ?InvoiceReminder
@@ -72,9 +74,12 @@ final class ReminderSender
             $subject = $message['subject'];
             $pdf = $settings->attachPdf ? $this->pdf->render($invoice) : null;
 
-            $this->mailers->for($invoice->company)
-                ->to($recipient)
-                ->send((new InvoiceReminderMail($invoice, $message['subject'], $message['body'], $message['bodyText'], $pdf))->locale($locale));
+            // A rejected Cc/Bcc must not stop the reminder reaching the To.
+            $dropped = $this->fallbackSender->send(
+                $this->mailers->for($invoice->company),
+                $recipient,
+                fn (bool $primaryOnly) => (new InvoiceReminderMail($invoice, $message['subject'], $message['body'], $message['bodyText'], $pdf, $primaryOnly))->locale($locale),
+            );
         } catch (Throwable $e) {
             report($e);
 
@@ -83,7 +88,7 @@ final class ReminderSender
 
         // Record the send FIRST — it happened; nothing after this may turn it into
         // a «failed» row that invites a second email.
-        $this->finish($row, InvoiceReminder::STATUS_SENT, recipient: $recipient, subject: $subject, extra: [
+        $this->finish($row, InvoiceReminder::STATUS_SENT, recipient: $recipient, subject: $subject, error: RecipientFallbackSender::droppedLogFields($dropped)['error_message'] ?? null, extra: [
             'sent_at' => now(),
             'due_date' => $due?->toDateString(),
             'days_overdue' => $days,

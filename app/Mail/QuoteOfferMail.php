@@ -24,6 +24,8 @@ class QuoteOfferMail extends Mailable
     public function __construct(
         public Quote $quote,
         public string $pdfBytes,
+        /** RecipientFallbackSender retry: To only (no customer CC / audit BCC). */
+        public bool $primaryOnly = false,
     ) {}
 
     public function envelope(): Envelope
@@ -35,12 +37,12 @@ class QuoteOfferMail extends Mailable
         $fromName = $tenant->mail_from_name ?: ($tenant->name ?: config('mail.from.name'));
 
         $cc = [];
-        if ($customer?->secondary_email) {
+        if (! $this->primaryOnly && $customer?->secondary_email) {
             $cc[] = new Address($customer->secondary_email);
         }
 
         $bcc = [];
-        foreach ($tenant->auditBccList() as $bccAddr) {
+        foreach ($this->primaryOnly ? [] : $tenant->auditBccList() as $bccAddr) {
             $bcc[] = new Address($bccAddr);
         }
 

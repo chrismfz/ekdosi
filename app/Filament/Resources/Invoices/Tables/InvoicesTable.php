@@ -151,7 +151,9 @@ class InvoicesTable
                         'queued', 'sending' => 'info',
                         default => 'gray',
                     })
-                    ->tooltip(fn (?Invoice $record): ?string => $record?->latestMailLog?->status === 'failed'
+                    // 'failed' → the error; 'sent' with a note → a Cc/Bcc was rejected and
+                    // the mail went to the primary only (RecipientFallbackSender).
+                    ->tooltip(fn (?Invoice $record): ?string => in_array($record?->latestMailLog?->status, ['failed', 'sent'], true)
                         ? $record->latestMailLog->error_message
                         : null)
                     ->toggleable(),

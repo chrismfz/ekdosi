@@ -68,6 +68,11 @@ class InvoiceIssuedMail extends Mailable
          * customer-send path keeps its CC.
          */
         public bool $suppressCustomerCc = false,
+        /**
+         * RecipientFallbackSender's retry after an extra recipient was rejected:
+         * To only — no customer CC and no tenant audit BCC.
+         */
+        public bool $primaryOnly = false,
     ) {
         $this->pdfBytes = $pdfBytes;
     }
@@ -82,12 +87,12 @@ class InvoiceIssuedMail extends Mailable
         $fromName = $tenant->mail_from_name    ?: ($tenant->name ?: config('mail.from.name'));
 
         $cc = [];
-        if (! $this->suppressCustomerCc && $customer?->secondary_email) {
+        if (! $this->suppressCustomerCc && ! $this->primaryOnly && $customer?->secondary_email) {
             $cc[] = new Address($customer->secondary_email);
         }
 
         $bcc = [];
-        foreach ($tenant->auditBccList() as $bccAddr) {
+        foreach ($this->primaryOnly ? [] : $tenant->auditBccList() as $bccAddr) {
             $bcc[] = new Address($bccAddr);
         }
 
