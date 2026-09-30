@@ -25,6 +25,8 @@ class RejectingSmtpTransport extends AbstractTransport
         public array $rejected = [],
         public int $code = 550,
         public string $expected = '250/251/252',
+        /** Server reply text; null → Postfix style «<addr>: … User unknown». */
+        public ?string $reply = null,
     ) {
         parent::__construct();
     }
@@ -35,9 +37,12 @@ class RejectingSmtpTransport extends AbstractTransport
 
         foreach ($message->getEnvelope()->getRecipients() as $recipient) {
             if (in_array($recipient->getAddress(), $this->rejected, true)) {
+                $reply = $this->reply
+                    ?? sprintf('%d 5.1.1 <%s>: Recipient address rejected: User unknown in virtual mailbox table', $this->code, $recipient->getAddress());
+
                 throw new UnexpectedResponseException(sprintf(
-                    'Expected response code "%s" but got code "%d", with message "%d 5.1.1 <%s>: Recipient address rejected: User unknown in virtual mailbox table".',
-                    $this->expected, $this->code, $this->code, $recipient->getAddress(),
+                    'Expected response code "%s" but got code "%d", with message "%s".',
+                    $this->expected, $this->code, $reply,
                 ), $this->code);
             }
         }

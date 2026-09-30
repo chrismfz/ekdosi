@@ -144,6 +144,38 @@ class MailRecipientFallbackTest extends TestCase
         $this->assertSame('failed', InvoiceMailLog::query()->sole()->status);
     }
 
+    public function test_a_rejection_that_names_no_address_drops_every_extra(): void
+    {
+        // Exchange/Gmail style: no <address> in the reply.
+        $this->transport->rejected = ['gone@example.com'];
+        $this->transport->reply = '550 5.1.1 User unknown';
+
+        $this->sendInvoice($invoice = $this->makeFiledInvoice());
+
+        $this->assertSame(['cust@example.com'], $this->transport->recipientsOf(0));
+        $log = InvoiceMailLog::where('invoice_id', $invoice->id)->sole();
+        $this->assertSame('sent', $log->status);
+        $this->assertStringContainsString('gone@example.com', (string) $log->error_message);
+        $this->assertStringContainsString('audit@acme.gr', (string) $log->error_message);
+    }
+
+    public function test_a_sender_rejection_at_rcpt_is_not_mistaken_for_a_bad_extra(): void
+    {
+        // Postfix reports sender restrictions at RCPT; it's an SMTP/From problem.
+        $this->transport->rejected = ['gone@example.com'];
+        $this->transport->reply = '553 5.7.1 <noreply@acme.gr>: Sender address rejected: not owned by user';
+        $this->transport->code = 553;
+
+        try {
+            $this->sendInvoice($this->makeFiledInvoice());
+            $this->fail('a sender rejection must be rethrown for the normal failure path');
+        } catch (UnexpectedResponseException) {
+        }
+
+        $this->assertSame(1, $this->transport->attempts, 'no To-only resend for a From problem');
+        $this->assertSame('failed', InvoiceMailLog::query()->sole()->status);
+    }
+
     public function test_a_rejected_cc_on_a_quote_still_reaches_the_customer(): void
     {
         $this->transport->rejected = ['gone@example.com'];

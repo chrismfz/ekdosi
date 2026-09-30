@@ -53,6 +53,12 @@ class RecipientFallbackSender
             }
 
             $mail = $makeMail(false);
+            // Postfix reports sender restrictions at RCPT too («<from>: Sender address
+            // rejected») — that's an SMTP/From config problem, not a recipient one.
+            if ($rejected !== null && strcasecmp($rejected, self::fromAddress($mail) ?? '') === 0) {
+                throw $e;
+            }
+
             $extras = self::extraRecipients($mail);
             if ($extras === []) {
                 // Only the To was on the envelope → it must be the one rejected.
@@ -119,6 +125,13 @@ class RecipientFallbackSender
     public static function rejectedAddress(\Throwable $e): ?string
     {
         return preg_match('/<([^<>\s]+@[^<>\s]+)>/', $e->getMessage(), $m) ? $m[1] : null;
+    }
+
+    private static function fromAddress(Mailable $mail): ?string
+    {
+        $from = method_exists($mail, 'envelope') ? $mail->envelope()->from : null;
+
+        return $from instanceof Address ? $from->address : $from;
     }
 
     /** @return list<string> */
