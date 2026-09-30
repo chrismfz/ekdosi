@@ -24,6 +24,8 @@ class InvoiceReminderMail extends Mailable
         public string $body,
         public string $bodyText,
         public ?string $pdfBytes = null,
+        /** RecipientFallbackSender retry: To only (no customer CC / audit BCC). */
+        public bool $primaryOnly = false,
     ) {}
 
     public function envelope(): Envelope
@@ -31,8 +33,8 @@ class InvoiceReminderMail extends Mailable
         $tenant = $this->invoice->company;
         $customer = $this->invoice->customer;
 
-        $cc = $customer?->secondary_email ? [new Address($customer->secondary_email)] : [];
-        $bcc = array_map(static fn (string $a): Address => new Address($a), $tenant->auditBccList());
+        $cc = ! $this->primaryOnly && $customer?->secondary_email ? [new Address($customer->secondary_email)] : [];
+        $bcc = $this->primaryOnly ? [] : array_map(static fn (string $a): Address => new Address($a), $tenant->auditBccList());
 
         return new Envelope(
             from: new Address(

@@ -11,6 +11,7 @@ use App\Models\InvoiceMailLog;
 use App\Models\InvoiceType;
 use App\Models\User;
 use App\Services\InvoicePdfRenderer;
+use App\Services\Mail\RecipientFallbackSender;
 use App\Services\MailTemplateRenderer;
 use App\Services\TenantMailerFactory;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -83,6 +84,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         // Mail dispatched to primary recipient
@@ -115,6 +117,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         Mail::assertNothingSent();
@@ -139,6 +142,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         Mail::assertNothingSent();
@@ -162,6 +166,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         $log = InvoiceMailLog::where('invoice_id', $invoice->id)->first();
@@ -186,6 +191,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
@@ -212,6 +218,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
@@ -233,6 +240,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         Mail::assertSent(InvoiceIssuedMail::class, function ($mail) {
@@ -417,6 +425,7 @@ class SendInvoiceEmailTest extends TestCase
             app(InvoicePdfRenderer::class),
             app(TenantMailerFactory::class),
             app(MailTemplateRenderer::class),
+            app(RecipientFallbackSender::class),
         );
 
         // Valid addresses BCC'd; invalid one not present (auditBccList
@@ -434,10 +443,10 @@ class SendInvoiceEmailTest extends TestCase
         $job = new SendInvoiceEmail($invoice, trigger: 'auto');
 
         // Attempt 1 sends and marks the row 'sent'.
-        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class));
+        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class), app(RecipientFallbackSender::class));
         // Attempt 2 = a RETRY of the same dispatch (same instance → same send_key):
         // the guard sees the 'sent' row and must NOT mail the customer again.
-        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class));
+        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class), app(RecipientFallbackSender::class));
 
         Mail::assertSent(InvoiceIssuedMail::class, 1);   // exactly once, not twice
         $this->assertSame(1, InvoiceMailLog::where('invoice_id', $invoice->id)
@@ -459,7 +468,7 @@ class SendInvoiceEmailTest extends TestCase
             'send_key' => 'test-send-key-0001', 'status' => 'sending', 'queued_at' => now(),
         ]);
 
-        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class));
+        $job->handle(app(InvoicePdfRenderer::class), app(TenantMailerFactory::class), app(MailTemplateRenderer::class), app(RecipientFallbackSender::class));
 
         Mail::assertNothingSent();                          // no duplicate
         $this->assertSame('sent', $log->fresh()->status);   // reconciled

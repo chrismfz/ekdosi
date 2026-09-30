@@ -6,6 +6,8 @@ use App\Mail\InvoiceIssuedMail;
 use App\Models\Invoice;
 use App\Models\InvoiceMailLog;
 use App\Services\InvoicePdfRenderer;
+use App\Services\Mail\PrimaryRecipientRejected;
+use App\Services\Mail\RecipientFallbackSender;
 use App\Services\MailTemplateRenderer;
 use App\Services\TenantMailerFactory;
 use App\Support\CustomerLanguage;
@@ -86,6 +88,7 @@ class SendInvoiceEmail implements ShouldQueue
         InvoicePdfRenderer $renderer,
         TenantMailerFactory $mailerFactory,
         MailTemplateRenderer $templateRenderer,
+        RecipientFallbackSender $fallbackSender,
     ): void {
         // Re-fetch with relations so we render + log against current
         // state, not the SerializesModels snapshot from queue time.
@@ -228,18 +231,33 @@ class SendInvoiceEmail implements ShouldQueue
             $log->update(['status' => 'sending']);
 
             $pdfBytes = $renderer->render($invoice);
-            $mailerFactory->for($tenant)
-                ->to($email)
-                // i18n: stamp the recipient's language on the mailable. The default
-                // (non-custom) invoice body + subject + MARK section render in that
-                // language (MailTemplateRenderer); a tenant's CUSTOM template stays in
-                // its own language. The PDF stays frozen (a separate slice).
-                ->send((new InvoiceIssuedMail($invoice, $pdfBytes, suppressCustomerCc: $isOverride))->locale(CustomerLanguage::forDocumentMail($invoice)));
+            // i18n: stamp the recipient's language on the mailable. The default
+            // (non-custom) invoice body + subject + MARK section render in that
+            // language (MailTemplateRenderer); a tenant's CUSTOM template stays in
+            // its own language. The PDF stays frozen (a separate slice).
+            $locale = CustomerLanguage::forDocumentMail($invoice);
+            // A rejected Cc/Bcc must not stop the mail reaching the To (SMTP is
+            // all-or-nothing per message) — see RecipientFallbackSender.
+            $dropped = $fallbackSender->send(
+                $mailerFactory->for($tenant),
+                $email,
+                fn (bool $primaryOnly) => (new InvoiceIssuedMail($invoice, $pdfBytes, suppressCustomerCc: $isOverride, primaryOnly: $primaryOnly))->locale($locale),
+            );
 
             $log->update([
                 'status'  => 'sent',
                 'sent_at' => now(),
+            ] + RecipientFallbackSender::droppedLogFields($dropped));
+        } catch (PrimaryRecipientRejected $e) {
+            // The To itself doesn't exist: retrying can't help. Fail the row now
+            // (no retries) and surface it via the exception handler so the
+            // operator is alerted to fix the customer's email.
+            $log->update([
+                'status'        => 'failed',
+                'error_message' => $e->getMessage(),
+                'failed_at'     => now(),
             ]);
+            report($e);
         } catch (Throwable $e) {
             $log->update([
                 'status'        => 'failed',
