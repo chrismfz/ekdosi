@@ -80,6 +80,7 @@ class ServiceContractForm
                         ->label('Προϊόν/Υπηρεσία (προαιρετικό)')
                         ->searchable()
                         ->getSearchResultsUsing(fn (string $search) => Product::query()
+                            ->sellable()
                             ->where('company_id', Filament::getTenant()?->getKey())
                             ->where('description_short', 'like', "%{$search}%")
                             ->limit(50)

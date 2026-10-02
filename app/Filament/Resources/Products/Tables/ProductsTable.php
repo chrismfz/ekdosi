@@ -2,16 +2,17 @@
 
 namespace App\Filament\Resources\Products\Tables;
 
+use App\Filament\Resources\Products\ProductResource;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Product;
 use App\Models\StockMovement;
 use App\Services\Stock\StockService;
 use App\Support\MyData\ClassificationGuidance;
+use App\Support\Products\StockDisplay;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -24,6 +25,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 class ProductsTable
 {
@@ -46,11 +48,22 @@ class ProductsTable
                     ->copyable()
                     ->toggleable(),
 
+                TextColumn::make('internal_code')
+                    ->label('Εσωτ. κωδικός')
+                    ->searchable()
+                    ->copyable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('description_short')
                     ->label('Description')
                     ->searchable()
                     ->sortable()
-                    ->wrap(),
+                    ->wrap()
+                    ->description(fn (Product $record) => match ($record->kind) {
+                        Product::KIND_VARIABLE => 'Με παραλλαγές · '.(int) ($record->variants_count ?? 0),
+                        Product::KIND_VARIANT => 'Παραλλαγή',
+                        default => null,
+                    }),
 
                 // Pin frequent products/services to the top of the
                 // invoice-line picker. Toggle inline.
@@ -98,24 +111,22 @@ class ProductsTable
                     ->label('Απόθεμα')
                     // Real on-hand from the stock ledger (SUM of movements).
                     // Only meaningful for track_stock products; others show «—».
-                    ->state(fn ($record) => $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null)
+                    // A variable parent has no movements of its own — it shows its tracked
+                    // variants' total (StockService::currentStock's definition), toned on the
+                    // total alone: reorder thresholds are per sellable unit (the variants).
+                    ->state(fn (Product $record) => match (true) {
+                        $record->isVariable() => ($record->tracked_variants_count ?? 0) > 0 ? (float) ($record->variants_stock ?? 0) : null,
+                        (bool) $record->track_stock => (float) ($record->stock_on_hand ?? 0),
+                        default => null,
+                    })
                     ->numeric(decimalPlaces: 3)
                     ->badge()
-                    ->color(function ($record) {
-                        if (! $record->track_stock) {
-                            return 'gray';
-                        }
-                        $s = (float) ($record->stock_on_hand ?? 0);
-                        if ($s < 0) {
-                            return 'danger';   // backorder
-                        }
-                        $reorder = (float) ($record->reorder_level ?? 0);
-                        if ($s <= 0 || ($reorder > 0 && $s <= $reorder)) {
-                            return 'warning';  // χαμηλό / εξαντλημένο → αναπαραγγελία
-                        }
-
-                        return 'success';
-                    })
+                    ->color(fn (Product $record) => $record->isVariable()
+                        ? StockDisplay::tone(($record->tracked_variants_count ?? 0) > 0 ? (float) ($record->variants_stock ?? 0) : null)
+                        : StockDisplay::tone(
+                            $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null,
+                            $record->reorder_level !== null ? (float) $record->reorder_level : null,
+                        ))
                     ->placeholder('—')
                     ->alignRight()
                     ->toggleable(),
@@ -151,7 +162,15 @@ class ProductsTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->modifyQueryUsing(fn (Builder $query) => $query->withSum('stockMovements as stock_on_hand', 'qty_change'))
+            ->modifyQueryUsing(fn (Builder $query) => $query
+                ->withSum('stockMovements as stock_on_hand', 'qty_change')
+                ->withCount(['variants', 'variants as tracked_variants_count' => fn (Builder $q) => $q->where('track_stock', true)])
+                ->selectSub(fn ($q) => $q->from('stock_movements')
+                    ->join('products as v', 'v.id', '=', 'stock_movements.product_id')
+                    ->whereColumn('v.parent_product_id', 'products.id')
+                    ->whereNull('v.deleted_at')
+                    ->where('v.track_stock', true)
+                    ->selectRaw('COALESCE(SUM(stock_movements.qty_change), 0)'), 'variants_stock'))
             ->filters([
                 TernaryFilter::make('is_active')
                     ->label('Active')
@@ -160,6 +179,32 @@ class ProductsTable
                     ->trueLabel('Active only')
                     ->falseLabel('Inactive only')
                     ->placeholder('All'),
+
+                // Variants (docs/woocommerce-bridge-plan.md §0): by default the list shows
+                // simple products + variable parents; a search (barcode/SKU scan) always
+                // reaches the variants too.
+                SelectFilter::make('kind_view')
+                    ->label('Παραλλαγές')
+                    ->options([
+                        'grouped' => 'Χωρίς παραλλαγές (γονικά + απλά)',
+                        'variants' => 'Μόνο παραλλαγές',
+                        'all' => 'Όλα',
+                    ])
+                    ->default('grouped')
+                    ->query(function (Builder $query, array $data, $livewire): Builder {
+                        $view = $data['value'] ?? 'grouped';
+                        if ($view === 'variants') {
+                            return $query->where('kind', Product::KIND_VARIANT);
+                        }
+                        // Searching, or asking for stock status (reorder is per variant),
+                        // must reach the variants — otherwise «grouped» would hide them.
+                        $stockStatus = data_get($livewire->tableFilters ?? [], 'stock_status.value');
+                        if ($view === 'grouped' && blank($livewire->getTableSearch()) && blank($stockStatus)) {
+                            return $query->where('kind', '!=', Product::KIND_VARIANT);
+                        }
+
+                        return $query;
+                    }),
 
                 TernaryFilter::make('is_favorite')
                     ->label('Αγαπημένα')
@@ -189,16 +234,19 @@ class ProductsTable
                         if (! $v) {
                             return $query;
                         }
-                        // groupBy the PK so HAVING on the withSum alias works on
-                        // sqlite too (MySQL tolerates HAVING without GROUP BY).
-                        $query->where('track_stock', true)->groupBy('products.id');
+                        // WHERE on the correlated sum — no GROUP BY/HAVING: products.* under
+                        // MariaDB's ONLY_FULL_GROUP_BY made the old groupBy+having a 1055.
+                        // Reorder is per sellable unit — the variants, never their grouping parent.
+                        $onHand = '(SELECT COALESCE(SUM(sm.qty_change), 0) FROM stock_movements sm WHERE sm.product_id = products.id)';
+                        $query->where('products.track_stock', true)
+                            ->where('products.kind', '!=', Product::KIND_VARIABLE);
                         if ($v === 'negative') {
-                            return $query->havingRaw('COALESCE(stock_on_hand, 0) < 0');
+                            return $query->whereRaw("{$onHand} < 0");
                         }
 
                         // low/out: ≤0, or ≤ reorder_level when a threshold is set.
-                        return $query->havingRaw(
-                            'COALESCE(stock_on_hand, 0) <= 0 OR (reorder_level IS NOT NULL AND reorder_level > 0 AND COALESCE(stock_on_hand, 0) <= reorder_level)'
+                        return $query->whereRaw(
+                            "({$onHand} <= 0 OR (products.reorder_level IS NOT NULL AND products.reorder_level > 0 AND {$onHand} <= products.reorder_level))"
                         );
                     }),
 
@@ -211,7 +259,7 @@ class ProductsTable
                     ->label('Παραλαβή')
                     ->icon('heroicon-o-plus-circle')
                     ->color('success')
-                    ->visible(fn (Product $record) => $record->track_stock && ! $record->trashed())
+                    ->visible(fn (Product $record) => $record->track_stock && ! $record->isVariable() && ! $record->trashed())
                     ->schema([
                         TextInput::make('qty')
                             ->label('Ποσότητα παραλαβής')
@@ -253,9 +301,25 @@ class ProductsTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                    RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn (Product $record): array => ProductResource::dependents($record)),
+                    // Restore skips variants whose parent is gone / whose axes changed
+                    // (Product::restoring refuses them) and says how many were skipped.
+                    RestoreBulkAction::make()
+                        ->action(function (Collection $records): void {
+                            // Parents before variants, so a parent restored in the same batch
+                            // is already live when its variants are checked.
+                            $restored = $records
+                                ->sortBy(fn (Product $record) => $record->isVariant() ? 1 : 0)
+                                ->filter(fn (Product $record) => $record->restore())
+                                ->count();
+                            $skipped = $records->count() - $restored;
+                            Notification::make()
+                                ->{$skipped > 0 ? 'warning' : 'success'}()
+                                ->title('Επαναφέρθηκαν: '.$restored)
+                                ->body($skipped > 0 ? 'Παραλείφθηκαν '.$skipped.' παραλλαγές (διαγραμμένο γονικό ή άλλα χαρακτηριστικά).' : null)
+                                ->send();
+                        }),
+                    GuardedDeleteAction::forceBulk(fn (Product $record): array => ProductResource::forceDependents($record)),
                 ]),
             ])
             ->defaultSort('description_short');

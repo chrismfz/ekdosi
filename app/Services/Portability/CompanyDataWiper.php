@@ -39,7 +39,7 @@ class CompanyDataWiper
     public const PARTY_TABLES = [
         'lead_activities', 'leads',
         'customer_contacts', 'customers', 'suppliers',
-        'product_billing_prices', 'product_price_tiers', 'products',
+        'product_billing_prices', 'product_price_tiers', 'product_variant_values', 'products',
     ];
 
     /**
@@ -118,7 +118,13 @@ class CompanyDataWiper
                 $this->wipeTaggables($company->id, $keepParties);
 
                 foreach ($this->tables($keepParties) as $table) {
-                    $n = DB::table($table)->where('company_id', $company->id)->delete();
+                    // products.parent_product_id is a self-FK (variant → parent): drop the
+                    // variants first so the FK holds even where it can't be switched off
+                    // mid-transaction (sqlite).
+                    $n = $table === 'products'
+                        ? DB::table('products')->where('company_id', $company->id)->whereNotNull('parent_product_id')->delete()
+                        : 0;
+                    $n += DB::table($table)->where('company_id', $company->id)->delete();
                     if ($n > 0) {
                         $deleted[$table] = $n;
                     }

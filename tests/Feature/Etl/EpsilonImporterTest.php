@@ -182,6 +182,23 @@ class EpsilonImporterTest extends TestCase
         $this->assertSame('ΤΙΜ', $inv->fresh()->filedSeries(), 'a rename must not rewrite an imported filing');
     }
 
+    public function test_sales_lines_never_link_to_a_variable_parent(): void
+    {
+        $importer = new EpsilonImporter($this->tenant);
+        $importer->importCustomers($this->load('Customers'));
+        $importer->importProducts($this->load('Items'), $this->load('Services'));
+
+        // Every catalogue product became a variant grouping (non-sellable) before
+        // the sales import: lines are raw-inserted, so the lookup itself must skip them.
+        $parents = Product::where('company_id', $this->tenant->id)->pluck('id');
+        Product::whereIn('id', $parents)->update(['kind' => Product::KIND_VARIABLE]);
+
+        $importer->importSales($this->load('Sales'));
+
+        $this->assertSame(0, InvoiceLine::where('company_id', $this->tenant->id)->whereIn('product_id', $parents)->count());
+        $this->assertGreaterThan(0, InvoiceLine::where('company_id', $this->tenant->id)->count());
+    }
+
     public function test_sales_store_filed_line_values_verbatim_not_recomputed(): void
     {
         // The 68.40 @24% line: AADE has 84.81; the InvoiceLine recompute hook

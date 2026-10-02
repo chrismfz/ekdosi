@@ -28,9 +28,19 @@ use Illuminate\Database\Eloquent\Model;
  */
 class StockService
 {
-    /** Current on-hand for a tracked product (0.0 for untracked or no movements). */
+    /**
+     * Current on-hand for a tracked product (0.0 for untracked or no movements).
+     * A variable parent holds no stock itself: its on-hand is the sum of its live
+     * variants that track stock — the ONE definition the list, grid and POS use.
+     */
     public function currentStock(Product $product): float
     {
+        if ($product->isVariable()) {
+            return (float) StockMovement::query()
+                ->whereIn('product_id', $product->variants()->where('track_stock', true)->select('id'))
+                ->sum('qty_change');
+        }
+
         if (! $product->track_stock) {
             return 0.0;
         }
@@ -50,6 +60,11 @@ class StockService
         ?string $note = null,
         ?Carbon $occurredAt = null,
     ): StockMovement {
+        if ($product->isVariable()) {
+            // A movement on the grouping parent would be ghost stock no screen shows.
+            throw new \InvalidArgumentException('Το «'.$product->description_short.'» έχει παραλλαγές — το απόθεμα κινείται στις παραλλαγές του.');
+        }
+
         return $product->stockMovements()->create([
             'company_id' => $product->company_id,
             'qty_change' => $qtyChange,
@@ -78,7 +93,7 @@ class StockService
 
         foreach ($invoice->lines()->get() as $line) {
             $product = $line->product;
-            if (! $product || ! $product->track_stock) {
+            if (! $product || ! $product->track_stock || $product->isVariable()) {
                 continue;
             }
             if ($this->lineAlreadyMoved($product->company_id, InvoiceLine::class, $line->getKey())) {
@@ -114,7 +129,7 @@ class StockService
 
         foreach ($note->lines()->get() as $line) {
             $product = $line->product;
-            if (! $product || ! $product->track_stock) {
+            if (! $product || ! $product->track_stock || $product->isVariable()) {
                 continue;
             }
             if ($this->lineAlreadyMoved($product->company_id, DeliveryNoteLine::class, $line->getKey())) {
@@ -140,7 +155,7 @@ class StockService
 
         foreach ($creditNote->lines()->get() as $line) {
             $product = $line->product;
-            if (! $product || ! $product->track_stock) {
+            if (! $product || ! $product->track_stock || $product->isVariable()) {
                 continue;
             }
             if ($this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
@@ -186,7 +201,7 @@ class StockService
 
         foreach ($invoice->lines()->get() as $line) {
             $product = $line->product;
-            if (! $product || ! $product->track_stock) {
+            if (! $product || ! $product->track_stock || $product->isVariable()) {
                 continue;
             }
             if (! $this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
@@ -233,7 +248,7 @@ class StockService
     {
         foreach ($note->lines()->get() as $line) {
             $product = $line->product;
-            if (! $product || ! $product->track_stock) {
+            if (! $product || ! $product->track_stock || $product->isVariable()) {
                 continue;
             }
             if (! $this->lineHasMovement($product->company_id, DeliveryNoteLine::class, $line->getKey(), StockMovement::REASON_SALE)) {
@@ -295,7 +310,7 @@ class StockService
 
         foreach ($creditNote->lines()->get() as $line) {
             $product = $line->product;
-            if (! $product || ! $product->track_stock) {
+            if (! $product || ! $product->track_stock || $product->isVariable()) {
                 continue;
             }
             if (! $this->lineHasMovement($product->company_id, InvoiceLine::class, $line->getKey(), StockMovement::REASON_RETURN)) {
@@ -337,7 +352,7 @@ class StockService
         $standing = [];
         foreach ($source->lines()->get() as $line) {
             $product = $line->product;
-            if (! $product || ! $product->track_stock
+            if (! $product || ! $product->track_stock || $product->isVariable()
                 || $this->isCompensated($companyId, InvoiceLine::class, $line->getKey())) {
                 continue;
             }

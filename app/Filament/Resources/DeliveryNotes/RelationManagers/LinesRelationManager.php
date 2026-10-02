@@ -60,6 +60,7 @@ class LinesRelationManager extends RelationManager
                     ->searchable()
                     ->preload(false)
                     ->getSearchResultsUsing(fn (string $search) => Product::query()
+                        ->sellable()
                         ->where('company_id', Filament::getTenant()?->getKey())
                         ->where('description_short', 'like', "%{$search}%")
                         ->orderBy('description_short')

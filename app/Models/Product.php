@@ -4,12 +4,16 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
+use App\Services\Products\VariantGenerator;
 use App\Support\MyData\Taric;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Collection;
 
 /**
  * Per-tenant product catalogue row. Mirrors legacy PRODUCT.
@@ -33,11 +37,27 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * - Markup is NOT a column. Legacy reads it from a Windows Registry app
  *   setting; we use product_categories.markup as the per-category default
  *   for the live-compute in the Filament form.
+ *
+ * Variants (`kind`): a `variable` product is a NON-sellable grouping («Παντελόνι
+ * Nike»); each `variant` («… — Μαύρο / M») is a full product row of its own (own
+ * stock, SKU, barcode, price) pointing at it via `parent_product_id`. Pickers use
+ * {@see scopeSellable()} so a variable parent can never land on a document line.
  */
 class Product extends Model
 {
     use BelongsToCompany;
     use HasFactory, HasTags, SoftDeletes;
+
+    public const KIND_SIMPLE = 'simple';
+
+    public const KIND_VARIABLE = 'variable';
+
+    public const KIND_VARIANT = 'variant';
+
+    /** Mirror the column default so a freshly created (un-refreshed) model knows its kind. */
+    protected $attributes = [
+        'kind' => self::KIND_SIMPLE,
+    ];
 
     /**
      * TARIC is stored NORMALISED (10 chars: an 8-digit ΣΟ code +«00») whatever the entry
@@ -53,6 +73,9 @@ class Product extends Model
     protected $fillable = [
         'taric_code',
         'company_id',
+        'kind',
+        'parent_product_id',
+        'internal_code',
         'legacy_id',
         'barcode',
         'sku',
@@ -113,9 +136,75 @@ class Product extends Model
         ];
     }
 
+    protected static function booted(): void
+    {
+        // Backstop for EVERY restore path (row action, bulk action, code): a variant
+        // whose parent is gone or whose axes no longer match its live siblings stays
+        // trashed. The UI actions check the same rule first to explain why.
+        static::restoring(fn (Product $product) => app(VariantGenerator::class)->restoreBlocker($product) === null);
+    }
+
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_product_id');
+    }
+
+    public function variants(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_product_id');
+    }
+
+    /** A variant's axis values («Μαύρο», «M»), ordered by attribute then value. */
+    public function variantValues(): BelongsToMany
+    {
+        return $this->belongsToMany(ProductAttributeValue::class, 'product_variant_values')
+            ->withPivot('product_attribute_id', 'company_id')
+            ->withTimestamps();
+    }
+
+    /**
+     * A variant's values in the ONE canonical order (attribute sort, then value
+     * sort) — used for its name, its label in the variants tab, grid and form.
+     *
+     * @return Collection<int, ProductAttributeValue>
+     */
+    public function orderedVariantValues(): Collection
+    {
+        $this->loadMissing('variantValues.attribute');
+
+        return self::orderValues($this->variantValues);
+    }
+
+    /**
+     * @param  iterable<ProductAttributeValue>  $values
+     * @return Collection<int, ProductAttributeValue>
+     */
+    public static function orderValues(iterable $values): Collection
+    {
+        return collect($values)
+            ->sortBy(fn (ProductAttributeValue $v) => [$v->attribute?->sort ?? 0, $v->product_attribute_id, $v->sort, $v->id])
+            ->values();
+    }
+
+    public function isVariable(): bool
+    {
+        return $this->kind === self::KIND_VARIABLE;
+    }
+
+    public function isVariant(): bool
+    {
+        return $this->kind === self::KIND_VARIANT;
+    }
+
+    /** Everything that can go on a document line — i.e. not a variable (grouping) parent. */
+    public function scopeSellable(Builder $query): Builder
+    {
+        return $query->where($query->qualifyColumn('kind'), '!=', self::KIND_VARIABLE);
     }
 
     public function stockMovements(): HasMany

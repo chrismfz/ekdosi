@@ -39,6 +39,9 @@ class CompanyExporter
         'delivery_methods',
         'distribution_aims',
         'product_categories',
+        // Variant axes (Χρώμα / Μέγεθος…) — operator-curated catalogue config.
+        'product_attributes',
+        'product_attribute_values',
         'vat_categories',
         'metric_units',
         'tags',
@@ -62,6 +65,8 @@ class CompanyExporter
         'customers', 'customer_contacts', 'suppliers',
         'leads', 'lead_activities',
         'products', 'product_price_tiers', 'product_billing_prices',
+        // variant ↔ attribute-value links (pivot, no model of its own).
+        'product_variant_values',
         'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
         // Dunning log — travels so the target knows which stages already went
         // out (else its first run would re-send them).
