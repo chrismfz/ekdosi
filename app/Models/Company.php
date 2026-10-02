@@ -7,6 +7,7 @@ use App\Enums\MyDataMode;
 use App\Models\Scopes\CompanyScope;
 use App\Observers\CompanyObserver;
 use App\Services\Portability\CompanyPurger;
+use App\Support\LegalEvidence;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -17,6 +18,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
 #[ObservedBy(CompanyObserver::class)]
@@ -45,8 +47,12 @@ class Company extends Model
      * `deleted` then drops the tenant's roles. One transaction around the lot
      * means a failure anywhere leaves the tenant whole. The purge lives HERE, not
      * in a `deleting` observer, so deleteQuietly()/withoutEvents() get it too.
-     * Covers every instance delete — the EditCompany action, the bulk action,
-     * tinker; a query-builder delete (Company::where()->delete()) bypasses it.
+     * Covers every instance delete — the EditCompany action, tinker, any future
+     * command; a query-builder delete (Company::where()->delete()) bypasses it.
+     *
+     * MYD-025's audit line lives here too, so no delete path can skip it: the
+     * filing evidence is described BEFORE the purge removes it, and logged only
+     * once the delete has committed.
      */
     public function delete(): ?bool
     {
@@ -57,7 +63,9 @@ class Company extends Model
             return parent::delete();
         }
 
-        return DB::transaction(function (): ?bool {
+        $evidence = LegalEvidence::for($this)->describe();
+
+        return DB::transaction(function () use ($evidence): ?bool {
             app(CompanyPurger::class)->clearRestrictedChildren($this);
 
             $deleted = parent::delete();
@@ -69,6 +77,13 @@ class Company extends Model
             if ($deleted === false) {
                 throw new RuntimeException('Η διαγραφή της εταιρείας ακυρώθηκε.');
             }
+
+            DB::afterCommit(fn () => Log::warning('Company deleted', [
+                'company_id' => $this->getKey(),
+                'slug' => $this->slug,
+                'evidence' => $evidence,
+                'user_id' => auth()->id(),
+            ]));
 
             return $deleted;
         });

@@ -32,9 +32,13 @@ class CompaniesNoBulkDeleteTest extends TestCase
         ]));
         $other = Company::create(['name' => 'Other OE', 'slug' => 'other-'.uniqid(), 'country_code' => 'GR', 'einvoice_provider' => 'none']);
 
-        Livewire::test(ListCompanies::class)
+        $page = Livewire::test(ListCompanies::class)
             ->assertSuccessful()
             ->assertCanSeeTableRecords([$other])
             ->assertActionDoesNotExist(TestAction::make('delete')->table()->bulk());
+
+        // Not just «no action named delete»: no bulk action at all, so a renamed
+        // DeleteBulkAction can't sneak the bypass back in.
+        $this->assertSame([], $page->instance()->getTable()->getFlatBulkActions());
     }
 }
