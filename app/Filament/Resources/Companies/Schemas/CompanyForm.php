@@ -1149,11 +1149,13 @@ class CompanyForm
                                 Select::make('ai_model')
                                     ->label('Μοντέλο')
                                     ->options([
-                                        'claude-sonnet-4-6' => 'Sonnet 4.6 (προεπιλογή — ισορροπία)',
+                                        'claude-sonnet-5-5' => 'Sonnet 5.5 (προεπιλογή — ισορροπία)',
+                                        'claude-opus-5-5' => 'Opus 5.5 (βαριά ανάλυση)',
                                         'claude-haiku-4-5' => 'Haiku 4.5 (φθηνό/γρήγορο)',
-                                        'claude-opus-4-8' => 'Opus 4.8 (βαριά ανάλυση)',
+                                        'claude-sonnet-4-6' => 'Sonnet 4.6 (παλαιότερο)',
+                                        'claude-opus-4-8' => 'Opus 4.8 (παλαιότερο)',
                                     ])
-                                    ->placeholder('Προεπιλογή συστήματος (Sonnet)')
+                                    ->placeholder('Προεπιλογή συστήματος (Sonnet 5.5)')
                                     ->helperText('Κενό = η προεπιλογή του συστήματος.'),
                                 TextInput::make('ai_monthly_token_cap')
                                     ->label('Μηνιαίο όριο tokens')

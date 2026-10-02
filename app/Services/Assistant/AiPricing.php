@@ -26,7 +26,7 @@ class AiPricing
         $cost =
             ($usage['input_tokens'] ?? 0) * $in
             + ($usage['output_tokens'] ?? 0) * $out
-            + ($usage['cache_read_input_tokens'] ?? 0) * $in * 0.1
+            + ($usage['cache_read_input_tokens'] ?? 0) * (float) ($rates['cache_read'] ?? $in * 0.1)
             + ($usage['cache_creation_input_tokens'] ?? 0) * $in * 1.25;
 
         // Rates are per 1M tokens.
