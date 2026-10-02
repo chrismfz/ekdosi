@@ -22,6 +22,7 @@ use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Schema;
 use Livewire\Livewire;
 use Tests\TestCase;
 
@@ -106,6 +107,82 @@ class VariantScreensTest extends TestCase
 
         $this->assertDatabaseMissing('product_attribute_values', ['id' => $unused->id]);
         $this->assertDatabaseHas('product_attribute_values', ['id' => $usedValue->id]);
+    }
+
+    public function test_a_new_repeater_row_whose_uuid_starts_with_a_used_id_does_not_fool_the_guard(): void
+    {
+        [, $size] = $this->axes();
+        $parent = $this->variableParent();
+        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+        $used = $size->values()->where('value', 'S')->first();
+
+        $page = Livewire::test(EditProductAttribute::class, ['record' => $size->getKey()]);
+        $state = $page->get('data.values');
+        unset($state['record-'.$used->id]);
+        // A NEW row keyed by a UUID that begins with the removed row's id.
+        $state[$used->id.'ab9c3e-1111-4222-8333-944455556666'] = ['value' => 'XXL', 'code' => null, 'color_hex' => null];
+        $page->set('data.values', $state)->call('save');
+
+        $this->assertDatabaseHas('product_attribute_values', ['id' => $used->id]);
+    }
+
+    public function test_values_used_only_by_deleted_variants_can_be_removed(): void
+    {
+        [, $size] = $this->axes();
+        $parent = $this->variableParent();
+        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+        $value = $size->values()->where('value', 'S')->first();
+        $parent->variants()->get()->each->delete();
+
+        $page = Livewire::test(EditProductAttribute::class, ['record' => $size->getKey()]);
+        $state = $page->get('data.values');
+        unset($state['record-'.$value->id]);
+        $page->set('data.values', $state)->call('save')->assertHasNoFormErrors();
+
+        $this->assertDatabaseMissing('product_attribute_values', ['id' => $value->id]);
+        $this->assertDatabaseMissing('product_variant_values', ['product_attribute_value_id' => $value->id]);
+    }
+
+    public function test_restoring_a_variant_is_refused_when_its_parent_is_gone_or_its_axes_changed(): void
+    {
+        [$color, $size] = $this->axes();
+        $parent = $this->variableParent();
+        $gen = app(VariantGenerator::class);
+        $gen->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+        $old = $parent->variants()->first();
+        $parent->variants()->get()->each->delete();
+
+        // Axes changed: colour × size is the live set now.
+        $gen->generate($parent, [
+            $color->id => $color->values()->pluck('id')->all(),
+            $size->id => $size->values()->pluck('id')->all(),
+        ]);
+        Livewire::test(VariantsRelationManager::class, ['ownerRecord' => $parent, 'pageClass' => EditProduct::class])
+            ->filterTable('trashed', false)
+            ->callTableAction('restore', $old);
+        $this->assertSoftDeleted($old);
+        $this->assertFalse($old->restore(), 'the model hook refuses it on any path');
+
+        // Parent gone: delete the live variants + the parent, then try a bulk restore.
+        $parent->variants()->get()->each->delete();
+        $parent->delete();
+        $one = $parent->variants()->withTrashed()->latest('id')->first();
+        Livewire::test(ListProducts::class)
+            ->filterTable('kind_view', 'variants')
+            ->filterTable('trashed', false)
+            ->callTableBulkAction('restore', [$one]);
+        $this->assertSoftDeleted($one);
+    }
+
+    public function test_variant_foreign_keys_never_block_a_company_delete(): void
+    {
+        $fks = collect(Schema::getForeignKeys('products'))
+            ->merge(Schema::getForeignKeys('product_variant_values'))
+            ->mapWithKeys(fn (array $fk) => [implode(',', $fk['columns']) => strtolower((string) $fk['on_delete'])]);
+
+        $this->assertSame('set null', $fks['parent_product_id']);
+        $this->assertSame('cascade', $fks['product_attribute_id']);
+        $this->assertSame('cascade', $fks['product_attribute_value_id']);
     }
 
     public function test_variable_product_edit_shows_grid_and_variants_tab(): void

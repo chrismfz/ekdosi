@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
+use App\Services\Products\VariantGenerator;
 use App\Support\MyData\Taric;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -132,6 +133,14 @@ class Product extends Model
             'module_meta' => 'array',
             'dunning_enabled' => 'boolean',
         ];
+    }
+
+    protected static function booted(): void
+    {
+        // Backstop for EVERY restore path (row action, bulk action, code): a variant
+        // whose parent is gone or whose axes no longer match its live siblings stays
+        // trashed. The UI actions check the same rule first to explain why.
+        static::restoring(fn (Product $product) => app(VariantGenerator::class)->restoreBlocker($product) === null);
     }
 
     public function company(): BelongsTo

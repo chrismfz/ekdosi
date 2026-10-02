@@ -19,8 +19,11 @@ return new class extends Migration
     {
         Schema::table('products', function (Blueprint $table) {
             $table->string('kind', 16)->default('simple')->after('company_id');   // simple|variable|variant
+            // SET NULL like every other products FK: a company delete cascades through
+            // products row by row (parent may go before its variants). The app guards
+            // (ProductResource::dependents/forceDependents) stop UI deletes instead.
             $table->foreignId('parent_product_id')->nullable()->after('kind')
-                ->constrained('products')->restrictOnDelete();
+                ->constrained('products')->nullOnDelete();
             $table->string('internal_code', 60)->nullable()->after('sku');      // e.g. the SoftOne item code
             $table->index(['company_id', 'kind']);
             $table->unique(['company_id', 'internal_code']);
@@ -54,8 +57,12 @@ return new class extends Migration
             $table->id();
             $table->foreignId('company_id')->constrained()->cascadeOnDelete();
             $table->foreignId('product_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('product_attribute_id')->constrained()->restrictOnDelete();
-            $table->foreignId('product_attribute_value_id')->constrained()->restrictOnDelete();
+            // CASCADE, not RESTRICT: a company delete must not abort on these links.
+            // Removing a value/attribute that LIVE variants use is refused in the app
+            // (ProductAttributeResource::dependents, EditProductAttribute::beforeSave);
+            // links of soft-deleted variants simply go with it.
+            $table->foreignId('product_attribute_id')->constrained()->cascadeOnDelete();
+            $table->foreignId('product_attribute_value_id')->constrained()->cascadeOnDelete();
 
             $table->timestamps();   // the company export/import stamps every row
 

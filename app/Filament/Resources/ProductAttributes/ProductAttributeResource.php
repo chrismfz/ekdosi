@@ -41,8 +41,9 @@ class ProductAttributeResource extends Resource
     protected static ?string $recordTitleAttribute = 'name';
 
     /**
-     * Variants using this attribute block its deletion (the pivot FK is
-     * restrictOnDelete — this turns the raw DB error into a readable message).
+     * LIVE variants using this attribute block its deletion. Links of soft-deleted
+     * variants don't count — they cascade away with the attribute (a restored
+     * variant missing an axis is then refused by VariantGenerator::restoreBlocker).
      *
      * @return array<string, int>
      */
@@ -50,7 +51,9 @@ class ProductAttributeResource extends Resource
     {
         return [
             'παραλλαγές' => DB::table('product_variant_values')
-                ->where('product_attribute_id', $record->getKey())
+                ->join('products', 'products.id', '=', 'product_variant_values.product_id')
+                ->whereNull('products.deleted_at')
+                ->where('product_variant_values.product_attribute_id', $record->getKey())
                 ->count(),
         ];
     }

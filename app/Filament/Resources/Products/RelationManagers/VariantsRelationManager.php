@@ -125,7 +125,14 @@ class VariantsRelationManager extends RelationManager
             ])
             ->recordActions([
                 DeleteAction::make(),
-                RestoreAction::make(),
+                RestoreAction::make()
+                    ->before(function (RestoreAction $action, Product $record): void {
+                        $why = app(VariantGenerator::class)->restoreBlocker($record);
+                        if ($why !== null) {
+                            Notification::make()->danger()->title('Δεν γίνεται επαναφορά')->body($why)->send();
+                            $action->halt();
+                        }
+                    }),
             ])
             ->toolbarActions([
                 BulkActionGroup::make([

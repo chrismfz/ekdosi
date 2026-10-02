@@ -146,6 +146,41 @@ class VariantGenerator
     }
 
     /**
+     * Why a soft-deleted variant may NOT be restored (null = it may): its parent
+     * is gone, or the parent's live variants now use a different set of axes
+     * (restoring it would bring back an overlapping set and split stock).
+     */
+    public function restoreBlocker(Product $variant): ?string
+    {
+        if (! $variant->isVariant()) {
+            return null;
+        }
+
+        $parent = Product::query()->withoutGlobalScopes()->whereKey($variant->parent_product_id)->first();
+        if ($parent === null || $parent->trashed()) {
+            return 'Το γονικό προϊόν είναι διαγραμμένο — επανάφερέ το πρώτα.';
+        }
+
+        $own = DB::table('product_variant_values')
+            ->where('product_id', $variant->getKey())
+            ->pluck('product_attribute_id')
+            ->map(fn ($id) => (int) $id)
+            ->sort()
+            ->values()
+            ->all();
+        $live = $this->existingAttributeSets($parent);
+
+        if ($own === []) {
+            return 'Η παραλλαγή έχασε τα χαρακτηριστικά της (διαγράφηκαν) — δεν επαναφέρεται.';
+        }
+        if ($live !== [] && $live !== [$own]) {
+            return 'Οι ενεργές παραλλαγές του «'.$parent->description_short.'» έχουν πλέον άλλα χαρακτηριστικά — αυτή η παλιά παραλλαγή δεν επαναφέρεται.';
+        }
+
+        return null;
+    }
+
+    /**
      * Copy the chosen field groups (keys of SYNC_GROUPS, plus 'names') from the
      * parent onto every variant. Returns how many variants were updated.
      *

@@ -24,6 +24,7 @@ use Filament\Tables\Filters\TernaryFilter;
 use Filament\Tables\Filters\TrashedFilter;
 use Filament\Tables\Table;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection;
 
 class ProductsTable
 {
@@ -301,7 +302,18 @@ class ProductsTable
             ->toolbarActions([
                 BulkActionGroup::make([
                     GuardedDeleteAction::bulk(fn (Product $record): array => ProductResource::dependents($record)),
-                    RestoreBulkAction::make(),
+                    // Restore skips variants whose parent is gone / whose axes changed
+                    // (Product::restoring refuses them) and says how many were skipped.
+                    RestoreBulkAction::make()
+                        ->action(function (Collection $records): void {
+                            $restored = $records->filter(fn (Product $record) => $record->restore())->count();
+                            $skipped = $records->count() - $restored;
+                            Notification::make()
+                                ->{$skipped > 0 ? 'warning' : 'success'}()
+                                ->title('Επαναφέρθηκαν: '.$restored)
+                                ->body($skipped > 0 ? 'Παραλείφθηκαν '.$skipped.' παραλλαγές (διαγραμμένο γονικό ή άλλα χαρακτηριστικά).' : null)
+                                ->send();
+                        }),
                     GuardedDeleteAction::forceBulk(fn (Product $record): array => ProductResource::forceDependents($record)),
                 ]),
             ])
