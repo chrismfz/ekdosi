@@ -110,17 +110,29 @@ class ProductsTable
                     ->label('Απόθεμα')
                     // Real on-hand from the stock ledger (SUM of movements).
                     // Only meaningful for track_stock products; others show «—».
-                    // A variable parent has no movements of its own — show its variants' total.
-                    ->state(fn ($record) => $record->track_stock
-                        ? (float) ($record->isVariable() ? ($record->variants_stock ?? 0) : ($record->stock_on_hand ?? 0))
-                        : null)
+                    // A variable parent has no movements of its own — it shows its tracked
+                    // variants' total (StockService::currentStock's definition), toned on the
+                    // total alone: reorder thresholds are per sellable unit (the variants).
+                    ->state(fn (Product $record) => match (true) {
+                        $record->isVariable() => ($record->tracked_variants_count ?? 0) > 0 ? (float) ($record->variants_stock ?? 0) : null,
+                        (bool) $record->track_stock => (float) ($record->stock_on_hand ?? 0),
+                        default => null,
+                    })
                     ->numeric(decimalPlaces: 3)
                     ->badge()
-                    ->color(function ($record) {
+                    ->color(function (Product $record) {
+                        if ($record->isVariable()) {
+                            if (($record->tracked_variants_count ?? 0) === 0) {
+                                return 'gray';
+                            }
+                            $s = (float) ($record->variants_stock ?? 0);
+
+                            return $s < 0 ? 'danger' : ($s <= 0 ? 'warning' : 'success');
+                        }
                         if (! $record->track_stock) {
                             return 'gray';
                         }
-                        $s = (float) ($record->isVariable() ? ($record->variants_stock ?? 0) : ($record->stock_on_hand ?? 0));
+                        $s = (float) ($record->stock_on_hand ?? 0);
                         if ($s < 0) {
                             return 'danger';   // backorder
                         }
@@ -168,11 +180,12 @@ class ProductsTable
             ])
             ->modifyQueryUsing(fn (Builder $query) => $query
                 ->withSum('stockMovements as stock_on_hand', 'qty_change')
-                ->withCount('variants')
+                ->withCount(['variants', 'variants as tracked_variants_count' => fn (Builder $q) => $q->where('track_stock', true)])
                 ->selectSub(fn ($q) => $q->from('stock_movements')
                     ->join('products as v', 'v.id', '=', 'stock_movements.product_id')
                     ->whereColumn('v.parent_product_id', 'products.id')
                     ->whereNull('v.deleted_at')
+                    ->where('v.track_stock', true)
                     ->selectRaw('COALESCE(SUM(stock_movements.qty_change), 0)'), 'variants_stock'))
             ->filters([
                 TernaryFilter::make('is_active')
@@ -199,7 +212,10 @@ class ProductsTable
                         if ($view === 'variants') {
                             return $query->where('kind', Product::KIND_VARIANT);
                         }
-                        if ($view === 'grouped' && blank($livewire->getTableSearch())) {
+                        // Searching, or asking for stock status (reorder is per variant),
+                        // must reach the variants — otherwise «grouped» would hide them.
+                        $stockStatus = data_get($livewire->tableFilters ?? [], 'stock_status.value');
+                        if ($view === 'grouped' && blank($livewire->getTableSearch()) && blank($stockStatus)) {
                             return $query->where('kind', '!=', Product::KIND_VARIANT);
                         }
 
@@ -234,19 +250,19 @@ class ProductsTable
                         if (! $v) {
                             return $query;
                         }
-                        // groupBy the PK so HAVING on the withSum alias works on
-                        // sqlite too (MySQL tolerates HAVING without GROUP BY).
+                        // WHERE on the correlated sum — no GROUP BY/HAVING: products.* under
+                        // MariaDB's ONLY_FULL_GROUP_BY made the old groupBy+having a 1055.
                         // Reorder is per sellable unit — the variants, never their grouping parent.
-                        $query->where('track_stock', true)
-                            ->where('kind', '!=', Product::KIND_VARIABLE)
-                            ->groupBy('products.id');
+                        $onHand = '(SELECT COALESCE(SUM(sm.qty_change), 0) FROM stock_movements sm WHERE sm.product_id = products.id)';
+                        $query->where('products.track_stock', true)
+                            ->where('products.kind', '!=', Product::KIND_VARIABLE);
                         if ($v === 'negative') {
-                            return $query->havingRaw('COALESCE(stock_on_hand, 0) < 0');
+                            return $query->whereRaw("{$onHand} < 0");
                         }
 
                         // low/out: ≤0, or ≤ reorder_level when a threshold is set.
-                        return $query->havingRaw(
-                            'COALESCE(stock_on_hand, 0) <= 0 OR (reorder_level IS NOT NULL AND reorder_level > 0 AND COALESCE(stock_on_hand, 0) <= reorder_level)'
+                        return $query->whereRaw(
+                            "({$onHand} <= 0 OR (products.reorder_level IS NOT NULL AND products.reorder_level > 0 AND {$onHand} <= products.reorder_level))"
                         );
                     }),
 

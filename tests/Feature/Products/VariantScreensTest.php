@@ -286,10 +286,35 @@ class VariantScreensTest extends TestCase
         app(StockService::class)->record($s, 4, StockMovement::REASON_RECEIPT);
         app(StockService::class)->record($m, 3, StockMovement::REASON_RECEIPT);
 
+        app(StockService::class)->record($m, -3, StockMovement::REASON_ADJUSTMENT); // M → 0
+
+        // The parent's own toggle off must not hide its variants' total.
+        $parent->update(['track_stock' => false]);
+
         Livewire::test(ListProducts::class)
-            ->assertTableColumnStateSet('stock_on_hand', 7.0, $parent)
+            ->assertTableColumnStateSet('stock_on_hand', 4.0, $parent)
+            // Reorder is per variant: on the DEFAULT (grouped) view the low-stock
+            // filter must surface the empty variant, never the parent.
             ->filterTable('stock_status', 'low')
-            ->assertCanNotSeeTableRecords([$parent]);
+            ->assertCanSeeTableRecords([$m])
+            ->assertCanNotSeeTableRecords([$parent, $s]);
+    }
+
+    public function test_stock_service_defines_a_parents_stock_and_refuses_movements_on_it(): void
+    {
+        [, $size] = $this->axes();
+        $parent = $this->variableParent();
+        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+        [$s, $m] = $parent->variants()->orderBy('id')->get()->all();
+        $stock = app(StockService::class);
+        $stock->record($s, 5, StockMovement::REASON_RECEIPT);
+        $stock->record($m, 2, StockMovement::REASON_RECEIPT);
+        $m->update(['track_stock' => false]);   // untracked variants don't count
+
+        $this->assertSame(5.0, $stock->currentStock($parent->refresh()));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $stock->record($parent, 1, StockMovement::REASON_RECEIPT);
     }
 
     public function test_choosing_variants_turns_stock_tracking_on_by_default(): void
