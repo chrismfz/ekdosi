@@ -7,6 +7,7 @@ use App\Filament\Resources\Products\ProductResource;
 use App\Models\Product;
 use App\Models\ProductAttribute;
 use App\Services\Products\VariantGenerator;
+use App\Support\Products\StockDisplay;
 use Filament\Actions\Action;
 use Filament\Actions\BulkAction;
 use Filament\Actions\BulkActionGroup;
@@ -65,8 +66,7 @@ class VariantsRelationManager extends RelationManager
             ->columns([
                 TextColumn::make('values')
                     ->label('Παραλλαγή')
-                    ->state(fn (Product $record) => $record->variantValues
-                        ->sortBy(fn ($v) => [$v->attribute?->sort ?? 0, $v->product_attribute_id])
+                    ->state(fn (Product $record) => $record->orderedVariantValues()
                         ->map(fn ($v) => ($v->color_hex
                             ? '<span class="ekdosi-swatch" style="background: '.e($v->color_hex).'"></span>'
                             : '').e($v->value))
@@ -104,11 +104,12 @@ class VariantsRelationManager extends RelationManager
                 TextColumn::make('stock_on_hand')
                     ->label('Απόθεμα')
                     ->state(fn (Product $record) => $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null)
-                    ->numeric(decimalPlaces: 0)
+                    ->formatStateUsing(fn (?float $state) => StockDisplay::format($state))
                     ->badge()
-                    ->color(fn (Product $record) => ! $record->track_stock ? 'gray'
-                        : ((float) ($record->stock_on_hand ?? 0) < 0 ? 'danger'
-                            : ((float) ($record->stock_on_hand ?? 0) <= 0 ? 'warning' : 'success')))
+                    ->color(fn (Product $record) => StockDisplay::tone(
+                        $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null,
+                        $record->reorder_level !== null ? (float) $record->reorder_level : null,
+                    ))
                     ->placeholder('—')
                     ->alignRight(),
 

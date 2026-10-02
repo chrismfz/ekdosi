@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Products\RelationManagers;
 
+use App\Models\Product;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\CreateAction;
 use Filament\Actions\DeleteAction;
@@ -13,6 +14,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Quantity-break tiers for a product (legacy PROD_PRICE_QTY).
@@ -32,6 +34,13 @@ class PriceTiersRelationManager extends RelationManager
     protected static ?string $title = 'Quantity-break tiers';
 
     protected static ?string $recordTitleAttribute = 'qty';
+
+    /** A variable parent is never sold, so tiers on it would never apply — set them per variant. */
+    public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
+    {
+        return ! ($ownerRecord instanceof Product && $ownerRecord->isVariable())
+            && parent::canViewForRecord($ownerRecord, $pageClass);
+    }
 
     public function form(Schema $schema): Schema
     {
@@ -95,6 +104,7 @@ class PriceTiersRelationManager extends RelationManager
                         // the current tenant. The parent Product already
                         // belongs to this tenant; we mirror it.
                         $data['company_id'] = Filament::getTenant()?->getKey();
+
                         return $data;
                     }),
             ])

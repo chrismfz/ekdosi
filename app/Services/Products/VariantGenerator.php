@@ -210,7 +210,7 @@ class VariantGenerator
                     if ($names) {
                         $changes['description_short'] = $this->variantName(
                             $parent,
-                            $this->orderedValues($variant->variantValues)
+                            Product::orderValues($variant->variantValues)
                         );
                     }
                     $variant->fill($changes);
@@ -363,18 +363,6 @@ class VariantGenerator
             ->groupBy('product_id')
             ->map(fn ($rows) => $rows->pluck('product_attribute_id')->map(fn ($id) => (int) $id)->sort()->values()->all())
             ->unique(fn (array $set) => implode(',', $set))
-            ->values()
-            ->all();
-    }
-
-    /**
-     * @param  iterable<ProductAttributeValue>  $values
-     * @return list<ProductAttributeValue>
-     */
-    private function orderedValues(iterable $values): array
-    {
-        return collect($values)
-            ->sortBy(fn (ProductAttributeValue $v) => [$v->attribute?->sort ?? 0, $v->product_attribute_id, $v->sort, $v->id])
             ->values()
             ->all();
     }

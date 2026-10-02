@@ -9,6 +9,7 @@ use App\Models\Product;
 use App\Models\StockMovement;
 use App\Services\Stock\StockService;
 use App\Support\MyData\ClassificationGuidance;
+use App\Support\Products\StockDisplay;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
 use Filament\Actions\EditAction;
@@ -120,29 +121,12 @@ class ProductsTable
                     })
                     ->numeric(decimalPlaces: 3)
                     ->badge()
-                    ->color(function (Product $record) {
-                        if ($record->isVariable()) {
-                            if (($record->tracked_variants_count ?? 0) === 0) {
-                                return 'gray';
-                            }
-                            $s = (float) ($record->variants_stock ?? 0);
-
-                            return $s < 0 ? 'danger' : ($s <= 0 ? 'warning' : 'success');
-                        }
-                        if (! $record->track_stock) {
-                            return 'gray';
-                        }
-                        $s = (float) ($record->stock_on_hand ?? 0);
-                        if ($s < 0) {
-                            return 'danger';   // backorder
-                        }
-                        $reorder = (float) ($record->reorder_level ?? 0);
-                        if ($s <= 0 || ($reorder > 0 && $s <= $reorder)) {
-                            return 'warning';  // χαμηλό / εξαντλημένο → αναπαραγγελία
-                        }
-
-                        return 'success';
-                    })
+                    ->color(fn (Product $record) => $record->isVariable()
+                        ? StockDisplay::tone(($record->tracked_variants_count ?? 0) > 0 ? (float) ($record->variants_stock ?? 0) : null)
+                        : StockDisplay::tone(
+                            $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null,
+                            $record->reorder_level !== null ? (float) $record->reorder_level : null,
+                        ))
                     ->placeholder('—')
                     ->alignRight()
                     ->toggleable(),

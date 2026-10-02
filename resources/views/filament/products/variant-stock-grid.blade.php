@@ -1,6 +1,6 @@
 @php
-    $fmt = fn (?float $n) => $n === null ? '—' : rtrim(rtrim(number_format($n, 3, ',', '.'), '0'), ',');
-    $tone = fn (?float $n) => $n === null ? '' : ($n < 0 ? 'is-negative' : ($n <= 0 ? 'is-out' : 'is-in'));
+    $fmt = fn (?float $n) => \App\Support\Products\StockDisplay::format($n);
+    $css = fn (array $cell) => ['danger' => 'is-negative', 'warning' => 'is-out', 'success' => 'is-in'][$cell['tone']] ?? '';
 @endphp
 
 @if ($grid['mode'] === 'empty')
@@ -29,7 +29,7 @@
                             @if ($cell === null)
                                 <td class="is-none">·</td>
                             @else
-                                <td class="{{ $tone($cell['stock']) }} {{ $cell['active'] ? '' : 'is-inactive' }}">{{ $fmt($cell['stock']) }}</td>
+                                <td class="{{ $css($cell) }} {{ $cell['active'] ? '' : 'is-inactive' }}">{{ $fmt($cell['stock']) }}</td>
                             @endif
                         @endforeach
                     </tr>
@@ -44,7 +44,7 @@
                 @foreach ($grid['items'] as $item)
                     <tr>
                         <th class="ekdosi-vgrid-rowhead">{{ $item['label'] }}</th>
-                        <td class="{{ $tone($item['stock']) }} {{ $item['active'] ? '' : 'is-inactive' }}">{{ $fmt($item['stock']) }}</td>
+                        <td class="{{ $css($item) }} {{ $item['active'] ? '' : 'is-inactive' }}">{{ $fmt($item['stock']) }}</td>
                     </tr>
                 @endforeach
             </tbody>

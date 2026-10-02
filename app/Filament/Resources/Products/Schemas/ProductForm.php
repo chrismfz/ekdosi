@@ -94,8 +94,7 @@ class ProductForm
                                             return 'Με παραλλαγές — '.$record->variants()->count().' παραλλαγές (καρτέλα «Παραλλαγές» παρακάτω).';
                                         }
                                         $parent = $record->parent()->withTrashed()->first();
-                                        $values = $record->variantValues()->with('attribute')->get()
-                                            ->sortBy(fn ($v) => [$v->attribute?->sort ?? 0, $v->product_attribute_id])
+                                        $values = $record->orderedVariantValues()
                                             ->map(fn ($v) => e($v->attribute?->name.': '.$v->value))
                                             ->implode(' · ');
                                         $link = $parent

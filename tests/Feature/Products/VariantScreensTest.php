@@ -8,6 +8,7 @@ use App\Filament\Resources\ProductAttributes\Pages\ListProductAttributes;
 use App\Filament\Resources\Products\Pages\CreateProduct;
 use App\Filament\Resources\Products\Pages\EditProduct;
 use App\Filament\Resources\Products\Pages\ListProducts;
+use App\Filament\Resources\Products\RelationManagers\PriceTiersRelationManager;
 use App\Filament\Resources\Products\RelationManagers\VariantsRelationManager;
 use App\Models\Company;
 use App\Models\Product;
@@ -19,6 +20,8 @@ use App\Models\User;
 use App\Models\VatCategory;
 use App\Services\Products\VariantGenerator;
 use App\Services\Stock\StockService;
+use App\Support\Products\StockDisplay;
+use App\Support\Products\VariantStockGrid;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
@@ -233,6 +236,38 @@ class VariantScreensTest extends TestCase
         Livewire::test(EditProduct::class, ['record' => $variant->getKey()])
             ->assertOk()
             ->assertSee('Παραλλαγή του');
+    }
+
+    public function test_list_tab_and_grid_agree_on_the_stock_tone_and_format(): void
+    {
+        [$color, $size] = $this->axes();
+        $parent = $this->variableParent();
+        app(VariantGenerator::class)->generate($parent, [
+            $color->id => [$color->values()->where('value', 'Μαύρο')->value('id')],
+            $size->id => [$size->values()->where('value', 'S')->value('id')],
+        ]);
+        $variant = $parent->variants()->first();
+        $variant->update(['reorder_level' => 5]);
+        app(StockService::class)->record($variant, 3.5, StockMovement::REASON_RECEIPT);
+
+        // Same rule everywhere: 3.5 ≤ reorder 5 → «warning», shown as «3.5».
+        $this->assertSame('warning', StockDisplay::tone(3.5, 5.0));
+        $this->assertSame('3.5', StockDisplay::format(3.5));
+        $grid = VariantStockGrid::for($parent);
+        $this->assertSame('warning', $grid['rows'][0]['cells'][0]['tone']);
+
+        Livewire::test(VariantsRelationManager::class, ['ownerRecord' => $parent, 'pageClass' => EditProduct::class])
+            ->assertTableColumnFormattedStateSet('stock_on_hand', '3.5', $variant);
+        Livewire::test(ListProducts::class)
+            ->filterTable('kind_view', 'variants')
+            ->assertTableColumnStateSet('stock_on_hand', 3.5, $variant);
+    }
+
+    public function test_price_tiers_tab_is_hidden_on_a_variable_parent(): void
+    {
+        $parent = $this->variableParent();
+
+        $this->assertFalse(PriceTiersRelationManager::canViewForRecord($parent, EditProduct::class));
     }
 
     public function test_generate_action_creates_the_picked_combinations(): void

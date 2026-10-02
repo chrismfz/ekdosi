@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Collection;
 
 /**
  * Per-tenant product catalogue row. Mirrors legacy PRODUCT.
@@ -164,6 +165,30 @@ class Product extends Model
         return $this->belongsToMany(ProductAttributeValue::class, 'product_variant_values')
             ->withPivot('product_attribute_id', 'company_id')
             ->withTimestamps();
+    }
+
+    /**
+     * A variant's values in the ONE canonical order (attribute sort, then value
+     * sort) — used for its name, its label in the variants tab, grid and form.
+     *
+     * @return Collection<int, ProductAttributeValue>
+     */
+    public function orderedVariantValues(): Collection
+    {
+        $this->loadMissing('variantValues.attribute');
+
+        return self::orderValues($this->variantValues);
+    }
+
+    /**
+     * @param  iterable<ProductAttributeValue>  $values
+     * @return Collection<int, ProductAttributeValue>
+     */
+    public static function orderValues(iterable $values): Collection
+    {
+        return collect($values)
+            ->sortBy(fn (ProductAttributeValue $v) => [$v->attribute?->sort ?? 0, $v->product_attribute_id, $v->sort, $v->id])
+            ->values();
     }
 
     public function isVariable(): bool

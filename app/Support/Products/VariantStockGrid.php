@@ -32,6 +32,7 @@ class VariantStockGrid
         }
 
         $stockOf = fn (Product $v): ?float => $v->track_stock ? (float) ($v->stock_on_hand ?? 0) : null;
+        $toneOf = fn (Product $v): string => StockDisplay::tone($stockOf($v), $v->reorder_level !== null ? (float) $v->reorder_level : null);
         $total = (float) $variants->sum(fn (Product $v) => $stockOf($v) ?? 0);
 
         $color = self::axis($variants, ProductAttribute::KIND_COLOR);
@@ -46,7 +47,7 @@ class VariantStockGrid
                 $c = $v->variantValues->firstWhere('product_attribute_id', $color['attribute_id']);
                 $s = $v->variantValues->firstWhere('product_attribute_id', $size['attribute_id']);
                 if ($c && $s) {
-                    $cells[$c->id][$s->id] = ['stock' => $stockOf($v), 'active' => (bool) $v->is_active];
+                    $cells[$c->id][$s->id] = ['stock' => $stockOf($v), 'tone' => $toneOf($v), 'active' => (bool) $v->is_active];
                     $placed++;
                 }
             }
@@ -70,10 +71,9 @@ class VariantStockGrid
         return [
             'mode' => 'list',
             'items' => $variants->map(fn (Product $v) => [
-                'label' => $v->variantValues
-                    ->sortBy(fn ($val) => [$val->attribute?->sort ?? 0, $val->product_attribute_id])
-                    ->pluck('value')->implode(' / ') ?: $v->description_short,
+                'label' => Product::orderValues($v->variantValues)->pluck('value')->implode(' / ') ?: $v->description_short,
                 'stock' => $stockOf($v),
+                'tone' => $toneOf($v),
                 'active' => (bool) $v->is_active,
             ])->all(),
             'total' => $total,
