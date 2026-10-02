@@ -222,6 +222,21 @@ class GrossAnchoredLineTest extends TestCase
         $this->assertStringContainsString('<api_UnitPrice>0.80</api_UnitPrice>', $xml);
     }
 
+    public function test_invosign_states_the_real_discount_of_a_discounted_shelf_line(): void
+    {
+        // 100 × 10,00 −1%: pre-discount net 806,45 → net 798,39 → the discount IS 8,06
+        // (not 8,06×100 − 798,39 = 7,61, which hid the rounding).
+        $invoice = $this->invoice([[10.00, 100]]);
+        $invoice->lines()->first()->update(['discount' => 1]);
+        $invoice = app(RecomputeInvoiceTotals::class)($invoice)->fresh(['lines']);
+        $invoice->forceFill(['code' => 10])->save();
+        $doc = new AadeInvoiceDocument($this->tenant);
+        $xml = InvoSignDocument::augment($doc->toXml($doc->build($invoice->fresh())), $invoice->fresh(['lines']));
+
+        $this->assertSame('798.39', $invoice->lines->first()->net_price);
+        $this->assertStringContainsString('<api_DiscountValue>8.06</api_DiscountValue>', $xml);
+    }
+
     public function test_an_imported_till_document_is_rebuilt_gross_anchored(): void
     {
         $anchor = new ReflectionMethod(OrphanImporter::class, 'grossAnchor');

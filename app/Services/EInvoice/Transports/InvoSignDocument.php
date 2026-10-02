@@ -5,6 +5,7 @@ namespace App\Services\EInvoice\Transports;
 use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
+use App\Support\LineMoney;
 use App\Support\MyData\DeliveryCodes;
 use DOMDocument;
 use DOMElement;
@@ -177,11 +178,12 @@ class InvoSignDocument
         // the VAT was extracted from the gross — so the unit is the line's own net per
         // unit, and only a REAL line discount is a discount (never a rounding cent).
         if ($line->gross_unit_price !== null && $qty > 0) {
+            // The pre-discount net of the SAME shelf line (VAT extracted, no discount)
+            // → the real discount is exactly pre − net.
+            $preNet = LineMoney::fromGross($qty, (float) $line->gross_unit_price, 0.0, (float) $line->vat_percent)['net'];
+            $unit = round($preNet / $qty, 2);
             $unitAfter = round($net / $qty, 2);
-            if ($discountPct <= 0) {
-                $unit = $unitAfter;
-                $discountValue = 0.0;
-            }
+            $discountValue = max(0.0, round($preNet - $net, 2));
         }
 
         $fields = [
