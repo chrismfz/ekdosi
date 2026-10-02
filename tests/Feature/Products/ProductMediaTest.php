@@ -282,6 +282,7 @@ class ProductMediaTest extends TestCase
             $call();
             $this->fail('expected a rejection');
         } catch (InvalidArgumentException $e) {
+            $this->addToAssertionCount(1);   // the rejection itself is the assertion
             if ($messagePart !== null) {
                 $this->assertStringContainsString($messagePart, $e->getMessage());
             }
