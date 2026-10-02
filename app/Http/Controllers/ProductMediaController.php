@@ -32,8 +32,10 @@ class ProductMediaController extends Controller
         $headers = [
             'Content-Type' => $row->mime_type ?? 'application/octet-stream',
             'Cache-Control' => 'private, max-age=3600',
+            // Images are GD re-encoded; videos keep a video/* type — nosniff stops any
+            // reinterpretation. (No CSP here: «default-src 'none'» would stop the
+            // browser playing the very video/image opened in a new tab.)
             'X-Content-Type-Options' => 'nosniff',
-            'Content-Security-Policy' => "sandbox; default-src 'none'",
         ];
 
         // Local disk → BinaryFileResponse (answers HTTP Range — needed to play/seek MP4).
