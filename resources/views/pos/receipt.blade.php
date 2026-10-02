@@ -50,6 +50,16 @@
         @foreach($totals['rows'] as $row)
             <tr><td>{{ $L('vat') }} {{ rtrim(rtrim(number_format($row['rate'], 2, ',', '.'), '0'), ',') }}%: {{ number_format($row['net'], 2, ',', '.') }}</td><td class="r">{{ number_format($row['vat'], 2, ',', '.') }}</td></tr>
         @endforeach
+        @foreach(['fees' => 'fees', 'stamp' => 'stamp_duty', 'other' => 'other_taxes'] as $key => $label)
+            @if($totals[$key] > 0)
+                <tr><td>{{ $L($label) }}</td><td class="r">+{{ number_format($totals[$key], 2, ',', '.') }}</td></tr>
+            @endif
+        @endforeach
+        @foreach(['deductions' => 'deductions', 'withhold' => 'withholding'] as $key => $label)
+            @if($totals[$key] > 0)
+                <tr><td>{{ $L($label) }}</td><td class="r">−{{ number_format($totals[$key], 2, ',', '.') }}</td></tr>
+            @endif
+        @endforeach
         <tr class="b big"><td>@gup($L('total'))</td><td class="r">{{ number_format($totals['payable'], 2, ',', '.') }} €</td></tr>
         @if($invoice->paymentMethod)
             <tr><td colspan="2">{{ $invoice->paymentMethod->description }}</td></tr>

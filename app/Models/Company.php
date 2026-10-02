@@ -349,18 +349,6 @@ class Company extends Model
         return (bool) $this->pos_enabled;
     }
 
-    /** The receipt series (11.1 ΑΛΠ) a till sale is issued on. */
-    public function posInvoiceType(): BelongsTo
-    {
-        return $this->belongsTo(InvoiceType::class, 'pos_invoice_type_id');
-    }
-
-    /** The cash payment method a till sale is recorded with. */
-    public function posPaymentMethod(): BelongsTo
-    {
-        return $this->belongsTo(PaymentMethod::class, 'pos_payment_method_id');
-    }
-
     /**
      * Resolve a tenant from a CLI "--tenant" argument that may be a slug or
      * a numeric id. Shared by the myDATA / WHMCS console commands so the

@@ -38,14 +38,35 @@
         .pos-btn-issue[disabled] { opacity: .5; cursor: wait; }
         .pos-btn-ghost { background: transparent; border: 1px solid #d1d5db; color: inherit; }
         .pos-empty { color: #9ca3af; text-align: center; padding: 1.5rem 0; }
+        .pos-btn-sm { padding: .35rem .7rem; font-size: .85rem; }
+        .pos-btn-xs { padding: .2rem .5rem; font-size: .75rem; margin-top: .3rem; }
+        .pos-btn-block { width: 100%; margin-top: .5rem; font-size: .9rem; }
     </style>
 
+    {{--
+        The receipt window is opened SYNCHRONOUSLY on the click (a popup opened after
+        the filing round-trip — seconds later — is blocked by the browser) and only
+        pointed at the receipt when the sale is issued; closed again on a failure.
+        The success notification also carries an «Εκτύπωση απόδειξης» link as a fallback.
+        Any key pressed outside a text field goes back to the scan field, so a scanner
+        "typing" after a click on +/− never lands on a button.
+    --}}
     <div
         class="pos"
-        x-data
+        x-data="{
+            win: null,
+            openWin() { this.win = window.open('', 'pos-receipt', 'width=420,height=720'); },
+            print(url) {
+                if (this.win && ! this.win.closed) { this.win.location = url; }
+                else { this.win = window.open(url, 'pos-receipt', 'width=420,height=720'); }
+            },
+            cancel() { if (this.win && ! this.win.closed) { this.win.close(); } this.win = null; },
+        }"
         x-init="$nextTick(() => $refs.scan?.focus())"
         x-on:pos-focus.window="$nextTick(() => $refs.scan?.focus())"
-        x-on:pos-print.window="window.open($event.detail.url, 'pos-receipt', 'width=420,height=720')"
+        x-on:pos-print.window="print($event.detail.url)"
+        x-on:pos-print-cancel.window="cancel()"
+        x-on:keydown.window="if (! $event.target.closest('input, textarea, select, [contenteditable]') && $event.key.length === 1 && ! $event.ctrlKey && ! $event.metaKey && ! $event.altKey) { $refs.scan?.focus(); }"
     >
         {{-- Left: scan + search + variant picker --}}
         <div class="pos-card">
@@ -56,8 +77,7 @@
                 inputmode="none"
                 autocomplete="off"
                 placeholder="Σκανάρισε barcode ή πληκτρολόγησε κωδικό + Enter"
-                wire:model="scan"
-                wire:keydown.enter.prevent="scanCode"
+                x-on:keydown.enter.prevent="const code = $el.value.trim(); $el.value = ''; if (code !== '') { $wire.scanCode(code); }"
             >
             <input class="pos-search" type="search" placeholder="Αναζήτηση με όνομα…" wire:model.live.debounce.300ms="search">
             <div class="pos-hint">Το scanner λειτουργεί σαν πληκτρολόγιο — κράτα το πάνω πεδίο ενεργό.</div>
@@ -65,7 +85,7 @@
             @if ($this->pickerParent)
                 <div class="pos-picker-head">
                     <span>{{ $this->pickerParent->description_short }} — διάλεξε παραλλαγή</span>
-                    <button type="button" class="pos-btn-ghost pos-btn" style="padding:.35rem .7rem;font-size:.85rem" wire:click="closePicker">Κλείσιμο</button>
+                    <button type="button" class="pos-btn-ghost pos-btn pos-btn-sm" wire:click="closePicker">Κλείσιμο</button>
                 </div>
                 <div class="pos-variants">
                     @forelse ($this->pickerVariants as $variant)
@@ -113,7 +133,7 @@
                     </div>
                     <div>
                         <div class="pos-cart-gross">{{ number_format($line['gross'], 2, ',', '.') }} €</div>
-                        <button type="button" class="pos-btn-ghost pos-btn" style="padding:.2rem .5rem;font-size:.75rem;margin-top:.3rem" wire:click="remove({{ $i }})">Αφαίρεση</button>
+                        <button type="button" class="pos-btn-ghost pos-btn pos-btn-xs" wire:click="remove({{ $i }})">Αφαίρεση</button>
                     </div>
                 </div>
             @empty
@@ -132,7 +152,7 @@
             </div>
 
             <div class="pos-actions">
-                <button type="button" class="pos-btn pos-btn-issue" wire:click="checkout" wire:loading.attr="disabled" wire:target="checkout" @disabled($cart === [])>
+                <button type="button" class="pos-btn pos-btn-issue" x-on:click="openWin()" wire:click="checkout" wire:loading.attr="disabled" wire:target="checkout" @disabled($cart === [])>
                     <span wire:loading.remove wire:target="checkout">Έκδοση απόδειξης (μετρητά)</span>
                     <span wire:loading wire:target="checkout">Έκδοση…</span>
                 </button>
@@ -140,7 +160,7 @@
             </div>
 
             @if ($lastInvoiceId)
-                <button type="button" class="pos-btn pos-btn-ghost" style="width:100%;margin-top:.5rem;font-size:.9rem" wire:click="reprint">Επανεκτύπωση τελευταίας απόδειξης</button>
+                <button type="button" class="pos-btn pos-btn-ghost pos-btn-block" x-on:click="openWin()" wire:click="reprint">Επανεκτύπωση τελευταίας απόδειξης</button>
             @endif
         </div>
     </div>

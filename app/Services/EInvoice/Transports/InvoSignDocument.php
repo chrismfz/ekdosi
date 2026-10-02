@@ -27,6 +27,9 @@ class InvoSignDocument
 {
     private const AADE_NS = 'http://www.aade.gr/myDATA/invoice/v1.0';
 
+    /** InvoSign's printable counterpart for an anonymous retail (11.x) sale. */
+    public const RETAIL_COUNTERPART_NAME = 'Πελάτης λιανικής';
+
     public static function augment(string $aadeXml, Invoice $invoice): string
     {
         $invoice->loadMissing(['lines.product', 'invoiceType', 'customer', 'company', 'paymentMethod']);
@@ -335,6 +338,11 @@ class InvoSignDocument
         // the snapshot rule applies where there IS a legal party to get wrong.
         if ($invoice->filesNoCounterpart()) {
             $name = (string) ($invoice->company_name ?: $invoice->customer?->name ?? '');
+            // An anonymous till sale («Ταμείο», no customer) still needs that
+            // printable name — the generic retail one, never "".
+            if (trim($name) === '') {
+                $name = self::RETAIL_COUNTERPART_NAME;
+            }
 
             return self::counterpartFields(
                 $name,

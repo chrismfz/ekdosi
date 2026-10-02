@@ -3,10 +3,13 @@
 namespace App\Filament\Pages;
 
 use App\Actions\CreatePosSale;
+use App\Actions\PosSaleNotIssued;
+use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Product;
 use App\Services\Products\ProductMediaService;
 use BackedEnum;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
@@ -14,6 +17,8 @@ use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\URL;
+use Livewire\Attributes\Locked;
+use RuntimeException;
 use Throwable;
 use UnitEnum;
 
@@ -30,18 +35,16 @@ class PointOfSale extends Page
 {
     protected static string|BackedEnum|null $navigationIcon = Heroicon::OutlinedShoppingCart;
 
-    protected static string|UnitEnum|null $navigationGroup = 'Παραστατικά';
+    protected static string|UnitEnum|null $navigationGroup = 'Καθημερινά';
 
     protected static ?string $navigationLabel = 'Ταμείο';
 
-    protected static ?int $navigationSort = 1;
+    protected static ?int $navigationSort = 5;
 
     protected string $view = 'filament.pages.point-of-sale';
 
-    /** @var list<array{product_id: int, label: string, qty: float, discount: float}> */
+    /** @var list<array{product_id: int, qty: float, discount: float}> */
     public array $cart = [];
-
-    public string $scan = '';
 
     public string $search = '';
 
@@ -50,7 +53,8 @@ class PointOfSale extends Page
 
     public string $tendered = '';
 
-    /** The last issued receipt (for «Επανεκτύπωση»). */
+    /** The last issued receipt (for «Επανεκτύπωση») — server-set only. */
+    #[Locked]
     public ?int $lastInvoiceId = null;
 
     public function getTitle(): string
@@ -79,11 +83,14 @@ class PointOfSale extends Page
 
     // ── scanning / searching ───────────────────────────────────────────────
 
-    /** Enter in the scan field: exact barcode / SKU / internal code. */
-    public function scanCode(): void
+    /**
+     * Enter in the scan field: exact barcode / SKU / internal code. The field is
+     * cleared CLIENT-side and the code passed in — a server round-trip of the
+     * field would overwrite the next scan typed while this one is in flight.
+     */
+    public function scanCode(string $code = ''): void
     {
-        $code = trim($this->scan);
-        $this->scan = '';
+        $code = trim($code);
         if ($code === '') {
             return;
         }
@@ -135,8 +142,9 @@ class PointOfSale extends Page
     public function increment(int $index): void
     {
         if (isset($this->cart[$index])) {
-            $this->cart[$index]['qty']++;
+            $this->cart[$index]['qty'] = (float) ($this->cart[$index]['qty'] ?? 0) + 1;
         }
+        $this->dispatch('pos-focus');
     }
 
     public function decrement(int $index): void
@@ -144,10 +152,13 @@ class PointOfSale extends Page
         if (! isset($this->cart[$index])) {
             return;
         }
-        $this->cart[$index]['qty']--;
+        $this->cart[$index]['qty'] = (float) ($this->cart[$index]['qty'] ?? 0) - 1;
         if ($this->cart[$index]['qty'] <= 0) {
             $this->remove($index);
+
+            return;
         }
+        $this->dispatch('pos-focus');
     }
 
     public function remove(int $index): void
@@ -164,21 +175,25 @@ class PointOfSale extends Page
         $this->dispatch('pos-focus');
     }
 
-    /** Keep edited qty / discount inside sane bounds. */
+    /** Keep edited qty / discount inside sane bounds (the cart is client-writable). */
     public function updatedCart(): void
     {
-        foreach ($this->cart as $i => $line) {
-            $this->cart[$i]['qty'] = max(0.001, round((float) $line['qty'], 3));
-            $this->cart[$i]['discount'] = min(100, max(0, round((float) $line['discount'], 2)));
-        }
+        $this->cart = array_values(array_map(fn ($line): array => [
+            'product_id' => (int) (is_array($line) ? ($line['product_id'] ?? 0) : 0),
+            'qty' => max(0.001, round((float) (is_array($line) && is_scalar($line['qty'] ?? null) ? $line['qty'] : 1), 3)),
+            'discount' => min(100, max(0, round((float) (is_array($line) && is_scalar($line['discount'] ?? null) ? $line['discount'] : 0), 2))),
+        ], $this->cart));
+        $this->dispatch('pos-focus');
     }
 
     // ── checkout ───────────────────────────────────────────────────────────
 
     public function checkout(): void
     {
+        $this->updatedCart();
         if ($this->cart === []) {
             Notification::make()->warning()->title('Το καλάθι είναι άδειο.')->send();
+            $this->dispatch('pos-print-cancel');
 
             return;
         }
@@ -187,29 +202,55 @@ class PointOfSale extends Page
         abort_unless($tenant instanceof Company && static::canAccess(), 403);
 
         try {
-            $invoice = app(CreatePosSale::class)($tenant, array_map(fn (array $l) => [
-                'product_id' => $l['product_id'],
-                'qty' => $l['qty'],
-                'discount' => $l['discount'],
-            ], $this->cart));
+            $invoice = app(CreatePosSale::class)($tenant, $this->cart);
+        } catch (PosSaleNotIssued $e) {
+            // The draft EXISTS (and a timed-out filing may already be at AADE):
+            // empty the cart so the same sale can't be rung up again as a new
+            // document — the retry happens on THAT draft.
+            report($e);
+            $this->cart = [];
+            $this->tendered = '';
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()
+                ->actions([
+                    Action::make('open')->label('Άνοιγμα πρόχειρου #'.$e->invoiceId)
+                        ->url(InvoiceResource::getUrl('view', ['record' => $e->invoiceId]), shouldOpenInNewTab: true),
+                ])
+                ->send();
+
+            return;
+        } catch (RuntimeException $e) {
+            // Refused before anything was created (settings, an unsellable item):
+            // keep the cart so the cashier can fix it.
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()->send();
+
+            return;
         } catch (Throwable $e) {
             report($e);
-            Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()->send();
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->danger()->title('Δεν εκδόθηκε')
+                ->body('Απρόσμενο σφάλμα — δες τα «Παραστατικά» πριν το ξαναχτυπήσεις.')->persistent()->send();
 
             return;
         }
 
-        $change = $this->change((float) $invoice->gross_total);
+        $payable = $invoice->payableTotal();
+        $change = $this->change($payable);
         $this->lastInvoiceId = $invoice->getKey();
         $this->cart = [];
         $this->tendered = '';
+        $url = $this->receiptUrl($invoice->getKey());
 
         Notification::make()->success()
-            ->title('Εκδόθηκε '.$invoice->invcode.' — '.number_format((float) $invoice->gross_total, 2, ',', '.').' €')
+            ->title('Εκδόθηκε '.$invoice->invcode.' — '.number_format($payable, 2, ',', '.').' €')
             ->body($change !== null ? 'Ρέστα: '.number_format($change, 2, ',', '.').' €' : null)
+            ->actions([
+                Action::make('print')->label('Εκτύπωση απόδειξης')->url($url, shouldOpenInNewTab: true),
+            ])
             ->send();
 
-        $this->dispatch('pos-print', url: $this->receiptUrl($invoice->getKey()));
+        $this->dispatch('pos-print', url: $url);
         $this->dispatch('pos-focus');
     }
 
@@ -217,6 +258,8 @@ class PointOfSale extends Page
     {
         if ($this->lastInvoiceId !== null) {
             $this->dispatch('pos-print', url: $this->receiptUrl($this->lastInvoiceId));
+        } else {
+            $this->dispatch('pos-print-cancel');
         }
     }
 
@@ -229,12 +272,13 @@ class PointOfSale extends Page
         if (mb_strlen($term) < 2) {
             return collect();
         }
+        $like = '%'.addcslashes($term, '%_\\').'%';
 
         return $this->products()
             ->where('kind', '!=', Product::KIND_VARIANT)   // variants are reached through their parent
-            ->where(fn ($q) => $q->where('description_short', 'like', "%{$term}%")
-                ->orWhere('sku', 'like', "%{$term}%")
-                ->orWhere('internal_code', 'like', "%{$term}%")
+            ->where(fn ($q) => $q->where('description_short', 'like', $like)
+                ->orWhere('sku', 'like', $like)
+                ->orWhere('internal_code', 'like', $like)
                 ->orWhere('barcode', $term))
             ->with(['media', 'vatCategory'])
             ->orderBy('description_short')
@@ -260,30 +304,41 @@ class PointOfSale extends Page
 
     public function getPickerParentProperty(): ?Product
     {
-        return $this->pickParent === null ? null : Product::query()->find($this->pickParent);
+        return $this->pickParent === null ? null : $this->products()->find($this->pickParent);
     }
 
-    /** @return list<array{label: string, qty: float, discount: float, unit: float, gross: float}> */
+    /** @return list<array{label: string, qty: float, discount: float, unit: float, gross: float, levy: float}> */
     public function getCartViewProperty(): array
     {
-        $products = Product::query()->with('vatCategory')->whereKey(array_column($this->cart, 'product_id'))->get()->keyBy('id');
+        $products = $this->products()->with('vatCategory')
+            ->whereKey(array_map(fn ($l) => (int) ($l['product_id'] ?? 0), $this->cart))
+            ->get()->keyBy('id');
 
         return array_map(function (array $line) use ($products): array {
-            $product = $products->get($line['product_id']);
+            $product = $products->get((int) ($line['product_id'] ?? 0));
+            $qty = (float) ($line['qty'] ?? 0);
+            $discount = (float) ($line['discount'] ?? 0);
+            $totals = $product ? CreatePosSale::lineTotals($product, $qty, $discount) : null;
 
             return [
-                'label' => $line['label'],
-                'qty' => (float) $line['qty'],
-                'discount' => (float) $line['discount'],
+                'label' => $product?->description_short ?? '— μη διαθέσιμο είδος —',
+                'qty' => $qty,
+                'discount' => $discount,
                 'unit' => $product ? CreatePosSale::lineTotals($product, 1)['gross'] : 0.0,
-                'gross' => $product ? CreatePosSale::lineTotals($product, (float) $line['qty'], (float) $line['discount'])['gross'] : 0.0,
+                'gross' => $totals['gross'] ?? 0.0,
+                'levy' => $totals['levy'] ?? 0.0,
             ];
         }, $this->cart);
     }
 
+    /** Σ line gross + the product-linked levies (bag fee…) — what the receipt's ΣΥΝΟΛΟ will say. */
     public function getTotalProperty(): float
     {
-        return round(array_sum(array_column($this->cartView, 'gross')), 2);
+        return round(
+            round(array_sum(array_column($this->cartView, 'gross')), 2)
+            + round(array_sum(array_column($this->cartView, 'levy')), 2),
+            2,
+        );
     }
 
     public function change(?float $total = null): ?float
@@ -317,8 +372,8 @@ class PointOfSale extends Page
     private function add(Product $product): void
     {
         foreach ($this->cart as $i => $line) {
-            if ($line['product_id'] === $product->getKey() && (float) $line['discount'] === 0.0) {
-                $this->cart[$i]['qty']++;
+            if ((int) ($line['product_id'] ?? 0) === $product->getKey() && (float) ($line['discount'] ?? 0) === 0.0) {
+                $this->cart[$i]['qty'] = (float) ($line['qty'] ?? 0) + 1;
 
                 return;
             }
@@ -326,7 +381,6 @@ class PointOfSale extends Page
 
         $this->cart[] = [
             'product_id' => $product->getKey(),
-            'label' => $product->description_short,
             'qty' => 1.0,
             'discount' => 0.0,
         ];

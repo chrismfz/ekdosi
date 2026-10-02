@@ -7,10 +7,10 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\Product;
+use App\Models\Scopes\CompanyScope;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
-use App\Support\MyData\VatExemptionGuidance;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -27,8 +27,9 @@ use RuntimeException;
  *
  * Lines are priced exactly like the invoice form (net `sell_price` + the product's
  * VAT rate), so the till shows the same total the receipt will have ({@see lineTotals}).
- * If issuing fails the sale stays a DRAFT invoice — nothing is lost; the error
- * carries its id so the operator can retry from «Παραστατικά».
+ * If issuing fails the sale stays a DRAFT invoice — nothing is lost; the
+ * PosSaleNotIssued carries its id so the operator retries THAT draft from
+ * «Παραστατικά» (never a new ring-up of the same cart).
  */
 class CreatePosSale
 {
@@ -48,7 +49,7 @@ class CreatePosSale
             throw new RuntimeException('Το καλάθι είναι άδειο.');
         }
 
-        $products = Product::query()->withoutGlobalScopes()
+        $products = Product::query()->withoutGlobalScope(CompanyScope::class)
             ->with(['vatCategory', 'metricUnit'])
             ->where('company_id', $company->getKey())
             ->whereKey(array_map(fn (array $i) => (int) $i['product_id'], $items))
@@ -67,7 +68,7 @@ class CreatePosSale
                 'header_discount_percent' => 0,
                 'payment_method_id' => $method->getKey(),
                 'country' => $company->country_code ?: 'GR',
-                'language' => 'el',
+                'language' => null,   // auto = from the frozen country, as any no-choice document
             ]);
 
             foreach ($items as $item) {
@@ -82,6 +83,9 @@ class CreatePosSale
                 }
 
                 $vat = self::vatOf($product);
+                if ($vat === null) {
+                    throw new RuntimeException('Το «'.$product->description_short.'» δεν έχει κατηγορία ΦΠΑ — όρισέ τη στο είδος.');
+                }
                 $invoice->lines()->create([
                     'company_id' => $company->getKey(),
                     'product_id' => $product->getKey(),
@@ -90,8 +94,9 @@ class CreatePosSale
                     'price_per_item' => (float) $product->sell_price,
                     'discount' => $discount,
                     'vat_percent' => $vat,
-                    // A 0% line needs its §8.3 reason — suggested from the receipt type.
-                    'vat_exemption_category' => $vat === 0.0 ? VatExemptionGuidance::recommendForType($type->mydata_type) : null,
+                    // A 0% line carries its §8.3 reason from the product's VAT category
+                    // (null → the tenant's single 0% reason, as on any invoice).
+                    'vat_exemption_category' => $vat == 0.0 ? $product->vatCategory?->vat_exemption_category : null,
                     'metric_unit' => $product->metricUnit?->name,
                 ]);
             }
@@ -107,20 +112,34 @@ class CreatePosSale
     /**
      * The till's money math, line by line — the SAME formulas InvoiceLine::saving
      * stores (net and gross rounded per line), so the screen and the receipt agree.
+     * `levy` = the product-linked tax/fee of the line (RecomputeInvoiceTaxes:
+     * qty × per-unit, e.g. the plastic bag), signed (a deduction is negative).
      *
-     * @return array{net: float, gross: float}
+     * @return array{net: float, gross: float, levy: float}
      */
     public static function lineTotals(Product $product, float $qty, float $discount = 0.0): array
     {
         $net = round($qty * (float) $product->sell_price * (1 - $discount / 100), 2);
+        $levy = 0.0;
+        $perUnit = (float) ($product->mydata_tax_per_unit ?? 0);
+        $taxType = (int) ($product->mydata_tax_type ?? 0);
+        if ($perUnit > 0 && in_array($taxType, [2, 3, 4, 5], true)) {
+            $levy = ($taxType === 5 ? -1 : 1) * $qty * $perUnit;
+        }
 
-        return ['net' => $net, 'gross' => round($net * (1 + self::vatOf($product) / 100), 2)];
+        return [
+            'net' => $net,
+            'gross' => round($net * (1 + (self::vatOf($product) ?? 0) / 100), 2),
+            'levy' => $levy,
+        ];
     }
 
-    /** VAT rate a line of this product gets (the product's category rate). */
-    public static function vatOf(Product $product): float
+    /** VAT rate a line of this product gets (its category's rate); null = none set. */
+    public static function vatOf(Product $product): ?float
     {
-        return (float) ($product->vatCategory?->rate ?? 0);
+        $rate = $product->vatCategory?->rate;
+
+        return $rate === null ? null : (float) $rate;
     }
 
     /**
@@ -136,16 +155,17 @@ class CreatePosSale
                     }
                     $invoice->update(['local_status' => 'active']);
                 });
-
-                return;
+            } else {
+                $this->submitters->for($invoice->company)->submit($invoice);
             }
-
-            $this->submitters->for($invoice->company)->submit($invoice);
         } catch (\Throwable $e) {
-            throw new RuntimeException(
-                'Η απόδειξη δεν εκδόθηκε: '.$e->getMessage().' — έμεινε πρόχειρο #'.$invoice->getKey().' (Παραστατικά).',
-                previous: $e,
-            );
+            throw new PosSaleNotIssued((int) $invoice->getKey(), $e);
+        }
+
+        // «Nothing threw» isn't «issued»: a submitter that returned without
+        // promoting the draft must not print as a sale.
+        if ($invoice->refresh()->local_status !== 'active') {
+            throw new PosSaleNotIssued((int) $invoice->getKey(), new RuntimeException('το παραστατικό δεν οριστικοποιήθηκε'));
         }
     }
 
@@ -158,7 +178,7 @@ class CreatePosSale
             throw new RuntimeException('Το «Ταμείο» δεν είναι ενεργό για αυτή την εταιρεία.');
         }
 
-        $type = InvoiceType::query()->withoutGlobalScopes()
+        $type = InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $company->getKey())
             ->whereKey($company->pos_invoice_type_id)
             ->first();
@@ -166,11 +186,12 @@ class CreatePosSale
             throw new RuntimeException('Δεν έχει οριστεί σειρά αποδείξεων λιανικής (11.1) για το Ταμείο.');
         }
 
-        $method = PaymentMethod::query()->withoutGlobalScopes()
+        $method = PaymentMethod::query()->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $company->getKey())
             ->whereKey($company->pos_payment_method_id)
             ->first();
-        if ($method === null || (int) $method->due_days !== 0) {
+        if ($method === null || (int) $method->due_days !== 0
+            || ($method->mydata_payment_type !== null && (int) $method->mydata_payment_type !== 3)) {
             throw new RuntimeException('Δεν έχει οριστεί τρόπος πληρωμής «Μετρητά» (0 ημέρες) για το Ταμείο.');
         }
 

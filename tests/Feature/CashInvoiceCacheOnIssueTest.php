@@ -10,6 +10,7 @@ use App\Models\PaymentMethod;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeInvoiceTotals;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -44,6 +45,31 @@ class CashInvoiceCacheOnIssueTest extends TestCase
         app(RecomputeInvoiceTotals::class)($other);
         $other->fresh()->update(['payment_method_id' => $credit->id]);
         $this->assertSame(PaymentStatus::Unpaid, $this->cached($other));
+    }
+
+    public function test_the_refresh_runs_after_the_issuing_transaction_commits_and_skips_a_cancelled_draft(): void
+    {
+        $company = Company::create(['name' => 'C', 'slug' => 'cc-'.uniqid(), 'country_code' => 'GR', 'einvoice_provider' => 'none']);
+        $type = InvoiceType::create(['company_id' => $company->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ', 'invcount' => 1, 'mydata_type' => '2.1']);
+        $cash = PaymentMethod::create(['company_id' => $company->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        $invoice = Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $type->id, 'issued_at' => now(), 'local_status' => 'draft', 'payment_method_id' => $cash->id]);
+        $invoice->lines()->create(['company_id' => $company->id, 'product_descr' => 'x', 'qty' => 1, 'price_per_item' => 10, 'vat_percent' => 24]);
+        app(RecomputeInvoiceTotals::class)($invoice);
+
+        // Inside the issuing transaction the cache is NOT touched (no payment locks
+        // taken under the filing transaction) — it refreshes once it commits.
+        DB::transaction(function () use ($invoice): void {
+            $invoice->fresh()->update(['local_status' => 'active']);
+            $this->assertSame(PaymentStatus::Unpaid, $this->cached($invoice));
+        });
+        $this->assertSame(PaymentStatus::Paid, $this->cached($invoice));
+
+        // A never-issued cash draft that is cancelled keeps its draft-time cache.
+        $draft = Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $type->id, 'issued_at' => now(), 'local_status' => 'draft', 'payment_method_id' => $cash->id]);
+        $draft->lines()->create(['company_id' => $company->id, 'product_descr' => 'y', 'qty' => 1, 'price_per_item' => 10, 'vat_percent' => 24]);
+        app(RecomputeInvoiceTotals::class)($draft);
+        $draft->fresh()->update(['local_status' => 'cancelled']);
+        $this->assertSame(PaymentStatus::Unpaid, $this->cached($draft));
     }
 
     private function cached(Invoice $invoice): PaymentStatus

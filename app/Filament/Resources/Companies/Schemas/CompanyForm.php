@@ -15,6 +15,7 @@ use App\Filament\Support\MailTemplateFields;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
+use App\Models\Scopes\CompanyScope;
 use App\Services\AadeRegistryLookup;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\NullProviderTransport;
@@ -1185,7 +1186,10 @@ class CompanyForm
                             ]),
                         // Point of Sale (docs/woocommerce-bridge-plan.md §11) — same kill-switch
                         // pattern as Support/Domains, plus the receipt series + cash method.
+                        // Configured on an EXISTING company: its series/payment methods
+                        // are what the selects list (none exist while creating it).
                         Tab::make('Ταμείο (POS)')
+                            ->visible(fn (?Company $record): bool => $record !== null)
                             ->schema([
                                 Toggle::make('pos_enabled')
                                     ->label('Ενεργό «Ταμείο» (Point of Sale)')
@@ -1195,9 +1199,10 @@ class CompanyForm
                                     ->label('Σειρά αποδείξεων (ΑΛΠ 11.1)')
                                     ->visible(fn (callable $get): bool => (bool) $get('pos_enabled'))
                                     ->options(fn (?Company $record) => $record
-                                        ? InvoiceType::query()->withoutGlobalScopes()
+                                        ? InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
                                             ->where('company_id', $record->getKey())
                                             ->where('mydata_type', '11.1')
+                                            ->where('is_credit', false)
                                             ->orderBy('code')
                                             ->get()
                                             ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
@@ -1209,9 +1214,10 @@ class CompanyForm
                                     ->label('Τρόπος πληρωμής «Μετρητά»')
                                     ->visible(fn (callable $get): bool => (bool) $get('pos_enabled'))
                                     ->options(fn (?Company $record) => $record
-                                        ? PaymentMethod::query()->withoutGlobalScopes()
+                                        ? PaymentMethod::query()->withoutGlobalScope(CompanyScope::class)
                                             ->where('company_id', $record->getKey())
                                             ->where('due_days', 0)
+                                            ->where(fn ($q) => $q->whereNull('mydata_payment_type')->orWhere('mydata_payment_type', 3))
                                             ->orderBy('description')
                                             ->pluck('description', 'id')
                                             ->all()
