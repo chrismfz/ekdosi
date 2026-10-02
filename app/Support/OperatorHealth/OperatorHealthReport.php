@@ -10,7 +10,7 @@ use App\Models\MyDataMark;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\ScheduledTaskRun;
 use App\Models\Scopes\CompanyScope;
-use App\Support\Settings\SystemSettings;
+use App\Support\Settings\ScheduleTiming;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
@@ -479,8 +479,7 @@ class OperatorHealthReport
      */
     private function scheduleEnabled(string $key): bool
     {
-        return app(SystemSettings::class)
-            ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+        return ScheduleTiming::enabled($key);
     }
 
     /**
