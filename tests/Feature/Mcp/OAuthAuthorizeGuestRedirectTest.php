@@ -4,6 +4,7 @@ namespace Tests\Feature\Mcp;
 
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Laravel\Passport\ClientRepository;
+use Laravel\Passport\Passport;
 use Tests\TestCase;
 
 /**
@@ -15,6 +16,35 @@ use Tests\TestCase;
 class OAuthAuthorizeGuestRedirectTest extends TestCase
 {
     use RefreshDatabase;
+
+    private static ?string $keyDir = null;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        // Passport needs its RSA key pair to build the authorization/resource
+        // servers — without it every OAuth/MCP request is a 500 BEFORE the auth
+        // check. CI has no storage/oauth-*.key, so generate a throwaway pair once
+        // (never touching a host's real keys) and point Passport at it.
+        if (self::$keyDir === null) {
+            self::$keyDir = sys_get_temp_dir().'/ekdosi-passport-test-'.getmypid();
+            @mkdir(self::$keyDir, 0700, true);
+            $key = openssl_pkey_new(['private_key_bits' => 2048, 'private_key_type' => OPENSSL_KEYTYPE_RSA]);
+            openssl_pkey_export($key, $private);
+            file_put_contents(self::$keyDir.'/oauth-private.key', $private);
+            file_put_contents(self::$keyDir.'/oauth-public.key', openssl_pkey_get_details($key)['key']);
+            chmod(self::$keyDir.'/oauth-private.key', 0600);
+            chmod(self::$keyDir.'/oauth-public.key', 0600);
+        }
+        Passport::loadKeysFrom(self::$keyDir);
+    }
+
+    protected function tearDown(): void
+    {
+        Passport::$keyPath = null;   // don't leak the throwaway keys into other tests
+        parent::tearDown();
+    }
 
     private function authorizeUrl(): string
     {
