@@ -39,7 +39,11 @@ class CreatePosSale
     ) {}
 
     /**
-     * @param  list<array{product_id: int, qty: float|int|string, discount?: float|int|string|null}>  $items
+     * `price` = the GROSS unit price the cashier typed — honoured ONLY for a product
+     * flagged «ελεύθερη τιμή» (pos_open_price); every other line sells at its
+     * catalogue price whatever the cart says.
+     *
+     * @param  list<array{product_id: int, qty: float|int|string, discount?: float|int|string|null, price?: float|int|string|null}>  $items
      */
     public function __invoke(Company $company, array $items): Invoice
     {
@@ -86,12 +90,16 @@ class CreatePosSale
                 if ($vat === null) {
                     throw new RuntimeException('Το «'.$product->description_short.'» δεν έχει κατηγορία ΦΠΑ — όρισέ τη στο είδος.');
                 }
+                $unitNet = self::unitNet($product, $item['price'] ?? null);
+                if ($unitNet === null) {
+                    throw new RuntimeException('Το «'.$product->description_short.'» είναι ελεύθερης τιμής — γράψε την τιμή του.');
+                }
                 $invoice->lines()->create([
                     'company_id' => $company->getKey(),
                     'product_id' => $product->getKey(),
                     'product_descr' => $product->description_short,
                     'qty' => $qty,
-                    'price_per_item' => (float) $product->sell_price,
+                    'price_per_item' => $unitNet,
                     'discount' => $discount,
                     'vat_percent' => $vat,
                     // A 0% line carries its §8.3 reason from the product's VAT category
@@ -117,9 +125,9 @@ class CreatePosSale
      *
      * @return array{net: float, gross: float, levy: float}
      */
-    public static function lineTotals(Product $product, float $qty, float $discount = 0.0): array
+    public static function lineTotals(Product $product, float $qty, float $discount = 0.0, float|int|string|null $price = null): array
     {
-        $net = round($qty * (float) $product->sell_price * (1 - $discount / 100), 2);
+        $net = round($qty * (self::unitNet($product, $price) ?? 0.0) * (1 - $discount / 100), 2);
         $levy = 0.0;
         $perUnit = (float) ($product->mydata_tax_per_unit ?? 0);
         $taxType = (int) ($product->mydata_tax_type ?? 0);
@@ -132,6 +140,27 @@ class CreatePosSale
             'gross' => round($net * (1 + (self::vatOf($product) ?? 0) / 100), 2),
             'levy' => $levy,
         ];
+    }
+
+    /**
+     * The NET unit price a till line is stored with: the catalogue `sell_price`, or —
+     * for an open-price product only — the typed GROSS price back-computed to net
+     * (2dp, like the invoice form's gross-edit path; the line's gross is then
+     * recomputed from it, so it can land a cent off for some prices — MON-7).
+     * Null = an open-price product without a valid typed price.
+     */
+    public static function unitNet(Product $product, float|int|string|null $price): ?float
+    {
+        if (! $product->pos_open_price) {
+            return (float) $product->sell_price;
+        }
+
+        $gross = is_numeric($price) ? (float) $price : 0.0;
+        if ($gross <= 0 || $gross > 1_000_000) {
+            return null;
+        }
+
+        return round($gross / (1 + (self::vatOf($product) ?? 0) / 100), 2);
     }
 
     /**

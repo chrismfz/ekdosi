@@ -51,6 +51,11 @@ class PointOfSale extends Page
     /** A variable parent whose variants are being picked. */
     public ?int $pickParent = null;
 
+    /** An open-price product («ΡΟΥΧΑ 24%») waiting for the cashier's price. */
+    public ?int $pricePrompt = null;
+
+    public string $promptPrice = '';
+
     public string $tendered = '';
 
     /** The last issued receipt (for «Επανεκτύπωση») — server-set only. */
@@ -125,8 +130,61 @@ class PointOfSale extends Page
             return;
         }
 
+        if ($product->pos_open_price) {
+            $this->pricePrompt = $product->getKey();
+            $this->promptPrice = '';
+            $this->pickParent = null;
+            $this->dispatch('pos-price-focus');
+
+            return;
+        }
+
         $this->add($product);
         $this->pickParent = null;
+        $this->search = '';
+        $this->dispatch('pos-focus');
+    }
+
+    /** Enter / «Προσθήκη» in the price prompt: one line at the typed gross price. */
+    public function addOpenPrice(): void
+    {
+        $product = $this->pricePrompt === null ? null : $this->products()->with(CreatePosSale::withVat())->find($this->pricePrompt);
+        $typed = trim($this->promptPrice);
+        if (str_contains($typed, ',')) {
+            $typed = str_replace(['.', ','], ['', '.'], $typed);   // «1.234,50» → 1234.50
+        }
+        $price = round((float) $typed, 2);
+        if ($product === null || ! $product->pos_open_price) {
+            $this->closePrice();
+
+            return;
+        }
+        if (CreatePosSale::unitNet($product, $price) === null) {
+            Notification::make()->warning()->title('Γράψε μια τιμή μεγαλύτερη από 0.')->send();
+            $this->dispatch('pos-price-focus');
+
+            return;
+        }
+
+        // Always its own line — two «ΡΟΥΧΑ» at different prices never merge.
+        $this->cart[] = ['product_id' => $product->getKey(), 'qty' => 1.0, 'discount' => 0.0, 'price' => $price];
+        $this->closePrice();
+
+        // A net price is stored at 2dp, so some gross prices can't be reproduced
+        // exactly (e.g. 10,00 at 24% → 9,99) — say so instead of a silent cent.
+        $charged = CreatePosSale::lineTotals($product, 1, 0.0, $price)['gross'];
+        if (abs($charged - $price) >= 0.005) {
+            Notification::make()->warning()
+                ->title('Θα χρεωθεί '.number_format($charged, 2, ',', '.').' € αντί '.number_format($price, 2, ',', '.').' €')
+                ->body('Στρογγυλοποίηση ΦΠΑ: η τιμή αυτή δεν βγαίνει ακριβώς από καθαρό με 2 δεκαδικά.')
+                ->send();
+        }
+    }
+
+    public function closePrice(): void
+    {
+        $this->pricePrompt = null;
+        $this->promptPrice = '';
         $this->search = '';
         $this->dispatch('pos-focus');
     }
@@ -144,7 +202,7 @@ class PointOfSale extends Page
         if (isset($this->cart[$index])) {
             $this->cart[$index]['qty'] = (float) ($this->cart[$index]['qty'] ?? 0) + 1;
         }
-        $this->dispatch('pos-focus');
+        $this->refocus();
     }
 
     public function decrement(int $index): void
@@ -158,14 +216,20 @@ class PointOfSale extends Page
 
             return;
         }
-        $this->dispatch('pos-focus');
+        $this->refocus();
     }
 
     public function remove(int $index): void
     {
         unset($this->cart[$index]);
         $this->cart = array_values($this->cart);
-        $this->dispatch('pos-focus');
+        $this->refocus();
+    }
+
+    /** Back to the scan field — unless a price is being typed into the open-price prompt. */
+    private function refocus(): void
+    {
+        $this->dispatch($this->pricePrompt === null ? 'pos-focus' : 'pos-price-focus');
     }
 
     public function clearCart(): void
@@ -192,6 +256,8 @@ class PointOfSale extends Page
             'product_id' => (int) (is_array($line) ? ($line['product_id'] ?? 0) : 0),
             'qty' => max(0.001, round((float) (is_array($line) && is_scalar($line['qty'] ?? null) ? $line['qty'] : 1), 3)),
             'discount' => min(100, max(0, round((float) (is_array($line) && is_scalar($line['discount'] ?? null) ? $line['discount'] : 0), 2))),
+            // the typed gross price of an open-price line (ignored for any other product)
+            'price' => is_array($line) && is_numeric($line['price'] ?? null) ? round((float) $line['price'], 2) : null,
         ], $this->cart));
     }
 
@@ -314,6 +380,24 @@ class PointOfSale extends Page
             ->values();
     }
 
+    /** @return Collection<int, Product> «αγαπημένα» — quick keys while nothing is searched */
+    public function getFavoritesProperty(): Collection
+    {
+        return $this->products()
+            ->where('is_favorite', true)
+            ->where('kind', '!=', Product::KIND_VARIANT)
+            ->with(['media', ...CreatePosSale::withVat()])
+            ->orderBy('description_short')
+            ->limit(24)
+            ->get();
+    }
+
+    /** The open-price product waiting for its price. */
+    public function getPricePromptProductProperty(): ?Product
+    {
+        return $this->pricePrompt === null ? null : $this->products()->find($this->pricePrompt);
+    }
+
     public function getPickerParentProperty(): ?Product
     {
         return $this->pickParent === null ? null : $this->products()->find($this->pickParent);
@@ -330,13 +414,14 @@ class PointOfSale extends Page
             $product = $products->get((int) ($line['product_id'] ?? 0));
             $qty = (float) ($line['qty'] ?? 0);
             $discount = (float) ($line['discount'] ?? 0);
-            $totals = $product ? CreatePosSale::lineTotals($product, $qty, $discount) : null;
+            $price = $line['price'] ?? null;
+            $totals = $product ? CreatePosSale::lineTotals($product, $qty, $discount, $price) : null;
 
             return [
                 'label' => $product?->description_short ?? '— μη διαθέσιμο είδος —',
                 'qty' => $qty,
                 'discount' => $discount,
-                'unit' => $product ? CreatePosSale::lineTotals($product, 1)['gross'] : 0.0,
+                'unit' => $product ? CreatePosSale::lineTotals($product, 1, 0.0, $price)['gross'] : 0.0,
                 'gross' => $totals['gross'] ?? 0.0,
                 'levy' => $totals['levy'] ?? 0.0,
             ];
@@ -384,7 +469,7 @@ class PointOfSale extends Page
     private function add(Product $product): void
     {
         foreach ($this->cart as $i => $line) {
-            if ((int) ($line['product_id'] ?? 0) === $product->getKey() && (float) ($line['discount'] ?? 0) === 0.0) {
+            if ((int) ($line['product_id'] ?? 0) === $product->getKey() && (float) ($line['discount'] ?? 0) === 0.0 && ($line['price'] ?? null) === null) {
                 $this->cart[$i]['qty'] = (float) ($line['qty'] ?? 0) + 1;
 
                 return;

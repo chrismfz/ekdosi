@@ -7,6 +7,7 @@ use App\Actions\PosSaleNotIssued;
 use App\Contracts\EInvoiceSubmitter;
 use App\Enums\PaymentStatus;
 use App\Filament\Pages\PointOfSale;
+use App\Filament\Resources\Invoices\Pages\ViewInvoice;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
@@ -277,6 +278,67 @@ class PosSaleTest extends TestCase
         $this->expectException(CannotUpdateLockedPropertyException::class);
 
         Livewire::test(PointOfSale::class)->set('lastInvoiceId', 999);
+    }
+
+    public function test_an_open_price_item_sells_at_the_typed_price_and_nothing_else_does(): void
+    {
+        $clothes = $this->product('ΡΟΥΧΑ 24%', 0, ['pos_open_price' => true]);
+        $shirt = $this->product('Μπλούζα', 20);
+
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [
+            ['product_id' => $clothes->id, 'qty' => 1, 'price' => 24.90],
+            ['product_id' => $clothes->id, 'qty' => 2, 'price' => '12.40'],
+            ['product_id' => $shirt->id, 'qty' => 1, 'price' => 1.00],   // a catalogue item ignores a typed price
+        ]);
+
+        $lines = $invoice->lines()->orderBy('id')->get();
+        $this->assertSame(20.08, (float) $lines[0]->price_per_item);     // 24,90 / 1,24
+        $this->assertSame(24.90, (float) $lines[0]->gross_price);
+        $this->assertSame(24.80, (float) $lines[1]->gross_price);
+        $this->assertSame(20.00, (float) $lines[2]->price_per_item);
+        $this->assertSame(24.90 + 24.80 + 24.80, (float) $invoice->gross_total);
+
+        $this->assertRefused(fn () => app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $clothes->id, 'qty' => 1]]));
+    }
+
+    public function test_the_till_shows_favourites_and_prompts_for_an_open_price(): void
+    {
+        $clothes = $this->product('ΡΟΥΧΑ 24%', 0, ['pos_open_price' => true, 'is_favorite' => true]);
+        $this->product('Ζώνη', 10, ['is_favorite' => true]);
+        $this->product('Κρυφό', 10);
+        $this->operator();
+
+        $page = Livewire::test(PointOfSale::class)
+            ->assertSee('Αγαπημένα')->assertSee('ΡΟΥΧΑ 24%')->assertSee('Ζώνη')->assertDontSee('Κρυφό')
+            ->call('choose', $clothes->id)
+            ->assertSet('pricePrompt', $clothes->id)
+            ->assertDispatched('pos-price-focus')
+            ->assertCount('cart', 0)
+            ->set('promptPrice', '0')->call('addOpenPrice')
+            ->assertCount('cart', 0)                                 // no zero-price line
+            ->set('promptPrice', '24,90')->call('addOpenPrice')
+            ->assertSet('pricePrompt', null)
+            ->call('choose', $clothes->id)->set('promptPrice', '9,90')->call('addOpenPrice')
+            ->assertCount('cart', 2);                                // two prices never merge
+        $this->assertSame(34.80, $page->instance()->total);
+
+        $page->call('checkout');
+        $this->assertSame(34.80, (float) Invoice::sole()->gross_total);
+    }
+
+    public function test_an_issued_receipt_can_be_reprinted_at_80mm_from_the_invoice(): void
+    {
+        // Paper out / jam at the till → «Απόδειξη 80mm» on the invoice page.
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $this->product('Μπλούζα', 20)->id, 'qty' => 1]]);
+        $this->operator();
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getKey()])
+            ->assertActionVisible('receipt_80mm');
+
+        $this->tenant->update(['pos_enabled' => false]);   // no till → no thermal receipt button
+        Filament::setTenant($this->tenant->fresh());
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getKey()])
+            ->assertActionHidden('receipt_80mm');
     }
 
     public function test_the_till_is_hidden_without_the_switch_or_the_permission(): void

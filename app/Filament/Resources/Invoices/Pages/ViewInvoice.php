@@ -51,6 +51,7 @@ use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\URL;
 use Illuminate\Support\HtmlString;
 use RuntimeException;
 use Throwable;
@@ -1488,6 +1489,23 @@ class ViewInvoice extends ViewRecord
                         $this->movementLifecycleError($e);
                     }
                 }),
+
+            // «Απόδειξη 80mm» — the till's thermal-printer receipt for an ISSUED retail
+            // document (11.x), re-printable from here when the till's print failed
+            // (paper out, jam, closed popup). Same signed page the «Ταμείο» opens.
+            Action::make('receipt_80mm')
+                ->label('Απόδειξη 80mm')
+                ->icon('heroicon-o-printer')
+                ->color('gray')
+                // Only where the «Ταμείο» is on (a thermal printer exists there).
+                ->visible(fn (Invoice $record): bool => (bool) $record->company?->hasPos()
+                    && $record->filesNoCounterpart()
+                    && $record->local_status === 'active'
+                    && $record->code !== null
+                    && $record->mydata_state !== 'CANCELLED')
+                ->url(fn (Invoice $record): string => URL::temporarySignedRoute(
+                    'pos.receipt', now()->addMinutes(30), ['invoice' => $record->getKey()],
+                ), shouldOpenInNewTab: true),
 
             // PDF download. Works for any invoice regardless of state —
             // operators may want a paper trail of drafts too.

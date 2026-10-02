@@ -103,6 +103,8 @@ class Product extends Model
         // Operator-feedback polish: pin frequent products/services to the
         // top of the invoice-line picker (favourites-first + auto-top).
         'is_favorite',
+        // «Ταμείο»: the cashier types the price (generic «ΡΟΥΧΑ 24%» items).
+        'pos_open_price',
         'internal_notes',
         'whmcs_product_id',
         'supplier',
@@ -133,6 +135,7 @@ class Product extends Model
             'date_inserted' => 'date',
             'is_active' => 'boolean',
             'is_favorite' => 'boolean',
+            'pos_open_price' => 'boolean',
             'track_stock' => 'boolean',
             'reorder_level' => 'decimal:3',
             'is_recurring' => 'boolean',
