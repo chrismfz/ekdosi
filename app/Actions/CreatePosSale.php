@@ -50,7 +50,7 @@ class CreatePosSale
         }
 
         $products = Product::query()->withoutGlobalScope(CompanyScope::class)
-            ->with(['vatCategory', 'metricUnit'])
+            ->with([...self::withVat(), 'metricUnit'])
             ->where('company_id', $company->getKey())
             ->whereKey(array_map(fn (array $i) => (int) $i['product_id'], $items))
             ->sellable()
@@ -132,6 +132,19 @@ class CreatePosSale
             'gross' => round($net * (1 + (self::vatOf($product) ?? 0) / 100), 2),
             'levy' => $levy,
         ];
+    }
+
+    /**
+     * Eager-load of the product's VAT category for the till — INCLUDING a soft-
+     * deleted one: a retired duplicate category (e.g. an old «24%» superseded by a
+     * re-seeded one) still states the rate the product was set up with; only a
+     * product with NO category at all is refused.
+     *
+     * @return array<string, \Closure>
+     */
+    public static function withVat(): array
+    {
+        return ['vatCategory' => fn ($q) => $q->withTrashed()];
     }
 
     /** VAT rate a line of this product gets (its category's rate); null = none set. */

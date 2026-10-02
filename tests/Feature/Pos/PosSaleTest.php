@@ -201,18 +201,29 @@ class PosSaleTest extends TestCase
 
     public function test_a_refusal_before_anything_is_created_keeps_the_cart(): void
     {
-        // Its VAT category was deleted (soft) — the till must not guess a rate.
-        $gone = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '13%', 'rate' => 13]);
-        $noVat = $this->product('Χωρίς ΦΠΑ', 5, ['vat_category_id' => $gone->id]);
-        $gone->delete();
+        $gone = $this->product('Αποσυρμένο', 5, ['is_active' => false]);
         $this->operator();
 
         Livewire::test(PointOfSale::class)
-            ->call('choose', $noVat->id)
+            ->set('cart', [['product_id' => $gone->id, 'qty' => 1, 'discount' => 0]])
             ->call('checkout')
             ->assertCount('cart', 1);
 
-        $this->assertSame(0, Invoice::count(), 'no guessed VAT rate on a legal receipt');
+        $this->assertSame(0, Invoice::count());
+    }
+
+    public function test_a_retired_vat_category_still_states_the_products_rate(): void
+    {
+        // Live devbox: most products pointed at a soft-deleted duplicate «24%»
+        // category — its rate is still the product's rate (only NO category refuses).
+        $retired = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '13%', 'rate' => 13]);
+        $product = $this->product('Βιβλίο', 10, ['vat_category_id' => $retired->id]);
+        $retired->delete();
+
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $product->id, 'qty' => 1]]);
+
+        $this->assertSame(11.30, (float) $invoice->gross_total);
+        $this->assertSame(13.0, (float) $invoice->lines()->first()->vat_percent);
     }
 
     public function test_the_till_total_includes_product_levies_like_the_receipt(): void
