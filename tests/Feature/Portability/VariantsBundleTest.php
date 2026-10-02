@@ -66,6 +66,12 @@ class VariantsBundleTest extends TestCase
         $this->assertSame(['Μαύρο', 'S'], $newVariants->first()->variantValues
             ->sortBy(fn ($v) => $v->attribute->sort)->pluck('value')->values()->all());
 
+        // The dry-run predicts exactly what execute does for the rewired-key tables:
+        // the attribute values MATCH (update), they are not reported as inserts.
+        $plan = app(CompanyImporter::class)->run($bundle, ['into' => 'rouxa', 'execute' => false, 'passphrase' => 'p@ss'])['tables'];
+        $this->assertSame(['insert' => 0, 'update' => 2], $plan['product_attributes']);
+        $this->assertSame(['insert' => 0, 'update' => 3], $plan['product_attribute_values']);
+
         // Re-import INTO the same company: the setup side (attributes + values,
         // keyed on the rewired attribute id) converges instead of tripping the
         // unique index. Legacy-less products re-insert — the importer's documented

@@ -650,12 +650,18 @@ class CompanyImporter
             $sections[$t] = $bundle['data'][$t] ?? [];
         }
 
+        // bundle id → matched target id, per table, built as the plan walks the import
+        // ORDER — so a KEYS_AFTER_REWIRE table is keyed exactly as execute keys it
+        // (on target ids), not on raw bundle ids that never match.
+        $planMaps = [];
+
         foreach ($sections as $table => $rows) {
             if ($rows === [] || ! Schema::hasTable($table)) {
                 continue;
             }
             $rows = $this->normaliseBundleRows($table, $rows);
             $index = $existing ? $this->existingIndex($table, $existing->id) : [];
+            $rewired = in_array($table, self::KEYS_AFTER_REWIRE, true);
             // customers also merge by ΑΦΜ identity (see importTable) — the dry-run
             // must say so, or the operator approves inserts that become overwrites.
             $afmIndex = [];
@@ -671,9 +677,14 @@ class CompanyImporter
             $insert = 0;
             $update = 0;
             foreach ($rows as $row) {
-                $hit = isset($index[$this->naturalKey($table, $row)])
+                $keyRow = $rewired ? $this->rowData($table, $row, (int) $existing?->id, $planMaps) : $row;
+                $matchedId = $index[$this->naturalKey($table, $keyRow)] ?? null;
+                $hit = $matchedId !== null
                     || ($afmIndex !== [] && ! self::rowIsParked($row)
                         && isset($afmIndex[Afm::uniqueKey($row['afm'] ?? null) ?? '']));
+                if ($matchedId !== null && isset($row['id'])) {
+                    $planMaps[$table][$row['id']] = (int) $matchedId;
+                }
                 $hit ? $update++ : $insert++;
             }
             $plan[$table] = ['insert' => $insert, 'update' => $update];
