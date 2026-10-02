@@ -105,20 +105,15 @@ class InvoiceLine extends Model
                 );
             }
 
-            // POS-2: a GROSS-anchored line (retail shelf price). An edit of the net
-            // price that no longer matches the anchor's own net mirror means the
-            // operator re-priced the line by NET — the anchor no longer applies.
-            if ($line->gross_unit_price !== null) {
-                $mirror = LineMoney::netFromGross((float) $line->gross_unit_price, $vat);
-                if ($line->exists && $line->isDirty('price_per_item') && round($price, 2) !== $mirror) {
-                    $line->gross_unit_price = null;
-                }
-            }
-
             // Compute line totals — authoritative, overwrites any value the caller
             // set, on every save; rounded per line, 2dp (legacy FAddInvoice.cpp:269).
             // The HEADER discount is applied at the aggregate level by
             // InvoiceVatBreakdown, never here. One formula: App\Support\LineMoney.
+            //
+            // POS-2: a GROSS-anchored line (retail shelf price, gross_unit_price set)
+            // is ALWAYS priced from its anchor — the caller that re-prices a line by
+            // net clears the anchor explicitly (the invoice form does); the model
+            // never guesses intent from which column changed.
             if ($line->gross_unit_price !== null) {
                 $unitGross = (float) $line->gross_unit_price;
                 if ($unitGross < 0) {

@@ -311,7 +311,6 @@ final class OrphanImporter
                 || ((string) $i->code === $aa && trim((string) $i->filedSeries()) === $series));
     }
 
-    /** An amount in whole cents — legal totals are compared exactly. */
     /**
      * The gross anchor for an imported line, or null to keep it net-anchored: only
      * when AADE's vatAmount is NOT what the net gives (net × rate) but IS what a
@@ -328,9 +327,11 @@ final class OrphanImporter
         $gross = round($net + $vat, 2);
         $fromGross = LineMoney::fromGross(1, $gross, 0, $rate);
 
-        return $fromGross['net'] === $net ? $gross : null;
+        // A credit/negative line stays net-anchored (the anchor is a positive shelf price).
+        return $gross > 0 && $fromGross['net'] === $net ? $gross : null;
     }
 
+    /** An amount in whole cents — legal totals are compared exactly. */
     public static function cents(float $amount): int
     {
         return (int) round($amount * 100);

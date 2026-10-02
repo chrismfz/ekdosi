@@ -9,6 +9,7 @@ use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
 use App\Support\CustomerLanguage;
+use App\Support\LineMoney;
 use InvalidArgumentException;
 
 /**
@@ -533,15 +534,16 @@ class WhmcsInvoiceMapper
                 // G3: gross-inclusive → back out the net; tax-exclusive → the
                 // amount IS the net.
                 $preDiscNet = $amountIncludesTax
-                    ? round($grossAmount / (1 + ($vatPercent / 100)), 2)
+                    ? LineMoney::netFromGross($grossAmount, $vatPercent)
                     : round($grossAmount, 2);
                 $linePercent = $vatPercent;
                 $lineVatCategoryId = $defaultVat->id;
             }
             // Apply the (possibly zero) line discount exactly as InvoiceLine::saving
             // does, so preview == persisted regardless of taxed/untaxed.
-            $lineNet = round($preDiscNet * (1 - ($discountPct / 100)), 2);
-            $lineGross = round($lineNet * (1 + ($linePercent / 100)), 2);
+            $money = LineMoney::fromNet(1.0, (float) $preDiscNet, (float) $discountPct, (float) $linePercent);
+            $lineNet = $money['net'];
+            $lineGross = $money['gross'];
 
             // Field names mirror the invoice_lines schema:
             //   qty × price_per_item × (1 - discount/100) = net_price

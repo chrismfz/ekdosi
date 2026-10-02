@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Actions\IssueCreditNote;
 use App\Filament\Resources\Invoices\Pages\EditInvoice;
+use App\Filament\Support\VatRateOptions;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -98,23 +99,17 @@ class GrossAnchoredLineTest extends TestCase
         $this->assertSame(100.00, (float) $invoice->gross_total);
     }
 
-    public function test_a_net_reprice_drops_the_anchor_but_a_rate_change_keeps_the_shelf_price(): void
+    public function test_the_model_always_honours_the_anchor_and_a_cleared_one_reprices_by_net(): void
     {
         $line = $this->invoice([[10.00, 1]])->lines()->first();
 
-        // Same net mirror re-sent (the invoice form saving an untouched line) → still anchored.
+        // The model never guesses: a stray net value can't override the anchor…
         $line->update(['price_per_item' => 8.06, 'qty' => 2]);
-        $this->assertSame('10.00', $line->fresh()->gross_unit_price);
-        $this->assertSame('20.00', $line->fresh()->gross_price);
+        $this->assertSame(['10.00', '20.00', '8.06'], [$line->fresh()->gross_unit_price, $line->fresh()->gross_price, $line->fresh()->price_per_item]);
 
-        // VAT rate changed → the shelf price stands, VAT re-extracted.
-        $line->update(['vat_percent' => 13]);
-        $this->assertSame(['20.00', '17.70'], [$line->fresh()->gross_price, $line->fresh()->net_price]);
-
-        // Re-priced by NET → classic net-anchored line.
-        $line->refresh()->update(['price_per_item' => 9.00]);
-        $this->assertNull($line->fresh()->gross_unit_price);
-        $this->assertSame(['18.00', '20.34'], [$line->fresh()->net_price, $line->fresh()->gross_price]);
+        // …the caller re-prices by NET by clearing it explicitly (the invoice form does).
+        $line->refresh()->update(['gross_unit_price' => null, 'price_per_item' => 9.00]);
+        $this->assertSame(['18.00', '22.32'], [$line->fresh()->net_price, $line->fresh()->gross_price]);
     }
 
     public function test_a_copy_and_a_partial_credit_keep_the_shelf_price(): void
@@ -163,9 +158,7 @@ class GrossAnchoredLineTest extends TestCase
     {
         // A re-issued shelf-priced draft opened in the invoice form: «Τιμή (με ΦΠΑ)»
         // shows the exact 10,00 (not 8,06 × 1,24 = 9,99) and a save keeps the anchor.
-        Gate::before(fn () => true);
-        $this->actingAs(User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@e.test', 'password' => bcrypt('x')]));
-        Filament::setTenant($this->tenant);
+        $this->panelOperator();
         $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης']);
         $invoice = $this->invoice([[10.00, 1]]);
         $invoice->update(['customer_id' => $customer->id]);
@@ -179,6 +172,56 @@ class GrossAnchoredLineTest extends TestCase
         $this->assertSame(['10.00', '10.00'], [$line->gross_unit_price, $line->gross_price]);
     }
 
+    public function test_the_invoice_form_manages_the_anchor_explicitly(): void
+    {
+        $this->panelOperator();
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης']);
+        $invoice = $this->invoice([[10.00, 1]]);
+        $invoice->update(['customer_id' => $customer->id]);
+        $key = fn ($page) => array_key_first($page->get('data.lines'));
+
+        // A typed gross on a shelf-priced line moves the shelf price — even one whose
+        // 2dp net is the same (9,99 and 10,00 both → 8,06): exact, not ignored.
+        $page = Livewire::test(EditInvoice::class, ['record' => $invoice->getKey()]);
+        $page->set('data.lines.'.$key($page).'.price_per_item_wvat', '9.99')->call('save')->assertHasNoFormErrors();
+        $line = $invoice->lines()->first();
+        $this->assertSame(['9.99', '9.99'], [$line->gross_unit_price, $line->gross_price]);
+
+        // A VAT-rate change keeps the NET (e.g. reverse charge at 0% must not turn the
+        // shelf price into the net) — the anchor is dropped, screen == saved.
+        $page = Livewire::test(EditInvoice::class, ['record' => $invoice->getKey()]);
+        $page->set('data.lines.'.$key($page).'.vat_percent', VatRateOptions::normalize(13))->call('save')->assertHasNoFormErrors();
+        $line = $invoice->lines()->first();
+        $this->assertNull($line->gross_unit_price);
+        $this->assertSame(['8.06', '9.11'], [$line->net_price, $line->gross_price]);
+    }
+
+    public function test_a_net_edit_in_the_form_drops_the_anchor(): void
+    {
+        $this->panelOperator();
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης']);
+        $invoice = $this->invoice([[10.00, 1]]);
+        $invoice->update(['customer_id' => $customer->id]);
+
+        $page = Livewire::test(EditInvoice::class, ['record' => $invoice->getKey()]);
+        $page->set('data.lines.'.array_key_first($page->get('data.lines')).'.price_per_item', '9')->call('save')->assertHasNoFormErrors();
+        $line = $invoice->lines()->first();
+        $this->assertNull($line->gross_unit_price);
+        $this->assertSame(['9.00', '11.16'], [$line->net_price, $line->gross_price]);
+    }
+
+    public function test_invosign_gets_the_line_own_unit_on_a_multi_qty_shelf_line(): void
+    {
+        // 5 × 0,99: net mirror 0,80 × 5 = 4,00 vs line net 3,99 — must not print a «discount».
+        $invoice = $this->invoice([[0.99, 5]]);
+        $invoice->forceFill(['code' => 9])->save();
+        $doc = new AadeInvoiceDocument($this->tenant);
+        $xml = InvoSignDocument::augment($doc->toXml($doc->build($invoice->fresh())), $invoice->fresh(['lines']));
+
+        $this->assertStringContainsString('<api_DiscountValue>0.00</api_DiscountValue>', $xml);
+        $this->assertStringContainsString('<api_UnitPrice>0.80</api_UnitPrice>', $xml);
+    }
+
     public function test_an_imported_till_document_is_rebuilt_gross_anchored(): void
     {
         $anchor = new ReflectionMethod(OrphanImporter::class, 'grossAnchor');
@@ -187,6 +230,14 @@ class GrossAnchoredLineTest extends TestCase
         $this->assertNull($anchor->invoke(null, 8.06, 1.93, 24.0), 'classic net × rate line');
         $this->assertNull($anchor->invoke(null, 24.11, 5.79, 24.0), 'both formulas agree → net-anchored');
         $this->assertNull($anchor->invoke(null, 8.06, 2.50, 24.0), 'neither formula → left to the exact-cent check');
+        $this->assertNull($anchor->invoke(null, -8.06, -1.94, 24.0), 'a negative line stays net-anchored (friendly refusal path)');
+    }
+
+    private function panelOperator(): void
+    {
+        Gate::before(fn () => true);
+        $this->actingAs(User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@e.test', 'password' => bcrypt('x')]));
+        Filament::setTenant($this->tenant);
     }
 
     /** @param  list<array{0: float, 1: float}>  $lines  [unit gross, qty] */
