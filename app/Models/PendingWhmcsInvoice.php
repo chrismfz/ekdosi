@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Observers\PendingWhmcsInvoiceObserver;
 use App\Support\Afm;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -76,6 +77,15 @@ class PendingWhmcsInvoice extends Model
     // rows. Not «rejected» (nothing was refused) — «resolved»/«done». Never
     // filed to AADE.
     public const STATUS_RESOLVED = 'resolved';
+
+    /**
+     * The marker whmcs:auto-issue appends to a row's notes when it files it — the
+     * durable «issued automatically» signal for the inbox. NOT filed_by_user_id
+     * IS NULL: that FK is ON DELETE SET NULL, so a deleted operator's manual rows
+     * would read as automatic. The notes are frozen once the row is filed
+     * (PendingWhmcsInvoiceObserver), so the marker can't drift.
+     */
+    public const AUTO_ISSUE_MARKER = 'whmcs:auto-issue';
 
     /**
      * Match-reason constants - mirror MatchResult::$reason values so
@@ -207,6 +217,22 @@ class PendingWhmcsInvoice extends Model
     public function filedByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'filed_by_user_id');
+    }
+
+    /** Filed at AADE by whmcs:auto-issue (no operator) — see AUTO_ISSUE_MARKER. */
+    public function wasAutoIssued(): bool
+    {
+        return $this->status === self::STATUS_FILED
+            && str_contains((string) $this->notes, self::AUTO_ISSUE_MARKER);
+    }
+
+    /** @param  Builder<self>  $query */
+    public function scopeAutoIssued(Builder $query, bool $auto = true): void
+    {
+        $query->where('status', self::STATUS_FILED);
+        $auto
+            ? $query->where('notes', 'like', '%'.self::AUTO_ISSUE_MARKER.'%')
+            : $query->where(fn (Builder $q) => $q->whereNull('notes')->orWhere('notes', 'not like', '%'.self::AUTO_ISSUE_MARKER.'%'));
     }
 
     /**

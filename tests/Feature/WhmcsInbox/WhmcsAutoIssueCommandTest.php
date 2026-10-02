@@ -107,6 +107,7 @@ class WhmcsAutoIssueCommandTest extends TestCase
         $this->assertNotNull($fresh->invoice_id);
         $this->assertNull($fresh->filed_by_user_id, 'auto-issue is system-filed (no operator)');
         $this->assertStringContainsString('άμεση τιμολόγηση', (string) $fresh->notes);
+        $this->assertTrue($fresh->wasAutoIssued(), 'the inbox «🤖 Αυτόματα» signal must be stamped');
         $this->assertSame('ΤΠΥ1', Invoice::find($fresh->invoice_id)->invcode);
     }
 

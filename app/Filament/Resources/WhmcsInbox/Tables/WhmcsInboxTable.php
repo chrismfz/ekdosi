@@ -224,6 +224,22 @@ class WhmcsInboxTable
                         : null)
                     ->openUrlInNewTab(),
 
+                // Who issued a filed row: whmcs:auto-issue or an operator. Shown only
+                // on filed rows (the «Καταχωρημένα» question); pair with the filter.
+                TextColumn::make('filed_by')
+                    ->label('Έκδοση από')
+                    ->state(fn (PendingWhmcsInvoice $r): ?string => match (true) {
+                        $r->status !== PendingWhmcsInvoice::STATUS_FILED => null,
+                        $r->wasAutoIssued() => '🤖 Αυτόματα',
+                        default => $r->filedByUser?->name ?? 'Χειριστής',
+                    })
+                    ->badge()
+                    ->color(fn (PendingWhmcsInvoice $r): string => $r->wasAutoIssued() ? 'info' : 'gray')
+                    ->placeholder('—')
+                    // Only where filed rows live — elsewhere it'd be a permanently blank column.
+                    ->visible(fn ($livewire): bool => self::showsFiledRows($livewire))
+                    ->toggleable(),
+
                 TextColumn::make('mydata_mark')
                     ->label('MARK')
                     ->copyable()
@@ -292,6 +308,19 @@ class WhmcsInboxTable
                     ->query(fn (Builder $query, array $data): Builder => ($data['value'] ?? null) === 'yes'
                         ? $query->whereHas('customer', fn (Builder $q) => $q->where('needs_immediate_invoice', true))
                         : $query),
+
+                // Filed rows by how they were issued (auto-issue vs operator).
+                SelectFilter::make('issued_how')
+                    ->label('Τρόπος έκδοσης')
+                    // Filed-only by definition; hidden (→ not applied) on the other tabs,
+                    // so a leftover selection can't empty «Ανοιχτά».
+                    ->visible(fn ($livewire): bool => self::showsFiledRows($livewire))
+                    ->options(['auto' => '🤖 Αυτόματα', 'manual' => 'Χειροκίνητα'])
+                    ->query(fn (Builder $query, array $data): Builder => match ($data['value'] ?? null) {
+                        'auto' => $query->autoIssued(),
+                        'manual' => $query->autoIssued(false),
+                        default => $query,
+                    }),
 
                 // «Τιμολόγιο πριν την πληρωμή»: the UNPAID rows staged by whmcs:fetch-unpaid
                 // for manual επί-πιστώσει issuance. Filters on the WHMCS payment status in the
@@ -366,6 +395,12 @@ class WhmcsInboxTable
                     self::deleteSelectedAction(),
                 ]),
             ]);
+    }
+
+    /** The inbox tabs that can contain filed rows («Καταχωρημένα», «Όλα»). */
+    private static function showsFiledRows(mixed $livewire): bool
+    {
+        return in_array($livewire->activeTab ?? null, ['filed', 'all'], true);
     }
 
     /**
