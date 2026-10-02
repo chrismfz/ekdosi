@@ -181,6 +181,10 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
   `ai_conversations` persistence (+ UI επιλογής) · streaming απαντήσεων (SSE/Livewire).
 - **Bridges/Connectors Phase 1** — πραγματική 2η πηγή (WooCommerce/Blesta…) → `bridges-connectors.md`. **Χτίσ' το
   μόνο όταν υπάρξει πραγματική 2η πηγή** (αλλιώς το contract κουβαλά WHMCS-isms).
+- **WooCommerce γέφυρα + Point of Sale (ΣΧΕΔΙΟ 2026-10-02)** — η 2η πραγματική πηγή ήρθε: e-shop ρούχων/παπουτσιών
+  που φεύγει από το SoftOne (Woo παραγγελίες → ΑΛΠ, παραλλαγές χρώμα×μέγεθος + barcodes, στοκ ekdosi → Woo, POS
+  καταστήματος με διασύνδεση καρτών μέσω InvoSign `GetPayment`). Πλήρες πλάνο + ανοιχτά (πελάτης/λογιστής) →
+  **`woocommerce-bridge-plan.md`**. Δεν ξεκινά πριν απαντηθούν τα §9/§10 εκεί.
 
 ### 💡 UX / ERP-parity ideas
 - **Κεντρικός editor κειμένων/ετικετών (ζητήθηκε 2026-09-19)** — «Ρυθμίσεις → Κείμενα/Ετικέτες» για όλα τα
