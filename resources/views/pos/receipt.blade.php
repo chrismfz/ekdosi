@@ -40,7 +40,8 @@
     {{--
         One block per item: description, then «qty × unit (VAT incl.) · VAT%» and the
         amount BEFORE the line discount; a discount gets its own «Έκπτωση x%  −y» row
-        (like a cash register), so the amounts in the right column add up to the total.
+        (like a cash register); a document-level discount gets its own row too, so the
+        item amounts add up to the VAT-inclusive total (fees/withholding follow it).
     --}}
     <table>
         @foreach($invoice->lines as $line)
@@ -62,11 +63,18 @@
             </tr>
             @if($discountAmount > 0)
                 <tr>
-                    <td>&nbsp;&nbsp;{{ $L('line_discount') }} {{ rtrim(rtrim(number_format((float) $line->discount, 2, ',', '.'), '0'), ',') }}%</td>
+                    <td>&nbsp;&nbsp;{{ $L('line_discount') }} {{ rtrim(rtrim(number_format((float) $line->discount, 4, ',', '.'), '0'), ',') }}%</td>
                     <td class="r">−{{ number_format($discountAmount, 2, ',', '.') }}</td>
                 </tr>
             @endif
         @endforeach
+        @php($headerDiscount = round((float) $invoice->lines->sum(fn ($l) => (float) $l->gross_price) - (float) $totals['totalGross'], 2))
+        @if((float) $invoice->header_discount_percent > 0 && $headerDiscount > 0)
+            <tr>
+                <td>{{ $L('header_discount') }} {{ rtrim(rtrim(number_format((float) $invoice->header_discount_percent, 4, ',', '.'), '0'), ',') }}%</td>
+                <td class="r">−{{ number_format($headerDiscount, 2, ',', '.') }}</td>
+            </tr>
+        @endif
     </table>
     <hr>
     <table>
@@ -85,13 +93,17 @@
             @endif
         @endforeach
         <tr class="b big"><td>@gup($L('total'))</td><td class="r">{{ number_format($totals['payable'], 2, ',', '.') }} €</td></tr>
-        <tr><td colspan="2">{{ $L('items_count') }}: {{ rtrim(rtrim(number_format((float) $totals['totalQty'], 3, ',', '.'), '0'), ',') }}</td></tr>
+        {{-- «Τεμάχια» only when every quantity is a whole number; kilos/hours → total quantity. --}}
+        @php($wholeQty = $invoice->lines->every(fn ($l) => fmod((float) $l->qty, 1.0) == 0.0))
+        <tr><td colspan="2">{{ $L($wholeQty ? 'items_count' : 'total_quantity') }}: {{ rtrim(rtrim(number_format((float) $totals['totalQty'], 3, ',', '.'), '0'), ',') }}</td></tr>
         @if($invoice->paymentMethod)
             <tr><td colspan="2">{{ $invoice->paymentMethod->description }}</td></tr>
         @endif
     </table>
 
-    <div class="c note">{{ $L('vat_included') }}</div>
+    @if((float) $totals['totalVat'] > 0)
+        <div class="c note">{{ $L('vat_included') }}</div>
+    @endif
 
     @if(! empty($totals['vatExemption']))
         <hr>

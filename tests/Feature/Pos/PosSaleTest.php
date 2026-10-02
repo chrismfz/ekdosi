@@ -23,6 +23,7 @@ use App\Models\VatCategory;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
 use App\Services\Products\VariantGenerator;
+use App\Services\RecomputeInvoiceTotals;
 use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -375,6 +376,25 @@ class PosSaleTest extends TestCase
         $this->assertStringContainsString('29,30 €', $text);
         $this->assertStringContainsString('Τεμάχια: 3', $text);
         $this->assertStringContainsString('Στις τιμές συμπεριλαμβάνεται ο ΦΠΑ', $text);
+    }
+
+    public function test_the_receipt_shows_a_document_discount_row_and_a_quantity_for_weighed_items(): void
+    {
+        // An 11.1 issued from the invoice form can carry a header discount; a weighed item has a fractional qty.
+        $cheese = $this->product('Τυρί', 10.00, ['price_wvat' => 12.40]);
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $cheese->id, 'qty' => 1.5]]);
+        $invoice->update(['header_discount_percent' => 10]);
+        $invoice = app(RecomputeInvoiceTotals::class)($invoice);
+        $this->operator();
+
+        $html = $this->get(URL::temporarySignedRoute('pos.receipt', now()->addMinutes(5), ['invoice' => $invoice->id]))->assertOk()->getContent();
+        $text = preg_replace('/\s+/u', ' ', html_entity_decode(preg_replace('/<[^>]+>/', ' ', $html)));
+
+        $this->assertStringContainsString('1,5 × 12,40 · 24% 18,60', $text);
+        $this->assertStringContainsString('Έκπτωση παραστατικού 10% −1,86', $text);   // 18,60 → 16,74
+        $this->assertStringContainsString('16,74 €', $text);
+        $this->assertStringContainsString('Συνολική ποσότητα: 1,5', $text);
+        $this->assertStringNotContainsString('Τεμάχια', $text);
     }
 
     public function test_the_last_receipt_id_cannot_be_set_from_the_browser(): void
