@@ -6,8 +6,6 @@ use App\Filament\Resources\Companies\Actions\CompanyBackupActions;
 use App\Models\Company;
 use App\Support\EInvoice\SendChannel;
 use Filament\Actions\ActionGroup;
-use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -108,13 +106,12 @@ class CompaniesTable
                     ->color('gray')
                     ->button(),
             ])
-            ->toolbarActions([
-                // «Εισαγωγή εταιρίας από αρχείο» moved to the page header, next to
-                // «New company» (its natural twin) — see ListCompanies.
-                BulkActionGroup::make([
-                    DeleteBulkAction::make(),
-                ]),
-            ])
+            // NO bulk delete (MYD-025): deleting a tenant destroys its filed MARKs and
+            // audit trail, so it happens one company at a time through EditCompany's
+            // «Οριστική διαγραφή» — evidence warning, two acknowledgements, log line.
+            // A bare DeleteBulkAction here skipped all three.
+            // «Εισαγωγή εταιρίας από αρχείο» lives in the page header, next to
+            // «New company» (its natural twin) — see ListCompanies.
             ->defaultSort('name');
     }
 }
