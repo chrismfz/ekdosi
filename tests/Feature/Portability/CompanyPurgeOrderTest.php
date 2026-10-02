@@ -6,7 +6,9 @@ use App\Models\Company;
 use App\Services\Portability\CompanyPurger;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
+use Mockery;
 use RuntimeException;
 use Tests\TestCase;
 
@@ -86,6 +88,18 @@ class CompanyPurgeOrderTest extends TestCase
         $this->assertNotNull(Company::find($c->id));
         $this->assertSame(1, DB::table('products')->where('company_id', $c->id)->count());
         $this->assertSame(1, DB::table('invoices')->where('company_id', $c->id)->count());
+    }
+
+    public function test_every_delete_writes_the_myd025_audit_line_with_the_evidence_it_destroyed(): void
+    {
+        $c = $this->seedTenant('audit');
+        Log::spy();
+
+        $c->delete();   // not through EditCompany — the model itself must log
+
+        Log::shouldHaveReceived('warning')->once()->with('Company deleted', Mockery::on(
+            fn (array $ctx): bool => $ctx['company_id'] === $c->id && $ctx['slug'] === 'audit' && array_key_exists('evidence', $ctx),
+        ));
     }
 
     public function test_deleting_an_unpersisted_instance_purges_nothing(): void

@@ -11,7 +11,6 @@ use Filament\Actions\DeleteAction;
 use Filament\Forms\Components\Checkbox;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
 
 class EditCompany extends EditRecord
@@ -77,17 +76,9 @@ class EditCompany extends EditRecord
                         ->accepted()
                         ->validationMessages(['accepted' => 'Χρειάζεται επιβεβαίωση.']),
                 ])
-                ->modalSubmitActionLabel('Οριστική διαγραφή')
-                ->before(function (): void {
-                    // On the record either way: this is the one moment where the
-                    // local proof of everything filed under this ΑΦΜ stops existing.
-                    Log::warning('Company deleted', [
-                        'company_id' => $this->record->getKey(),
-                        'slug' => $this->record->slug,
-                        'evidence' => LegalEvidence::for($this->record)->describe(),
-                        'user_id' => auth()->id(),
-                    ]);
-                }),
+                // The 'Company deleted' audit line (with the evidence summary) is
+                // written by Company::delete() itself, so every path logs it.
+                ->modalSubmitActionLabel('Οριστική διαγραφή'),
         ];
     }
 
