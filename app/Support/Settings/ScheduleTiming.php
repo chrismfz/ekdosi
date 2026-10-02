@@ -17,6 +17,16 @@ use Cron\CronExpression;
  */
 class ScheduleTiming
 {
+    /**
+     * A task's enable switch: the UI override wins, config/env is the default.
+     * THE one reader — routes/console.php (what actually runs), ops:health and the
+     * inbox auto-issue badge must never disagree on it.
+     */
+    public static function enabled(string $key): bool
+    {
+        return app(SystemSettings::class)->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+    }
+
     public static function cron(string $key, string $default): string
     {
         $stored = (string) app(SystemSettings::class)->string("schedule.{$key}", $default);

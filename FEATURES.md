@@ -664,6 +664,8 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Άμεση τιμολόγηση (auto-issue) type-aware** — διαλέγει Απόδειξη/Τιμολόγιο από την πρόθεση
   (ΑΦΜ/wantsinvoice ή route is_receipt)· `whmcs_default_invoice_type_id` + `whmcs_default_receipt_type_id`·
   ό,τι δεν τυποποιείται με ασφάλεια ΜΕΝΕΙ στο Inbox (ποτέ λάθος τύπος).
+- **Inbox υπενθύμιση «Άμεση τιμολόγηση»** (header, δίπλα στο «Συγχρονισμός τώρα») — η *πραγματική* κατάσταση του
+  auto-issue (`WhmcsInboxTable::autoIssueState()`): ενεργή / «ON — δεν τρέχει» + αιτία· κρυφή όταν είναι OFF.
 - **Inbox «Έκδοση από» + φίλτρο «Τρόπος έκδοσης»** — στα «Καταχωρημένα» φαίνεται αν μια εγγραφή εκδόθηκε
   «🤖 Αυτόματα» (`whmcs:auto-issue`) ή από ποιον χειριστή· σήμα = `PendingWhmcsInvoice::AUTO_ISSUE_MARKER` στις
   παγωμένες σημειώσεις (όχι `filed_by_user_id` NULL — FK ON DELETE SET NULL).
