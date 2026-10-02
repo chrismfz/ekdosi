@@ -11,6 +11,7 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Stock\StockService;
 use App\Services\Taric\CnCatalog;
+use App\Support\LineMoney;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\Products\VariantStockGrid;
 use Filament\Facades\Filament;
@@ -351,7 +352,13 @@ class ProductForm
                                     ->default(0)
                                     ->prefix('€')
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn ($set, $get) => self::recomputeWvatFromSell($set, $get))
+                                    // Only a CHANGED net re-derives the gross (re-typing «8.060» must not
+                                    // turn a 10,00 shelf price into 9,99 — POS-2).
+                                    ->afterStateUpdated(function ($state, $old, $set, $get): void {
+                                        if (round((float) $state, 2) !== round((float) $old, 2)) {
+                                            self::recomputeWvatFromSell($set, $get);
+                                        }
+                                    })
                                     ->helperText('Computed from buy × markup, but you can override directly.'),
 
                                 TextInput::make('price_wvat')
@@ -363,7 +370,7 @@ class ProductForm
                                     ->prefix('€')
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn ($state, $set, $get) => self::recomputeSellFromWvat($state, $set, $get))
-                                    ->helperText('Type the gross retail price and the net sell price is back-computed.'),
+                                    ->helperText('Η τιμή ραφιού: το «Ταμείο» τη χρεώνει ΑΚΡΙΒΩΣ (η καθαρή βγαίνει από αυτή). Αν μετά αλλάξεις κατηγορία ΦΠΑ, τιμή αγοράς ή markup, ξαναϋπολογίζεται από την καθαρή — ξαναγράψ\' την.'),
                             ])
                             ->columns(2),
 
@@ -524,9 +531,9 @@ class ProductForm
      */
     private static function recomputeWvatFromSell(callable $set, callable $get, ?float $sellOverride = null): void
     {
-        $sell = $sellOverride ?? (float) ($get('sell_price') ?? 0);
+        $sell = round($sellOverride ?? (float) ($get('sell_price') ?? 0), 2);   // as stored
         $rate = self::vatRate($get);
-        $set('price_wvat', round($sell * (1 + $rate / 100), 2));
+        $set('price_wvat', LineMoney::grossFromNet($sell, $rate));
     }
 
     /**
@@ -537,8 +544,9 @@ class ProductForm
     {
         $gross = (float) ($state ?? 0);
         $rate = self::vatRate($get);
-        $sell = $rate > 0 ? round($gross / (1 + $rate / 100), 2) : $gross;
-        $set('sell_price', $sell);
+        // The typed gross stays as the SHELF price (price_wvat) — the till sells at it
+        // exactly (POS-2); the net is its 2dp mirror.
+        $set('sell_price', LineMoney::netFromGross($gross, $rate));
     }
 
     private static function vatRate(callable $get): float

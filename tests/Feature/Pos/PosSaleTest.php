@@ -87,10 +87,55 @@ class PosSaleTest extends TestCase
         // The till's preview math == what the receipt stores, line by line.
         $expected = CreatePosSale::lineTotals($shirt, 2, 10)['gross'] + CreatePosSale::lineTotals($socks, 3)['gross'];
         $this->assertSame(round($expected, 2), (float) $invoice->gross_total);
-        $this->assertSame(44.64 + 14.99, (float) $invoice->gross_total);
+        // POS-2: the till sells at the SHELF price — socks tagged 5,00 (net 4,03) are
+        // 3 × 5,00 = 15,00 exactly (net-anchored math would give 14,99).
+        $this->assertSame(44.64 + 15.00, (float) $invoice->gross_total);
 
         $this->assertSame(PaymentStatus::Paid->value, (string) ($invoice->fresh()->payment_status?->value ?? $invoice->fresh()->payment_status), 'cash is settled at issue — in the CACHE the lists read');
         $this->assertSame(8.0, app(StockService::class)->currentStock($shirt));
+    }
+
+    public function test_a_ten_euro_tag_charges_ten_euros(): void
+    {
+        // The whole point of POS-2: net-anchored math can't reach 10,00 @24% (8,06 → 9,99).
+        $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
+        $open = $this->product('ΡΟΥΧΑ 24%', 0, ['pos_open_price' => true]);
+
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [
+            ['product_id' => $tee->id, 'qty' => 3],
+            ['product_id' => $open->id, 'qty' => 1, 'price' => 10.00],
+        ]);
+
+        $this->assertSame(40.00, (float) $invoice->gross_total);
+        $this->assertSame(32.25, (float) $invoice->net_total);   // 30,00 → 24,19 + 10,00 → 8,06
+        $this->assertSame(['10.00', '10.00'], $invoice->lines()->orderBy('id')->pluck('gross_unit_price')->all());
+        $this->assertSame(CreatePosSale::lineTotals($tee, 3)['gross'] + CreatePosSale::lineTotals($open, 1, 0.0, 10.00)['gross'], (float) $invoice->gross_total, 'screen == receipt');
+    }
+
+    public function test_a_product_without_a_valid_shelf_price_is_net_priced_like_the_invoice_form(): void
+    {
+        // No / stale shelf price → NO anchor: 3 × 4,03 net = 12,09 → 14,99, exactly what
+        // the invoice form charges for it (anchoring 4,03×1,24 = 5,00 would give 15,00).
+        $legacy = $this->product('Παλιό είδος', 4.03, ['price_wvat' => 0]);
+
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $legacy->id, 'qty' => 3]]);
+
+        $this->assertSame(14.99, (float) $invoice->gross_total);
+        $this->assertNull($invoice->lines()->first()->gross_unit_price);
+        $this->assertSame(14.99, CreatePosSale::lineTotals($legacy, 3)['gross'], 'screen == receipt');
+    }
+
+    public function test_a_stale_shelf_price_is_ignored(): void
+    {
+        // Legacy import: a 19%-era gross (460,00) next to a 24% category and net 386,55 —
+        // not THIS product's shelf price any more → priced from the net (479,32), as before.
+        $nas = $this->product('NAS', 386.55, ['price_wvat' => 460.00]);
+        $this->assertNull($nas->load('vatCategory')->shelfGross());
+
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $nas->id, 'qty' => 1]]);
+
+        $this->assertSame(479.32, (float) $invoice->gross_total);
+        $this->assertSame(386.55, (float) $invoice->net_total, 'the stored net is the catalogue net');
     }
 
     public function test_what_a_till_will_not_sell(): void

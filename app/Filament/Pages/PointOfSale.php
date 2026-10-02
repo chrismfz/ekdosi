@@ -167,7 +167,7 @@ class PointOfSale extends Page
         }
 
         $price = self::parseAmount($typed);
-        if ($price === null || CreatePosSale::unitNet($product, $price) === null) {
+        if ($price === null || CreatePosSale::unitGross($product, $price) === null) {
             Notification::make()->warning()->title('Μη έγκυρη τιμή «'.$typed.'»')
                 ->body('Γράψε την τιμή με ΦΠΑ, π.χ. 24,90 ή 1.250,00 (όχι σκέτο «1.250»).')->send();
             $this->dispatch('pos-price-focus');
@@ -175,19 +175,10 @@ class PointOfSale extends Page
             return;
         }
 
-        // Always its own line — two «ΡΟΥΧΑ» at different prices never merge.
+        // Always its own line — two «ΡΟΥΧΑ» at different prices never merge. The line
+        // is shelf-priced (POS-2): it charges exactly the typed price.
         $this->cart[] = ['product_id' => $product->getKey(), 'qty' => 1.0, 'discount' => 0.0, 'price' => $price];
         $this->closePrice();
-
-        // A net price is stored at 2dp, so some gross prices can't be reproduced
-        // exactly (e.g. 10,00 at 24% → 9,99) — say so instead of a silent cent.
-        $charged = CreatePosSale::lineTotals($product, 1, 0.0, $price)['gross'];
-        if (abs($charged - $price) >= 0.005) {
-            Notification::make()->warning()
-                ->title('Θα χρεωθεί '.number_format($charged, 2, ',', '.').' € αντί '.number_format($price, 2, ',', '.').' €')
-                ->body('Στρογγυλοποίηση ΦΠΑ: η τιμή αυτή δεν βγαίνει ακριβώς από καθαρό με 2 δεκαδικά.')
-                ->send();
-        }
     }
 
     public function closePrice(): void
@@ -493,9 +484,16 @@ class PointOfSale extends Page
         return ProductMediaService::primaryImage($product)?->fileUrl('thumb');
     }
 
+    /** One unit's shelf price (VAT incl.) — the same number the cart row shows. */
     public function unitPrice(Product $product): float
     {
         return CreatePosSale::lineTotals($product, 1)['gross'];
+    }
+
+    /** One unit's product-linked fee (bag, deposit…) — shown NEXT to the price, never inside it. */
+    public function unitLevy(Product $product): float
+    {
+        return round(CreatePosSale::lineTotals($product, 1)['levy'], 2);
     }
 
     // ── internals ──────────────────────────────────────────────────────────

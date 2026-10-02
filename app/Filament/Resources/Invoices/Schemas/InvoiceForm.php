@@ -531,8 +531,13 @@ class InvoiceForm
                                         : (float) ($product->vatCategory?->rate ?? 24);
                                     $set('product_descr', $product->description_short);
                                     $set('price_per_item', $net);
-                                    // A (re)picked product is priced by its catalogue NET — no shelf anchor.
-                                    $set('gross_unit_price', null);
+                                    // POS-2: on a RETAIL document (11.x) a product with a valid shelf
+                                    // price is sold at it exactly, like the «Ταμείο» (10,00, not 9,99);
+                                    // B2B / reverse-charge lines stay net-priced (no anchor).
+                                    $shelf = ! $reverseCharge && str_starts_with((string) self::mydataTypeOf($get('../../invoice_type_id')), '11.')
+                                        ? $product->shelfGross($vat)
+                                        : null;
+                                    $set('gross_unit_price', $shelf);
                                     // Normalised so the value matches a VAT-rate Select option.
                                     $set('vat_percent', VatRateOptions::normalize($vat));
                                     // MYD-007: a $set() on vat_percent does NOT fire that Select's
@@ -550,8 +555,8 @@ class InvoiceForm
                                     } else {
                                         $set('vat_exemption_category', null);
                                     }
-                                    // G7: keep the VAT-inclusive mirror in sync.
-                                    $set('price_per_item_wvat', self::grossFromNet($net, $vat));
+                                    // G7: keep the VAT-inclusive mirror in sync (the exact shelf price on an anchored line).
+                                    $set('price_per_item_wvat', $shelf ?? self::grossFromNet($net, $vat));
                                     $set('metric_unit', $product->metricUnit?->name);
                                 }),
 
@@ -572,10 +577,11 @@ class InvoiceForm
                                 ->maxLength(15),
 
                             // POS-2: a shelf-priced line's VAT-inclusive anchor (re-issue /
-                            // «Νέο από αυτό» drafts of till receipts). The FORM owns it
-                            // explicitly: a net edit, a product pick or a VAT change clears
-                            // it; a gross edit on an anchored line moves it. The model just
-                            // honours whatever is saved (InvoiceLine::saving).
+                            // «Νέο από αυτό» drafts of till receipts, or a product picked on a
+                            // RETAIL 11.x document with a valid shelf price). The FORM owns it
+                            // explicitly: a product pick sets it (retail) or clears it (B2B);
+                            // a net edit or a VAT change clears it; a gross edit on an anchored
+                            // line moves it. The model honours whatever is saved.
                             Hidden::make('gross_unit_price')
                                 ->rules(['nullable', 'numeric', 'min:0']),
 

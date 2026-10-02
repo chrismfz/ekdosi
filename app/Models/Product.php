@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
 use App\Services\Products\ProductMediaService;
 use App\Services\Products\VariantGenerator;
+use App\Support\LineMoney;
 use App\Support\MyData\Taric;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -34,8 +35,12 @@ use Illuminate\Support\Facades\DB;
  * - `buy_price`   = wholesale / cost.
  * - `sell_price`  = net retail (what gets stamped onto invoice lines as
  *                   PRICE_PER_ITEM — FAddInvoice.cpp:194).
- * - `price_wvat`  = sell_price × (1 + vat_category.rate/100), denormalised
- *                   so list views can show "with VAT" without joining.
+ * - `price_wvat`  = the VAT-inclusive SHELF price (POS-2): normally
+ *                   sell_price × (1 + rate), but when the operator types it
+ *                   (product form / CSV gross column) it is kept EXACTLY and
+ *                   sell_price is its 2dp net mirror. The «Ταμείο» (and a retail
+ *                   11.x line in the invoice form) sells at it — via shelfGross(),
+ *                   which ignores a STALE value (see there).
  * - Markup is NOT a column. Legacy reads it from a Windows Registry app
  *   setting; we use product_categories.markup as the per-category default
  *   for the live-compute in the Filament form.
@@ -243,6 +248,24 @@ class Product extends Model
     public function productCategory(): BelongsTo
     {
         return $this->belongsTo(ProductCategory::class);
+    }
+
+    /**
+     * The VAT-inclusive SHELF price (POS-2) — `price_wvat`, but ONLY while it is still
+     * the shelf price of THIS product: its 2dp net mirror at the CURRENT rate must be
+     * the catalogue net (sell_price). A stale one (legacy import at 19/23%, a VAT
+     * category whose rate was edited, a variant tax-synced without its prices) is NOT
+     * trusted → null, and callers price from the net as before. One rule for the till
+     * and the invoice form.
+     */
+    public function shelfGross(?float $vatPercent = null): ?float
+    {
+        $gross = round((float) ($this->price_wvat ?? 0), 2);
+        $rate = $vatPercent ?? (float) ($this->vatCategory?->rate ?? 0);
+
+        return $gross > 0 && LineMoney::netFromGross($gross, $rate) === round((float) $this->sell_price, 2)
+            ? $gross
+            : null;
     }
 
     /**

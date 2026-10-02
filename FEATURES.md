@@ -1037,7 +1037,8 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   ρητά (τιμή με ΦΠΑ = νέα τελική· καθαρή/ΦΠΑ/είδος = κλασική γραμμή). Επικυρωμένο σε sandbox ΑΑΔΕ + InvoSign (POS-2).
 - **«Ταμείο» (Point of Sale)** (`PointOfSale` page, `CreatePosSale`, `pos.receipt`) — κρυφό module ανά εταιρεία· barcode/αναζήτηση/
   παραλλαγές, καλάθι, ρέστα· ΑΛΠ 11.1 χωρίς πελάτη που εκδίδεται αμέσως από την κανονική διαδρομή (πάροχος/myDATA), κινεί απόθεμα·
-  απόδειξη 80mm από τον browser· «Αγαπημένα» ως πλήκτρα + γενικά είδη ελεύθερης τιμής (`pos_open_price`). Μόνο μετρητά προς το
+  απόδειξη 80mm από τον browser· «Αγαπημένα» ως πλήκτρα + γενικά είδη ελεύθερης τιμής (`pos_open_price`)· χρεώνει ΑΚΡΙΒΩΣ
+  την τιμή ραφιού (`price_wvat`, γραμμές με σταθερή τελική τιμή — POS-2). Μόνο μετρητά προς το
   παρόν (§11 του `docs/woocommerce-bridge-plan.md`).
 - **Φωτογραφίες & βίντεο προϊόντων** (`ProductMedia`, `ProductMediaService::displayMedia`, route `product-media.show` μόνο για
   χειριστές) — GD re-encode (EXIF/GPS out, όλοι οι προσανατολισμοί, 2000px + thumb), βίντεο ≤12 MB ή σύνδεσμος, σειρά/κύρια/alt,

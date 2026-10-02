@@ -12,7 +12,7 @@
         @elseif ($product->isOpenPrice())
             Ελεύθερη τιμή ›
         @else
-            {{ number_format($page->unitPrice($product), 2, ',', '.') }} €
+            {{ number_format($page->unitPrice($product), 2, ',', '.') }} €@if (($levy = $page->unitLevy($product)) != 0) <small>{{ $levy > 0 ? '+' : '−' }} τέλος {{ number_format(abs($levy), 2, ',', '.') }}/τεμ</small>@endif
         @endif
     </div>
 </button>
