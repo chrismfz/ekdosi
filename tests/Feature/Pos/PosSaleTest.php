@@ -23,9 +23,11 @@ use App\Models\VatCategory;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
 use App\Services\Products\VariantGenerator;
+use App\Services\RecomputeInvoiceTotals;
 use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
@@ -351,6 +353,65 @@ class PosSaleTest extends TestCase
         $invoice = Invoice::sole();
         $this->assertSame('active', $invoice->local_status);
         $this->assertSame(2, $invoice->lines()->count());
+    }
+
+    public function test_the_receipt_shows_vat_per_item_a_discount_row_and_a_per_rate_summary(): void
+    {
+        $vat6 = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '6%', 'rate' => 6]);
+        $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
+        $book = $this->product('Βιβλίο', 10.66, ['vat_category_id' => $vat6->id, 'price_wvat' => 11.30]);
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [
+            ['product_id' => $tee->id, 'qty' => 2, 'discount' => 10],
+            ['product_id' => $book->id, 'qty' => 1],
+        ]);
+        $this->operator();
+
+        $html = $this->get(URL::temporarySignedRoute('pos.receipt', now()->addMinutes(5), ['invoice' => $invoice->id]))->assertOk()->getContent();
+        $text = preg_replace('/\s+/u', ' ', html_entity_decode(preg_replace('/<[^>]+>/', ' ', $html)));   // cells → spaced
+
+        $this->assertStringContainsString('2 × 10,00 · 24% 20,00', $text);     // before the discount
+        $this->assertStringContainsString('Έκπτωση 10% −2,00', $text);        // its own row
+        $this->assertStringContainsString('1 × 11,30 · 6% 11,30', $text);
+        $this->assertStringContainsString('ΦΠΑ 24% (Καθαρή 14,52) 3,48', $text);   // 18,00 → 14,52 + 3,48
+        $this->assertStringContainsString('ΦΠΑ 6% (Καθαρή 10,66) 0,64', $text);
+        $this->assertStringContainsString('29,30 €', $text);
+        $this->assertStringContainsString('Τεμάχια: 3', $text);
+        $this->assertStringContainsString('Στις τιμές συμπεριλαμβάνεται ο ΦΠΑ', $text);
+    }
+
+    public function test_the_receipt_shows_a_document_discount_row_and_a_quantity_for_weighed_items(): void
+    {
+        // An 11.1 issued from the invoice form can carry a header discount; a weighed item has a fractional qty.
+        $cheese = $this->product('Τυρί', 10.00, ['price_wvat' => 12.40]);
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $cheese->id, 'qty' => 1.5]]);
+        $invoice->update(['header_discount_percent' => 10]);
+        $invoice = app(RecomputeInvoiceTotals::class)($invoice);
+        $this->operator();
+
+        $html = $this->get(URL::temporarySignedRoute('pos.receipt', now()->addMinutes(5), ['invoice' => $invoice->id]))->assertOk()->getContent();
+        $text = preg_replace('/\s+/u', ' ', html_entity_decode(preg_replace('/<[^>]+>/', ' ', $html)));
+
+        $this->assertStringContainsString('1,5 × 12,40 · 24% 18,60', $text);
+        $this->assertStringContainsString('Έκπτωση παραστατικού 10% −1,86', $text);   // 18,60 → 16,74
+        $this->assertStringContainsString('16,74 €', $text);
+        $this->assertStringContainsString('Συνολική ποσότητα: 1,5', $text);
+        $this->assertStringNotContainsString('Τεμάχια', $text);
+    }
+
+    public function test_an_imported_line_a_cent_off_never_prints_a_phantom_discount(): void
+    {
+        // Legacy ETL stores gross verbatim (round(0,495 × 1,24) = 0,61) while the rebuilt
+        // pre-discount amount is 0,62 — with NO discount on the line, no «Έκπτωση» row.
+        $sale = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $this->product('Είδος', 1)->id, 'qty' => 1]]);
+        $line = $sale->lines()->first();
+        DB::table('invoice_lines')->where('id', $line->id)->update([
+            'qty' => 1.5, 'price_per_item' => 0.33, 'gross_unit_price' => null, 'discount' => 0, 'net_price' => 0.50, 'gross_price' => 0.61,
+        ]);
+        $this->operator();
+
+        $html = $this->get(URL::temporarySignedRoute('pos.receipt', now()->addMinutes(5), ['invoice' => $sale->id]))->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('Έκπτωση', strip_tags($html));
     }
 
     public function test_the_last_receipt_id_cannot_be_set_from_the_browser(): void

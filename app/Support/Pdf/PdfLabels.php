@@ -94,6 +94,10 @@ class PdfLabels
         'other_taxes' => ['Λοιποί φόροι', 'Other taxes'],
         'deductions' => ['Κρατήσεις', 'Deductions'],
         'payable' => ['Πληρωτέο', 'Payable'],
+        // 80mm till receipt (POS)
+        'line_discount' => ['Έκπτωση', 'Discount'],
+        'vat_included' => ['Στις τιμές συμπεριλαμβάνεται ο ΦΠΑ', 'Prices include VAT'],
+        'items_count' => ['Τεμάχια', 'Items'],
 
         // Customer running-balance block («ΝΕΟ ΥΠΟΛΟΙΠΟ»)
         'customer_balance' => ['Υπόλοιπο πελάτη', 'Customer balance'],
