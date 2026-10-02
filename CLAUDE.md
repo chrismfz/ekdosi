@@ -260,6 +260,19 @@ ONLY when assigning to the model attribute, never between sub-sums. New home:
 `App\Services\RecomputeInvoiceTotals` + `InvoiceVatBreakdown`. Golden-test after import (README
 query); expect a few off-by-€0.01 invoice-discount rows.
 
+**Gross-anchored lines (POS-2) — a deliberate SECOND per-line formula, do NOT "fix" it back.** A line
+with `invoice_lines.gross_unit_price` set (retail shelf price) is priced like a cash register:
+```
+GROSS = round(QTY * GROSS_UNIT * (1 - DISCOUNT_line / 100), 2)
+VAT   = round(GROSS * VATPERCENT / (100 + VATPERCENT), 2)      # extracted from the gross
+NET   = GROSS - VAT                                           # price_per_item = 2dp net MIRROR only
+```
+So 10,00 € @24% = 8,06 + 1,94 exactly (the net-anchored formula can only reach 9,99). Its VAT is NOT
+`NET × rate` — **AADE checks only the sums** ([203]/[207]/[208]/[209]; sandbox-proven 2026-10-02, AADE
+direct + InvoSign, incl. a 0,26 € summary divergence). Never add a «vatAmount == netValue × rate» check.
+Both formulas live in ONE place: `App\Support\LineMoney` (`fromNet`/`fromGross`). The model always
+honours the anchor; the caller that re-prices by net clears it explicitly (the invoice form does).
+
 **Key stored-proc semantics ported:**
 - `GET_INV_CODE` = `INVTYPE.code || INVCOUNT` (e.g. `APY423`), no zero-pad.
 - `CALCULATE_VAT_FOR_INVOICE` = per-VAT-rate breakdown WITH invoice-level discount applied →
