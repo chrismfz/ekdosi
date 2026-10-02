@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Contracts\MovableDocument;
 use App\Enums\PaymentStatus;
+use App\Http\Controllers\PosReceiptController;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasAttachments;
 use App\Models\Concerns\HasInternalNotes;
@@ -1011,6 +1012,16 @@ class Invoice extends Model implements MovableDocument
         }
 
         return blank($this->{$column});
+    }
+
+    /**
+     * Can this document print as an 80mm till receipt? Only an ISSUED, live one —
+     * never a draft or an AADE-cancelled document. The one rule for the receipt
+     * route ({@see PosReceiptController}) and its buttons.
+     */
+    public function isReceiptPrintable(): bool
+    {
+        return $this->local_status === 'active' && $this->code !== null && $this->mydata_state !== 'CANCELLED';
     }
 
     /**

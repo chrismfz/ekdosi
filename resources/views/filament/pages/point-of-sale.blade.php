@@ -64,6 +64,7 @@
         }"
         x-init="$nextTick(() => $refs.scan?.focus())"
         x-on:pos-focus.window="$nextTick(() => $refs.scan?.focus())"
+        x-on:pos-price-focus.window="$nextTick(() => $refs.price?.focus())"
         x-on:pos-print.window="print($event.detail.url)"
         x-on:pos-print-cancel.window="cancel()"
         x-on:keydown.window="if (! $event.target.closest('input, textarea, select, [contenteditable]') && $event.key.length === 1 && $event.key !== ' ' && ! $event.ctrlKey && ! $event.metaKey && ! $event.altKey) { $refs.scan?.focus(); }"
@@ -82,7 +83,16 @@
             <input class="pos-search" type="search" placeholder="Αναζήτηση με όνομα…" wire:model.live.debounce.300ms="search">
             <div class="pos-hint">Το scanner λειτουργεί σαν πληκτρολόγιο — κράτα το πάνω πεδίο ενεργό.</div>
 
-            @if ($this->pickerParent)
+            @if ($this->pricePromptProduct)
+                <div class="pos-picker-head">
+                    <span>{{ $this->pricePromptProduct->description_short }} — τιμή με ΦΠΑ</span>
+                    <button type="button" class="pos-btn-ghost pos-btn pos-btn-sm" wire:click="closePrice">Ακύρωση</button>
+                </div>
+                <div class="pos-pay">
+                    <input x-ref="price" type="text" inputmode="decimal" placeholder="π.χ. 24,90" wire:model="promptPrice" wire:keydown.enter.prevent="addOpenPrice">
+                    <button type="button" class="pos-btn pos-btn-issue" wire:click="addOpenPrice">Προσθήκη</button>
+                </div>
+            @elseif ($this->pickerParent)
                 <div class="pos-picker-head">
                     <span>{{ $this->pickerParent->description_short }} — διάλεξε παραλλαγή</span>
                     <button type="button" class="pos-btn-ghost pos-btn pos-btn-sm" wire:click="closePicker">Κλείσιμο</button>
@@ -101,19 +111,18 @@
             @elseif ($this->searchResults->isNotEmpty())
                 <div class="pos-results">
                     @foreach ($this->searchResults as $product)
-                        <button type="button" wire:key="p-{{ $product->id }}" wire:click="choose({{ $product->id }})" class="pos-item">
-                            @if ($url = $this->photoUrl($product))
-                                <img src="{{ $url }}" alt="">
-                            @endif
-                            <div class="pos-item-name">{{ $product->description_short }}</div>
-                            <div class="pos-item-price">
-                                {{ $product->isVariable() ? 'Επιλογή παραλλαγής ›' : number_format($this->unitPrice($product), 2, ',', '.').' €' }}
-                            </div>
-                        </button>
+                        @include('filament.pages.partials.pos-tile', ['product' => $product, 'page' => $this])
                     @endforeach
                 </div>
             @elseif (mb_strlen(trim($search)) >= 2)
                 <div class="pos-empty">Κανένα είδος για «{{ $search }}».</div>
+            @elseif ($this->favorites->isNotEmpty())
+                <div class="pos-picker-head"><span>Αγαπημένα</span></div>
+                <div class="pos-results">
+                    @foreach ($this->favorites as $product)
+                        @include('filament.pages.partials.pos-tile', ['product' => $product, 'page' => $this])
+                    @endforeach
+                </div>
             @endif
         </div>
 

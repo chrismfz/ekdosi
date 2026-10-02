@@ -10,6 +10,7 @@ use App\Filament\Resources\Cmr\CmrResource;
 use App\Filament\Resources\Customers\CustomerResource;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\BankAccountField;
+use App\Http\Controllers\PosReceiptController;
 use App\Jobs\SendInvoiceEmail;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
@@ -1488,6 +1489,20 @@ class ViewInvoice extends ViewRecord
                         $this->movementLifecycleError($e);
                     }
                 }),
+
+            // «Απόδειξη 80mm» — the till's thermal-printer receipt for an ISSUED retail
+            // document (11.x), re-printable from here when the till's print failed
+            // (paper out, jam, closed popup). Same signed page the «Ταμείο» opens.
+            Action::make('receipt_80mm')
+                ->label('Απόδειξη 80mm')
+                ->icon('heroicon-o-printer')
+                ->color('gray')
+                // Only where the «Ταμείο» is on (a thermal printer exists there).
+                ->visible(fn (Invoice $record): bool => (bool) $record->company?->hasPos()
+                    && $record->filesNoCounterpart()
+                    && $record->isReceiptPrintable())
+                // Minted at render — valid a working day so a page left open still prints.
+                ->url(fn (Invoice $record): string => PosReceiptController::signedUrl($record->getKey(), 12 * 60), shouldOpenInNewTab: true),
 
             // PDF download. Works for any invoice regardless of state —
             // operators may want a paper trail of drafts too.

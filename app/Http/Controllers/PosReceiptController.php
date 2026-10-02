@@ -6,6 +6,7 @@ use App\Models\Invoice;
 use App\Services\InvoicePdfRenderer;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\URL;
 use Spatie\Permission\PermissionRegistrar;
 use Symfony\Component\HttpFoundation\Response as HttpResponse;
 
@@ -18,6 +19,12 @@ use Symfony\Component\HttpFoundation\Response as HttpResponse;
  */
 class PosReceiptController extends Controller
 {
+    /** The signed link to a receipt (the till: minutes; the invoice page: a working day). */
+    public static function signedUrl(int $invoiceId, int $minutes = 30): string
+    {
+        return URL::temporarySignedRoute('pos.receipt', now()->addMinutes($minutes), ['invoice' => $invoiceId]);
+    }
+
     public function __invoke(Request $request, Invoice $invoice, InvoicePdfRenderer $renderer): Response
     {
         $user = $request->user();
@@ -46,10 +53,7 @@ class PosReceiptController extends Controller
 
         // Only an ISSUED, live document prints as a receipt — never a draft or an
         // AADE-cancelled one.
-        abort_if(
-            $invoice->local_status !== 'active' || $invoice->code === null || $invoice->mydata_state === 'CANCELLED',
-            HttpResponse::HTTP_NOT_FOUND,
-        );
+        abort_unless($invoice->isReceiptPrintable(), HttpResponse::HTTP_NOT_FOUND);
 
         return response()
             ->view('pos.receipt', $renderer->viewData($invoice))
