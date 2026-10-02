@@ -18,7 +18,10 @@ use App\Services\WhmcsInbox\MassPayConsolidator;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use App\Support\Afm;
-use App\Support\Settings\SystemSettings;
+use App\Support\OperatorHealth\HealthKeys;
+use App\Support\Settings\ScheduleTiming;
+use Carbon\Carbon;
+use Cron\CronExpression;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -37,6 +40,7 @@ use Illuminate\Contracts\View\View;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\HtmlString;
 use Livewire\Component;
 use Throwable;
@@ -876,8 +880,7 @@ class WhmcsInboxTable
             && InvoiceType::query()->where('company_id', $tenant->getKey())->whereKey($id)->exists();
 
         $missing = array_values(array_filter([
-            app(SystemSettings::class)
-                ->bool('schedule.whmcs_auto_issue_enabled', (bool) config('ekdosi.schedule.whmcs_auto_issue_enabled'))
+            ScheduleTiming::enabled('whmcs_auto_issue_enabled')
                 ? null : 'ο γενικός διακόπτης στον Χρονοπρογραμματιστή είναι κλειστός',
             $typeExists($tenant->whmcs_default_invoice_type_id) ? null : 'δεν έχει οριστεί προεπιλεγμένος τύπος τιμολογίου',
             $tenant->hasWhmcsIntegration() ? null : 'λείπει η σύνδεση WHMCS (URL/κλειδιά)',
@@ -887,11 +890,27 @@ class WhmcsInboxTable
             return ['running' => false, 'summary' => 'Ενεργοποιημένη στην εταιρεία αλλά ΔΕΝ εκδίδει: '.implode('· ', $missing).'.'];
         }
 
+        // Configured ≠ running: the scheduled task records every run (OPS-8). Two
+        // missed slots of ITS cron, or a failed last run, means it isn't issuing
+        // (dead cron/worker, crash) — say so instead of a reassuring green.
+        $cron = ScheduleTiming::cron('whmcs_auto_issue_cron', (string) config('ekdosi.schedule.whmcs_auto_issue_cron', '*/15 * * * *'));
+        $last = Cache::get(HealthKeys::scheduledTask('whmcs_auto_issue'));
+        $ranAt = is_array($last) && isset($last['ran_at']) ? Carbon::parse($last['ran_at']) : null;
+        $dueBy = Carbon::instance((new CronExpression($cron))->getPreviousRunDate(now(), 1));
+        $lastText = $ranAt ? 'τελευταία εκτέλεση '.$ranAt->diffForHumans() : 'δεν έχει τρέξει ποτέ';
+
+        if (($last['status'] ?? null) === 'failed') {
+            return ['running' => false, 'summary' => 'Ρυθμισμένη, αλλά η τελευταία εκτέλεση ΑΠΕΤΥΧΕ ('.$lastText.') — δες ops:health / logs.'];
+        }
+        if ($ranAt === null || $ranAt->lt($dueBy)) {
+            return ['running' => false, 'summary' => 'Ρυθμισμένη, αλλά ΔΕΝ τρέχει ('.$lastText.', πρόγραμμα «'.$cron.'») — έλεγξε cron/queue worker (ops:health).'];
+        }
+
         $scope = $typeExists($tenant->whmcs_default_receipt_type_id)
             ? 'τιμολόγια και αποδείξεις'
             : 'μόνο τιμολόγια (χωρίς τύπο απόδειξης οι αποδείξεις κρατούνται για χειριστή)';
 
-        return ['running' => true, 'summary' => 'Εκδίδει αυτόματα κάθε λίγα λεπτά: '.$scope.'.'];
+        return ['running' => true, 'summary' => 'Εκδίδει αυτόματα ('.$lastText.', πρόγραμμα «'.$cron.'»): '.$scope.'.'];
     }
 
     /**

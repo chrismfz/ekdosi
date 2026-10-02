@@ -8,7 +8,6 @@ use App\Support\Backup\BackupOverdue;
 use App\Support\OperatorHealth\HealthRecorder;
 use App\Support\OperatorHealth\TenantScheduleSweep;
 use App\Support\Settings\ScheduleTiming;
-use App\Support\Settings\SystemSettings;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Cache;
@@ -34,8 +33,7 @@ $trackSchedule = function ($event, string $task) {
  | run-history pollution). The UI can therefore also turn ON a task that env
  | left off, which registration-gating couldn't.
  */
-$scheduleEnabled = fn (string $key): bool => app(SystemSettings::class)
-    ->bool("schedule.{$key}", (bool) config("ekdosi.schedule.{$key}"));
+$scheduleEnabled = fn (string $key): bool => ScheduleTiming::enabled($key);
 
 /*
  | Per-task TIMING override (same «Σύστημα» settings UI, «Χρονισμός»). The DB

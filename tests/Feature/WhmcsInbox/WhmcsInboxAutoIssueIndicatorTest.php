@@ -7,9 +7,12 @@ use App\Filament\Resources\WhmcsInbox\Tables\WhmcsInboxTable;
 use App\Models\Company;
 use App\Models\InvoiceType;
 use App\Models\User;
+use App\Support\OperatorHealth\HealthKeys;
 use App\Support\Settings\SystemSettings;
+use Carbon\Carbon;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
 use Livewire\Livewire;
 use Tests\TestCase;
@@ -74,9 +77,17 @@ class WhmcsInboxAutoIssueIndicatorTest extends TestCase
             ->assertTableActionHasLabel('auto_issue_status', 'Άμεση τιμολόγηση: ON — δεν τρέχει');
     }
 
+    private function lastRun(string $status, \DateTimeInterface $at): void
+    {
+        Cache::forever(HealthKeys::scheduledTask('whmcs_auto_issue'), [
+            'task' => 'whmcs_auto_issue', 'status' => $status, 'exit_code' => $status === 'ok' ? 0 : 1, 'ran_at' => Carbon::instance($at)->toIso8601String(),
+        ]);
+    }
+
     public function test_green_when_it_actually_runs_and_says_invoices_only_without_a_receipt_type(): void
     {
         $this->scheduler(true);
+        $this->lastRun('ok', now()->subMinutes(5));
         $this->tenant->update(['whmcs_auto_issue_immediate' => true, 'whmcs_default_invoice_type_id' => $this->type('TPY')->id]);
 
         $state = WhmcsInboxTable::autoIssueState($this->tenant->fresh());
@@ -104,5 +115,25 @@ class WhmcsInboxAutoIssueIndicatorTest extends TestCase
         $state = WhmcsInboxTable::autoIssueState($this->tenant->fresh());
         $this->assertFalse($state['running']);
         $this->assertStringContainsString('σύνδεση WHMCS', $state['summary']);
+    }
+
+    public function test_configured_but_the_scheduler_is_not_actually_running_is_amber(): void
+    {
+        // Every knob ON, yet the cron/worker died: green would be the exact trap.
+        $this->scheduler(true);
+        $this->tenant->update(['whmcs_auto_issue_immediate' => true, 'whmcs_default_invoice_type_id' => $this->type('TPY')->id]);
+
+        // Never ran.
+        $this->assertFalse(WhmcsInboxTable::autoIssueState($this->tenant->fresh())['running']);
+
+        // Last run 2 hours ago on a */15 schedule → missed slots.
+        $this->lastRun('ok', now()->subHours(2));
+        $stale = WhmcsInboxTable::autoIssueState($this->tenant->fresh());
+        $this->assertFalse($stale['running']);
+        $this->assertStringContainsString('ΔΕΝ τρέχει', $stale['summary']);
+
+        // Ran recently but failed.
+        $this->lastRun('failed', now()->subMinutes(5));
+        $this->assertStringContainsString('ΑΠΕΤΥΧΕ', WhmcsInboxTable::autoIssueState($this->tenant->fresh())['summary']);
     }
 }
