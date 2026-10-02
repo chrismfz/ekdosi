@@ -197,6 +197,27 @@ class VariantScreensTest extends TestCase
         $this->assertSoftDeleted($one);
     }
 
+    public function test_bulk_restoring_a_parent_with_its_variants_brings_back_all_of_them(): void
+    {
+        [, $size] = $this->axes();
+        $parent = $this->variableParent();
+        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+        $variants = $parent->variants()->get();
+        $variants->each->delete();
+        $parent->delete();
+
+        // Variants FIRST in the selection — the action must still restore the parent first.
+        Livewire::test(ListProducts::class)
+            ->filterTable('kind_view', 'all')
+            ->filterTable('trashed', false)
+            ->callTableBulkAction('restore', [...$variants->all(), $parent]);
+
+        $this->assertNotSoftDeleted($parent);
+        foreach ($variants as $variant) {
+            $this->assertNotSoftDeleted($variant);
+        }
+    }
+
     public function test_variant_foreign_keys_never_block_a_company_delete(): void
     {
         $fks = collect(Schema::getForeignKeys('products'))

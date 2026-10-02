@@ -306,7 +306,12 @@ class ProductsTable
                     // (Product::restoring refuses them) and says how many were skipped.
                     RestoreBulkAction::make()
                         ->action(function (Collection $records): void {
-                            $restored = $records->filter(fn (Product $record) => $record->restore())->count();
+                            // Parents before variants, so a parent restored in the same batch
+                            // is already live when its variants are checked.
+                            $restored = $records
+                                ->sortBy(fn (Product $record) => $record->isVariant() ? 1 : 0)
+                                ->filter(fn (Product $record) => $record->restore())
+                                ->count();
                             $skipped = $records->count() - $restored;
                             Notification::make()
                                 ->{$skipped > 0 ? 'warning' : 'success'}()
