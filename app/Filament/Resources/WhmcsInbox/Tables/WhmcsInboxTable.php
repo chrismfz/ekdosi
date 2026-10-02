@@ -18,6 +18,7 @@ use App\Services\WhmcsInbox\MassPayConsolidator;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use App\Support\Afm;
+use App\Support\Settings\SystemSettings;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
@@ -357,6 +358,9 @@ class WhmcsInboxTable
                     }),
             ])
             ->headerActions([
+                // Left of «Συγχρονισμός τώρα»: a quiet reminder that άμεση τιμολόγηση
+                // auto-issue is armed (or armed but NOT actually running).
+                self::autoIssueStatusAction(),
                 self::syncNowAction(),
             ])
             ->recordActions([
@@ -811,6 +815,83 @@ class WhmcsInboxTable
             ->modalSubmitAction(false)
             ->modalCancelActionLabel('Κλείσιμο')
             ->modalWidth('2xl');
+    }
+
+    /**
+     * Header reminder for άμεση τιμολόγηση auto-issue. Hidden while the tenant
+     * toggle is off (no clutter). When armed it states the EFFECTIVE state —
+     * whmcs:auto-issue needs the tenant toggle AND the scheduler flag AND a
+     * default invoice type AND a WHMCS integration — so «ON but not running»
+     * (the trap: you think it issues, it doesn't) shows amber with the reason.
+     * Click → an info modal; read-only, no permission needed beyond the inbox.
+     */
+    private static function autoIssueStatusAction(): Action
+    {
+        // Memoised for the request: label/color/visible/tooltip/modal each ask, and
+        // the table is configured per Livewire request, so this never goes stale.
+        $memo = [];
+        $state = function () use (&$memo): ?array {
+            $t = Filament::getTenant();
+            if (! $t instanceof Company) {
+                return null;
+            }
+
+            return array_key_exists($t->getKey(), $memo) ? $memo[$t->getKey()] : ($memo[$t->getKey()] = self::autoIssueState($t));
+        };
+
+        return Action::make('auto_issue_status')
+            ->label(fn (): string => ($state()['running'] ?? false)
+                ? 'Άμεση τιμολόγηση: ενεργή'
+                : 'Άμεση τιμολόγηση: ON — δεν τρέχει')
+            ->icon('heroicon-o-bolt')
+            ->color(fn (): string => ($state()['running'] ?? false) ? 'success' : 'warning')
+            ->link()
+            ->visible(fn (): bool => $state() !== null)
+            ->tooltip(fn (): ?string => $state()['summary'] ?? null)
+            ->modalHeading('Αυτόματη έκδοση (άμεση τιμολόγηση)')
+            ->modalDescription(fn (): ?HtmlString => ($s = $state()) === null ? null : new HtmlString(
+                e($s['summary'])
+                .'<br><br>Εκδίδονται + υποβάλλονται <strong>χωρίς έγκριση</strong> μόνο οι σαφείς, πληρωμένες εγγραφές πελατών με «⚡ Άμεσο». '
+                .'Κρατούνται για χειριστή: απλήρωτα, γραμμές 0% ΦΠΑ, κουπόνια, τιμολόγιο χωρίς ΑΦΜ, ενοποιημένα, ασαφείς τρίτοι.'
+                .'<br>Τι εκδόθηκε αυτόματα: tab «Καταχωρημένα» → φίλτρο «Τρόπος έκδοσης: 🤖 Αυτόματα».'
+                .'<br>Ρυθμίσεις (super admin): Εταιρείες → WHMCS bridge (διακόπτης + τύποι) και Σύστημα → Χρονοπρογραμματιστής.'
+            ))
+            ->modalSubmitAction(false)
+            ->modalCancelActionLabel('Κλείσιμο');
+    }
+
+    /**
+     * The tenant's EFFECTIVE auto-issue state, mirroring what whmcs:auto-issue +
+     * routes/console.php actually require. Null = the tenant toggle is off.
+     *
+     * @return array{running: bool, summary: string}|null
+     */
+    public static function autoIssueState(Company $tenant): ?array
+    {
+        if (! $tenant->whmcs_auto_issue_immediate) {
+            return null;
+        }
+
+        $typeExists = fn (?int $id): bool => $id !== null
+            && InvoiceType::query()->where('company_id', $tenant->getKey())->whereKey($id)->exists();
+
+        $missing = array_values(array_filter([
+            app(SystemSettings::class)
+                ->bool('schedule.whmcs_auto_issue_enabled', (bool) config('ekdosi.schedule.whmcs_auto_issue_enabled'))
+                ? null : 'ο γενικός διακόπτης στον Χρονοπρογραμματιστή είναι κλειστός',
+            $typeExists($tenant->whmcs_default_invoice_type_id) ? null : 'δεν έχει οριστεί προεπιλεγμένος τύπος τιμολογίου',
+            $tenant->hasWhmcsIntegration() ? null : 'λείπει η σύνδεση WHMCS (URL/κλειδιά)',
+        ]));
+
+        if ($missing !== []) {
+            return ['running' => false, 'summary' => 'Ενεργοποιημένη στην εταιρεία αλλά ΔΕΝ εκδίδει: '.implode('· ', $missing).'.'];
+        }
+
+        $scope = $typeExists($tenant->whmcs_default_receipt_type_id)
+            ? 'τιμολόγια και αποδείξεις'
+            : 'μόνο τιμολόγια (χωρίς τύπο απόδειξης οι αποδείξεις κρατούνται για χειριστή)';
+
+        return ['running' => true, 'summary' => 'Εκδίδει αυτόματα κάθε λίγα λεπτά: '.$scope.'.'];
     }
 
     /**
