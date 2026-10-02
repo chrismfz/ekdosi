@@ -18,6 +18,7 @@ use Filament\Resources\RelationManagers\RelationManager;
 use Filament\Schemas\Schema;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
+use Illuminate\Database\Eloquent\Model;
 
 /**
  * Append-only stock ledger for a product. Read-only rows (the ledger is never
@@ -42,6 +43,13 @@ class StockMovementsRelationManager extends RelationManager
         'cancel' => 'Αναστροφή ακύρωσης',
         'conversion' => 'Μετατροπή σε φορολογικό',
     ];
+
+    /** A variable parent has no stock of its own — its variants do. */
+    public static function canViewForRecord(Model $ownerRecord, string $pageClass): bool
+    {
+        return ! ($ownerRecord instanceof Product && $ownerRecord->isVariable())
+            && parent::canViewForRecord($ownerRecord, $pageClass);
+    }
 
     public function form(Schema $schema): Schema
     {

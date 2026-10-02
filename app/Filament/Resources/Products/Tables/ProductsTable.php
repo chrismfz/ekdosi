@@ -2,6 +2,8 @@
 
 namespace App\Filament\Resources\Products\Tables;
 
+use App\Filament\Resources\Products\ProductResource;
+use App\Filament\Support\GuardedDeleteAction;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Product;
 use App\Models\StockMovement;
@@ -9,9 +11,7 @@ use App\Services\Stock\StockService;
 use App\Support\MyData\ClassificationGuidance;
 use Filament\Actions\Action;
 use Filament\Actions\BulkActionGroup;
-use Filament\Actions\DeleteBulkAction;
 use Filament\Actions\EditAction;
-use Filament\Actions\ForceDeleteBulkAction;
 use Filament\Actions\RestoreBulkAction;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
@@ -46,11 +46,22 @@ class ProductsTable
                     ->copyable()
                     ->toggleable(),
 
+                TextColumn::make('internal_code')
+                    ->label('Εσωτ. κωδικός')
+                    ->searchable()
+                    ->copyable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('description_short')
                     ->label('Description')
                     ->searchable()
                     ->sortable()
-                    ->wrap(),
+                    ->wrap()
+                    ->description(fn (Product $record) => match ($record->kind) {
+                        Product::KIND_VARIABLE => 'Με παραλλαγές · '.(int) ($record->variants_count ?? 0),
+                        Product::KIND_VARIANT => 'Παραλλαγή',
+                        default => null,
+                    }),
 
                 // Pin frequent products/services to the top of the
                 // invoice-line picker. Toggle inline.
@@ -151,7 +162,9 @@ class ProductsTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
-            ->modifyQueryUsing(fn (Builder $query) => $query->withSum('stockMovements as stock_on_hand', 'qty_change'))
+            ->modifyQueryUsing(fn (Builder $query) => $query
+                ->withSum('stockMovements as stock_on_hand', 'qty_change')
+                ->withCount('variants'))
             ->filters([
                 TernaryFilter::make('is_active')
                     ->label('Active')
@@ -160,6 +173,29 @@ class ProductsTable
                     ->trueLabel('Active only')
                     ->falseLabel('Inactive only')
                     ->placeholder('All'),
+
+                // Variants (docs/woocommerce-bridge-plan.md §0): by default the list shows
+                // simple products + variable parents; a search (barcode/SKU scan) always
+                // reaches the variants too.
+                SelectFilter::make('kind_view')
+                    ->label('Παραλλαγές')
+                    ->options([
+                        'grouped' => 'Χωρίς παραλλαγές (γονικά + απλά)',
+                        'variants' => 'Μόνο παραλλαγές',
+                        'all' => 'Όλα',
+                    ])
+                    ->default('grouped')
+                    ->query(function (Builder $query, array $data, $livewire): Builder {
+                        $view = $data['value'] ?? 'grouped';
+                        if ($view === 'variants') {
+                            return $query->where('kind', Product::KIND_VARIANT);
+                        }
+                        if ($view === 'grouped' && blank($livewire->getTableSearch())) {
+                            return $query->where('kind', '!=', Product::KIND_VARIANT);
+                        }
+
+                        return $query;
+                    }),
 
                 TernaryFilter::make('is_favorite')
                     ->label('Αγαπημένα')
@@ -211,7 +247,7 @@ class ProductsTable
                     ->label('Παραλαβή')
                     ->icon('heroicon-o-plus-circle')
                     ->color('success')
-                    ->visible(fn (Product $record) => $record->track_stock && ! $record->trashed())
+                    ->visible(fn (Product $record) => $record->track_stock && ! $record->isVariable() && ! $record->trashed())
                     ->schema([
                         TextInput::make('qty')
                             ->label('Ποσότητα παραλαβής')
@@ -253,9 +289,9 @@ class ProductsTable
             ])
             ->toolbarActions([
                 BulkActionGroup::make([
-                    DeleteBulkAction::make(),
+                    GuardedDeleteAction::bulk(fn (Product $record): array => ProductResource::dependents($record)),
                     RestoreBulkAction::make(),
-                    ForceDeleteBulkAction::make(),
+                    GuardedDeleteAction::forceBulk(fn (Product $record): array => ProductResource::forceDependents($record)),
                 ]),
             ])
             ->defaultSort('description_short');

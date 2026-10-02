@@ -353,3 +353,21 @@
 .dark .ekdosi-md th, .dark .ekdosi-md td { border-color: rgba(255,255,255,.1); }
 .ekdosi-md th { background-color: #f9fafb; font-weight: 600; }
 .dark .ekdosi-md th { background-color: rgba(255,255,255,.05); }
+
+/* ── product variant stock grid (VariantStockGrid) ───────────────────────── */
+.ekdosi-vgrid-wrap { overflow-x: auto; margin-bottom: .5rem; }
+.ekdosi-vgrid { border-collapse: collapse; font-size: .875rem; }
+.ekdosi-vgrid th, .ekdosi-vgrid td { border: 1px solid #e5e7eb; padding: .35rem .65rem; text-align: center; min-width: 3rem; }
+.dark .ekdosi-vgrid th, .dark .ekdosi-vgrid td { border-color: #374151; }
+.ekdosi-vgrid thead th { font-weight: 600; background: #f9fafb; }
+.dark .ekdosi-vgrid thead th { background: #1f2937; }
+.ekdosi-vgrid .ekdosi-vgrid-rowhead { text-align: left; font-weight: 600; white-space: nowrap; }
+.ekdosi-vgrid td.is-in { color: #15803d; font-weight: 600; }
+.ekdosi-vgrid td.is-out { color: #b45309; background: #fffbeb; }
+.ekdosi-vgrid td.is-negative { color: #b91c1c; background: #fef2f2; font-weight: 600; }
+.dark .ekdosi-vgrid td.is-in { color: #4ade80; }
+.dark .ekdosi-vgrid td.is-out { color: #fbbf24; background: transparent; }
+.dark .ekdosi-vgrid td.is-negative { color: #f87171; background: transparent; }
+.ekdosi-vgrid td.is-none { color: #9ca3af; }
+.ekdosi-vgrid td.is-inactive { text-decoration: line-through; opacity: .6; }
+.ekdosi-swatch { display: inline-block; width: .8rem; height: .8rem; border-radius: 9999px; border: 1px solid rgba(0,0,0,.2); vertical-align: -1px; margin-right: .3rem; }

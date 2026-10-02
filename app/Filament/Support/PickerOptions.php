@@ -115,6 +115,7 @@ class PickerOptions
         $tenantId = Filament::getTenant()?->getKey();
 
         $query = Product::query()
+            ->sellable()
             ->where('company_id', $tenantId)
             ->where('is_active', true)
             ->withCount('invoiceLines')
@@ -125,7 +126,7 @@ class PickerOptions
 
         // Browse-all (same rationale as customers): lift the cap when the active
         // catalogue is small enough to scroll the whole list on open.
-        $total = Product::query()->where('company_id', $tenantId)->where('is_active', true)->count();
+        $total = Product::query()->sellable()->where('company_id', $tenantId)->where('is_active', true)->count();
         if ($total > self::BROWSE_ALL_MAX) {
             $query->limit(30);
         }
@@ -144,11 +145,13 @@ class PickerOptions
     public static function searchProductOptions(string $search): array
     {
         return Product::query()
+            ->sellable()
             ->where('company_id', Filament::getTenant()?->getKey())
             ->where('is_active', true)
             ->where(fn ($q) => $q
                 ->where('description_short', 'like', "%{$search}%")
                 ->orWhere('sku', 'like', "%{$search}%")
+                ->orWhere('internal_code', 'like', "%{$search}%")
                 ->orWhere('barcode', 'like', "%{$search}%"))
             ->withSum('stockMovements as stock_on_hand', 'qty_change')
             ->orderByDesc('is_favorite')

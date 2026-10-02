@@ -3,9 +3,13 @@
 namespace App\Filament\Resources\Products\Pages;
 
 use App\Filament\Resources\Products\ProductResource;
+use App\Filament\Support\GuardedDeleteAction;
+use App\Models\Product;
 use App\Models\ProductCategory;
-use Filament\Actions\DeleteAction;
+use App\Services\Products\VariantGenerator;
+use Filament\Actions\Action;
 use Filament\Facades\Filament;
+use Filament\Notifications\Notification;
 use Filament\Resources\Pages\EditRecord;
 
 class EditProduct extends EditRecord
@@ -15,7 +19,34 @@ class EditProduct extends EditRecord
     protected function getHeaderActions(): array
     {
         return [
-            DeleteAction::make(),
+            // Simple → variable, only while the product has no history (see
+            // VariantGenerator::canBecomeVariable).
+            Action::make('make_variable')
+                ->label('Μετατροπή σε προϊόν με παραλλαγές')
+                ->icon('heroicon-o-squares-2x2')
+                ->color('gray')
+                ->authorize('update', $this->getRecord())
+                ->visible(fn () => $this->getRecord()->kind === Product::KIND_SIMPLE)
+                ->requiresConfirmation()
+                ->modalDescription('Το προϊόν θα γίνει «ομάδα» (δεν πουλιέται το ίδιο) και θα πουλιούνται οι παραλλαγές του. Επιτρέπεται μόνο αν δεν έχει ακόμη κινήσεις αποθέματος ή παραστατικά.')
+                ->action(function (): void {
+                    /** @var Product $record */
+                    $record = $this->getRecord();
+                    if (! app(VariantGenerator::class)->canBecomeVariable($record)) {
+                        Notification::make()
+                            ->danger()
+                            ->title('Δεν γίνεται μετατροπή')
+                            ->body('Το προϊόν έχει ήδη ιστορικό (κινήσεις αποθέματος ή παραστατικά). Φτιάξε νέο προϊόν «με παραλλαγές».')
+                            ->send();
+
+                        return;
+                    }
+                    $record->update(['kind' => Product::KIND_VARIABLE, 'barcode' => null]);
+                    Notification::make()->success()->title('Έγινε προϊόν με παραλλαγές')->send();
+                    $this->redirect(ProductResource::getUrl('edit', ['record' => $record]));
+                }),
+
+            GuardedDeleteAction::make(fn ($record): array => ProductResource::dependents($record)),
         ];
     }
 

@@ -1,14 +1,14 @@
 <?php
 
-namespace App\Filament\Resources\Products\Pages;
+namespace App\Filament\Resources\ProductAttributes\Pages;
 
-use App\Filament\Resources\Products\ProductResource;
+use App\Filament\Resources\ProductAttributes\ProductAttributeResource;
 use Filament\Facades\Filament;
 use Filament\Resources\Pages\CreateRecord;
 
-class CreateProduct extends CreateRecord
+class CreateProductAttribute extends CreateRecord
 {
-    protected static string $resource = ProductResource::class;
+    protected static string $resource = ProductAttributeResource::class;
 
     protected function mutateFormDataBeforeCreate(array $data): array
     {

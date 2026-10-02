@@ -3,13 +3,16 @@
 namespace App\Filament\Resources\Products\Schemas;
 
 use App\Enums\BillingCycle;
+use App\Filament\Resources\Products\ProductResource;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\MetricUnit;
+use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Stock\StockService;
 use App\Services\Taric\CnCatalog;
 use App\Support\MyData\ClassificationGuidance;
+use App\Support\Products\VariantStockGrid;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Placeholder;
@@ -25,6 +28,7 @@ use Filament\Schemas\Schema;
 use Firebed\AadeMyData\Enums\FeesPercentCategory;
 use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
 use Firebed\AadeMyData\Enums\StampCategory;
+use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rule;
 
 /**
@@ -60,13 +64,50 @@ class ProductForm
                                     ->maxLength(120)
                                     ->columnSpan(2),
 
+                                // Variants (docs/woocommerce-bridge-plan.md §0): chosen once on
+                                // create; an existing simple product converts via the edit-page
+                                // action (only while it has no history).
+                                Select::make('kind')
+                                    ->label('Είδος προϊόντος')
+                                    ->options([
+                                        Product::KIND_SIMPLE => 'Απλό προϊόν / υπηρεσία',
+                                        Product::KIND_VARIABLE => 'Με παραλλαγές (χρώμα, μέγεθος…)',
+                                    ])
+                                    ->default(Product::KIND_SIMPLE)
+                                    ->required()
+                                    ->live()
+                                    ->visibleOn('create')
+                                    ->helperText('«Με παραλλαγές»: το προϊόν ομαδοποιεί τις παραλλαγές του και δεν πουλιέται το ίδιο — πουλιούνται οι παραλλαγές (καθεμία με δικό της απόθεμα, SKU, barcode).'),
+
+                                Placeholder::make('kind_info')
+                                    ->label('Είδος προϊόντος')
+                                    ->hiddenOn('create')
+                                    ->visible(fn (?Product $record) => $record && $record->kind !== Product::KIND_SIMPLE)
+                                    ->content(function (Product $record): HtmlString|string {
+                                        if ($record->isVariable()) {
+                                            return 'Με παραλλαγές — '.$record->variants()->count().' παραλλαγές (καρτέλα «Παραλλαγές» παρακάτω).';
+                                        }
+                                        $parent = $record->parent()->withTrashed()->first();
+                                        $values = $record->variantValues()->with('attribute')->get()
+                                            ->sortBy(fn ($v) => [$v->attribute?->sort ?? 0, $v->product_attribute_id])
+                                            ->map(fn ($v) => e($v->attribute?->name.': '.$v->value))
+                                            ->implode(' · ');
+                                        $link = $parent
+                                            ? '<a href="'.e(ProductResource::getUrl('edit', ['record' => $parent])).'" class="fi-link">'.e($parent->description_short).'</a>'
+                                            : '—';
+
+                                        return new HtmlString('Παραλλαγή του '.$link.($values ? ' — '.$values : ''));
+                                    }),
+
                                 Toggle::make('is_active')
                                     ->label('Active')
                                     ->default(true)
                                     ->helperText('Inactive products stay in the catalogue for invoice history but are hidden from new-invoice pickers.'),
 
                                 Toggle::make('track_stock')
-                                    ->label('Παρακολούθηση αποθέματος')
+                                    ->label(fn (Get $get, ?Product $record) => ($record?->isVariable() || $get('kind') === Product::KIND_VARIABLE)
+                                        ? 'Οι παραλλαγές παρακολουθούν απόθεμα'
+                                        : 'Παρακολούθηση αποθέματος')
                                     ->default(false)
                                     ->live()
                                     ->helperText('Μέτρα απόθεμα γι\' αυτό το είδος (εμπορεύματα). Άφησέ το κλειστό για υπηρεσίες. Το απόθεμα είναι ενημερωτικό — δεν μπλοκάρει ποτέ πώληση.'),
@@ -80,7 +121,7 @@ class ProductForm
 
                                 Placeholder::make('current_stock')
                                     ->label('Τρέχον απόθεμα')
-                                    ->visible(fn ($record) => (bool) $record?->track_stock)
+                                    ->visible(fn ($record) => (bool) $record?->track_stock && ! $record->isVariable())
                                     ->content(function ($record) {
                                         $n = (float) app(StockService::class)->currentStock($record);
                                         $txt = rtrim(rtrim(number_format($n, 3, '.', ''), '0'), '.');
@@ -97,6 +138,15 @@ class ProductForm
                                         ->whereNull('deleted_at')
                                         ->ignore($record?->id))
                                     ->helperText('Internal stock code, distinct from barcode. e.g. "HOST-PREM-12M".'),
+
+                                TextInput::make('internal_code')
+                                    ->label('Εσωτερικός κωδικός')
+                                    ->maxLength(60)
+                                    // DB unique(company_id, internal_code) counts trashed rows too.
+                                    ->rule(fn ($record) => Rule::unique('products', 'internal_code')
+                                        ->where('company_id', Filament::getTenant()?->getKey())
+                                        ->ignore($record?->id))
+                                    ->helperText('Π.χ. ο κωδικός είδους από το προηγούμενο πρόγραμμα (SoftOne). Αναζητήσιμος στα παραστατικά.'),
 
                                 Select::make('taric_code')
                                     ->label('Κωδικός TARIC / ΣΟ')
@@ -121,6 +171,7 @@ class ProductForm
 
                                 TextInput::make('barcode')
                                     ->maxLength(25)
+                                    ->hidden(fn (Get $get, ?Product $record) => $record?->isVariable() || $get('kind') === Product::KIND_VARIABLE)
                                     // Unique per tenant — barcodes are short
                                     // and may collide with other tenants'.
                                     ->rule(fn ($record) => Rule::unique('products', 'barcode')
@@ -227,6 +278,14 @@ class ProductForm
                                     ->visible(fn (Get $get) => (int) $get('mydata_tax_type') > 0)
                                     ->required(fn (Get $get) => (int) $get('mydata_tax_type') > 0)
                                     ->helperText('Το τέλος ανά τεμάχιο/μονάδα. Πολλαπλασιάζεται με την ποσότητα της γραμμής.'),
+
+                                Placeholder::make('variant_stock_grid')
+                                    ->label('Απόθεμα παραλλαγών')
+                                    ->columnSpanFull()
+                                    ->visible(fn (?Product $record) => (bool) $record?->isVariable())
+                                    ->content(fn (Product $record) => view('filament.products.variant-stock-grid', [
+                                        'grid' => VariantStockGrid::for($record),
+                                    ])),
                             ])
                             ->columns(2),
 

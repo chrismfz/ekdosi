@@ -93,6 +93,9 @@ class TenantRoleProvisioner
         'LeadsBoard' => ['View'],
         'LeadsCalendar' => ['View'],
         'Product' => ['ViewAny', 'View', 'Create', 'Update'],
+        // Variant axes (Χρώμα / Μέγεθος) — part of keeping the catalogue; no Delete
+        // (removing an axis is a company_admin call).
+        'ProductAttribute' => ['ViewAny', 'View', 'Create', 'Update'],
         'Payment' => ['ViewAny', 'View', 'Create', 'Update'],
         // Payment reminders: approving/sending/skipping them is daily AR work, like
         // emailing an invoice. No Create:* (rows come from the daily run only).

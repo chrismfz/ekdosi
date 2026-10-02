@@ -1026,6 +1026,10 @@ super_admin + company_admin εξ ορισμού· operator μόνο αν του 
 VAT categories · invoice types · payment/delivery methods · distribution aims · metric
 units · bank accounts · product categories · **tags** — όλα tenant-scoped, με
 guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμεση έκδοση.
+- **Προϊόντα με παραλλαγές + «Χαρακτηριστικά»** (`products.kind` simple/variable/variant, `ProductAttribute(Value)`,
+  `VariantGenerator`, `VariantStockGrid`) — χρώμα × μέγεθος, κάθε παραλλαγή πλήρες προϊόν με δικό της απόθεμα/SKU/
+  barcode/εσωτερικό κωδικό· γεννήτρια συνδυασμών, εφαρμογή γονικού σε παραλλαγές, πλέγμα αποθέματος. Θεμέλιο για
+  POS + WooCommerce (`docs/woocommerce-bridge-plan.md` §0).
 - **myDATA-readiness στη λίστα κάθε lookup που κουβαλά κωδικό §8.** Τύποι παραστατικών (§8.1, με
   suggestion + «Ετοιμότητα myDATA»), ΦΠΑ (§8.2, flag σε μη-έγκυρο συντελεστή), κατηγορίες προϊόντων
   (§8.6, «κληρονομεί τύπο») και **τρόποι πληρωμής (§8.12)** δείχνουν στη λίστα τον κωδικό ή «λείπει» —
