@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Models\Invoice;
+use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Services\InvoicePdfRenderer;
 use Illuminate\Http\Request;
@@ -38,7 +39,7 @@ class PosReceiptController extends Controller
 
         $documents = [$renderer->viewData($invoice)];
         if ($request->filled('with')) {
-            $second = Invoice::query()->withoutGlobalScopes()->whereKey((int) $request->query('with'))->firstOrFail();
+            $second = Invoice::query()->withoutGlobalScope(CompanyScope::class)->whereKey((int) $request->query('with'))->firstOrFail();
             abort_unless((int) $second->company_id === (int) $invoice->company_id, HttpResponse::HTTP_NOT_FOUND);
             $this->authorizeDocument($user, $second);
             $documents[] = $renderer->viewData($second);

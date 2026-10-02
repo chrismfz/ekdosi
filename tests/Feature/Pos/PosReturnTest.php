@@ -16,7 +16,9 @@ use App\Models\ProductCategory;
 use App\Models\StockMovement;
 use App\Models\User;
 use App\Models\VatCategory;
+use App\Services\Pos\PosIssuer;
 use App\Services\Pos\ReceiptLookup;
+use App\Services\RecomputeInvoiceTotals;
 use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -167,20 +169,79 @@ class PosReturnTest extends TestCase
         $this->assertSame(20.00, (float) Invoice::whereNotNull('credited_invoice_id')->sole()->payableTotal());
     }
 
-    public function test_an_exchange_whose_sale_fails_keeps_the_issued_credit_note(): void
+    public function test_an_exchange_with_an_unsellable_new_item_is_refused_before_the_credit_note(): void
     {
         $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
         $sale = $this->sell([['product_id' => $tee->id, 'qty' => 1]]);
         $gone = $this->product('Αποσυρμένο', 5, ['is_active' => false]);
 
+        $this->assertRefused(fn () => app(CreatePosReturn::class)($this->tenant->fresh(), $sale, [$sale->lines()->first()->id => 1], [['product_id' => $gone->id, 'qty' => 1]]));
+        $this->assertSame(0, Invoice::whereNotNull('credited_invoice_id')->count(), 'an input error never leaves a filed return behind');
+    }
+
+    public function test_an_exchange_whose_sale_fails_keeps_the_issued_credit_note(): void
+    {
+        $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
+        $shirt = $this->product('Πουκάμισο', 10.00, ['price_wvat' => 12.40]);
+        $sale = $this->sell([['product_id' => $tee->id, 'qty' => 1]]);
+        // The sale passes its checks but fails while issuing (e.g. the filing times out).
+        $this->app->bind(CreatePosSale::class, fn ($app) => new class($app->make(RecomputeInvoiceTotals::class), $app->make(PosIssuer::class)) extends CreatePosSale
+        {
+            public function __invoke(Company $company, array $items): Invoice
+            {
+                throw new RuntimeException('filing down');
+            }
+        });
+
         try {
-            app(CreatePosReturn::class)($this->tenant->fresh(), $sale, [$sale->lines()->first()->id => 1], [['product_id' => $gone->id, 'qty' => 1]]);
+            app(CreatePosReturn::class)($this->tenant->fresh(), $sale, [$sale->lines()->first()->id => 1], [['product_id' => $shirt->id, 'qty' => 1]]);
             $this->fail('expected an incomplete exchange');
         } catch (PosExchangeIncomplete $e) {
             $credit = Invoice::find($e->creditId);
             $this->assertSame('active', $credit->local_status, 'the return is a filed document — it stands');
             $this->assertStringContainsString($credit->invcode, $e->getMessage());
         }
+    }
+
+    public function test_only_the_tills_own_receipts_are_returned_at_the_till(): void
+    {
+        // Another 11.x series (e.g. an 11.2 issued from «Παραστατικά») is never credited here.
+        $other = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΑΠΥ', 'name' => 'Απόδειξη Παροχής', 'invcount' => 1, 'mydata_type' => '11.2']);
+        $sale = $this->sell([['product_id' => $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00])->id, 'qty' => 1]]);
+        $sale->forceFill(['invoice_type_id' => $other->id])->save();
+
+        $this->assertRefused(fn () => CreatePosReturn::assertReturnable($this->tenant->fresh(), $sale->fresh()));
+        $this->assertNull(app(ReceiptLookup::class)->find($this->tenant->fresh(), 'R'.$sale->id));
+
+        // …nor a till receipt with document-level taxes the till's refund math does not cover.
+        $taxed = $this->sell([['product_id' => $this->product('Τσάντα', 8.06, ['price_wvat' => 10.00])->id, 'qty' => 1]]);
+        $taxed->forceFill(['stamp_duty_rate' => 3.6])->save();
+        $this->assertRefused(fn () => CreatePosReturn::assertReturnable($this->tenant->fresh(), $taxed->fresh()));
+
+        // …nor one paid otherwise (card / on credit) — the till refunds cash.
+        $card = PaymentMethod::create(['company_id' => $this->tenant->id, 'description' => 'Κάρτα', 'due_days' => 0, 'mydata_payment_type' => 7]);
+        $byCard = $this->sell([['product_id' => $this->product('Ζώνη', 8.06, ['price_wvat' => 10.00])->id, 'qty' => 1]]);
+        $byCard->forceFill(['payment_method_id' => $card->id])->save();
+        $this->assertRefused(fn () => CreatePosReturn::assertReturnable($this->tenant->fresh(), $byCard->fresh()));
+    }
+
+    public function test_the_return_panel_shows_the_new_quantity_in_the_same_click(): void
+    {
+        $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
+        $sale = $this->sell([['product_id' => $tee->id, 'qty' => 3]]);
+        $lineId = $sale->lines()->first()->id;
+        $this->operator();
+
+        Livewire::test(PointOfSale::class)
+            ->call('scanCode', $sale->receiptCode())
+            ->call('returnMore', $lineId)
+            ->assertSee('1 / 3')->assertSee('−10,00 €')
+            ->call('returnMore', $lineId)
+            ->assertSee('2 / 3')->assertSee('−20,00 €')
+            ->call('returnLess', $lineId)
+            ->assertSee('1 / 3')
+            ->set('tendered', '50')
+            ->assertDontSee('Ρέστα');   // a refund is not «change»
     }
 
     public function test_an_exchange_prints_both_documents_in_one_run_with_the_receipt_barcode(): void

@@ -67,6 +67,10 @@ class PointOfSale extends Page
     #[Locked]
     public ?int $lastInvoiceId = null;
 
+    /** …and the document printed WITH it (an exchange's sale next to its credit note). */
+    #[Locked]
+    public ?int $lastWithId = null;
+
     /** Return / exchange (PR 2a): the original receipt being returned — server-set only. */
     #[Locked]
     public ?int $returnOf = null;
@@ -255,10 +259,7 @@ class PointOfSale extends Page
 
     public function clearCart(): void
     {
-        $this->cart = [];
-        $this->tendered = '';
-        $this->returnOf = null;
-        $this->returnQty = [];
+        $this->resetTill();
         $this->closePrice();
     }
 
@@ -336,10 +337,8 @@ class PointOfSale extends Page
             return false;
         }
 
+        $this->resetReturn();
         $this->returnOf = $original->getKey();
-        $this->returnQty = [];
-        $this->returnPrompt = false;
-        $this->returnCode = '';
         $this->dispatch('pos-focus');
 
         return true;
@@ -347,26 +346,51 @@ class PointOfSale extends Page
 
     public function returnMore(int $lineId): void
     {
-        $line = collect($this->returnView)->firstWhere('line_id', $lineId);
+        $original = $this->returnOriginal;
+        $line = $original === null ? null : collect(CreatePosReturn::returnableLines($original))->firstWhere('line_id', $lineId);
         if ($line !== null) {
-            $this->returnQty[$lineId] = min($line['remaining'], (float) ($this->returnQty[$lineId] ?? 0) + 1);
+            $this->returnQty[$lineId] = min($line['remaining'], self::qtyOf($this->returnQty[$lineId] ?? 0) + 1);
         }
+        $this->forgetReturnView();
         $this->refocus();
     }
 
     public function returnLess(int $lineId): void
     {
-        $this->returnQty[$lineId] = max(0.0, (float) ($this->returnQty[$lineId] ?? 0) - 1);
+        $this->returnQty[$lineId] = max(0.0, self::qtyOf($this->returnQty[$lineId] ?? 0) - 1);
+        $this->forgetReturnView();
         $this->refocus();
     }
 
     public function cancelReturn(): void
     {
+        $this->resetReturn();
+        $this->refocus();
+    }
+
+    /** returnQty is client-writable: only a number counts (an array / text = 0). */
+    private static function qtyOf(mixed $qty): float
+    {
+        return is_numeric($qty) ? (float) $qty : 0.0;
+    }
+
+    private function resetReturn(): void
+    {
         $this->returnOf = null;
         $this->returnQty = [];
         $this->returnPrompt = false;
         $this->returnCode = '';
-        $this->refocus();
+        $this->forgetReturnView();
+    }
+
+    /**
+     * Livewire memoizes a computed property for the whole request — after returnQty /
+     * returnOf change, drop the cached panel so THIS render shows the new numbers
+     * (else it lags one click behind the qty the credit note will be issued for).
+     */
+    private function forgetReturnView(): void
+    {
+        unset($this->returnOriginal, $this->returnView, $this->returnTotal, $this->due);
     }
 
     /** @return list<array{line_id: int, label: string, remaining: float, unit: float, rate: float, qty: float, refund: float}> */
@@ -379,7 +403,7 @@ class PointOfSale extends Page
         $lines = $original->lines->keyBy('id');
 
         return array_map(function (array $l) use ($lines): array {
-            $qty = min($l['remaining'], max(0.0, round((float) ($this->returnQty[$l['line_id']] ?? 0), 3)));
+            $qty = min($l['remaining'], max(0.0, round(self::qtyOf($this->returnQty[$l['line_id']] ?? 0), 3)));
 
             return $l + ['qty' => $qty, 'refund' => $qty > 0 ? CreatePosReturn::refundOf($lines[$l['line_id']], $qty) : 0.0];
         }, CreatePosReturn::returnableLines($original));
@@ -408,8 +432,17 @@ class PointOfSale extends Page
     private function checkoutReturn(Company $tenant): void
     {
         $original = $this->returnOriginal;
+        if ($original === null) {
+            // The receipt went away under us (deleted / no longer this till's) — start over
+            // (its exchange cart too: never ring the new items as a plain full-price sale).
+            $this->resetTill();
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title('Η απόδειξη της επιστροφής δεν είναι πια διαθέσιμη — η επιστροφή ακυρώθηκε.')->send();
+
+            return;
+        }
         $qty = collect($this->returnView)->filter(fn ($l) => $l['qty'] > 0)->mapWithKeys(fn ($l) => [$l['line_id'] => $l['qty']])->all();
-        if ($original === null || $qty === []) {
+        if ($qty === []) {
             $this->dispatch('pos-print-cancel');
             Notification::make()->warning()->title('Διάλεξε τι επιστρέφεται (+ στα είδη της απόδειξης) — ή «Ακύρωση επιστροφής».')->send();
 
@@ -423,6 +456,8 @@ class PointOfSale extends Page
             // everything, and say what to do about the new sale.
             report($e);
             $this->resetTill();
+            $this->lastInvoiceId = $e->creditId;
+            $this->lastWithId = null;
             $this->dispatch('pos-print', url: $this->receiptUrl($e->creditId));
             $notification = Notification::make()->danger()->title('Η αλλαγή ολοκληρώθηκε μόνο ως επιστροφή')->body($e->getMessage())->persistent();
             if ($e->saleDraftId !== null) {
@@ -448,11 +483,20 @@ class PointOfSale extends Page
             Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()->send();
 
             return;
+        } catch (Throwable $e) {
+            // Before/inside the (transactional) credit note — nothing issued: keep the till.
+            report($e);
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->danger()->title('Δεν εκδόθηκε')
+                ->body('Απρόσμενο σφάλμα — δες τα «Παραστατικά» πριν το ξαναχτυπήσεις.')->persistent()->send();
+
+            return;
         }
 
         $due = round(($sale?->payableTotal() ?? 0.0) - $credit->payableTotal(), 2);
         $change = $due > 0 ? $this->change($due) : null;
-        $this->lastInvoiceId = $sale?->getKey() ?? $credit->getKey();
+        $this->lastInvoiceId = $credit->getKey();
+        $this->lastWithId = $sale?->getKey();
         $url = $this->receiptUrl($credit->getKey(), $sale?->getKey());
         $this->resetTill();
 
@@ -472,10 +516,8 @@ class PointOfSale extends Page
     {
         $this->cart = [];
         $this->tendered = '';
-        $this->returnOf = null;
-        $this->returnQty = [];
-        $this->returnPrompt = false;
-        $this->returnCode = '';
+        $this->resetReturn();
+        unset($this->cartView, $this->total);
     }
 
     public function checkout(): void
@@ -549,6 +591,7 @@ class PointOfSale extends Page
         $payable = $invoice->payableTotal();
         $change = $this->change($payable);
         $this->lastInvoiceId = $invoice->getKey();
+        $this->lastWithId = null;
         $this->cart = [];
         $this->tendered = '';
         $url = $this->receiptUrl($invoice->getKey());
@@ -568,7 +611,7 @@ class PointOfSale extends Page
     public function reprint(): void
     {
         if ($this->lastInvoiceId !== null) {
-            $this->dispatch('pos-print', url: $this->receiptUrl($this->lastInvoiceId));
+            $this->dispatch('pos-print', url: $this->receiptUrl($this->lastInvoiceId, $this->lastWithId));
         } else {
             $this->dispatch('pos-print-cancel');
         }
@@ -676,6 +719,9 @@ class PointOfSale extends Page
     {
         $paid = self::parseAmount($this->tendered);
         $total ??= $this->due;
+        if ($total <= 0) {
+            return null;   // nothing to pay (a refund is shown as «Επιστροφή χρημάτων», not as change)
+        }
 
         return $paid !== null && $paid >= $total ? round($paid - $total, 2) : null;
     }

@@ -46,13 +46,19 @@ class CreatePosReturn
 
         $selections = [];
         foreach ($returnQty as $lineId => $qty) {
-            $qty = round((float) $qty, 3);
+            $qty = is_numeric($qty) ? round((float) $qty, 3) : 0.0;
             if ($qty > 0) {
                 $selections[] = ['line_id' => (int) $lineId, 'qty' => $qty];
             }
         }
         if ($selections === []) {
             throw new RuntimeException('Διάλεξε τι επιστρέφεται (ποσότητα σε τουλάχιστον ένα είδος).');
+        }
+
+        // The new cart's own refusals (inactive item, no price, 0 € …) BEFORE the credit
+        // note is filed — an input error must never leave a lone filed return behind.
+        if ($saleItems !== []) {
+            $this->sales->validate($company, $saleItems);
         }
 
         // Locked + validated against the remaining (already-returned) quantities.
@@ -79,6 +85,9 @@ class CreatePosReturn
     /** The company's till credit-note series (11.4), or a clear refusal. */
     public static function creditType(Company $company): InvoiceType
     {
+        if (! $company->hasPos()) {
+            throw new RuntimeException('Το «Ταμείο» δεν είναι ενεργό για αυτή την εταιρεία.');
+        }
         $type = $company->pos_credit_type_id === null ? null : InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $company->getKey())
             ->whereKey($company->pos_credit_type_id)
@@ -90,18 +99,27 @@ class CreatePosReturn
         return $type;
     }
 
-    /** Only an issued, live retail sale of THIS company, without a document discount. */
+    /**
+     * Only an issued, live receipt of THE TILL's series (pos_invoice_type_id) — never
+     * another 11.x issued from «Παραστατικά» (a named customer, a credit-term method:
+     * crediting it here would lower their balance AND hand out cash) — and only one
+     * the till's refund math covers (no document discount, no document-level taxes).
+     */
     public static function assertReturnable(Company $company, Invoice $original): void
     {
         if ((int) $original->company_id !== (int) $company->getKey()
+            || $company->pos_invoice_type_id === null
+            || (int) $original->invoice_type_id !== (int) $company->pos_invoice_type_id
             || $original->credited_invoice_id !== null
-            || ! str_starts_with((string) $original->invoiceType?->mydata_type, '11.')
-            || (bool) $original->invoiceType?->is_credit
+            || $original->customer_id !== null
+            || (int) $original->payment_method_id !== (int) $company->pos_payment_method_id
             || ! $original->isReceiptPrintable()) {
-            throw new RuntimeException('Δεν βρέθηκε εκδομένη απόδειξη λιανικής για επιστροφή.');
+            throw new RuntimeException('Δεν βρέθηκε εκδομένη απόδειξη του Ταμείου για επιστροφή.');
         }
-        if ((float) $original->header_discount_percent > 0) {
-            throw new RuntimeException('Η απόδειξη έχει έκπτωση παραστατικού — η επιστροφή της γίνεται από τα «Παραστατικά».');
+        $documentTaxes = (float) $original->withhold_rate + (float) $original->fees_rate + (float) $original->other_taxes_rate
+            + (float) $original->stamp_duty_rate + (float) $original->deductions_rate;
+        if ((float) $original->header_discount_percent > 0 || $documentTaxes > 0) {
+            throw new RuntimeException('Η απόδειξη έχει έκπτωση ή φόρους παραστατικού — η επιστροφή της γίνεται από τα «Παραστατικά».');
         }
     }
 
@@ -148,14 +166,6 @@ class CreatePosReturn
             ? LineMoney::fromGross($qty, (float) $line->gross_unit_price, $discount, $rate)['gross']
             : LineMoney::fromNet($qty, (float) $line->price_per_item, $discount, $rate)['gross'];
 
-        $levy = 0.0;
-        $product = $line->product;
-        $perUnit = (float) ($product?->mydata_tax_per_unit ?? 0);
-        $taxType = (int) ($product?->mydata_tax_type ?? 0);
-        if ($perUnit > 0 && in_array($taxType, [2, 3, 4, 5], true)) {
-            $levy = ($taxType === 5 ? -1 : 1) * $qty * $perUnit;
-        }
-
-        return round($gross + $levy, 2);
+        return round($gross + CreatePosSale::levyOf($line->product, $qty), 2);
     }
 }
