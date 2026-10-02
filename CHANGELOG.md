@@ -156,8 +156,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 - **`league/commonmark` 2.10.1 → 2.10.3** (`composer audit`: GHSA-3q6v-r5mr-hxv8 high — quadratic-time DoS στο GFM Table
   block-start scan· GHSA-97jj-33gv-5xf9 medium — παράκαμψη `DisallowedRawHtml`). Πραγματική έκθεση χαμηλή: markdown
   αποδίδεται μόνο σε σημειώσεις πελάτη (`Note::renderedBody`, συγγραφείς = χειριστές πάνελ/ETL/σύστημα, `html_input=escape`
-  → το raw HTML escape-άρεται ούτως ή άλλως) και στα markdown emails (πρότυπα χειριστή, τιμές πελάτη markdown-escaped).
-  Καμία δημόσια/πύλης επιφάνεια δεν αποδίδει markdown.
+  → το raw HTML escape-άρεται ούτως ή άλλως), στα markdown emails (πρότυπα/κείμενα χειριστή + στοιχεία πελάτη) και στο
+  email «Σφάλμα εφαρμογής» (μήνυμα exception, κομμένο στους 500 χαρ.). Καμία σελίδα πύλης/δημόσια δεν αποδίδει markdown.
 
 ### Added
 - **Φύλακας προσωπικού** (στο εβδομαδιαίο `ergani:watch`, μόνο ανάγνωση `EX_BASE_05` από την Παραγωγή): συγκρίνει το δυναμικό
