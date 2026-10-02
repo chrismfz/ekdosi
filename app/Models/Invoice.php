@@ -1660,11 +1660,16 @@ class Invoice extends Model implements MovableDocument
      * G6: per-customer auto-email opt-out. Gates ONLY the automatic mail
      * paths (myDATA-VALID + non-myDATA finalize); the manual "Resend
      * email" action ignores it (clicking is explicit operator intent).
-     * Defaults to true (no customer / flag unset → send) so existing
-     * behaviour is preserved.
+     * Defaults to true (flag unset → send) so existing behaviour is preserved.
+     * NO customer (an anonymous till receipt) → false: there is no recipient,
+     * and queueing one would only log a failed mail per sale.
      */
     public function customerAcceptsAutoEmail(): bool
     {
+        if ($this->customer_id === null) {
+            return false;
+        }
+
         return (bool) ($this->customer?->auto_email_invoices ?? true);
     }
 

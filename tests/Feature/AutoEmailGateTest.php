@@ -95,6 +95,16 @@ class AutoEmailGateTest extends TestCase
         $this->assertFalse($invoice->customerAcceptsAutoEmail());
     }
 
+    public function test_an_anonymous_receipt_never_auto_emails(): void
+    {
+        // «Ταμείο»: no customer = no recipient — a queued mail would only log a failure per sale.
+        $tenant = $this->tenant();
+        $invoice = $this->invoiceFor($tenant, $this->customerFor($tenant));
+        $invoice->forceFill(['customer_id' => null])->save();
+
+        $this->assertFalse($invoice->fresh()->customerAcceptsAutoEmail());
+    }
+
     public function test_finalize_emails_when_tenant_opted_in_and_customer_in(): void
     {
         $tenant = $this->tenant(['auto_email_on_issue' => true]);

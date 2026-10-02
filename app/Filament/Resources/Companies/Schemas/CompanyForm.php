@@ -14,6 +14,8 @@ use App\Filament\Pages\MyDataCodeGuide;
 use App\Filament\Support\MailTemplateFields;
 use App\Models\Company;
 use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
+use App\Models\Scopes\CompanyScope;
 use App\Services\AadeRegistryLookup;
 use App\Services\EInvoice\ProviderTransportRegistry;
 use App\Services\EInvoice\Transports\NullProviderTransport;
@@ -1181,6 +1183,47 @@ class CompanyForm
                                 Toggle::make('enable_domain_management')
                                     ->label('Ενεργή διαχείριση domains')
                                     ->helperText('Ενεργοποιεί τον πυλώνα Domains (Πυλώνας A) για αυτή την εταιρεία: το μενού «Domains», τις συνδέσεις registrar και (σταδιακά) καταχωρήσεις/ανανεώσεις/μεταφορές. Ανενεργό = τελείως κρυμμένο.'),
+                            ]),
+                        // Point of Sale (docs/woocommerce-bridge-plan.md §11) — same kill-switch
+                        // pattern as Support/Domains, plus the receipt series + cash method.
+                        // Configured on an EXISTING company: its series/payment methods
+                        // are what the selects list (none exist while creating it).
+                        Tab::make('Ταμείο (POS)')
+                            ->visible(fn (?Company $record): bool => $record !== null)
+                            ->schema([
+                                Toggle::make('pos_enabled')
+                                    ->label('Ενεργό «Ταμείο» (Point of Sale)')
+                                    ->helperText('Οθόνη πώλησης λιανικής με barcode: εκδίδει ΑΛΠ αμέσως και τυπώνει απόδειξη 80mm. Ανενεργό = τελείως κρυμμένο.')
+                                    ->live(),
+                                Select::make('pos_invoice_type_id')
+                                    ->label('Σειρά αποδείξεων (ΑΛΠ 11.1)')
+                                    ->visible(fn (callable $get): bool => (bool) $get('pos_enabled'))
+                                    ->options(fn (?Company $record) => $record
+                                        ? InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
+                                            ->where('company_id', $record->getKey())
+                                            ->where('mydata_type', '11.1')
+                                            ->where('is_credit', false)
+                                            ->orderBy('code')
+                                            ->get()
+                                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+                                            ->all()
+                                        : [])
+                                    ->requiredWith('pos_enabled')
+                                    ->helperText('Τύπος παραστατικού με myDATA 11.1 (Απόδειξη Λιανικής Πώλησης).'),
+                                Select::make('pos_payment_method_id')
+                                    ->label('Τρόπος πληρωμής «Μετρητά»')
+                                    ->visible(fn (callable $get): bool => (bool) $get('pos_enabled'))
+                                    ->options(fn (?Company $record) => $record
+                                        ? PaymentMethod::query()->withoutGlobalScope(CompanyScope::class)
+                                            ->where('company_id', $record->getKey())
+                                            ->where('due_days', 0)
+                                            ->where(fn ($q) => $q->whereNull('mydata_payment_type')->orWhere('mydata_payment_type', 3))
+                                            ->orderBy('description')
+                                            ->pluck('description', 'id')
+                                            ->all()
+                                        : [])
+                                    ->requiredWith('pos_enabled')
+                                    ->helperText('Τρόπος με «ημέρες πίστωσης» 0 (εξοφλείται στην έκδοση) και κωδικό myDATA 3 (μετρητά).'),
                             ]),
                         // Προσωπικό / ΕΡΓΑΝΗ (docs/ergani/README.md) — same kill-switch
                         // pattern as Support/Domains, plus the ΕΡΓΑΝΗ ΙΙ environment,

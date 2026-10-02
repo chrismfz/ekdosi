@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Models\Invoice;
+use App\Models\Scopes\CompanyScope;
 use App\Models\ServiceContract;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
 use App\Services\Domains\DomainRenewalInProgress;
@@ -36,6 +37,7 @@ class InvoiceObserver
     public function saved(Invoice $invoice): void
     {
         $this->recomputeOriginal($invoice);
+        $this->recomputeOwnOnStatusChange($invoice);
         $this->applyStockSaleIfActivated($invoice);
         // BEFORE the cursor advance: the renewal service reads the SC's
         // next_due_date as the period the invoice covers (§6.6 adopt guard).
@@ -335,6 +337,50 @@ class InvoiceObserver
     public function restored(Invoice $invoice): void
     {
         $this->recomputeOriginal($invoice);
+    }
+
+    /**
+     * The invoice's OWN money cache depends on its status: a cash-term sale is
+     * «unpaid» while it is an unissued draft and settled the moment it is issued
+     * (InvoiceBalance). Nothing refreshed the cache on that transition, so every
+     * cash invoice finalized/filed after its draft-time recompute kept showing
+     * «unpaid» in the lists and badges while the live balance said paid.
+     *
+     * Only the transitions that can flip it: issued (→active), reverted (→draft),
+     * the AADE state, or the payment method (cash ↔ credit term). → cancelled is left alone
+     * (it was never issued; InvoiceScope::live drops it anyway).
+     *
+     * AFTER COMMIT, never inside the caller's transaction: the issue/filing paths
+     * (MyDataSubmitter/GrProviderSubmitter persist, finalize, POS) save inside a
+     * transaction, and recompute() takes FOR UPDATE on the invoice + its payments —
+     * a lock order the payment paths take in reverse. A deadlock there would roll
+     * back the whole filing transaction (the MARK row with it). After commit the
+     * recompute runs in its own transaction, and a failure only leaves a stale
+     * cache (the warning; `invoices:recompute-balances` heals it). No loop:
+     * recompute() saves only cache columns, so the nested save doesn't match.
+     */
+    private function recomputeOwnOnStatusChange(Invoice $invoice): void
+    {
+        // issued (→active) or reverted to draft (a cash sale is unsettled again)
+        $flipped = $invoice->wasChanged('local_status') && in_array($invoice->local_status, ['active', 'draft'], true);
+        if (! $flipped && ! $invoice->wasChanged(['mydata_state', 'payment_method_id'])) {
+            return;
+        }
+
+        $invoiceId = $invoice->getKey();
+        DB::afterCommit(function () use ($invoiceId): void {
+            try {
+                $fresh = Invoice::query()->withoutGlobalScope(CompanyScope::class)->find($invoiceId);
+                if ($fresh !== null) {
+                    $this->balance->recompute($fresh);
+                }
+            } catch (Throwable $e) {
+                Log::warning('Refreshing the invoice money cache after a status change failed (the change stands)', [
+                    'invoice_id' => $invoiceId,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+        });
     }
 
     private function recomputeOriginal(Invoice $invoice): void

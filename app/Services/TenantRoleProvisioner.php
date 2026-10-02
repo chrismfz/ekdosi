@@ -92,6 +92,8 @@ class TenantRoleProvisioner
         // …and the two alternative views of the same leads (kanban / calendar).
         'LeadsBoard' => ['View'],
         'LeadsCalendar' => ['View'],
+        // «Ταμείο» (Point of Sale) — selling at the till is daily operator work.
+        'PointOfSale' => ['View'],
         'Product' => ['ViewAny', 'View', 'Create', 'Update'],
         // Variant axes (Χρώμα / Μέγεθος) — part of keeping the catalogue; no Delete
         // (removing an axis is a company_admin call).

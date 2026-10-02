@@ -89,6 +89,31 @@ class InvoSignTransportTest extends TestCase
         $this->assertNotFalse(simplexml_load_string($xml));
     }
 
+    public function test_an_anonymous_till_receipt_gets_the_retail_counterpart_name(): void
+    {
+        // «Ταμείο»: a 11.1 with no customer — AADE files no counterpart, but InvoSign
+        // hard-rejects an empty CounterpartName ([88-001]).
+        $receipt = InvoiceType::create([
+            'company_id' => $this->tenant->id, 'code' => 'ALP', 'name' => 'ΑΛΠ', 'invcount' => 1,
+            'mydata_type' => '11.1', 'mydata_income_class' => 'E3_561_003', 'mydata_income_class_category' => 'category1_1',
+        ]);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ALP1', 'code' => 1,
+            'invoice_type_id' => $receipt->id, 'customer_id' => null,
+            'issued_at' => now(), 'header_discount_percent' => 0,
+        ]);
+        $invoice->lines()->create([
+            'company_id' => $this->tenant->id, 'product_descr' => 'Μπλούζα',
+            'qty' => 1, 'price_per_item' => 20, 'vat_percent' => 24,
+        ]);
+        $invoice = $invoice->fresh('lines');
+        $aade = (new AadeInvoiceDocument($this->tenant))->toXml((new AadeInvoiceDocument($this->tenant))->build($invoice));
+
+        $xml = InvoSignDocument::augment($aade, $invoice);
+
+        $this->assertStringContainsString('<CounterpartName>'.InvoSignDocument::RETAIL_COUNTERPART_NAME.'</CounterpartName>', $xml);
+    }
+
     public function test_zero_value_line_is_not_filed_and_twins_stay_aligned(): void
     {
         // Prod ΤΠΥ7029 (2026-09-29): a WHMCS invoice carried a free .gr domain transfer
