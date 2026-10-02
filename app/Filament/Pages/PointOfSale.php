@@ -175,22 +175,31 @@ class PointOfSale extends Page
         $this->dispatch('pos-focus');
     }
 
-    /** Keep edited qty / discount inside sane bounds (the cart is client-writable). */
+    /**
+     * Keep edited qty / discount inside sane bounds. NO refocus here: a blur from
+     * the qty field into the discount field lands here, and yanking focus to the
+     * scan field would send the discount the cashier types next to scanCode().
+     */
     public function updatedCart(): void
+    {
+        $this->normalizeCart();
+    }
+
+    /** The cart is client-writable — coerce every line to a sane shape. */
+    private function normalizeCart(): void
     {
         $this->cart = array_values(array_map(fn ($line): array => [
             'product_id' => (int) (is_array($line) ? ($line['product_id'] ?? 0) : 0),
             'qty' => max(0.001, round((float) (is_array($line) && is_scalar($line['qty'] ?? null) ? $line['qty'] : 1), 3)),
             'discount' => min(100, max(0, round((float) (is_array($line) && is_scalar($line['discount'] ?? null) ? $line['discount'] : 0), 2))),
         ], $this->cart));
-        $this->dispatch('pos-focus');
     }
 
     // ── checkout ───────────────────────────────────────────────────────────
 
     public function checkout(): void
     {
-        $this->updatedCart();
+        $this->normalizeCart();
         if ($this->cart === []) {
             Notification::make()->warning()->title('Το καλάθι είναι άδειο.')->send();
             $this->dispatch('pos-print-cancel');
@@ -199,7 +208,10 @@ class PointOfSale extends Page
         }
 
         $tenant = Filament::getTenant();
-        abort_unless($tenant instanceof Company && static::canAccess(), 403);
+        if (! $tenant instanceof Company || ! static::canAccess()) {
+            $this->dispatch('pos-print-cancel');
+            abort(403);
+        }
 
         try {
             $invoice = app(CreatePosSale::class)($tenant, $this->cart);

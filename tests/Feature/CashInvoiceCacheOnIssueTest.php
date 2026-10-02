@@ -64,6 +64,10 @@ class CashInvoiceCacheOnIssueTest extends TestCase
         });
         $this->assertSame(PaymentStatus::Paid, $this->cached($invoice));
 
+        // Reverted to draft («Επαναφορά σε πρόχειρο») → unsettled again.
+        $invoice->fresh()->update(['local_status' => 'draft']);
+        $this->assertSame(PaymentStatus::Unpaid, $this->cached($invoice));
+
         // A never-issued cash draft that is cancelled keeps its draft-time cache.
         $draft = Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $type->id, 'issued_at' => now(), 'local_status' => 'draft', 'payment_method_id' => $cash->id]);
         $draft->lines()->create(['company_id' => $company->id, 'product_descr' => 'y', 'qty' => 1, 'price_per_item' => 10, 'vat_percent' => 24]);

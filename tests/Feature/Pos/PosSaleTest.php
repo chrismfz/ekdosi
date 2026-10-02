@@ -171,6 +171,34 @@ class PosSaleTest extends TestCase
         $this->assertSame(1, Invoice::count());
     }
 
+    public function test_editing_a_cart_line_does_not_steal_focus_to_the_scan_field(): void
+    {
+        // A blur from «qty» into «έκπτ.» lands in updatedCart — refocusing the scan
+        // field there would send the discount the cashier types to scanCode().
+        $this->operator();
+        Livewire::test(PointOfSale::class)
+            ->call('choose', $this->product('Μπλούζα', 20)->id)
+            ->set('cart.0.qty', 3)
+            ->assertNotDispatched('pos-focus')
+            ->assertSet('cart.0.qty', 3.0);
+    }
+
+    public function test_a_step_failing_after_the_filing_committed_is_still_a_sale(): void
+    {
+        $this->tenant->update(['einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox']);
+        $submitter = \Mockery::mock(EInvoiceSubmitter::class);
+        $submitter->shouldReceive('submit')->once()->andReturnUsing(function (Invoice $invoice): never {
+            app(InvoiceNumberer::class)->assign($invoice);
+            $invoice->forceFill(['local_status' => 'active', 'mydata_mark' => '400000000000999'])->save();
+            throw new RuntimeException('queue insert failed after the MARK');
+        });
+        $this->fakeSubmitter($submitter);
+
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $this->product('Μπλούζα', 20)->id, 'qty' => 1]]);
+
+        $this->assertSame('active', $invoice->local_status, 'issued → the till prints it, never «δεν εκδόθηκε»');
+    }
+
     public function test_a_refusal_before_anything_is_created_keeps_the_cart(): void
     {
         // Its VAT category was deleted (soft) — the till must not guess a rate.

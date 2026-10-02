@@ -66,7 +66,7 @@
         x-on:pos-focus.window="$nextTick(() => $refs.scan?.focus())"
         x-on:pos-print.window="print($event.detail.url)"
         x-on:pos-print-cancel.window="cancel()"
-        x-on:keydown.window="if (! $event.target.closest('input, textarea, select, [contenteditable]') && $event.key.length === 1 && ! $event.ctrlKey && ! $event.metaKey && ! $event.altKey) { $refs.scan?.focus(); }"
+        x-on:keydown.window="if (! $event.target.closest('input, textarea, select, [contenteditable]') && $event.key.length === 1 && $event.key !== ' ' && ! $event.ctrlKey && ! $event.metaKey && ! $event.altKey) { $refs.scan?.focus(); }"
     >
         {{-- Left: scan + search + variant picker --}}
         <div class="pos-card">

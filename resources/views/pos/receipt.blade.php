@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="{{ $invoice->language ?? 'el' }}">
+<html lang="{{ $invoice->language ?? (strtoupper((string) $invoice->country) === 'GR' || blank($invoice->country) ? 'el' : 'en') }}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">

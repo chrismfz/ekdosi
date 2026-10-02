@@ -346,8 +346,8 @@ class InvoiceObserver
      * cash invoice finalized/filed after its draft-time recompute kept showing
      * «unpaid» in the lists and badges while the live balance said paid.
      *
-     * Only the transitions that can flip it: issued (→active), the AADE state, or
-     * the payment method (cash ↔ credit term). A draft → cancelled is left alone
+     * Only the transitions that can flip it: issued (→active), reverted (→draft),
+     * the AADE state, or the payment method (cash ↔ credit term). → cancelled is left alone
      * (it was never issued; InvoiceScope::live drops it anyway).
      *
      * AFTER COMMIT, never inside the caller's transaction: the issue/filing paths
@@ -361,8 +361,9 @@ class InvoiceObserver
      */
     private function recomputeOwnOnStatusChange(Invoice $invoice): void
     {
-        $issued = $invoice->wasChanged('local_status') && $invoice->local_status === 'active';
-        if (! $issued && ! $invoice->wasChanged(['mydata_state', 'payment_method_id'])) {
+        // issued (→active) or reverted to draft (a cash sale is unsettled again)
+        $flipped = $invoice->wasChanged('local_status') && in_array($invoice->local_status, ['active', 'draft'], true);
+        if (! $flipped && ! $invoice->wasChanged(['mydata_state', 'payment_method_id'])) {
             return;
         }
 

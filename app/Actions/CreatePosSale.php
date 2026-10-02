@@ -159,6 +159,13 @@ class CreatePosSale
                 $this->submitters->for($invoice->company)->submit($invoice);
             }
         } catch (\Throwable $e) {
+            // A step AFTER the filing committed (auto-email queueing…) may throw on
+            // an invoice that IS issued — that's a sale, not a failure.
+            if ($invoice->refresh()->local_status === 'active') {
+                report($e);
+
+                return;
+            }
             throw new PosSaleNotIssued((int) $invoice->getKey(), $e);
         }
 
