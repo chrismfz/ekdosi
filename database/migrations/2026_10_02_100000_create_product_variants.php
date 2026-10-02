@@ -57,6 +57,8 @@ return new class extends Migration
             $table->foreignId('product_attribute_id')->constrained()->restrictOnDelete();
             $table->foreignId('product_attribute_value_id')->constrained()->restrictOnDelete();
 
+            $table->timestamps();   // the company export/import stamps every row
+
             // One value per attribute per variant.
             $table->unique(['product_id', 'product_attribute_id']);
         });

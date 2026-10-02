@@ -311,12 +311,16 @@ class VariantGenerator
             ->all();
     }
 
-    /** @return list<list<int>> the distinct sorted attribute-id sets of the parent's variants (incl. trashed) */
+    /**
+     * @return list<list<int>> the distinct sorted attribute-id sets of the parent's LIVE variants
+     *                         (trashed ones are retired — a new axis set may replace them)
+     */
     private function existingAttributeSets(Product $parent): array
     {
         return DB::table('product_variant_values')
             ->join('products', 'products.id', '=', 'product_variant_values.product_id')
             ->where('products.parent_product_id', $parent->getKey())
+            ->whereNull('products.deleted_at')
             ->get(['product_variant_values.product_id', 'product_variant_values.product_attribute_id'])
             ->groupBy('product_id')
             ->map(fn ($rows) => $rows->pluck('product_attribute_id')->map(fn ($id) => (int) $id)->sort()->values()->all())

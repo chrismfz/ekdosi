@@ -49,6 +49,9 @@ class CompanyImporter
         'payment_methods' => ['description'],
         'bank_accounts' => ['iban', 'account_name'],
         'product_categories' => ['description'],
+        'product_attributes' => ['name'],
+        // Keyed by the REWIRED attribute id (see KEYS_AFTER_REWIRE).
+        'product_attribute_values' => ['product_attribute_id', 'value'],
         'metric_units' => ['name'],
         'tags' => ['name'],
         'server_groups' => ['name'],
@@ -66,6 +69,7 @@ class CompanyImporter
         'customers' => ['legacy_id'],
         'products' => ['legacy_id'],
         'product_price_tiers' => ['legacy_id'],
+        'product_variant_values' => ['product_id', 'product_attribute_id'],
         'invoices' => ['legacy_id'],
         'invoice_lines' => ['legacy_id'],
         'mydata_marks' => ['legacy_id'],
@@ -73,10 +77,21 @@ class CompanyImporter
         'quotes' => ['legacy_id'],
     ];
 
+    /**
+     * Tables whose natural key contains an FK column: matched on the REWIRED row
+     * (target ids), since the bundle's raw ids never match the target's rows and
+     * the unique index would reject a re-import as an insert.
+     */
+    private const KEYS_AFTER_REWIRE = ['product_attribute_values', 'product_variant_values'];
+
+    /** products self-reference (variant → its variable parent) — nulled on insert, patched after the pass. */
+    private const PRODUCT_SELF_REFS = ['parent_product_id'];
+
     /** Import order for setup (bucket B): independent first, then intra-setup FKs. */
     private const ORDER = [
         'distribution_aims', 'delivery_methods', 'vat_categories', 'payment_methods',
-        'bank_accounts', 'product_categories', 'metric_units', 'tags',
+        'bank_accounts', 'product_categories', 'product_attributes', 'product_attribute_values',
+        'metric_units', 'tags',
         'server_groups', 'billing_connections', 'invoice_types', 'servers',
         'expense_classification_rules', 'whmcs_income_maps',
         // whmcs_payment_maps FK-depends on payment_methods (imported above).
@@ -87,7 +102,7 @@ class CompanyImporter
     private const ORDER_TRANSACTIONAL = [
         'customers', 'customer_contacts', 'suppliers',
         'leads', 'lead_activities',
-        'products', 'product_price_tiers', 'product_billing_prices',
+        'products', 'product_price_tiers', 'product_billing_prices', 'product_variant_values',
         'invoices', 'invoice_lines', 'mydata_marks', 'return_invoice_extras', 'invoice_mail_log',
         'invoice_reminders',
         'payments',
@@ -141,7 +156,16 @@ class CompanyImporter
         // panel-global user → nulled (same rule as *_by_user_id elsewhere).
         'leads' => ['referred_by_customer_id' => 'customers', 'converted_customer_id' => 'customers', 'assigned_user_id' => 'users'],
         'lead_activities' => ['lead_id' => 'leads', 'user_id' => 'users'],
-        'products' => ['product_category_id' => 'product_categories', 'vat_category_id' => 'vat_categories', 'metric_unit_id' => 'metric_units'],
+        'products' => [
+            'product_category_id' => 'product_categories', 'vat_category_id' => 'vat_categories', 'metric_unit_id' => 'metric_units',
+            // self-ref: the parent may import later in the pass → nulled here, patchProductSelfRefs().
+            'parent_product_id' => 'products',
+        ],
+        'product_attribute_values' => ['product_attribute_id' => 'product_attributes'],
+        'product_variant_values' => [
+            'product_id' => 'products', 'product_attribute_id' => 'product_attributes',
+            'product_attribute_value_id' => 'product_attribute_values',
+        ],
         'product_price_tiers' => ['product_id' => 'products'],
         'product_billing_prices' => ['product_id' => 'products'],
         'invoices' => [
@@ -288,6 +312,7 @@ class CompanyImporter
             foreach (self::ORDER_TRANSACTIONAL as $table) {
                 $maps[$table] = $this->importTable($table, $bundle['data'][$table] ?? [], $company->id, $maps);
             }
+            $this->patchProductSelfRefs($bundle['data']['products'] ?? [], $maps);
             $this->patchInvoiceSelfRefs($bundle['data']['invoices'] ?? [], $maps);
             // MON-1: resolve invoice_lines.original_line_id against the complete
             // invoice_lines map (the credited line may import before its original).
@@ -519,6 +544,35 @@ class CompanyImporter
             }
             if ($patch !== []) {
                 DB::table('invoices')->where('id', $invoiceMap[$oldId])->update($patch);
+            }
+        }
+    }
+
+    /**
+     * Variants: patch products.parent_product_id after the whole products pass —
+     * a variant may import before its variable parent, so FK_REWIRES nulled it
+     * on insert; resolve it here against the complete products map.
+     *
+     * @param  list<array<string,mixed>>  $productRows
+     * @param  array<string, array<int|string,int>>  $maps
+     */
+    private function patchProductSelfRefs(array $productRows, array $maps): void
+    {
+        $productMap = $maps['products'] ?? [];
+        foreach ($productRows as $row) {
+            $oldId = $row['id'] ?? null;
+            if ($oldId === null || ! isset($productMap[$oldId])) {
+                continue;
+            }
+            $patch = [];
+            foreach (self::PRODUCT_SELF_REFS as $col) {
+                $oldRef = $row[$col] ?? null;
+                if ($oldRef !== null && isset($productMap[$oldRef])) {
+                    $patch[$col] = $productMap[$oldRef];
+                }
+            }
+            if ($patch !== []) {
+                DB::table('products')->where('id', $productMap[$oldId])->update($patch);
             }
         }
     }
@@ -808,7 +862,7 @@ class CompanyImporter
         foreach ($rows as $row) {
             $oldId = $row['id'] ?? null;
             $data = $this->rowData($table, $row, $companyId, $maps);
-            $key = $this->naturalKey($table, $row);
+            $key = $this->naturalKey($table, in_array($table, self::KEYS_AFTER_REWIRE, true) ? $data : $row);
             $afmKey = $table === 'customers' ? ($data['afm_key'] ?? null) : null;
 
             $existingId = $index[$key] ?? null;

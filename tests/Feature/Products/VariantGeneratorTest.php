@@ -198,6 +198,10 @@ class VariantGeneratorTest extends TestCase
 
         // Same axes → still fine (adds nothing new here).
         $this->assertCount(0, $gen->generate($parent, [$this->size->id => $this->ids($this->size)]));
+
+        // Once the old size-only variants are deleted, the new colour × size set is allowed.
+        $parent->variants()->get()->each->delete();
+        $this->assertCount(6, $gen->generate($parent, $this->pick()));
     }
 
     public function test_recurring_or_whmcs_mapped_products_cannot_become_variable(): void

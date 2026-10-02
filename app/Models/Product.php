@@ -153,7 +153,8 @@ class Product extends Model
     public function variantValues(): BelongsToMany
     {
         return $this->belongsToMany(ProductAttributeValue::class, 'product_variant_values')
-            ->withPivot('product_attribute_id', 'company_id');
+            ->withPivot('product_attribute_id', 'company_id')
+            ->withTimestamps();
     }
 
     public function isVariable(): bool
