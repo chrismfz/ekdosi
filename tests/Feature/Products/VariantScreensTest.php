@@ -79,6 +79,26 @@ class VariantScreensTest extends TestCase
         $this->assertSame([$this->tenant->id], $attribute->values()->pluck('company_id')->unique()->values()->all());
     }
 
+    public function test_values_differing_only_in_case_or_accent_are_rejected_like_the_db_index_would(): void
+    {
+        foreach ([['M', 'm'], ['Μαύρο', 'ΜΑΥΡΟ'], ['Μαύρο', 'Μαυρο']] as [$a, $b]) {
+            Livewire::test(CreateProductAttribute::class)
+                ->fillForm([
+                    'name' => 'Χ-'.$a.$b,
+                    'kind' => ProductAttribute::KIND_OTHER,
+                    'values' => [['value' => $a], ['value' => $b]],
+                ])
+                ->call('create')
+                ->assertHasFormErrors();
+        }
+        $this->assertSame(0, ProductAttributeValue::where('company_id', $this->tenant->id)->count());
+
+        Livewire::test(CreateProductAttribute::class)
+            ->fillForm(['name' => 'Σειρά', 'kind' => ProductAttribute::KIND_OTHER, 'sort' => 70000])
+            ->call('create')
+            ->assertHasFormErrors(['sort']);
+    }
+
     public function test_removing_a_value_used_by_variants_is_refused(): void
     {
         [$color, $size] = $this->axes();

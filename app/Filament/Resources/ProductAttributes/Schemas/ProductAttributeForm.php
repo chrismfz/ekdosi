@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\ProductAttributes\Schemas;
 
 use App\Models\ProductAttribute;
+use App\Support\GreekText;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\ColorPicker;
 use Filament\Forms\Components\Repeater;
@@ -41,7 +42,9 @@ class ProductAttributeForm
 
                         TextInput::make('sort')
                             ->label('Σειρά')
-                            ->numeric()
+                            ->integer()
+                            ->minValue(0)
+                            ->maxValue(65535)   // unsignedSmallInteger
                             ->default(0)
                             ->helperText('Με αυτή τη σειρά μπαίνουν οι τιμές στο όνομα της παραλλαγής (π.χ. πρώτα χρώμα, μετά μέγεθος).'),
                     ]),
@@ -63,7 +66,19 @@ class ProductAttributeForm
                             ->label('Τιμή')
                             ->required()
                             ->maxLength(60)
-                            ->distinct()
+                            // The DB unique index is utf8mb4_unicode_ci (case- and accent-
+                            // insensitive): «M»/«m», «Μαύρο»/«Μαυρο» collide there, so they
+                            // must collide here too — a plain distinct() would let them
+                            // through to a raw 1062.
+                            ->rule(fn (Get $get) => function (string $attribute, mixed $value, \Closure $fail) use ($get): void {
+                                $folded = GreekText::fold((string) $value);
+                                $same = collect($get('../../values') ?? [])
+                                    ->filter(fn ($row) => GreekText::fold((string) ($row['value'] ?? '')) === $folded)
+                                    ->count();
+                                if ($same > 1) {
+                                    $fail('Η τιμή «'.$value.'» υπάρχει ήδη (χωρίς διάκριση πεζών/κεφαλαίων και τόνων).');
+                                }
+                            })
                             ->placeholder('π.χ. Μαύρο, M, 42'),
 
                         TextInput::make('code')
