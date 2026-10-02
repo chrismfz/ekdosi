@@ -136,7 +136,7 @@
                             <button type="button" wire:click="decrement({{ $i }})" aria-label="Λιγότερα">−</button>
                             <input type="number" min="0.001" step="1" wire:model.blur="cart.{{ $i }}.qty" aria-label="Ποσότητα">
                             <button type="button" wire:click="increment({{ $i }})" aria-label="Περισσότερα">+</button>
-                            × {{ number_format($line['unit'], 2, ',', '.') }} €@if ($line['levy'] != 0) <small>{{ $line['levy'] > 0 ? '+' : '−' }} τέλος {{ number_format(abs($line['levy']), 2, ',', '.') }}</small>@endif
+                            × {{ number_format($line['unit'], 2, ',', '.') }} €@if ($line['levy'] != 0 && $line['qty'] > 0) <small>{{ $line['levy'] > 0 ? '+' : '−' }} τέλος {{ number_format(abs($line['levy']) / $line['qty'], 2, ',', '.') }}/τεμ</small>@endif
                             · έκπτ. <input type="number" min="0" max="100" step="1" wire:model.blur="cart.{{ $i }}.discount" aria-label="Έκπτωση %">%
                         </div>
                     </div>
