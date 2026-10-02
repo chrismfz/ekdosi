@@ -148,6 +148,10 @@ class Company extends Model
         // Προσωπικό / ΕΡΓΑΝΗ pillar per-tenant kill-switch (default off) + the
         // ΕΡΓΑΝΗ ΙΙ environment and e-ΕΦΚΑ credentials (docs/ergani/README.md).
         'ergani_enabled',
+        // Point of Sale (docs/woocommerce-bridge-plan.md §11)
+        'pos_enabled',
+        'pos_invoice_type_id',
+        'pos_payment_method_id',
         'ergani_mode',
         'ergani_username',
         'ergani_password',
@@ -254,6 +258,7 @@ class Company extends Model
             'support_enabled' => 'boolean',
             'enable_domain_management' => 'boolean',
             'ergani_enabled' => 'boolean',
+            'pos_enabled' => 'boolean',
             'ergani_submit_leaves' => 'boolean',
             'ergani_submit_cards' => 'boolean',
             'ergani_submit_overtime' => 'boolean',
@@ -336,6 +341,24 @@ class Company extends Model
     public function hasErgani(): bool
     {
         return (bool) $this->ergani_enabled;
+    }
+
+    /** Point of Sale («Ταμείο») — kill-switch in the «Ταμείο (POS)» tab of the Company form. */
+    public function hasPos(): bool
+    {
+        return (bool) $this->pos_enabled;
+    }
+
+    /** The receipt series (11.1 ΑΛΠ) a till sale is issued on. */
+    public function posInvoiceType(): BelongsTo
+    {
+        return $this->belongsTo(InvoiceType::class, 'pos_invoice_type_id');
+    }
+
+    /** The cash payment method a till sale is recorded with. */
+    public function posPaymentMethod(): BelongsTo
+    {
+        return $this->belongsTo(PaymentMethod::class, 'pos_payment_method_id');
     }
 
     /**

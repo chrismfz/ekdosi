@@ -36,6 +36,7 @@ class InvoiceObserver
     public function saved(Invoice $invoice): void
     {
         $this->recomputeOriginal($invoice);
+        $this->recomputeOwnOnStatusChange($invoice);
         $this->applyStockSaleIfActivated($invoice);
         // BEFORE the cursor advance: the renewal service reads the SC's
         // next_due_date as the period the invoice covers (§6.6 adopt guard).
@@ -335,6 +336,31 @@ class InvoiceObserver
     public function restored(Invoice $invoice): void
     {
         $this->recomputeOriginal($invoice);
+    }
+
+    /**
+     * The invoice's OWN money cache depends on its status: a cash-term sale is
+     * «unpaid» while it is an unissued draft and settled the moment it is issued
+     * (InvoiceBalance). Nothing refreshed the cache on that transition, so every
+     * cash invoice finalized/filed after its draft-time recompute kept showing
+     * «unpaid» in the lists and badges while the live balance said paid. Refresh
+     * it whenever what the balance depends on changes. No loop: recompute() saves
+     * only cache columns, so the nested save doesn't match this guard.
+     */
+    private function recomputeOwnOnStatusChange(Invoice $invoice): void
+    {
+        if (! $invoice->wasChanged(['local_status', 'mydata_state', 'payment_method_id'])) {
+            return;
+        }
+
+        try {
+            $this->balance->recompute($invoice);
+        } catch (Throwable $e) {
+            Log::warning('Refreshing the invoice money cache after a status change failed (the change stands)', [
+                'invoice_id' => $invoice->getKey(),
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function recomputeOriginal(Invoice $invoice): void

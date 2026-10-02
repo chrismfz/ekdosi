@@ -14,6 +14,7 @@ use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\Portal\ReceiptShowController as PortalReceiptShowController;
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\Portal\TicketController as PortalTicketController;
+use App\Http\Controllers\PosReceiptController;
 use App\Http\Controllers\ProductMediaController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Controllers\TicketAttachmentController;
@@ -216,6 +217,13 @@ Route::get('/media/products/{media}/{variant}', ProductMediaController::class)
     ->where(['media' => '[0-9]+', 'variant' => 'full|thumb'])
     ->middleware('auth')
     ->name('product-media.show');
+
+// «Ταμείο» 80mm receipt — AUTH + SIGNED + tenant-checked (see controller), opened
+// by the POS right after issuing for the browser to print on the thermal printer.
+Route::get('/pos/receipt/{invoice}', PosReceiptController::class)
+    ->where('invoice', '[0-9]+')
+    ->middleware(['auth', 'signed'])
+    ->name('pos.receipt');
 
 // Expense attachment — AUTH + SIGNED + tenant-checked (see controller). Streams
 // the private supplier-document scan from the local disk.

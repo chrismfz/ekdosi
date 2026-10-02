@@ -1030,6 +1030,9 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   `VariantGenerator`, `VariantStockGrid`) — χρώμα × μέγεθος, κάθε παραλλαγή πλήρες προϊόν με δικό της απόθεμα/SKU/
   barcode/εσωτερικό κωδικό· γεννήτρια συνδυασμών, εφαρμογή γονικού σε παραλλαγές, πλέγμα αποθέματος. Θεμέλιο για
   POS + WooCommerce (`docs/woocommerce-bridge-plan.md` §0).
+- **«Ταμείο» (Point of Sale)** (`PointOfSale` page, `CreatePosSale`, `pos.receipt`) — κρυφό module ανά εταιρεία· barcode/αναζήτηση/
+  παραλλαγές, καλάθι, ρέστα· ΑΛΠ 11.1 χωρίς πελάτη που εκδίδεται αμέσως από την κανονική διαδρομή (πάροχος/myDATA), κινεί απόθεμα·
+  απόδειξη 80mm από τον browser. Μόνο μετρητά προς το παρόν (§11 του `docs/woocommerce-bridge-plan.md`).
 - **Φωτογραφίες & βίντεο προϊόντων** (`ProductMedia`, `ProductMediaService::displayMedia`, route `product-media.show` μόνο για
   χειριστές) — GD re-encode (EXIF/GPS out, όλοι οι προσανατολισμοί, 2000px + thumb), βίντεο ≤12 MB ή σύνδεσμος, σειρά/κύρια/alt,
   φωτογραφίες ανά χρώμα που κληρονομούν οι παραλλαγές. Δεν σερβίρονται δημόσια — το e-shop τα παίρνει μέσω γέφυρας.
