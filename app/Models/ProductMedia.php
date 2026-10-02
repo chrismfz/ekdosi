@@ -6,14 +6,14 @@ use App\Models\Concerns\BelongsToCompany;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\URL;
 
 /**
  * A product photo, uploaded video, or video link (docs/woocommerce-bridge-plan.md §0).
  *
  * Hard-deleted on purpose (like Attachment): the row is a pointer to files, so
- * deleting it drops the bytes too — no orphaned images on disk.
+ * deleting it drops the bytes too (after commit) — no orphaned images on disk.
  */
 class ProductMedia extends Model
 {
@@ -46,35 +46,36 @@ class ProductMedia extends Model
         'original_name',
         'mime_type',
         'size',
-        'width',
-        'height',
         'alt',
         'sort',
-        'is_primary',
     ];
 
     protected function casts(): array
     {
         return [
             'size' => 'integer',
-            'width' => 'integer',
-            'height' => 'integer',
             'sort' => 'integer',
-            'is_primary' => 'boolean',
         ];
     }
 
     protected static function booted(): void
     {
+        // Drop the bytes only once the delete COMMITS — a rolled-back delete must
+        // not leave a row pointing at files that are gone. (Runs at once outside a
+        // transaction.)
         static::deleted(function (self $media): void {
             if ($media->disk === null) {
                 return;
             }
-            foreach ([$media->path, $media->thumb_path] as $path) {
-                if ($path && Storage::disk($media->disk)->exists($path)) {
-                    Storage::disk($media->disk)->delete($path);
+            $disk = $media->disk;
+            $paths = array_values(array_filter([$media->path, $media->thumb_path]));
+            DB::afterCommit(function () use ($disk, $paths): void {
+                try {
+                    Storage::disk($disk)->delete($paths);
+                } catch (\Throwable $e) {
+                    report($e);
                 }
-            }
+            });
         });
     }
 
@@ -94,19 +95,16 @@ class ProductMedia extends Model
     }
 
     /**
-     * Stable, permanently-signed URL to the stored file ('full' or 'thumb').
-     * Stable so the browser caches it; signed so ids can't be enumerated; public
-     * (no login) so WooCommerce can fetch it. A video link returns its own URL.
+     * URL for a signed-in operator ('full' or 'thumb'); a video link returns its
+     * own URL. NOT public: the e-shop gets the files through the WooCommerce
+     * bridge and serves them from its own CDN (docs/woocommerce-bridge-plan.md §6).
      */
-    public function publicUrl(string $variant = 'full'): ?string
+    public function fileUrl(string $variant = 'full'): ?string
     {
         if ($this->kind === self::KIND_VIDEO_LINK) {
             return $this->url;
         }
-        if ($variant === 'thumb' && ! $this->thumb_path) {
-            $variant = 'full';
-        }
 
-        return URL::signedRoute('product-media.show', ['media' => $this->getKey(), 'variant' => $variant]);
+        return route('product-media.show', ['media' => $this->getKey(), 'variant' => $variant === 'thumb' && $this->thumb_path ? 'thumb' : 'full']);
     }
 }

@@ -19,8 +19,9 @@ return new class extends Migration
             $table->id();
             $table->foreignId('company_id')->constrained()->cascadeOnDelete();
             $table->foreignId('product_id')->constrained()->cascadeOnDelete();
-            // Colour (or any axis value) the media belongs to; the value going away
-            // just makes it general to the product.
+            // Colour (or any axis value) the media belongs to. Removing a value that
+            // photos are tied to is refused in the app (ProductAttributeResource);
+            // SET NULL is only the backstop.
             $table->foreignId('product_attribute_value_id')->nullable()->constrained()->nullOnDelete();
             $table->string('kind', 16);                      // image | video | video_link
             $table->string('disk', 32)->nullable();
@@ -30,11 +31,8 @@ return new class extends Migration
             $table->string('original_name')->nullable();
             $table->string('mime_type', 100)->nullable();
             $table->unsignedBigInteger('size')->nullable();
-            $table->unsignedSmallInteger('width')->nullable();
-            $table->unsignedSmallInteger('height')->nullable();
             $table->string('alt', 255)->nullable();
-            $table->unsignedSmallInteger('sort')->default(0);
-            $table->boolean('is_primary')->default(false);
+            $table->unsignedSmallInteger('sort')->default(0);   // the first IMAGE by sort is the primary one
             $table->timestamps();
 
             $table->index(['product_id', 'sort']);

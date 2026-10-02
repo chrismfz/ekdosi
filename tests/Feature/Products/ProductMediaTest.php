@@ -8,19 +8,23 @@ use App\Models\ProductAttribute;
 use App\Models\ProductAttributeValue;
 use App\Models\ProductCategory;
 use App\Models\ProductMedia;
+use App\Models\User;
 use App\Models\VatCategory;
 use App\Services\Portability\CompanyDataWiper;
 use App\Services\Products\ProductMediaService;
 use App\Services\Products\VariantGenerator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Storage;
 use InvalidArgumentException;
 use Tests\TestCase;
 
 /**
- * Product photos & videos: GD re-encode (+ thumbnail, size cap), primary image,
- * video links allow-list, colour-specific photos inherited by variants, the
- * signed public URL, and files never orphaned on delete / force-delete / wipe.
+ * Product photos & videos: GD re-encode (+ thumbnail, size/MP caps, all EXIF
+ * orientations), primary = first image by sort, strict video-link allow-list,
+ * the ONE display rule for variants, operator-only serving, and files removed
+ * only once a delete commits (never orphaned, never lost on rollback).
  */
 class ProductMediaTest extends TestCase
 {
@@ -45,72 +49,66 @@ class ProductMediaTest extends TestCase
         $this->media = app(ProductMediaService::class);
     }
 
-    public function test_an_image_is_reencoded_capped_and_thumbnailed_and_the_first_is_primary(): void
+    public function test_an_image_is_reencoded_capped_and_thumbnailed(): void
     {
         $product = $this->product();
 
         $first = $this->media->storeImage($product, $this->jpeg(2400, 1200), 'big.jpg', alt: 'Μπροστά');
         $second = $this->media->storeImage($product, $this->png(300, 300), 'small.png');
 
-        $this->assertSame(ProductMedia::KIND_IMAGE, $first->kind);
-        $this->assertSame([2000, 1000], [$first->width, $first->height], 'full capped at 2000px');
         Storage::disk('local')->assertExists([$first->path, $first->thumb_path]);
-        [$tw, $th] = getimagesizefromstring(Storage::disk('local')->get($first->thumb_path));
-        $this->assertSame([400, 200], [$tw, $th]);
+        $this->assertSame([2000, 1000], array_slice(getimagesizefromstring(Storage::disk('local')->get($first->path)), 0, 2), 'full capped at 2000px');
+        $this->assertSame([400, 200], array_slice(getimagesizefromstring(Storage::disk('local')->get($first->thumb_path)), 0, 2));
         $this->assertSame('image/jpeg', $first->mime_type);
-        $this->assertTrue($first->is_primary);
-
-        $this->assertFalse($second->is_primary);
+        $this->assertSame('Μπροστά', $first->alt);
         $this->assertSame('image/png', $second->mime_type);
-        $this->assertSame([300, 300], [$second->width, $second->height], 'never up-scaled');
+        $this->assertSame([300, 300], array_slice(getimagesizefromstring(Storage::disk('local')->get($second->path)), 0, 2), 'never up-scaled');
         $this->assertGreaterThan($first->sort, $second->sort);
+
+        $this->assertSame($first->id, ProductMediaService::primaryImage($product->fresh())->id, 'first image by sort is the primary');
     }
 
-    public function test_non_images_and_oversized_files_are_rejected(): void
+    public function test_non_images_oversized_files_and_too_many_megapixels_are_rejected(): void
     {
         $product = $this->product();
         $text = tempnam(sys_get_temp_dir(), 'pm');
         file_put_contents($text, 'not an image');
 
-        try {
-            $this->media->storeImage($product, $text, 'evil.jpg');
-            $this->fail('a text file must be rejected');
-        } catch (InvalidArgumentException) {
-        }
+        $this->assertRejected(fn () => $this->media->storeImage($product, $text, 'evil.jpg'));
 
-        config(['ekdosi.product_media.max_image_kb' => 1]);
-        $this->expectException(InvalidArgumentException::class);
-        $this->media->storeImage($product, $this->jpeg(800, 800, noise: true), 'huge.jpg');
-    }
-
-    public function test_too_many_megapixels_is_a_friendly_rejection_not_a_fatal(): void
-    {
         config(['ekdosi.product_media.max_megapixels' => 0.01]);   // 10,000 px
+        $this->assertRejected(fn () => $this->media->storeImage($product, $this->jpeg(200, 100), 'huge.jpg'), 'MP');
 
-        $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('MP');
-        $this->media->storeImage($this->product(), $this->jpeg(200, 100), 'huge.jpg');
+        config(['ekdosi.product_media.max_megapixels' => 50, 'ekdosi.product_media.max_image_kb' => 1]);
+        $this->assertRejected(fn () => $this->media->storeImage($product, $this->jpeg(800, 800, noise: true), 'heavy.jpg'));
+
+        $this->assertSame(0, ProductMedia::count());
+        $this->assertSame([], Storage::disk('local')->allFiles());
     }
 
-    public function test_videos_can_be_bigger_than_livewires_default_temp_upload_limit(): void
+    public function test_memory_limit_is_restored_after_processing(): void
     {
-        $rule = collect(config('livewire.temporary_file_upload.rules'))->first(fn ($r) => str_starts_with((string) $r, 'max:'));
+        $before = ini_get('memory_limit');
+        $this->media->storeImage($this->product(), $this->jpeg(1200, 900), 'a.jpg');
 
-        $this->assertGreaterThanOrEqual((int) config('ekdosi.product_media.max_video_kb'), (int) substr((string) $rule, 4));
+        $this->assertSame($before, ini_get('memory_limit'));
     }
 
-    public function test_a_photo_can_only_be_tied_to_a_value_its_variants_use(): void
+    public function test_every_exif_orientation_ends_up_upright(): void
     {
-        [$color, $size] = $this->axes();
-        $parent = $this->product(['kind' => Product::KIND_VARIABLE]);
-        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+        // A 2×1 image: red on the left, blue on the right. Each EXIF orientation n
+        // stores the pixels transformed; orient(n) must restore the original view.
+        foreach (range(1, 8) as $orientation) {
+            $stored = $this->storedAs($this->redBlue(), $orientation);
+            $fixed = ProductMediaService::orient($stored, $orientation);
 
-        // «Μαύρο» exists in the company but no variant of THIS product uses it.
-        $this->expectException(InvalidArgumentException::class);
-        $this->media->storeImage($parent, $this->jpeg(50, 50), 'x.jpg', $color->values()->value('id'));
+            $this->assertSame([2, 1], [imagesx($fixed), imagesy($fixed)], "orientation {$orientation}: size");
+            $this->assertSame('red', $this->colourAt($fixed, 0, 0), "orientation {$orientation}: left pixel");
+            $this->assertSame('blue', $this->colourAt($fixed, 1, 0), "orientation {$orientation}: right pixel");
+        }
     }
 
-    public function test_video_files_and_allow_listed_links(): void
+    public function test_video_files_and_a_strict_link_allow_list(): void
     {
         $product = $this->product();
         $mp4 = tempnam(sys_get_temp_dir(), 'pm');
@@ -119,36 +117,58 @@ class ProductMediaTest extends TestCase
         $video = $this->media->storeVideo($product, $mp4, 'clip.mp4');
         $this->assertSame('video/mp4', $video->mime_type);
         Storage::disk('local')->assertExists($video->path);
-        $this->assertFalse($video->is_primary, 'only images can be primary');
+        $this->assertNull(ProductMediaService::primaryImage($product->fresh()), 'a video is never the primary photo');
 
         $link = $this->media->addVideoLink($product, 'https://www.youtube.com/watch?v=abc');
-        $this->assertSame('https://www.youtube.com/watch?v=abc', $link->publicUrl());
+        $this->assertSame('https://www.youtube.com/watch?v=abc', $link->fileUrl());
 
-        foreach (['http://youtube.com/watch?v=x', 'https://evil.example/v.mp4', 'https://youtube.com.evil.example/x'] as $bad) {
-            try {
-                $this->media->addVideoLink($product, $bad);
-                $this->fail($bad.' must be rejected');
-            } catch (InvalidArgumentException) {
-            }
+        foreach ([
+            'http://youtube.com/watch?v=x',                                  // not https
+            'https://evil.example/v.mp4',                                    // unknown host
+            'https://youtube.com.evil.example/x',                            // suffix trick
+            'https://evil.com\\@youtube.com/x',                               // backslash: parse_url ≠ browser
+            'https://user@youtube.com/x',                                    // userinfo
+            'https://youtube.com:8443/x',                                    // port
+            'https://www.youtube.com/redirect?q=https://evil.com',           // the host's own redirector
+            'https://l.facebook.com/l.php?u=https%3A%2F%2Fevil.com',         // facebook redirector host
+            'javascript:alert(1)',
+        ] as $bad) {
+            $this->assertFalse(ProductMediaService::isAllowedVideoLink($bad), $bad);
         }
     }
 
-    public function test_deleting_drops_the_files_and_hands_primary_over(): void
+    public function test_make_primary_moves_the_photo_to_the_top_and_delete_keeps_the_next_one_primary(): void
     {
         $product = $this->product();
-        $a = $this->media->storeImage($product, $this->jpeg(100, 100), 'a.jpg');
-        $b = $this->media->storeImage($product, $this->jpeg(100, 100), 'b.jpg');
-
-        $this->media->delete($a);
-
-        Storage::disk('local')->assertMissing([$a->path, $a->thumb_path]);
-        $this->assertTrue($b->refresh()->is_primary);
+        $a = $this->media->storeImage($product, $this->jpeg(60, 60), 'a.jpg');
+        $b = $this->media->storeImage($product, $this->jpeg(60, 60), 'b.jpg');
 
         $this->media->makePrimary($b);
-        $this->assertSame(1, ProductMedia::where('product_id', $product->id)->where('is_primary', true)->count());
+        $this->assertSame($b->id, ProductMediaService::primaryImage($product->fresh())->id);
+        $this->assertLessThan($a->fresh()->sort, $b->fresh()->sort);
+
+        $this->media->delete($b);
+        Storage::disk('local')->assertMissing([$b->path, $b->thumb_path]);
+        $this->assertSame($a->id, ProductMediaService::primaryImage($product->fresh())->id);
     }
 
-    public function test_a_variant_shows_its_colours_photos_first_then_the_general_ones(): void
+    public function test_a_rolled_back_delete_keeps_its_files(): void
+    {
+        $image = $this->media->storeImage($this->product(), $this->jpeg(60, 60), 'a.jpg');
+
+        try {
+            DB::transaction(function () use ($image): void {
+                $this->media->delete($image);
+                throw new \RuntimeException('boom');
+            });
+        } catch (\RuntimeException) {
+        }
+
+        $this->assertModelExists($image);
+        Storage::disk('local')->assertExists([$image->path, $image->thumb_path]);
+    }
+
+    public function test_a_variant_shows_its_colours_photos_and_its_own_kinds_override_per_kind(): void
     {
         [$color, $size] = $this->axes();
         $parent = $this->product(['kind' => Product::KIND_VARIABLE, 'track_stock' => true]);
@@ -164,66 +184,109 @@ class ProductMediaTest extends TestCase
         $this->media->storeImage($parent, $this->jpeg(50, 50), 'white.jpg', $white);
 
         $blackM = $parent->variants()->get()->first(fn (Product $v) => $v->description_short === 'Παντελόνι — Μαύρο / M');
-        $shown = $this->media->mediaFor($blackM);
+        $this->assertSame([$blackPhoto->id, $general->id], ProductMediaService::displayMedia($blackM)->pluck('id')->all());
 
-        $this->assertSame([$blackPhoto->id, $general->id], $shown->pluck('id')->all());
-        $this->assertSame($blackPhoto->id, $this->media->primaryImageFor($blackM)->id);
+        // A variant's OWN video must not hide the inherited photos (per-kind override).
+        $ownLink = $this->media->addVideoLink($blackM, 'https://vimeo.com/1');
+        $shown = ProductMediaService::displayMedia($blackM->fresh());
+        $this->assertSame([$blackPhoto->id, $general->id, $ownLink->id], $shown->pluck('id')->all());
+        $this->assertSame($blackPhoto->id, ProductMediaService::primaryImage($blackM->fresh())->id);
     }
 
-    public function test_a_colour_can_only_be_tied_on_a_variable_product_of_the_same_company(): void
+    public function test_a_photo_can_only_be_tied_to_a_value_its_variants_use(): void
+    {
+        [$color, $size] = $this->axes();
+        $parent = $this->product(['kind' => Product::KIND_VARIABLE]);
+        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+
+        $this->assertRejected(fn () => $this->media->storeImage($this->product(), $this->jpeg(50, 50), 'x.jpg', $color->values()->value('id')));
+        // «Μαύρο» exists in the company but no variant of THIS product uses it.
+        $this->assertRejected(fn () => $this->media->storeImage($parent, $this->jpeg(50, 50), 'x.jpg', $color->values()->value('id')));
+    }
+
+    public function test_details_keep_a_colour_whose_variants_are_gone(): void
     {
         [$color] = $this->axes();
-        $simple = $this->product();
+        $parent = $this->product(['kind' => Product::KIND_VARIABLE]);
+        app(VariantGenerator::class)->generate($parent, [$color->id => $color->values()->pluck('id')->all()]);
+        $black = (int) $color->values()->where('value', 'Μαύρο')->value('id');
+        $photo = $this->media->storeImage($parent, $this->jpeg(50, 50), 'b.jpg', $black);
+        $parent->variants()->get()->each->delete();
 
-        $this->expectException(InvalidArgumentException::class);
-        $this->media->storeImage($simple, $this->jpeg(50, 50), 'x.jpg', $color->values()->value('id'));
+        $this->media->updateDetails($photo, 'Νέο alt', $black);
+
+        $this->assertSame(['Νέο alt', $black], [$photo->fresh()->alt, $photo->fresh()->product_attribute_value_id]);
     }
 
-    public function test_the_signed_url_serves_the_file_and_nothing_else(): void
+    public function test_media_is_served_to_operators_of_its_company_only(): void
     {
         $image = $this->media->storeImage($this->product(), $this->jpeg(600, 300), 'p.jpg');
+        $url = $image->fileUrl('thumb');
 
-        $this->get($image->publicUrl('thumb'))
+        $this->get($url)->assertRedirect();   // guest → login, never the bytes
+
+        Gate::before(fn () => true);
+        $outsider = User::create(['name' => 'X', 'email' => 'x-'.uniqid().'@e.test', 'password' => bcrypt('x')]);
+        $this->actingAs($outsider)->get($url)->assertForbidden();
+
+        $operator = User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@e.test', 'password' => bcrypt('x')]);
+        $this->tenant->users()->attach($operator);
+        $this->actingAs($operator)->get($url)
             ->assertOk()
             ->assertHeader('Content-Type', 'image/jpeg')
-            ->assertHeader('Cache-Control', 'immutable, max-age=31536000, public');
-
-        $this->get(route('product-media.show', ['media' => $image->id, 'variant' => 'full']))->assertForbidden();
-
-        // Range requests (needed by Safari/iOS for video, and for seeking) get a 206.
-        $this->get($image->publicUrl(), ['Range' => 'bytes=0-9'])
-            ->assertStatus(206)
-            ->assertHeader('Content-Length', '10');
-
-        $url = $image->publicUrl();
-        $this->media->delete($image);
-        $this->get($url)->assertNotFound();
+            ->assertHeader('Cache-Control', 'max-age=3600, private');
+        $this->actingAs($operator)->get($image->fileUrl(), ['Range' => 'bytes=0-9'])->assertStatus(206);
     }
 
-    public function test_force_deleting_a_product_and_wiping_a_company_leave_no_files(): void
+    public function test_video_uploads_stay_within_livewires_12mb_temp_limit(): void
+    {
+        $this->assertLessThanOrEqual(12288, (int) config('ekdosi.product_media.max_video_kb'));
+        $this->assertNull(config('livewire.temporary_file_upload.rules'), 'the app-wide Livewire limit is left alone');
+    }
+
+    public function test_force_delete_wipe_and_company_delete_leave_no_files(): void
     {
         $product = $this->product();
         $image = $this->media->storeImage($product, $this->jpeg(50, 50), 'a.jpg');
         $product->forceDelete();
         Storage::disk('local')->assertMissing([$image->path, $image->thumb_path]);
 
-        $other = $this->product();
-        $kept = $this->media->storeImage($other, $this->jpeg(50, 50), 'b.jpg');
+        $kept = $this->media->storeImage($this->product(), $this->jpeg(50, 50), 'b.jpg');
         app(CompanyDataWiper::class)->wipe($this->tenant, keepParties: false, resetCounter: false, force: true);
         Storage::disk('local')->assertMissing($kept->path);
         $this->assertSame(0, ProductMedia::where('company_id', $this->tenant->id)->count());
+
+        $last = $this->media->storeImage($this->product(), $this->jpeg(50, 50), 'c.jpg');
+        $this->tenant->delete();
+        Storage::disk('local')->assertMissing([$last->path, $last->thumb_path]);
     }
 
-    public function test_deleting_the_company_purges_its_files(): void
+    public function test_cleanup_covers_files_on_a_disk_the_config_moved_away_from(): void
     {
-        $image = $this->media->storeImage($this->product(), $this->jpeg(50, 50), 'a.jpg');
+        Storage::fake('old');
+        config(['filesystems.disks.old' => ['driver' => 'local', 'root' => Storage::disk('old')->path('')]]);
+        config(['ekdosi.product_media.disk' => 'old']);
+        $legacy = $this->media->storeImage($this->product(), $this->jpeg(50, 50), 'legacy.jpg');
+        config(['ekdosi.product_media.disk' => 'local']);
 
         $this->tenant->delete();
 
-        Storage::disk('local')->assertMissing([$image->path, $image->thumb_path]);
+        Storage::disk('old')->assertMissing($legacy->path);
     }
 
     // ── helpers ────────────────────────────────────────────────────────────
+
+    private function assertRejected(callable $call, ?string $messagePart = null): void
+    {
+        try {
+            $call();
+            $this->fail('expected a rejection');
+        } catch (InvalidArgumentException $e) {
+            if ($messagePart !== null) {
+                $this->assertStringContainsString($messagePart, $e->getMessage());
+            }
+        }
+    }
 
     private function product(array $overrides = []): Product
     {
@@ -271,5 +334,47 @@ class ProductMediaTest extends TestCase
         imagepng($img, $path);
 
         return $path;
+    }
+
+    private function redBlue(): \GdImage
+    {
+        $img = imagecreatetruecolor(2, 1);
+        imagesetpixel($img, 0, 0, imagecolorallocate($img, 255, 0, 0));
+        imagesetpixel($img, 1, 0, imagecolorallocate($img, 0, 0, 255));
+
+        return $img;
+    }
+
+    /** How a camera STORES an upright image under each EXIF orientation (the inverse of the fix). */
+    private function storedAs(\GdImage $upright, int $orientation): \GdImage
+    {
+        $img = imagecrop($upright, ['x' => 0, 'y' => 0, 'width' => 2, 'height' => 1]);
+        switch ($orientation) {
+            case 2: imageflip($img, IMG_FLIP_HORIZONTAL);
+                break;
+            case 3: $img = imagerotate($img, 180, 0);
+                break;
+            case 4: imageflip($img, IMG_FLIP_VERTICAL);
+                break;
+            case 5: imageflip($img, IMG_FLIP_HORIZONTAL);
+                $img = imagerotate($img, 90, 0);
+                break;
+            case 6: $img = imagerotate($img, 90, 0);
+                break;
+            case 7: imageflip($img, IMG_FLIP_HORIZONTAL);
+                $img = imagerotate($img, -90, 0);
+                break;
+            case 8: $img = imagerotate($img, -90, 0);
+                break;
+        }
+
+        return $img;
+    }
+
+    private function colourAt(\GdImage $img, int $x, int $y): string
+    {
+        $c = imagecolorsforindex($img, imagecolorat($img, $x, $y));
+
+        return $c['red'] > 200 && $c['blue'] < 50 ? 'red' : ($c['blue'] > 200 && $c['red'] < 50 ? 'blue' : 'other');
     }
 }

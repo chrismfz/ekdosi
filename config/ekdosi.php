@@ -741,17 +741,19 @@ return [
     |--------------------------------------------------------------------------
     | Product photos & videos (docs/woocommerce-bridge-plan.md §0)
     |--------------------------------------------------------------------------
-    | Stored on `disk` (local by default — switch to an S3-compatible disk later
-    | without code changes). Served through permanently-signed URLs so the panel
-    | can cache them and WooCommerce can fetch them without a login.
+    | Stored on `disk` (local by default; an S3-compatible disk works too — rows
+    | remember their disk, cleanup covers old ones). Shown to signed-in operators
+    | only; the e-shop gets them via the WooCommerce bridge and serves them itself.
     */
     'product_media' => [
         'disk' => (string) env('EKDOSI_PRODUCT_MEDIA_DISK', 'local'),
         'max_image_kb' => (int) env('EKDOSI_PRODUCT_MEDIA_MAX_IMAGE_KB', 10240),
-        'max_video_kb' => (int) env('EKDOSI_PRODUCT_MEDIA_MAX_VIDEO_KB', 51200),
-        // GD decodes the whole bitmap (~4 B/pixel) — bigger photos are refused, not fatal.
+        // Livewire caps every temporary upload at 12 MB (deliberately NOT raised
+        // app-wide — guests reach that endpoint too). Longer videos → a link.
+        'max_video_kb' => min(12288, (int) env('EKDOSI_PRODUCT_MEDIA_MAX_VIDEO_KB', 12288)),
+        // GD decodes the whole bitmap (~4 B/pixel); bigger photos are refused, not
+        // fatal. Hard ceiling 100 MP in code whatever this says.
         'max_megapixels' => (float) env('EKDOSI_PRODUCT_MEDIA_MAX_MEGAPIXELS', 50),
-        'thumb_px' => (int) env('EKDOSI_PRODUCT_MEDIA_THUMB_PX', 400),
     ],
 
 ];

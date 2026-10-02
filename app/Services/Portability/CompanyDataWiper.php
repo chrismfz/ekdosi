@@ -112,6 +112,8 @@ class CompanyDataWiper
         }
 
         $deleted = [];
+        // Where the media files live — noted before the rows that say so are wiped.
+        $mediaDisks = $keepParties ? [] : app(ProductMediaService::class)->companyDisks((int) $company->id);
 
         Schema::withoutForeignKeyConstraints(function () use ($company, $keepParties, $resetCounter, &$deleted): void {
             DB::transaction(function () use ($company, $keepParties, $resetCounter, &$deleted): void {
@@ -137,9 +139,10 @@ class CompanyDataWiper
             });
         });
 
-        // product_media rows went with the parties — drop their files too (after commit).
+        // product_media rows went with the parties — drop their files too, once the
+        // wipe is committed (runs at once when no outer transaction is open).
         if (! $keepParties) {
-            app(ProductMediaService::class)->purgeCompanyFiles((int) $company->id);
+            DB::afterCommit(fn () => app(ProductMediaService::class)->purgeFiles($mediaDisks, (int) $company->id));
         }
 
         return $deleted;

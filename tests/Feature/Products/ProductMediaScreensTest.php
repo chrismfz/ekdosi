@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Products;
 
+use App\Filament\Resources\ProductAttributes\Pages\EditProductAttribute;
 use App\Filament\Resources\Products\Pages\EditProduct;
 use App\Filament\Resources\Products\Pages\ListProducts;
 use App\Filament\Resources\Products\RelationManagers\MediaRelationManager;
@@ -13,6 +14,7 @@ use App\Models\ProductCategory;
 use App\Models\ProductMedia;
 use App\Models\User;
 use App\Models\VatCategory;
+use App\Services\Products\ProductMediaService;
 use App\Services\Products\VariantGenerator;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -69,12 +71,10 @@ class ProductMediaScreensTest extends TestCase
         $media = ProductMedia::where('product_id', $parent->id)->orderBy('id')->get();
         $this->assertCount(2, $media);
         $this->assertSame([$black, $black], $media->pluck('product_attribute_value_id')->all());
-        $this->assertTrue($media[0]->is_primary);
         $this->assertSame('Μαύρο παντελόνι', $media[1]->alt);
 
         $rm->callTableAction('make_primary', $media[1]);
-        $this->assertTrue($media[1]->refresh()->is_primary);
-        $this->assertFalse($media[0]->refresh()->is_primary);
+        $this->assertSame($media[1]->id, ProductMediaService::primaryImage($parent->fresh())->id);
 
         $rm->callTableAction('video_link', data: ['url' => 'https://vimeo.com/123456']);
         $this->assertTrue(ProductMedia::where('product_id', $parent->id)->where('kind', ProductMedia::KIND_VIDEO_LINK)->exists());
@@ -103,15 +103,48 @@ class ProductMediaScreensTest extends TestCase
         $this->assertNull(ProductMedia::where('product_id', $parent->id)->value('product_attribute_value_id'));
     }
 
-    public function test_users_without_update_permission_cannot_upload_or_delete(): void
+    public function test_users_without_update_permission_cannot_upload_reorder_or_delete(): void
     {
         $product = Product::create($this->productData());
+        $a = app(ProductMediaService::class)->storeImage($product, $this->jpegPath(), 'a.jpg');
+        $b = app(ProductMediaService::class)->storeImage($product, $this->jpegPath(), 'b.jpg');
         $this->denyUpdate = true;
 
         Livewire::test(MediaRelationManager::class, ['ownerRecord' => $product, 'pageClass' => EditProduct::class])
             ->assertOk()
             ->assertTableActionHidden('upload_images')
+            ->assertTableActionHidden('video_link')
+            ->call('reorderTable', [(string) $b->id, (string) $a->id]);
+
+        $this->assertLessThan($b->fresh()->sort, $a->fresh()->sort, 'reorder refused without update permission');
+    }
+
+    public function test_a_trashed_product_takes_no_new_media(): void
+    {
+        $product = Product::create($this->productData());
+        $product->delete();
+
+        Livewire::test(MediaRelationManager::class, ['ownerRecord' => $product, 'pageClass' => EditProduct::class])
+            ->assertTableActionHidden('upload_images')
+            ->assertTableActionHidden('upload_video')
             ->assertTableActionHidden('video_link');
+    }
+
+    public function test_a_colour_value_with_photos_cannot_be_removed(): void
+    {
+        [$parent, $black] = $this->variableWithColours();
+        $photo = app(ProductMediaService::class)->storeImage($parent, $this->jpegPath(), 'black.jpg', $black);
+        $parent->variants()->get()->each->delete();   // no live variant uses it any more…
+        $attribute = ProductAttributeValue::find($black)->attribute;
+
+        $page = Livewire::test(EditProductAttribute::class, ['record' => $attribute->getKey()]);
+        $state = $page->get('data.values');
+        unset($state['record-'.$black]);
+        $page->set('data.values', $state)->call('save');
+
+        // …but a photo is tied to it: removing it would make the black photo general.
+        $this->assertDatabaseHas('product_attribute_values', ['id' => $black]);
+        $this->assertSame($black, $photo->fresh()->product_attribute_value_id);
     }
 
     public function test_the_list_shows_a_variant_its_colours_photo_from_the_parent(): void
@@ -128,13 +161,22 @@ class ProductMediaScreensTest extends TestCase
         $whiteVariant = $parent->variants()->get()->first(fn (Product $v) => str_ends_with($v->description_short, 'Λευκό'));
 
         Livewire::test(ListProducts::class)
-            ->assertTableColumnStateSet('photo', $general->publicUrl('thumb'), $parent)
+            ->assertTableColumnStateSet('photo', $general->fileUrl('thumb'), $parent)
             ->filterTable('kind_view', 'variants')
-            ->assertTableColumnStateSet('photo', $blackPhoto->publicUrl('thumb'), $blackVariant)
-            ->assertTableColumnStateSet('photo', $general->publicUrl('thumb'), $whiteVariant);
+            ->assertTableColumnStateSet('photo', $blackPhoto->fileUrl('thumb'), $blackVariant)
+            ->assertTableColumnStateSet('photo', $general->fileUrl('thumb'), $whiteVariant);
     }
 
     // ── helpers ────────────────────────────────────────────────────────────
+
+    private function jpegPath(): string
+    {
+        $img = imagecreatetruecolor(40, 40);
+        $path = tempnam(sys_get_temp_dir(), 'pms').'.jpg';
+        imagejpeg($img, $path);
+
+        return $path;
+    }
 
     /** @return array{0: Product, 1: int} the variable parent + the «Μαύρο» value id */
     private function variableWithColours(): array

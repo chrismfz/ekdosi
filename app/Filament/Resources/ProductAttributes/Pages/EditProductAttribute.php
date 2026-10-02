@@ -36,16 +36,20 @@ class EditProductAttribute extends EditRecord
 
         $removedInUse = $this->getRecord()->values()
             ->whereKeyNot($kept)
-            ->whereExists(fn ($q) => $q->from('product_variant_values')
-                ->join('products', 'products.id', '=', 'product_variant_values.product_id')
-                ->whereNull('products.deleted_at')
-                ->whereColumn('product_variant_values.product_attribute_value_id', 'product_attribute_values.id'))
+            ->where(fn ($q) => $q
+                ->whereExists(fn ($e) => $e->from('product_variant_values')
+                    ->join('products', 'products.id', '=', 'product_variant_values.product_id')
+                    ->whereNull('products.deleted_at')
+                    ->whereColumn('product_variant_values.product_attribute_value_id', 'product_attribute_values.id'))
+                // …or photos tied to it (they would silently become general).
+                ->orWhereExists(fn ($e) => $e->from('product_media')
+                    ->whereColumn('product_media.product_attribute_value_id', 'product_attribute_values.id')))
             ->pluck('value');
 
         if ($removedInUse->isNotEmpty()) {
             Notification::make()
                 ->title('Δεν αφαιρούνται τιμές που χρησιμοποιούνται')
-                ->body('«'.$removedInUse->implode('», «').'» — υπάρχουν ενεργές παραλλαγές με αυτές τις τιμές. Διάγραψέ τες πρώτα (καρτέλα «Παραλλαγές» του προϊόντος).')
+                ->body('«'.$removedInUse->implode('», «').'» — υπάρχουν ενεργές παραλλαγές ή φωτογραφίες δεμένες σε αυτές τις τιμές. Διάγραψε/άλλαξέ τες πρώτα (καρτέλες «Παραλλαγές» / «Φωτογραφίες & βίντεο» του προϊόντος).')
                 ->danger()
                 ->persistent()
                 ->send();

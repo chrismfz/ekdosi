@@ -10,26 +10,34 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use InvalidArgumentException;
+use RuntimeException;
 
 /**
  * Stores and resolves product photos & videos (docs/woocommerce-bridge-plan.md §0).
  *
- * Images are RE-ENCODED with GD: EXIF orientation applied, EXIF (incl. GPS)
- * stripped — these photos end up public on the e-shop — the full image capped
- * at FULL_PX and a thumbnail generated. Videos are stored as-is (size-capped);
- * video LINKS store only an allow-listed https URL.
+ * Images are RE-ENCODED with GD: EXIF orientation applied (all 8 cases), EXIF
+ * (incl. GPS) stripped, the full image capped at FULL_PX and a thumbnail made
+ * from it. Videos are stored as-is (size-capped); video LINKS store only an
+ * allow-listed https URL. Nothing here is public: files are served to signed-in
+ * operators only (ProductMediaController) — publishing to the e-shop is the
+ * WooCommerce bridge's job (plan §6 Phase 4).
+ *
+ * The primary photo is simply the FIRST image by `sort` — dragging a photo to
+ * the top makes it primary, and there is no flag to keep in sync.
  */
 class ProductMediaService
 {
     /** Longest side of the stored "full" image. */
     private const FULL_PX = 2000;
 
-    /** Accepted image types → stored extension (GIF is stored as PNG — no animation kept). */
+    private const THUMB_PX = 400;
+
+    /** Accepted image types → [stored extension, stored mime] (GIF is stored as PNG — no animation kept). */
     private const IMAGE_TYPES = [
-        'image/jpeg' => 'jpg',
-        'image/png' => 'png',
-        'image/webp' => 'webp',
-        'image/gif' => 'png',
+        'image/jpeg' => ['jpg', 'image/jpeg'],
+        'image/png' => ['png', 'image/png'],
+        'image/webp' => ['webp', 'image/webp'],
+        'image/gif' => ['png', 'image/png'],
     ];
 
     private const VIDEO_TYPES = [
@@ -38,8 +46,29 @@ class ProductMediaService
         'video/quicktime' => 'mov',
     ];
 
-    /** Hosts a video link may point at (https only). */
-    private const VIDEO_HOSTS = ['youtube.com', 'youtu.be', 'vimeo.com', 'instagram.com', 'tiktok.com', 'facebook.com'];
+    /** Exact hosts a video link may point at (https only; «www.» is stripped first). */
+    private const VIDEO_HOSTS = [
+        'youtube.com', 'm.youtube.com', 'youtu.be',
+        'vimeo.com', 'player.vimeo.com',
+        'instagram.com',
+        'tiktok.com', 'vm.tiktok.com',
+        'facebook.com', 'm.facebook.com', 'fb.watch',
+    ];
+
+    /** Paths that are the allowed hosts' open redirectors. */
+    private const REDIRECT_PATHS = ['/redirect', '/l.php', '/link'];
+
+    /** @return list<string> mime types the image upload accepts (for the upload widget). */
+    public static function imageMimes(): array
+    {
+        return array_keys(self::IMAGE_TYPES);
+    }
+
+    /** @return list<string> mime types the video upload accepts (for the upload widget). */
+    public static function videoMimes(): array
+    {
+        return array_keys(self::VIDEO_TYPES);
+    }
 
     /**
      * Store an uploaded image from a local file path.
@@ -53,27 +82,34 @@ class ProductMediaService
         if ($info === false || ! isset(self::IMAGE_TYPES[$mime])) {
             throw new InvalidArgumentException('Μη υποστηριζόμενη εικόνα «'.$originalName.'» — δεκτά: JPG, PNG, WebP, GIF.');
         }
-        $this->assertSize($sourcePath, (int) config('ekdosi.product_media.max_image_kb', 10240), $originalName);
-        $this->assertDecodable((int) $info[0], (int) $info[1], $originalName);
+        $this->assertSize($sourcePath, (int) config('ekdosi.product_media.max_image_kb'), $originalName);
+        $this->assertWithinPixels((int) $info[0], (int) $info[1], $originalName);
 
-        $image = $this->load($sourcePath, $mime);
-        $image = $this->applyExifOrientation($image, $sourcePath, $mime);
+        [$ext, $storedMime] = self::IMAGE_TYPES[$mime];
 
-        $ext = self::IMAGE_TYPES[$mime];
+        [$fullBytes, $thumbBytes] = $this->withMemoryFor((int) $info[0] * (int) $info[1], $originalName, function () use ($sourcePath, $mime, $ext): array {
+            $image = $this->load($sourcePath, $mime);
+            $image = self::orient($image, $this->exifOrientation($sourcePath, $mime));
+            $full = $this->resized($image, self::FULL_PX);
+            unset($image);   // free the original bitmap before the thumbnail pass
+            $thumb = $this->resized($full, self::THUMB_PX);
+
+            return [$this->encode($full, $ext), $this->encode($thumb, $ext)];
+        });
+
         $disk = $this->disk();
         $dir = $this->directory($product);
         $name = (string) Str::uuid();
-
-        $full = $this->resized($image, self::FULL_PX);
-        $thumb = $this->resized($image, max(64, (int) config('ekdosi.product_media.thumb_px', 400)));
-
         $path = "{$dir}/{$name}.{$ext}";
         $thumbPath = "{$dir}/thumbs/{$name}.{$ext}";
-        Storage::disk($disk)->put($path, $this->encode($full, $ext));
-        Storage::disk($disk)->put($thumbPath, $this->encode($thumb, $ext));
 
-        $width = imagesx($full);
-        $height = imagesy($full);
+        $this->put($disk, $path, $fullBytes);
+        try {
+            $this->put($disk, $thumbPath, $thumbBytes);
+        } catch (\Throwable $e) {
+            Storage::disk($disk)->delete($path);
+            throw $e;
+        }
 
         return $this->createRowOrCleanUp($disk, [$path, $thumbPath], $product, [
             'kind' => ProductMedia::KIND_IMAGE,
@@ -81,10 +117,8 @@ class ProductMediaService
             'path' => $path,
             'thumb_path' => $thumbPath,
             'original_name' => mb_substr($originalName, 0, 255),
-            'mime_type' => $ext === 'png' ? 'image/png' : ($ext === 'webp' ? 'image/webp' : 'image/jpeg'),
-            'size' => Storage::disk($disk)->size($path),
-            'width' => $width,
-            'height' => $height,
+            'mime_type' => $storedMime,
+            'size' => strlen($fullBytes),
             'alt' => $alt !== null ? mb_substr($alt, 0, 255) : null,
             'product_attribute_value_id' => $valueId,
         ]);
@@ -99,14 +133,19 @@ class ProductMediaService
         if (! isset(self::VIDEO_TYPES[$mime])) {
             throw new InvalidArgumentException('Μη υποστηριζόμενο βίντεο «'.$originalName.'» — δεκτά: MP4, WebM, MOV.');
         }
-        $this->assertSize($sourcePath, (int) config('ekdosi.product_media.max_video_kb', 51200), $originalName);
+        $this->assertSize($sourcePath, (int) config('ekdosi.product_media.max_video_kb'), $originalName);
 
         $disk = $this->disk();
         $path = $this->directory($product).'/'.Str::uuid().'.'.self::VIDEO_TYPES[$mime];
         $stream = fopen($sourcePath, 'rb');
-        Storage::disk($disk)->writeStream($path, $stream);
-        if (is_resource($stream)) {
-            fclose($stream);
+        try {
+            if ($stream === false || ! Storage::disk($disk)->writeStream($path, $stream)) {
+                throw new RuntimeException('Δεν αποθηκεύτηκε το «'.$originalName.'» (δίσκος).');
+            }
+        } finally {
+            if (is_resource($stream)) {
+                fclose($stream);
+            }
         }
 
         return $this->createRowOrCleanUp($disk, [$path], $product, [
@@ -115,7 +154,7 @@ class ProductMediaService
             'path' => $path,
             'original_name' => mb_substr($originalName, 0, 255),
             'mime_type' => $mime,
-            'size' => Storage::disk($disk)->size($path),
+            'size' => (int) filesize($sourcePath),
             'product_attribute_value_id' => $valueId,
         ]);
     }
@@ -124,13 +163,9 @@ class ProductMediaService
     public function addVideoLink(Product $product, string $url, ?int $valueId = null): ProductMedia
     {
         $valueId = $this->checkedValueId($product, $valueId);
-
         $url = trim($url);
-        $parts = parse_url($url);
-        $host = Str::lower((string) ($parts['host'] ?? ''));
-        $host = Str::startsWith($host, 'www.') ? substr($host, 4) : $host;
-        $allowed = collect(self::VIDEO_HOSTS)->contains(fn (string $h) => $host === $h || Str::endsWith($host, '.'.$h));
-        if (($parts['scheme'] ?? '') !== 'https' || ! $allowed || mb_strlen($url) > 500) {
+
+        if (! self::isAllowedVideoLink($url)) {
             throw new InvalidArgumentException('Δεκτοί σύνδεσμοι: https από YouTube, Vimeo, Instagram, TikTok ή Facebook.');
         }
 
@@ -141,7 +176,32 @@ class ProductMediaService
         ]);
     }
 
-    /** Make this image the product's primary one (exactly one primary image per product). */
+    /**
+     * Strict allow-list: https, an exact known host, no userinfo/port/backslash
+     * (parse_url and browsers disagree on those), and none of the hosts' own
+     * open-redirect endpoints.
+     */
+    public static function isAllowedVideoLink(string $url): bool
+    {
+        if ($url === '' || mb_strlen($url) > 500 || str_contains($url, '\\') || preg_match('/\s/u', $url)) {
+            return false;
+        }
+        $parts = parse_url($url);
+        if ($parts === false || ($parts['scheme'] ?? '') !== 'https'
+            || isset($parts['user']) || isset($parts['pass']) || isset($parts['port'])) {
+            return false;
+        }
+        $host = strtolower((string) ($parts['host'] ?? ''));
+        $host = str_starts_with($host, 'www.') ? substr($host, 4) : $host;
+        if (! in_array($host, self::VIDEO_HOSTS, true)) {
+            return false;
+        }
+        $path = strtolower((string) ($parts['path'] ?? '/'));
+
+        return ! collect(self::REDIRECT_PATHS)->contains(fn (string $p) => $path === $p || str_starts_with($path, $p.'/'));
+    }
+
+    /** Make this image the primary one = move it to the top of the order. */
     public function makePrimary(ProductMedia $media): void
     {
         if (! $media->isImage()) {
@@ -149,79 +209,76 @@ class ProductMediaService
         }
 
         DB::transaction(function () use ($media): void {
-            ProductMedia::query()->withoutGlobalScopes()
+            $ids = ProductMedia::query()->withoutGlobalScopes()
                 ->where('product_id', $media->product_id)
                 ->whereKeyNot($media->getKey())
-                ->update(['is_primary' => false]);
-            $media->forceFill(['is_primary' => true])->save();
-        });
-    }
+                ->orderBy('sort')->orderBy('id')
+                ->pluck('id')
+                ->prepend($media->getKey());
 
-    /** Delete a media row (+ its files); a deleted primary hands over to the next image. */
-    public function delete(ProductMedia $media): void
-    {
-        DB::transaction(function () use ($media): void {
-            $wasPrimary = $media->is_primary;
-            $productId = $media->product_id;
-            $media->delete();
-
-            if ($wasPrimary) {
-                $next = ProductMedia::query()->withoutGlobalScopes()
-                    ->where('product_id', $productId)
-                    ->where('kind', ProductMedia::KIND_IMAGE)
-                    ->orderBy('sort')->orderBy('id')
-                    ->first();
-                $next?->forceFill(['is_primary' => true])->save();
+            foreach ($ids->values() as $i => $id) {
+                ProductMedia::query()->withoutGlobalScopes()->whereKey($id)->update(['sort' => $i + 1]);
             }
         });
     }
 
-    /**
-     * The media a product SHOWS, in display order. A variant: its own media, else
-     * its parent's media for the variant's colour/values, then the parent's
-     * general media. Anything else: its own media.
-     *
-     * @return Collection<int, ProductMedia>
-     */
-    public function mediaFor(Product $product): Collection
+    /** Update the alt text / colour of a media row (same value rules as uploading; its current colour stays valid). */
+    public function updateDetails(ProductMedia $media, ?string $alt, ?int $valueId): void
     {
-        $own = ProductMedia::query()->withoutGlobalScopes()
-            ->where('product_id', $product->getKey())
-            ->orderByDesc('is_primary')->orderBy('sort')->orderBy('id')
-            ->get();
-
-        if (! $product->isVariant() || $own->isNotEmpty() || $product->parent_product_id === null) {
-            return $own;
+        $product = $media->product()->withTrashed()->firstOrFail();
+        if ($valueId !== null && $valueId !== $media->product_attribute_value_id) {
+            $valueId = $this->checkedValueId($product, $valueId);
         }
 
-        $valueIds = DB::table('product_variant_values')
-            ->where('product_id', $product->getKey())
-            ->pluck('product_attribute_value_id')
-            ->map(fn ($id) => (int) $id)
-            ->all();
+        $media->update([
+            'alt' => $alt !== null && $alt !== '' ? mb_substr($alt, 0, 255) : null,
+            'product_attribute_value_id' => $valueId,
+        ]);
+    }
 
-        $parentMedia = ProductMedia::query()->withoutGlobalScopes()
-            ->where('product_id', $product->parent_product_id)
-            ->get();
-
-        return self::orderForVariant($parentMedia, $valueIds);
+    /** Delete a media row; its files go once the delete commits (ProductMedia::deleted). */
+    public function delete(ProductMedia $media): void
+    {
+        $media->delete();
     }
 
     /**
-     * Of a parent's media, what a variant with these values shows: its values'
-     * media (e.g. the black photos) first, then the general ones; media tied to
-     * OTHER values (the white photos) are left out. Shared with the list thumbnail.
+     * The media a product SHOWS, in display order — the ONE rule, used by the
+     * products list thumbnail and (later) the WooCommerce bridge. Uses the loaded
+     * relations when present (media, parent.media, variantValues).
      *
-     * @param  Collection<int, ProductMedia>  $parentMedia
-     * @param  list<int>  $valueIds
+     * Per kind (photos / videos): a variant shows its OWN when it has any of that
+     * kind, else its parent's for its values (e.g. the black photos) first, then
+     * the parent's general ones — never another colour's.
+     *
      * @return Collection<int, ProductMedia>
      */
-    public static function orderForVariant(Collection $parentMedia, array $valueIds): Collection
+    public static function displayMedia(Product $product): Collection
     {
-        return $parentMedia
+        $own = $product->media->sortBy(fn (ProductMedia $m) => [$m->sort, $m->id])->values();
+
+        $parent = $product->isVariant() ? $product->parent : null;
+        if ($parent === null) {
+            return $own;
+        }
+
+        $valueIds = $product->variantValues->pluck('id')->map(fn ($id) => (int) $id)->all();
+        $inherited = $parent->media
             ->filter(fn (ProductMedia $m) => $m->product_attribute_value_id === null || in_array((int) $m->product_attribute_value_id, $valueIds, true))
-            ->sortBy(fn (ProductMedia $m) => [$m->product_attribute_value_id === null ? 1 : 0, $m->is_primary ? 0 : 1, $m->sort, $m->id])
+            ->sortBy(fn (ProductMedia $m) => [$m->product_attribute_value_id === null ? 1 : 0, $m->sort, $m->id])
             ->values();
+
+        $pick = fn (bool $images) => (($mine = $own->filter(fn (ProductMedia $m) => $m->isImage() === $images))->isNotEmpty()
+            ? $mine
+            : $inherited->filter(fn (ProductMedia $m) => $m->isImage() === $images))->values();
+
+        return $pick(true)->concat($pick(false))->values();
+    }
+
+    /** The photo a product shows first (null when none). */
+    public static function primaryImage(Product $product): ?ProductMedia
+    {
+        return self::displayMedia($product)->first(fn (ProductMedia $m) => $m->isImage());
     }
 
     /**
@@ -243,17 +300,92 @@ class ProductMediaService
             ->all();
     }
 
-    /** Primary image a product shows (null when it has none). */
-    public function primaryImageFor(Product $product): ?ProductMedia
+    /**
+     * Every disk a company's media lives on (rows can predate a disk switch) plus
+     * the configured one — collect BEFORE the rows are deleted.
+     *
+     * @return list<string>
+     */
+    public function companyDisks(int $companyId): array
     {
-        return $this->mediaFor($product)->first(fn (ProductMedia $m) => $m->isImage());
+        return ProductMedia::query()->withoutGlobalScopes()
+            ->where('company_id', $companyId)
+            ->whereNotNull('disk')
+            ->distinct()
+            ->pluck('disk')
+            ->push($this->disk())
+            ->unique()
+            ->values()
+            ->all();
     }
 
-    /** Remove every stored file of a company's product media (used by the data wiper). */
-    public function purgeCompanyFiles(int $companyId): void
+    /** @return list<string> disks one product's media lives on, plus the configured one */
+    public function productDisks(Product $product): array
     {
-        $disk = $this->disk();
-        Storage::disk($disk)->deleteDirectory('products/'.$companyId);
+        return ProductMedia::query()->withoutGlobalScopes()
+            ->where('product_id', $product->getKey())
+            ->whereNotNull('disk')
+            ->distinct()
+            ->pluck('disk')
+            ->push($this->disk())
+            ->unique()
+            ->values()
+            ->all();
+    }
+
+    /**
+     * Remove a company's (or one product's) media directory on each disk. Never
+     * throws — a failed cleanup must not break the delete it follows; it is reported.
+     *
+     * @param  list<string>  $disks
+     */
+    public function purgeFiles(array $disks, int $companyId, ?int $productId = null): void
+    {
+        $dir = 'products/'.$companyId.($productId !== null ? '/'.$productId : '');
+        foreach ($disks as $disk) {
+            try {
+                Storage::disk($disk)->deleteDirectory($dir);
+            } catch (\Throwable $e) {
+                report($e);
+            }
+        }
+    }
+
+    /**
+     * EXIF orientation 1–8 → upright image (rotation + mirror), since the EXIF tag
+     * itself is dropped on re-encode and nothing could correct it later.
+     */
+    public static function orient(GdImage $image, int $orientation): GdImage
+    {
+        $rotate = fn (GdImage $img, int $angle) => ($r = imagerotate($img, $angle, 0)) instanceof GdImage ? $r : $img;
+
+        switch ($orientation) {
+            case 2:
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                break;
+            case 3:
+                $image = $rotate($image, 180);
+                break;
+            case 4:
+                imageflip($image, IMG_FLIP_VERTICAL);
+                break;
+            case 5:
+                $image = $rotate($image, -90);
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                break;
+            case 6:
+                $image = $rotate($image, -90);
+                break;
+            case 7:
+                $image = $rotate($image, 90);
+                imageflip($image, IMG_FLIP_HORIZONTAL);
+                break;
+            case 8:
+                $image = $rotate($image, 90);
+                break;
+        }
+
+        return $image;
     }
 
     // ── internals ──────────────────────────────────────────────────────────
@@ -261,21 +393,16 @@ class ProductMediaService
     /** @param  array<string, mixed>  $attributes */
     private function createRow(Product $product, array $attributes): ProductMedia
     {
-        return DB::transaction(function () use ($product, $attributes): ProductMedia {
-            $base = ProductMedia::query()->withoutGlobalScopes()->where('product_id', $product->getKey());
-            $isFirstImage = ($attributes['kind'] === ProductMedia::KIND_IMAGE)
-                && ! (clone $base)->where('kind', ProductMedia::KIND_IMAGE)->exists();
+        $sort = ((int) ProductMedia::query()->withoutGlobalScopes()->where('product_id', $product->getKey())->max('sort')) + 1;
 
-            return ProductMedia::create(array_merge($attributes, [
-                'company_id' => $product->company_id,
-                'product_id' => $product->getKey(),
-                'sort' => ((int) (clone $base)->max('sort')) + 1,
-                'is_primary' => $isFirstImage,
-            ]));
-        });
+        return ProductMedia::create(array_merge($attributes, [
+            'company_id' => $product->company_id,
+            'product_id' => $product->getKey(),
+            'sort' => min($sort, 65535),
+        ]));
     }
 
-    /** A value may be attached only on a variable parent, and only one of the same company. */
+    /** A value may be attached only on a variable parent, and only one its live variants use. */
     private function checkedValueId(Product $product, ?int $valueId): ?int
     {
         if ($valueId === null) {
@@ -291,35 +418,51 @@ class ProductMediaService
         return $valueId;
     }
 
-    /**
-     * GD holds the whole bitmap in memory (~4 bytes/pixel, plus the resized
-     * copies). Refuse what can't fit instead of dying with a fatal error; raise
-     * memory_limit for this request when that is enough.
-     */
-    private function assertDecodable(int $width, int $height, string $name): void
+    private function assertWithinPixels(int $width, int $height, string $name): void
     {
         $pixels = $width * $height;
-        $maxMp = (float) config('ekdosi.product_media.max_megapixels', 50);   // a 48 MP phone shot ≈ 8000×6000
+        $maxMp = min(100.0, (float) config('ekdosi.product_media.max_megapixels'));   // hard ceiling, whatever the env says
         if ($pixels > $maxMp * 1_000_000) {
             throw new InvalidArgumentException('Η εικόνα «'.$name.'» είναι πολύ μεγάλη ('.round($pixels / 1_000_000, 1).' MP) — μέχρι '
                 .$maxMp.' MP.');
         }
+    }
 
+    /**
+     * Run the GD work with enough memory (GD holds ~4 B/pixel, plus copies), then
+     * RESTORE the previous limit — the same save/restore pattern as the PDF renderers.
+     *
+     * @template T
+     *
+     * @param  callable(): T  $work
+     * @return T
+     */
+    private function withMemoryFor(int $pixels, string $name, callable $work): mixed
+    {
+        $previous = (string) ini_get('memory_limit');
+        $limit = self::iniBytes($previous);
         $needed = (int) ($pixels * 4 * 2.5) + memory_get_usage(true);
-        $limit = $this->bytes((string) ini_get('memory_limit'));
+
         if ($limit > 0 && $needed > $limit) {
             @ini_set('memory_limit', (string) $needed);
-            if ($this->bytes((string) ini_get('memory_limit')) < $needed) {
+            if (self::iniBytes((string) ini_get('memory_limit')) < $needed) {
                 throw new InvalidArgumentException('Δεν φτάνει η μνήμη για την εικόνα «'.$name.'» — ανέβασε μικρότερη ανάλυση.');
             }
         }
+
+        try {
+            return $work();
+        } finally {
+            @ini_set('memory_limit', $previous);
+        }
     }
 
-    private function bytes(string $value): int
+    /** php.ini shorthand («128M», «1G», «-1») → bytes; 0 = unlimited. */
+    private static function iniBytes(string $value): int
     {
         $value = trim($value);
-        if ($value === '' || $value === '-1') {
-            return 0;   // unlimited
+        if ($value === '' || (int) $value <= 0) {
+            return 0;
         }
         $n = (int) $value;
 
@@ -329,6 +472,13 @@ class ProductMediaService
             'k' => $n * 1024,
             default => $n,
         };
+    }
+
+    private function put(string $disk, string $path, string $bytes): void
+    {
+        if ($bytes === '' || ! Storage::disk($disk)->put($path, $bytes)) {
+            throw new RuntimeException('Δεν αποθηκεύτηκε η εικόνα (δίσκος ή κωδικοποίηση).');
+        }
     }
 
     /**
@@ -357,7 +507,7 @@ class ProductMediaService
 
     private function disk(): string
     {
-        return (string) config('ekdosi.product_media.disk', 'local');
+        return (string) config('ekdosi.product_media.disk');
     }
 
     private function directory(Product $product): string
@@ -370,11 +520,11 @@ class ProductMediaService
         $image = match ($mime) {
             'image/jpeg' => @imagecreatefromjpeg($path),
             'image/png' => @imagecreatefrompng($path),
-            'image/webp' => @imagecreatefromwebp($path),
+            'image/webp' => function_exists('imagecreatefromwebp') ? @imagecreatefromwebp($path) : false,
             'image/gif' => @imagecreatefromgif($path),
         };
         if (! $image instanceof GdImage) {
-            throw new InvalidArgumentException('Η εικόνα δεν διαβάζεται (κατεστραμμένο αρχείο;).');
+            throw new InvalidArgumentException('Η εικόνα δεν διαβάζεται (κατεστραμμένο αρχείο ή κινούμενο WebP).');
         }
         // Keep transparency for PNG/WebP/GIF.
         imagepalettetotruecolor($image);
@@ -384,21 +534,13 @@ class ProductMediaService
         return $image;
     }
 
-    /** Phone photos carry their rotation in EXIF — bake it in (EXIF is dropped on re-encode). */
-    private function applyExifOrientation(GdImage $image, string $path, string $mime): GdImage
+    private function exifOrientation(string $path, string $mime): int
     {
         if ($mime !== 'image/jpeg' || ! function_exists('exif_read_data')) {
-            return $image;
+            return 1;
         }
-        $orientation = (int) (@exif_read_data($path)['Orientation'] ?? 1);
-        $rotated = match ($orientation) {
-            3 => imagerotate($image, 180, 0),
-            6 => imagerotate($image, -90, 0),
-            8 => imagerotate($image, 90, 0),
-            default => $image,
-        };
 
-        return $rotated instanceof GdImage ? $rotated : $image;
+        return (int) (@exif_read_data($path)['Orientation'] ?? 1);
     }
 
     /** Down-scale so the longest side is ≤ $max (never up-scales). */
@@ -423,7 +565,7 @@ class ProductMediaService
         ob_start();
         match ($ext) {
             'png' => imagepng($image, null, 6),
-            'webp' => imagewebp($image, null, 85),
+            'webp' => function_exists('imagewebp') ? imagewebp($image, null, 85) : false,
             default => imagejpeg($image, null, 85),
         };
 

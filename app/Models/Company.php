@@ -66,7 +66,11 @@ class Company extends Model
 
         $evidence = LegalEvidence::for($this)->describe();
 
-        return DB::transaction(function () use ($evidence): ?bool {
+        // Noted before the cascade removes the rows that say where the files are.
+        $mediaDisks = app(ProductMediaService::class)->companyDisks((int) $this->getKey());
+        $companyId = (int) $this->getKey();
+
+        return DB::transaction(function () use ($evidence, $mediaDisks, $companyId): ?bool {
             app(CompanyPurger::class)->clearRestrictedChildren($this);
 
             $deleted = parent::delete();
@@ -79,17 +83,16 @@ class Company extends Model
                 throw new RuntimeException('Η διαγραφή της εταιρείας ακυρώθηκε.');
             }
 
-            // The cascade removed product_media rows without model events — drop the
-            // photo/video files too, only once the delete is committed.
-            $companyId = (int) $this->getKey();
-            DB::afterCommit(fn () => app(ProductMediaService::class)->purgeCompanyFiles($companyId));
-
             DB::afterCommit(fn () => Log::warning('Company deleted', [
                 'company_id' => $this->getKey(),
                 'slug' => $this->slug,
                 'evidence' => $evidence,
                 'user_id' => auth()->id(),
             ]));
+
+            // The cascade removed product_media rows without model events — drop the
+            // photo/video files too, AFTER the audit line (purgeFiles never throws).
+            DB::afterCommit(fn () => app(ProductMediaService::class)->purgeFiles($mediaDisks, $companyId));
 
             return $deleted;
         });
