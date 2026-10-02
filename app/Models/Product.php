@@ -245,6 +245,15 @@ class Product extends Model
         return $this->belongsTo(ProductCategory::class);
     }
 
+    /**
+     * «Ταμείο»: an open-price generic item (the cashier types its price). Only a
+     * SIMPLE product — a variant/variable sells at its own catalogue price.
+     */
+    public function isOpenPrice(): bool
+    {
+        return (bool) $this->pos_open_price && ($this->kind ?? self::KIND_SIMPLE) === self::KIND_SIMPLE;
+    }
+
     public function vatCategory(): BelongsTo
     {
         return $this->belongsTo(VatCategory::class);

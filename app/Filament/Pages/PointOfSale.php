@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Actions\CreatePosSale;
 use App\Actions\PosSaleNotIssued;
 use App\Filament\Resources\Invoices\InvoiceResource;
+use App\Http\Controllers\PosReceiptController;
 use App\Models\Company;
 use App\Models\Product;
 use App\Services\Products\ProductMediaService;
@@ -16,7 +17,6 @@ use Filament\Pages\Page;
 use Filament\Support\Enums\Width;
 use Filament\Support\Icons\Heroicon;
 use Illuminate\Support\Collection;
-use Illuminate\Support\Facades\URL;
 use Livewire\Attributes\Locked;
 use RuntimeException;
 use Throwable;
@@ -130,7 +130,7 @@ class PointOfSale extends Page
             return;
         }
 
-        if ($product->pos_open_price) {
+        if ($product->isOpenPrice()) {
             $this->pricePrompt = $product->getKey();
             $this->promptPrice = '';
             $this->pickParent = null;
@@ -141,26 +141,33 @@ class PointOfSale extends Page
 
         $this->add($product);
         $this->pickParent = null;
-        $this->search = '';
-        $this->dispatch('pos-focus');
+        $this->closePrice();   // a product picked while a price prompt was open closes it
     }
 
     /** Enter / «Προσθήκη» in the price prompt: one line at the typed gross price. */
     public function addOpenPrice(): void
     {
-        $product = $this->pricePrompt === null ? null : $this->products()->with(CreatePosSale::withVat())->find($this->pricePrompt);
-        $typed = trim($this->promptPrice);
-        if (str_contains($typed, ',')) {
-            $typed = str_replace(['.', ','], ['', '.'], $typed);   // «1.234,50» → 1234.50
-        }
-        $price = round((float) $typed, 2);
-        if ($product === null || ! $product->pos_open_price) {
+        $product = $this->pricePrompt === null ? null : $this->products()->with('vatCategory')->find($this->pricePrompt);
+        if ($product === null || ! $product->isOpenPrice()) {
             $this->closePrice();
 
             return;
         }
-        if (CreatePosSale::unitNet($product, $price) === null) {
-            Notification::make()->warning()->title('Γράψε μια τιμή μεγαλύτερη από 0.')->send();
+
+        // A barcode scanned while the price box had focus (6+ bare digits — no till
+        // price looks like that) is a SCAN, not a price.
+        $typed = trim($this->promptPrice);
+        if (preg_match('/^\d{6,}$/', $typed) === 1) {
+            $this->closePrice();
+            $this->scanCode($typed);
+
+            return;
+        }
+
+        $price = self::parseAmount($typed);
+        if ($price === null || CreatePosSale::unitNet($product, $price) === null) {
+            Notification::make()->warning()->title('Μη έγκυρη τιμή «'.$typed.'»')
+                ->body('Γράψε την τιμή με ΦΠΑ, π.χ. 24,90 ή 1.250,00.')->send();
             $this->dispatch('pos-price-focus');
 
             return;
@@ -236,7 +243,7 @@ class PointOfSale extends Page
     {
         $this->cart = [];
         $this->tendered = '';
-        $this->dispatch('pos-focus');
+        $this->closePrice();
     }
 
     /**
@@ -266,6 +273,15 @@ class PointOfSale extends Page
     public function checkout(): void
     {
         $this->normalizeCart();
+        if ($this->pricePrompt !== null) {
+            // A typed-but-not-added price would silently drop the item from the receipt.
+            Notification::make()->warning()->title('Ολοκλήρωσε πρώτα την τιμή του είδους')
+                ->body('Πάτα «Προσθήκη» (ή «Ακύρωση») και μετά «Έκδοση».')->send();
+            $this->dispatch('pos-print-cancel');
+            $this->dispatch('pos-price-focus');
+
+            return;
+        }
         if ($this->cart === []) {
             Notification::make()->warning()->title('Το καλάθι είναι άδειο.')->send();
             $this->dispatch('pos-print-cancel');
@@ -358,7 +374,7 @@ class PointOfSale extends Page
                 ->orWhere('sku', 'like', $like)
                 ->orWhere('internal_code', 'like', $like)
                 ->orWhere('barcode', $term))
-            ->with(['media', ...CreatePosSale::withVat()])
+            ->with(['media', 'vatCategory'])
             ->orderBy('description_short')
             ->limit(24)
             ->get();
@@ -373,7 +389,7 @@ class PointOfSale extends Page
 
         return $this->products()
             ->where('parent_product_id', $this->pickParent)
-            ->with(['variantValues.attribute', ...CreatePosSale::withVat()])
+            ->with(['variantValues.attribute', 'vatCategory'])
             ->withSum('stockMovements as stock_on_hand', 'qty_change')
             ->get()
             ->sortBy(fn (Product $v) => $v->orderedVariantValues()->map(fn ($val) => sprintf('%05d-%05d', $val->attribute?->sort ?? 0, $val->sort))->implode('|'))
@@ -386,7 +402,7 @@ class PointOfSale extends Page
         return $this->products()
             ->where('is_favorite', true)
             ->where('kind', '!=', Product::KIND_VARIANT)
-            ->with(['media', ...CreatePosSale::withVat()])
+            ->with(['media', 'vatCategory'])
             ->orderBy('description_short')
             ->limit(24)
             ->get();
@@ -406,7 +422,7 @@ class PointOfSale extends Page
     /** @return list<array{label: string, qty: float, discount: float, unit: float, gross: float, levy: float}> */
     public function getCartViewProperty(): array
     {
-        $products = $this->products()->with(CreatePosSale::withVat())
+        $products = $this->products()->with('vatCategory')
             ->whereKey(array_map(fn ($l) => (int) ($l['product_id'] ?? 0), $this->cart))
             ->get()->keyBy('id');
 
@@ -440,10 +456,28 @@ class PointOfSale extends Page
 
     public function change(?float $total = null): ?float
     {
-        $paid = (float) str_replace(',', '.', $this->tendered);
+        $paid = self::parseAmount($this->tendered);
         $total ??= $this->total;
 
-        return $this->tendered !== '' && $paid >= $total ? round($paid - $total, 2) : null;
+        return $paid !== null && $paid >= $total ? round($paid - $total, 2) : null;
+    }
+
+    /**
+     * A Greek-typed amount → float, STRICT (a misread price is a wrong legal receipt):
+     * «24,90» · «24.90» · «24» · «1.250» / «1.250,50» (dot = thousands only in groups
+     * of 3) — anything else (e.g. «1,250», «12,5,0», «abc») is null, never a guess.
+     */
+    public static function parseAmount(string $typed): ?float
+    {
+        $s = str_replace([' ', "\u{00A0}", '€'], '', trim($typed));
+        if (preg_match('/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/', $s) === 1) {        // 1.250 · 1.250,50
+            return round((float) str_replace(['.', ','], ['', '.'], $s), 2);
+        }
+        if (preg_match('/^\d+([.,]\d{1,2})?$/', $s) === 1) {                     // 24 · 24,90 · 24.90
+            return round((float) str_replace(',', '.', $s), 2);
+        }
+
+        return null;
     }
 
     public function photoUrl(Product $product): ?string
@@ -485,8 +519,6 @@ class PointOfSale extends Page
 
     private function receiptUrl(int $invoiceId): string
     {
-        return URL::temporarySignedRoute('pos.receipt', now()->addMinutes(30), [
-            'invoice' => $invoiceId,
-        ]);
+        return PosReceiptController::signedUrl($invoiceId);
     }
 }

@@ -30,6 +30,9 @@ class InvoSignDocument
     /** InvoSign's printable counterpart for an anonymous retail (11.x) sale. */
     public const RETAIL_COUNTERPART_NAME = 'Πελάτης λιανικής';
 
+    /** …and its VAT number (all zeros — sandbox-accepted for 11.1, 2026-10-02). */
+    public const RETAIL_COUNTERPART_VAT = '000000000';
+
     public static function augment(string $aadeXml, Invoice $invoice): string
     {
         $invoice->loadMissing(['lines.product', 'invoiceType', 'customer', 'company', 'paymentMethod']);
@@ -350,7 +353,7 @@ class InvoSignDocument
 
             return self::counterpartFields(
                 $name,
-                trim($vat) !== '' ? $vat : DeliveryNote::INTERNAL_MOVEMENT_AFM,
+                trim($vat) !== '' ? trim($vat) : self::RETAIL_COUNTERPART_VAT,
                 (string) ($invoice->occupation ?: $invoice->customer?->occupation ?? ''),
                 (string) ($invoice->address1 ?: $invoice->customer?->address1 ?? ''),
                 (string) ($invoice->postcode ?: $invoice->customer?->postcode ?? ''),

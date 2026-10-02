@@ -213,18 +213,54 @@ class PosSaleTest extends TestCase
         $this->assertSame(0, Invoice::count());
     }
 
-    public function test_a_retired_vat_category_still_states_the_products_rate(): void
+    public function test_a_retired_vat_category_is_refused_not_guessed(): void
     {
-        // Live devbox: most products pointed at a soft-deleted duplicate «24%»
-        // category — its rate is still the product's rate (only NO category refuses).
+        // A soft-deleted VAT category may be retired BECAUSE its rate is wrong — the
+        // till refuses (cart kept) like every other surface ignores it; never a guess.
         $retired = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '13%', 'rate' => 13]);
         $product = $this->product('Βιβλίο', 10, ['vat_category_id' => $retired->id]);
         $retired->delete();
 
-        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $product->id, 'qty' => 1]]);
+        $this->assertRefused(fn () => app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $product->id, 'qty' => 1]]));
+        $this->assertSame(0, Invoice::count());
+    }
 
-        $this->assertSame(11.30, (float) $invoice->gross_total);
-        $this->assertSame(13.0, (float) $invoice->lines()->first()->vat_percent);
+    public function test_a_zero_total_receipt_is_refused(): void
+    {
+        $shirt = $this->product('Μπλούζα', 20);
+
+        $this->assertRefused(fn () => app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $shirt->id, 'qty' => 1, 'discount' => 100]]));
+        $this->assertSame(0, Invoice::count());
+    }
+
+    public function test_typed_amounts_are_parsed_strictly(): void
+    {
+        foreach (['24,90' => 24.90, '24.90' => 24.90, '24' => 24.0, '1.250' => 1250.0, '1.250,50' => 1250.50, '€ 9,99' => 9.99] as $typed => $expected) {
+            $this->assertSame($expected, PointOfSale::parseAmount($typed), $typed);
+        }
+        foreach (['1,250', '12,5,0', '24.', 'abc', '', '0,004'] as $typed) {
+            $this->assertNull(PointOfSale::parseAmount($typed), $typed);
+        }
+    }
+
+    public function test_the_open_price_prompt_cannot_be_skipped_or_fed_a_scan(): void
+    {
+        $clothes = $this->product('ΡΟΥΧΑ 24%', 0, ['pos_open_price' => true]);
+        $belt = $this->product('Ζώνη', 10, ['barcode' => '5201234567890']);
+        $this->operator();
+
+        Livewire::test(PointOfSale::class)
+            ->call('choose', $belt->id)
+            ->call('choose', $clothes->id)
+            ->set('promptPrice', '24,90')
+            ->call('checkout')                                   // typed but not added → no sale
+            ->assertSet('pricePrompt', $clothes->id)
+            ->set('promptPrice', '5201234567890')->call('addOpenPrice')   // a scan in the price box
+            ->assertSet('pricePrompt', null)
+            ->assertSet('cart.0.qty', 2.0)                       // → the belt, not a €5bn line
+            ->assertCount('cart', 1);
+
+        $this->assertSame(0, Invoice::count());
     }
 
     public function test_the_till_total_includes_product_levies_like_the_receipt(): void

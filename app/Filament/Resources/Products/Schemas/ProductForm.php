@@ -112,8 +112,9 @@ class ProductForm
                                 Toggle::make('pos_open_price')
                                     ->label('Ελεύθερη τιμή στο «Ταμείο»')
                                     ->default(false)
-                                    ->visible(fn (Get $get, ?Product $record) => ! ($record?->isVariable() || $get('kind') === Product::KIND_VARIABLE))
-                                    ->helperText('Γενικό είδος (π.χ. «ΡΟΥΧΑ 24%») για ό,τι δεν έχει δικό του κωδικό: στο ταμείο ο ταμίας πληκτρολογεί την τελική τιμή (με ΦΠΑ). Βάλ\' το και στα «αγαπημένα» για να φαίνεται ως πλήκτρο στο ταμείο.'),
+                                    // generic SIMPLE items only — never a variant or a variable parent
+                                    ->visible(fn (Get $get, ?Product $record) => ($get('kind') ?? $record?->kind ?? Product::KIND_SIMPLE) === Product::KIND_SIMPLE)
+                                    ->helperText('Γενικό είδος (π.χ. «ΡΟΥΧΑ 24%») για ό,τι δεν έχει δικό του κωδικό: στο ταμείο ο ταμίας πληκτρολογεί την τελική τιμή (με ΦΠΑ). Βάλ\' το και στα «αγαπημένα» για να φαίνεται ως πλήκτρο στο ταμείο. Μόνο απλά είδη, χωρίς δεμένο τέλος.'),
 
                                 Toggle::make('track_stock')
                                     ->label(fn (Get $get, ?Product $record) => ($record?->isVariable() || $get('kind') === Product::KIND_VARIABLE)

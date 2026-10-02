@@ -7,7 +7,7 @@
     <div class="pos-item-price">
         @if ($product->isVariable())
             Επιλογή παραλλαγής ›
-        @elseif ($product->pos_open_price)
+        @elseif ($product->isOpenPrice())
             Ελεύθερη τιμή ›
         @else
             {{ number_format($page->unitPrice($product), 2, ',', '.') }} €
