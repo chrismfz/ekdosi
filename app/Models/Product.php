@@ -12,6 +12,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
 
@@ -142,11 +143,28 @@ class Product extends Model
         // whose parent is gone or whose axes no longer match its live siblings stays
         // trashed. The UI actions check the same rule first to explain why.
         static::restoring(fn (Product $product) => app(VariantGenerator::class)->restoreBlocker($product) === null);
+
+        // A force-delete cascades product_media rows in the DB without model events —
+        // drop the files first so no photo is orphaned on disk.
+        static::forceDeleting(fn (Product $product) => ProductMedia::query()->withoutGlobalScopes()
+            ->where('product_id', $product->getKey())->get()->each->delete());
     }
 
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /** Photos, videos and video links (unordered — callers sort; the media tab reorders by `sort`). */
+    public function media(): HasMany
+    {
+        return $this->hasMany(ProductMedia::class);
+    }
+
+    /** The product's own primary photo (a variant without its own falls back via ProductMediaService::mediaFor). */
+    public function primaryImage(): HasOne
+    {
+        return $this->hasOne(ProductMedia::class)->where('kind', ProductMedia::KIND_IMAGE)->where('is_primary', true);
     }
 
     public function parent(): BelongsTo

@@ -737,4 +737,19 @@ return [
         'strategy' => (string) env('EKDOSI_UPDATE_STRATEGY', 'php'),
     ],
 
+    /*
+    |--------------------------------------------------------------------------
+    | Product photos & videos (docs/woocommerce-bridge-plan.md §0)
+    |--------------------------------------------------------------------------
+    | Stored on `disk` (local by default — switch to an S3-compatible disk later
+    | without code changes). Served through permanently-signed URLs so the panel
+    | can cache them and WooCommerce can fetch them without a login.
+    */
+    'product_media' => [
+        'disk' => (string) env('EKDOSI_PRODUCT_MEDIA_DISK', 'local'),
+        'max_image_kb' => (int) env('EKDOSI_PRODUCT_MEDIA_MAX_IMAGE_KB', 10240),
+        'max_video_kb' => (int) env('EKDOSI_PRODUCT_MEDIA_MAX_VIDEO_KB', 51200),
+        'thumb_px' => (int) env('EKDOSI_PRODUCT_MEDIA_THUMB_PX', 400),
+    ],
+
 ];

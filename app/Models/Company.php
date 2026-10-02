@@ -7,6 +7,7 @@ use App\Enums\MyDataMode;
 use App\Models\Scopes\CompanyScope;
 use App\Observers\CompanyObserver;
 use App\Services\Portability\CompanyPurger;
+use App\Services\Products\ProductMediaService;
 use App\Support\LegalEvidence;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -77,6 +78,11 @@ class Company extends Model
             if ($deleted === false) {
                 throw new RuntimeException('Η διαγραφή της εταιρείας ακυρώθηκε.');
             }
+
+            // The cascade removed product_media rows without model events — drop the
+            // photo/video files too, only once the delete is committed.
+            $companyId = (int) $this->getKey();
+            DB::afterCommit(fn () => app(ProductMediaService::class)->purgeCompanyFiles($companyId));
 
             DB::afterCommit(fn () => Log::warning('Company deleted', [
                 'company_id' => $this->getKey(),

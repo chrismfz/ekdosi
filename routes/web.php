@@ -14,6 +14,7 @@ use App\Http\Controllers\Portal\ProfileController as PortalProfileController;
 use App\Http\Controllers\Portal\ReceiptShowController as PortalReceiptShowController;
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\Portal\TicketController as PortalTicketController;
+use App\Http\Controllers\ProductMediaController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Controllers\TicketAttachmentController;
 use App\Http\Controllers\TicketFeedbackController;
@@ -208,6 +209,13 @@ Route::get('/company-backups/{run}/download', CompanyBackupDownloadController::c
 Route::get('/support/tickets/{ticket}/attachments/{attachment}', TicketAttachmentController::class)
     ->where(['ticket' => '[0-9]+', 'attachment' => '[0-9]+'])
     ->middleware(['auth', 'signed'])->name('support.tickets.attachment');
+
+// Product photo/video — SIGNED, no login (public by nature: they go on the e-shop and
+// WooCommerce fetches them). Permanent signature = stable, cacheable, non-enumerable URL.
+Route::get('/media/products/{media}/{variant}', ProductMediaController::class)
+    ->where(['media' => '[0-9]+', 'variant' => 'full|thumb'])
+    ->middleware('signed')
+    ->name('product-media.show');
 
 // Expense attachment — AUTH + SIGNED + tenant-checked (see controller). Streams
 // the private supplier-document scan from the local disk.

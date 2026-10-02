@@ -18,6 +18,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
+use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -37,6 +38,14 @@ class ProductsTable
                     ->label('#')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
+
+                // Own primary photo, else (a variant) its parent's — eager-loaded below.
+                ImageColumn::make('photo')
+                    ->label('')
+                    ->state(fn (Product $record) => ($record->primaryImage ?? $record->parent?->primaryImage)?->publicUrl('thumb'))
+                    ->imageSize(40)
+                    ->square()
+                    ->toggleable(),
 
                 TextColumn::make('sku')
                     ->searchable()
@@ -163,6 +172,7 @@ class ProductsTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->modifyQueryUsing(fn (Builder $query) => $query
+                ->with(['primaryImage', 'parent.primaryImage'])
                 ->withSum('stockMovements as stock_on_hand', 'qty_change')
                 ->withCount(['variants', 'variants as tracked_variants_count' => fn (Builder $q) => $q->where('track_stock', true)])
                 ->selectSub(fn ($q) => $q->from('stock_movements')

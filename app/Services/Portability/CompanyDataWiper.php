@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Lead;
 use App\Models\Product;
+use App\Services\Products\ProductMediaService;
 use App\Support\LegalEvidence;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -39,7 +40,7 @@ class CompanyDataWiper
     public const PARTY_TABLES = [
         'lead_activities', 'leads',
         'customer_contacts', 'customers', 'suppliers',
-        'product_billing_prices', 'product_price_tiers', 'product_variant_values', 'products',
+        'product_billing_prices', 'product_price_tiers', 'product_variant_values', 'product_media', 'products',
     ];
 
     /**
@@ -135,6 +136,11 @@ class CompanyDataWiper
                 }
             });
         });
+
+        // product_media rows went with the parties — drop their files too (after commit).
+        if (! $keepParties) {
+            app(ProductMediaService::class)->purgeCompanyFiles((int) $company->id);
+        }
 
         return $deleted;
     }

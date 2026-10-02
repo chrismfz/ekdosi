@@ -1030,6 +1030,9 @@ guarded delete, προ-σπαρμένα από `MyDataLookupSeeder` για άμ�
   `VariantGenerator`, `VariantStockGrid`) — χρώμα × μέγεθος, κάθε παραλλαγή πλήρες προϊόν με δικό της απόθεμα/SKU/
   barcode/εσωτερικό κωδικό· γεννήτρια συνδυασμών, εφαρμογή γονικού σε παραλλαγές, πλέγμα αποθέματος. Θεμέλιο για
   POS + WooCommerce (`docs/woocommerce-bridge-plan.md` §0).
+- **Φωτογραφίες & βίντεο προϊόντων** (`ProductMedia`, `ProductMediaService`, signed route `product-media.show`) — GD re-encode
+  (EXIF/GPS out, 2000px + thumb), βίντεο αρχείο ή σύνδεσμος, κύρια/σειρά/alt, φωτογραφίες ανά χρώμα που κληρονομούν οι
+  παραλλαγές· σταθερά υπογεγραμμένα URL χωρίς login (για Woo). Disk ρυθμιζόμενος (`EKDOSI_PRODUCT_MEDIA_DISK`).
 - **myDATA-readiness στη λίστα κάθε lookup που κουβαλά κωδικό §8.** Τύποι παραστατικών (§8.1, με
   suggestion + «Ετοιμότητα myDATA»), ΦΠΑ (§8.2, flag σε μη-έγκυρο συντελεστή), κατηγορίες προϊόντων
   (§8.6, «κληρονομεί τύπο») και **τρόποι πληρωμής (§8.12)** δείχνουν στη λίστα τον κωδικό ή «λείπει» —

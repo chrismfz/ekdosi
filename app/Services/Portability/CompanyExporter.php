@@ -91,6 +91,9 @@ class CompanyExporter
         // owner when full-bundle attachment support lands (Phase 2 follow-up).
         'attachments',
         'notes',
+        // Product photos/videos: binary files, not part of the JSON bundle (v1) —
+        // like attachments. Re-uploaded (or re-imported from the e-shop) on the target.
+        'product_media',
         // Ψηφιακό ΔΑ (delivery) — its own re-issuable lifecycle; not part of the
         // accounting dataset a tenant carries across VMs (deferred bucket-C set).
         'delivery_notes', 'delivery_note_lines', 'delivery_note_events', 'delivery_marks',
