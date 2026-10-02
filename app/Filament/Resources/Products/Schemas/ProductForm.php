@@ -11,6 +11,7 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\Stock\StockService;
 use App\Services\Taric\CnCatalog;
+use App\Support\LineMoney;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\Products\VariantStockGrid;
 use Filament\Facades\Filament;
@@ -526,7 +527,7 @@ class ProductForm
     {
         $sell = $sellOverride ?? (float) ($get('sell_price') ?? 0);
         $rate = self::vatRate($get);
-        $set('price_wvat', round($sell * (1 + $rate / 100), 2));
+        $set('price_wvat', LineMoney::grossFromNet($sell, $rate));
     }
 
     /**
@@ -537,8 +538,9 @@ class ProductForm
     {
         $gross = (float) ($state ?? 0);
         $rate = self::vatRate($get);
-        $sell = $rate > 0 ? round($gross / (1 + $rate / 100), 2) : $gross;
-        $set('sell_price', $sell);
+        // The typed gross stays as the SHELF price (price_wvat) — the till sells at it
+        // exactly (POS-2); the net is its 2dp mirror.
+        $set('sell_price', LineMoney::netFromGross($gross, $rate));
     }
 
     private static function vatRate(callable $get): float

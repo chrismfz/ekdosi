@@ -34,8 +34,11 @@ use Illuminate\Support\Facades\DB;
  * - `buy_price`   = wholesale / cost.
  * - `sell_price`  = net retail (what gets stamped onto invoice lines as
  *                   PRICE_PER_ITEM — FAddInvoice.cpp:194).
- * - `price_wvat`  = sell_price × (1 + vat_category.rate/100), denormalised
- *                   so list views can show "with VAT" without joining.
+ * - `price_wvat`  = the VAT-inclusive SHELF price (POS-2): normally
+ *                   sell_price × (1 + rate), but when the operator types it
+ *                   (product form / CSV gross column) it is kept EXACTLY and
+ *                   sell_price is its 2dp net mirror. The «Ταμείο» sells at it
+ *                   (gross-anchored line), so a 10,00 tag charges 10,00.
  * - Markup is NOT a column. Legacy reads it from a Windows Registry app
  *   setting; we use product_categories.markup as the per-category default
  *   for the live-compute in the Filament form.

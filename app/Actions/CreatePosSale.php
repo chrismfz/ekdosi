@@ -93,8 +93,8 @@ class CreatePosSale
                     // rate on a legal receipt — the operator re-points the product.
                     throw new RuntimeException('Το «'.$product->description_short.'» δεν έχει ενεργή κατηγορία ΦΠΑ — όρισέ τη στο είδος.');
                 }
-                $unitNet = self::unitNet($product, $item['price'] ?? null);
-                if ($unitNet === null) {
+                $unitGross = self::unitGross($product, $item['price'] ?? null);
+                if ($unitGross === null) {
                     throw new RuntimeException('Το «'.$product->description_short.'» είναι ελεύθερης τιμής — γράψε την τιμή του.');
                 }
                 $invoice->lines()->create([
@@ -102,7 +102,9 @@ class CreatePosSale
                     'product_id' => $product->getKey(),
                     'product_descr' => $product->description_short,
                     'qty' => $qty,
-                    'price_per_item' => $unitNet,
+                    // POS-2: a till line is SHELF-priced — gross-anchored, so the receipt
+                    // charges exactly the price on the tag (price_per_item = its net mirror).
+                    'gross_unit_price' => $unitGross,
                     'discount' => $discount,
                     'vat_percent' => $vat,
                     // A 0% line carries its §8.3 reason from the product's VAT category
@@ -127,17 +129,17 @@ class CreatePosSale
     }
 
     /**
-     * The till's money math, line by line — the SAME formulas InvoiceLine::saving
-     * stores (net and gross rounded per line), so the screen and the receipt agree.
-     * `levy` = the product-linked tax/fee of the line (RecomputeInvoiceTaxes:
-     * qty × per-unit, e.g. the plastic bag), signed (a deduction is negative).
+     * The till's money math, line by line — the SAME formula InvoiceLine::saving
+     * stores for a shelf-priced (gross-anchored) line, so the screen and the receipt
+     * agree to the cent. `levy` = the product-linked tax/fee of the line
+     * (RecomputeInvoiceTaxes: qty × per-unit, e.g. the plastic bag), signed (a
+     * deduction is negative).
      *
      * @return array{net: float, gross: float, levy: float}
      */
     public static function lineTotals(Product $product, float $qty, float $discount = 0.0, float|int|string|null $price = null): array
     {
-        $money = LineMoney::fromNet($qty, self::unitNet($product, $price) ?? 0.0, $discount, self::vatOf($product) ?? 0.0);
-        $net = $money['net'];
+        $money = LineMoney::fromGross($qty, self::unitGross($product, $price) ?? 0.0, $discount, self::vatOf($product) ?? 0.0);
         $levy = 0.0;
         $perUnit = (float) ($product->mydata_tax_per_unit ?? 0);
         $taxType = (int) ($product->mydata_tax_type ?? 0);
@@ -145,24 +147,23 @@ class CreatePosSale
             $levy = ($taxType === 5 ? -1 : 1) * $qty * $perUnit;
         }
 
-        return [
-            'net' => $net,
-            'gross' => $money['gross'],
-            'levy' => $levy,
-        ];
+        return ['net' => $money['net'], 'gross' => $money['gross'], 'levy' => $levy];
     }
 
     /**
-     * The NET unit price a till line is stored with: the catalogue `sell_price`, or —
-     * for an open-price product only — the typed GROSS price back-computed to net
-     * (2dp, like the invoice form's gross-edit path; the line's gross is then
-     * recomputed from it, so it can land a cent off for some prices — MON-7).
+     * The VAT-inclusive SHELF price a till line is sold at (POS-2): the product's
+     * `price_wvat` (the price on the tag) — or, if it has none, its net `sell_price`
+     * grossed up; for an open-price product only, the price the cashier TYPED.
      * Null = an open-price product without a valid typed price.
      */
-    public static function unitNet(Product $product, float|int|string|null $price): ?float
+    public static function unitGross(Product $product, float|int|string|null $price): ?float
     {
         if (! $product->isOpenPrice()) {
-            return (float) $product->sell_price;
+            $shelf = (float) ($product->price_wvat ?? 0);
+
+            return $shelf > 0
+                ? round($shelf, 2)
+                : (LineMoney::grossFromNet((float) $product->sell_price, self::vatOf($product) ?? 0.0) ?? 0.0);
         }
 
         $gross = is_numeric($price) ? (float) $price : 0.0;
@@ -170,8 +171,7 @@ class CreatePosSale
             return null;
         }
 
-        // The one gross↔net formula (App\Support\LineMoney).
-        return LineMoney::netFromGross($gross, self::vatOf($product) ?? 0.0);
+        return round($gross, 2);
     }
 
     /** VAT rate a line of this product gets (its category's rate); null = none set. */

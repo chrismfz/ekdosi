@@ -14,6 +14,7 @@ use App\Models\ProductCategory;
 use App\Models\VatCategory;
 use App\Services\InvoiceBalance;
 use App\Support\Afm;
+use App\Support\LineMoney;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -787,7 +788,7 @@ class EpsilonImporter
                     'vat_category_id' => $this->resolveVatCategory($rate),
                     'metric_unit_id' => $this->resolveMetricUnit($this->clean($row['MsntName'] ?? null)),
                     'sell_price' => $sell,
-                    'price_wvat' => round($sell * (1 + $rate / 100), 2),
+                    'price_wvat' => LineMoney::grossFromNet($sell, $rate),
                 ];
 
                 $existing = Product::query()

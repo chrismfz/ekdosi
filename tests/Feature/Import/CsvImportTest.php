@@ -208,9 +208,10 @@ class CsvImportTest extends TestCase
             "Περιγραφή;Κωδικός;Τιμή χωρίς ΦΠΑ;Τιμή με ΦΠΑ;ΦΠΑ %;Κατηγορία;Μονάδα\n"
             ."Φιλοξενία;HOST-1;1.234,50;;24;Υπηρεσίες;Τεμάχια\n"
             ."Βιβλίο;BOOK-1;;11,30;13%;;Τεμάχια\n"
+            ."Μπλουζάκι;TEE-1;;10,00;24;;Τεμάχια\n"
         ));
 
-        $this->assertSame(2, $plan->count(PlannedRow::CREATE));
+        $this->assertSame(3, $plan->count(PlannedRow::CREATE));
         $host = Product::where('company_id', $this->tenant->id)->where('sku', 'HOST-1')->sole();
         $this->assertSame($vat24->id, $host->vat_category_id);
         $this->assertSame('1234.50', (string) $host->sell_price);
@@ -222,6 +223,11 @@ class CsvImportTest extends TestCase
         $this->assertSame('10.00', (string) $book->sell_price, 'net derived from the gross');
         $this->assertSame($host->metric_unit_id, $book->metric_unit_id, 'one unit created, then reused');
         $this->assertSame(1, MetricUnit::where('company_id', $this->tenant->id)->count());
+
+        // POS-2: a gross-only row keeps its SHELF price exactly (net 8,06 is only its
+        // mirror) — 10,00 must not become 8,06 × 1,24 = 9,99.
+        $tee = Product::where('company_id', $this->tenant->id)->where('sku', 'TEE-1')->sole();
+        $this->assertSame(['8.06', '10.00'], [(string) $tee->sell_price, (string) $tee->price_wvat]);
     }
 
     public function test_product_tax_is_never_guessed(): void

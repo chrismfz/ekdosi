@@ -8,6 +8,7 @@ use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\Scopes\CompanyScope;
 use App\Models\VatCategory;
+use App\Support\LineMoney;
 use Closure;
 
 /**
@@ -16,9 +17,11 @@ use Closure;
  *
  * Tax is never guessed: a VAT rate the tenant has no category for fails the
  * row; a row with no VAT column gets the tenant's default category (flagged).
- * `sell_price` (net) is authoritative, as on the model — a gross-only row
- * derives the net from the rate, and `price_wvat` is always recomputed from the
- * net. A category or unit named in the file but missing is created on import.
+ * Prices (POS-2): `price_wvat` is the SHELF price the till sells at. A gross-only row
+ * keeps that gross EXACTLY (net derived — 10,00 stays 10,00, never 9,99); a net-only
+ * row derives the gross; a row with both keeps the gross only if it agrees with the
+ * net (else the net wins and the gross is recomputed). A category or unit named in
+ * the file but missing is created on import.
  */
 final class ProductCsvImporter extends EntityCsvImporter
 {
@@ -177,7 +180,7 @@ final class ProductCsvImporter extends EntityCsvImporter
             // the net is blank; a blank gross alone is recomputed from the existing net.
             if ((float) $existing->sell_price == 0.0 && (float) $existing->price_wvat != 0.0) {
                 // A gross is on file: the net follows IT, not the file (nothing is overwritten).
-                $fill['sell_price'] = round((float) $existing->price_wvat / (1 + $existingRate / 100), 2);
+                $fill['sell_price'] = LineMoney::netFromGross((float) $existing->price_wvat, $existingRate);
             } elseif ((float) $existing->sell_price == 0.0) {
                 [$sell, $wvat] = $this->prices($net, $gross, $existingRate);
                 if ($sell !== null) {
@@ -185,7 +188,7 @@ final class ProductCsvImporter extends EntityCsvImporter
                     $fill['price_wvat'] = $wvat;
                 }
             } elseif ((float) $existing->price_wvat == 0.0) {
-                $fill['price_wvat'] = round((float) $existing->sell_price * (1 + $existingRate / 100), 2);
+                $fill['price_wvat'] = LineMoney::grossFromNet((float) $existing->sell_price, $existingRate);
             }
 
             $this->settleExisting($planned, $existing, $fill);
@@ -266,7 +269,8 @@ final class ProductCsvImporter extends EntityCsvImporter
     }
 
     /**
-     * [net, gross] — the net is authoritative; a gross-only row derives it.
+     * [net, gross] — a gross (the shelf price) is kept exactly when it is the only
+     * price or agrees with the net; otherwise the net wins and the gross follows it.
      *
      * @return array{0: ?float, 1: ?float}
      */
@@ -275,9 +279,11 @@ final class ProductCsvImporter extends EntityCsvImporter
         if ($net === null && $gross === null) {
             return [null, null];
         }
-        $net ??= round($gross / (1 + $rate / 100), 2);
+        if ($gross !== null && ($net === null || LineMoney::netFromGross($gross, $rate) === round($net, 2))) {
+            return [LineMoney::netFromGross($gross, $rate), round($gross, 2)];
+        }
 
-        return [round($net, 2), round($net * (1 + $rate / 100), 2)];
+        return [round($net, 2), LineMoney::grossFromNet($net, $rate)];
     }
 
     /** A code this row would FILL onto a record but another product already holds → dropped, flagged. */
