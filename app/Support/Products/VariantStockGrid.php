@@ -38,16 +38,23 @@ class VariantStockGrid
         $size = self::axis($variants, ProductAttribute::KIND_SIZE);
         $axesPerVariant = $variants->map(fn (Product $v) => $v->variantValues->count())->unique();
 
+        $cells = [];
+        $placed = null;
         if ($color && $size && $axesPerVariant->all() === [2]) {
-            $cells = [];
+            $placed = 0;
             foreach ($variants as $v) {
                 $c = $v->variantValues->firstWhere('product_attribute_id', $color['attribute_id']);
                 $s = $v->variantValues->firstWhere('product_attribute_id', $size['attribute_id']);
                 if ($c && $s) {
                     $cells[$c->id][$s->id] = ['stock' => $stockOf($v), 'active' => (bool) $v->is_active];
+                    $placed++;
                 }
             }
+        }
 
+        // Matrix only when EVERY variant has a cell — otherwise the list, so nothing
+        // (and no stock counted in «Σύνολο») goes missing from the picture.
+        if ($placed === $variants->count()) {
             return [
                 'mode' => 'matrix',
                 'cols' => $size['values']->pluck('value')->all(),

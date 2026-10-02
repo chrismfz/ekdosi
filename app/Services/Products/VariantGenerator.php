@@ -66,6 +66,12 @@ class VariantGenerator
 
         $id = $product->getKey();
 
+        // Recurring / WHMCS-mapped products are services wired into renewals — never a grouping.
+        if ($product->is_recurring || $product->whmcs_product_id !== null
+            || $product->billingPrices()->exists() || $product->priceTiers()->exists()) {
+            return false;
+        }
+
         return ! StockMovement::query()->where('product_id', $id)->exists()
             && ! InvoiceLine::query()->where('product_id', $id)->exists()
             && ! QuoteLine::query()->where('product_id', $id)->exists()
@@ -91,6 +97,15 @@ class VariantGenerator
         $axes = $this->loadAxes($parent, $valueIdsByAttribute);
         if ($axes === []) {
             return collect();
+        }
+
+        // Existing variants built on a different set of axes (e.g. size-only, now colour × size)
+        // would get a second, overlapping set — refuse instead of splitting stock across both.
+        $requested = collect($axes)->map(fn (array $values) => (int) $values[0]->product_attribute_id)->sort()->values()->all();
+        $current = $this->existingAttributeSets($parent);
+        if ($current !== [] && $current !== [$requested]) {
+            throw new InvalidArgumentException('Οι υπάρχουσες παραλλαγές έχουν άλλα χαρακτηριστικά. Διάλεξε τιμές από τα ίδια χαρακτηριστικά ('
+                .'ή διάγραψε πρώτα τις παλιές παραλλαγές).');
         }
 
         return DB::transaction(function () use ($parent, $axes) {
@@ -293,6 +308,20 @@ class VariantGenerator
             ->mapWithKeys(fn ($rows) => [
                 $rows->pluck('product_attribute_value_id')->map(fn ($id) => (int) $id)->sort()->implode(',') => true,
             ])
+            ->all();
+    }
+
+    /** @return list<list<int>> the distinct sorted attribute-id sets of the parent's variants (incl. trashed) */
+    private function existingAttributeSets(Product $parent): array
+    {
+        return DB::table('product_variant_values')
+            ->join('products', 'products.id', '=', 'product_variant_values.product_id')
+            ->where('products.parent_product_id', $parent->getKey())
+            ->get(['product_variant_values.product_id', 'product_variant_values.product_attribute_id'])
+            ->groupBy('product_id')
+            ->map(fn ($rows) => $rows->pluck('product_attribute_id')->map(fn ($id) => (int) $id)->sort()->values()->all())
+            ->unique(fn (array $set) => implode(',', $set))
+            ->values()
             ->all();
     }
 

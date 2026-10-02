@@ -109,14 +109,17 @@ class ProductsTable
                     ->label('Απόθεμα')
                     // Real on-hand from the stock ledger (SUM of movements).
                     // Only meaningful for track_stock products; others show «—».
-                    ->state(fn ($record) => $record->track_stock ? (float) ($record->stock_on_hand ?? 0) : null)
+                    // A variable parent has no movements of its own — show its variants' total.
+                    ->state(fn ($record) => $record->track_stock
+                        ? (float) ($record->isVariable() ? ($record->variants_stock ?? 0) : ($record->stock_on_hand ?? 0))
+                        : null)
                     ->numeric(decimalPlaces: 3)
                     ->badge()
                     ->color(function ($record) {
                         if (! $record->track_stock) {
                             return 'gray';
                         }
-                        $s = (float) ($record->stock_on_hand ?? 0);
+                        $s = (float) ($record->isVariable() ? ($record->variants_stock ?? 0) : ($record->stock_on_hand ?? 0));
                         if ($s < 0) {
                             return 'danger';   // backorder
                         }
@@ -164,7 +167,12 @@ class ProductsTable
             ])
             ->modifyQueryUsing(fn (Builder $query) => $query
                 ->withSum('stockMovements as stock_on_hand', 'qty_change')
-                ->withCount('variants'))
+                ->withCount('variants')
+                ->selectSub(fn ($q) => $q->from('stock_movements')
+                    ->join('products as v', 'v.id', '=', 'stock_movements.product_id')
+                    ->whereColumn('v.parent_product_id', 'products.id')
+                    ->whereNull('v.deleted_at')
+                    ->selectRaw('COALESCE(SUM(stock_movements.qty_change), 0)'), 'variants_stock'))
             ->filters([
                 TernaryFilter::make('is_active')
                     ->label('Active')
@@ -227,7 +235,10 @@ class ProductsTable
                         }
                         // groupBy the PK so HAVING on the withSum alias works on
                         // sqlite too (MySQL tolerates HAVING without GROUP BY).
-                        $query->where('track_stock', true)->groupBy('products.id');
+                        // Reorder is per sellable unit — the variants, never their grouping parent.
+                        $query->where('track_stock', true)
+                            ->where('kind', '!=', Product::KIND_VARIABLE)
+                            ->groupBy('products.id');
                         if ($v === 'negative') {
                             return $query->havingRaw('COALESCE(stock_on_hand, 0) < 0');
                         }

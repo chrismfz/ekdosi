@@ -200,6 +200,28 @@ class VariantScreensTest extends TestCase
             ->assertCanSeeTableRecords([$variant]);
     }
 
+    public function test_list_shows_a_variable_parent_with_its_variants_total_and_never_as_low_stock(): void
+    {
+        [, $size] = $this->axes();
+        $parent = $this->variableParent();
+        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+        [$s, $m] = $parent->variants()->orderBy('id')->get()->all();
+        app(StockService::class)->record($s, 4, StockMovement::REASON_RECEIPT);
+        app(StockService::class)->record($m, 3, StockMovement::REASON_RECEIPT);
+
+        Livewire::test(ListProducts::class)
+            ->assertTableColumnStateSet('stock_on_hand', 7.0, $parent)
+            ->filterTable('stock_status', 'low')
+            ->assertCanNotSeeTableRecords([$parent]);
+    }
+
+    public function test_choosing_variants_turns_stock_tracking_on_by_default(): void
+    {
+        Livewire::test(CreateProduct::class)
+            ->fillForm(['kind' => Product::KIND_VARIABLE])
+            ->assertSchemaStateSet(['track_stock' => true]);
+    }
+
     public function test_create_variable_product_and_convert_a_fresh_simple_one(): void
     {
         Livewire::test(CreateProduct::class)

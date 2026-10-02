@@ -28,6 +28,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\SoftDeletingScope;
 use Illuminate\Support\HtmlString;
 use Illuminate\Validation\Rule;
+use InvalidArgumentException;
 
 /**
  * «Παραλλαγές» of a variable product (docs/woocommerce-bridge-plan.md §0).
@@ -199,7 +200,13 @@ class VariantsRelationManager extends RelationManager
                     return;
                 }
 
-                $created = app(VariantGenerator::class)->generate($this->getOwnerRecord(), $picked);
+                try {
+                    $created = app(VariantGenerator::class)->generate($this->getOwnerRecord(), $picked);
+                } catch (InvalidArgumentException $e) {
+                    Notification::make()->danger()->title('Δεν δημιουργήθηκαν παραλλαγές')->body($e->getMessage())->persistent()->send();
+
+                    return;
+                }
 
                 Notification::make()
                     ->success()

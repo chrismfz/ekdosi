@@ -24,6 +24,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Schemas\Components\Tabs;
 use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
 use Firebed\AadeMyData\Enums\FeesPercentCategory;
 use Firebed\AadeMyData\Enums\OtherTaxesPercentCategory;
@@ -76,6 +77,11 @@ class ProductForm
                                     ->default(Product::KIND_SIMPLE)
                                     ->required()
                                     ->live()
+                                    // Variants are physical goods (sizes/colours) — track their stock
+                                    // unless the operator turns it off (variants inherit this toggle).
+                                    ->afterStateUpdated(fn (?string $state, Set $set) => $state === Product::KIND_VARIABLE
+                                        ? $set('track_stock', true)
+                                        : null)
                                     ->visibleOn('create')
                                     ->helperText('«Με παραλλαγές»: το προϊόν ομαδοποιεί τις παραλλαγές του και δεν πουλιέται το ίδιο — πουλιούνται οι παραλλαγές (καθεμία με δικό της απόθεμα, SKU, barcode).'),
 

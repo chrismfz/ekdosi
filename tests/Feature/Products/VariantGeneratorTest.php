@@ -4,10 +4,13 @@ namespace Tests\Feature\Products;
 
 use App\Filament\Support\PickerOptions;
 use App\Models\Company;
+use App\Models\DeliveryNoteLine;
+use App\Models\InvoiceLine;
 use App\Models\Product;
 use App\Models\ProductAttribute;
 use App\Models\ProductAttributeValue;
 use App\Models\ProductCategory;
+use App\Models\QuoteLine;
 use App\Models\StockMovement;
 use App\Models\User;
 use App\Models\VatCategory;
@@ -178,6 +181,45 @@ class VariantGeneratorTest extends TestCase
 
         $gen->syncFromParent($parent, ['names']);
         $this->assertSame('Φόρμα — Μαύρο / S', $odd->refresh()->description_short);
+    }
+
+    public function test_adding_a_new_axis_to_existing_variants_is_refused(): void
+    {
+        $parent = $this->parent();
+        $gen = app(VariantGenerator::class);
+        $gen->generate($parent, [$this->size->id => $this->ids($this->size)]);
+
+        try {
+            $gen->generate($parent, $this->pick());
+            $this->fail('colour × size on top of size-only variants must be refused');
+        } catch (InvalidArgumentException) {
+        }
+        $this->assertSame(3, $parent->variants()->count());
+
+        // Same axes → still fine (adds nothing new here).
+        $this->assertCount(0, $gen->generate($parent, [$this->size->id => $this->ids($this->size)]));
+    }
+
+    public function test_recurring_or_whmcs_mapped_products_cannot_become_variable(): void
+    {
+        $gen = app(VariantGenerator::class);
+
+        $this->assertFalse($gen->canBecomeVariable(Product::create($this->productData(['description_short' => 'Hosting', 'is_recurring' => true]))));
+        $this->assertFalse($gen->canBecomeVariable(Product::create($this->productData(['description_short' => 'VPS', 'whmcs_product_id' => 12]))));
+    }
+
+    public function test_a_document_line_can_never_point_at_a_variable_parent(): void
+    {
+        $parent = $this->parent();
+
+        foreach ([InvoiceLine::class, QuoteLine::class, DeliveryNoteLine::class] as $lineClass) {
+            try {
+                (new $lineClass)->forceFill(['company_id' => $this->tenant->id, 'product_id' => $parent->id])->save();
+                $this->fail($lineClass.' accepted a variable parent');
+            } catch (InvalidArgumentException $e) {
+                $this->assertStringContainsString('παραλλαγές', $e->getMessage());
+            }
+        }
     }
 
     public function test_variable_parent_never_appears_in_the_document_pickers(): void
