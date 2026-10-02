@@ -364,7 +364,7 @@ class ProductForm
                                     ->prefix('€')
                                     ->live(onBlur: true)
                                     ->afterStateUpdated(fn ($state, $set, $get) => self::recomputeSellFromWvat($state, $set, $get))
-                                    ->helperText('Type the gross retail price and the net sell price is back-computed.'),
+                                    ->helperText('Η τιμή ραφιού: το «Ταμείο» τη χρεώνει ΑΚΡΙΒΩΣ (η καθαρή βγαίνει από αυτή). Αν μετά αλλάξεις κατηγορία ΦΠΑ, τιμή αγοράς ή markup, ξαναϋπολογίζεται από την καθαρή — ξαναγράψ\' την.'),
                             ])
                             ->columns(2),
 

@@ -26,8 +26,8 @@ use RuntimeException;
  *    sets MARK/QR and flips it active — which moves the stock); a non-filing
  *    tenant → the same atomic number + activate as «Οριστικοποίηση».
  *
- * Lines are priced exactly like the invoice form (net `sell_price` + the product's
- * VAT rate), so the till shows the same total the receipt will have ({@see lineTotals}).
+ * Lines are SHELF-priced (POS-2, gross-anchored): the tag price is charged exactly
+ * and the till shows the same total the receipt will have ({@see lineTotals}).
  * If issuing fails the sale stays a DRAFT invoice — nothing is lost; the
  * PosSaleNotIssued carries its id so the operator retries THAT draft from
  * «Παραστατικά» (never a new ring-up of the same cart).
@@ -152,18 +152,18 @@ class CreatePosSale
 
     /**
      * The VAT-inclusive SHELF price a till line is sold at (POS-2): the product's
-     * `price_wvat` (the price on the tag) — or, if it has none, its net `sell_price`
-     * grossed up; for an open-price product only, the price the cashier TYPED.
+     * valid shelf price (Product::shelfGross — the price on the tag) — or, if it has
+     * none / a stale one, its net `sell_price` grossed up; for an open-price product
+     * only, the price the cashier TYPED.
      * Null = an open-price product without a valid typed price.
      */
     public static function unitGross(Product $product, float|int|string|null $price): ?float
     {
         if (! $product->isOpenPrice()) {
-            $shelf = (float) ($product->price_wvat ?? 0);
+            $rate = self::vatOf($product) ?? 0.0;
 
-            return $shelf > 0
-                ? round($shelf, 2)
-                : (LineMoney::grossFromNet((float) $product->sell_price, self::vatOf($product) ?? 0.0) ?? 0.0);
+            // The shelf price while it is valid; otherwise (none / stale) the net grossed up.
+            return $product->shelfGross($rate) ?? (float) LineMoney::grossFromNet((float) $product->sell_price, $rate);
         }
 
         $gross = is_numeric($price) ? (float) $price : 0.0;

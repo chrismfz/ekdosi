@@ -11,7 +11,10 @@ use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
+use App\Models\Product;
+use App\Models\ProductCategory;
 use App\Models\User;
+use App\Models\VatCategory;
 use App\Services\EInvoice\AadeInvoiceDocument;
 use App\Services\EInvoice\Transports\InvoSignDocument;
 use App\Services\InvoiceVatBreakdown;
@@ -221,6 +224,33 @@ class GrossAnchoredLineTest extends TestCase
         $line = $invoice->lines()->first();
         $this->assertNull($line->gross_unit_price);
         $this->assertSame(['9.00', '11.16'], [$line->net_price, $line->gross_price]);
+    }
+
+    public function test_picking_a_product_on_a_retail_document_sells_at_its_shelf_price(): void
+    {
+        $this->panelOperator();
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης']);
+        $vat = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '24%', 'rate' => 24, 'is_default' => true]);
+        $category = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'Ένδυση', 'markup' => 0]);
+        $tee = Product::create(['company_id' => $this->tenant->id, 'description_short' => 'Μπλουζάκι', 'product_category_id' => $category->id,
+            'vat_category_id' => $vat->id, 'sell_price' => 8.06, 'price_wvat' => 10.00]);
+
+        // Retail (11.1): the shelf price, like the «Ταμείο».
+        $invoice = $this->invoice([[5.00, 1]]);
+        $invoice->update(['customer_id' => $customer->id]);
+        $page = Livewire::test(EditInvoice::class, ['record' => $invoice->getKey()]);
+        $page->set('data.lines.'.array_key_first($page->get('data.lines')).'.product_id', $tee->id)->call('save')->assertHasNoFormErrors();
+        $this->assertSame(['10.00', '10.00'], [$invoice->lines()->first()->gross_unit_price, $invoice->lines()->first()->gross_price]);
+
+        // B2B (2.1): net-priced as always.
+        $b2b = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΤΠΥ', 'name' => 'ΤΠΥ', 'invcount' => 1, 'mydata_type' => '2.1',
+            'mydata_income_class' => 'E3_561_001', 'mydata_income_class_category' => 'category1_3']);
+        $other = $this->invoice([[5.00, 1]]);
+        $other->update(['customer_id' => $customer->id, 'invoice_type_id' => $b2b->id]);
+        $page = Livewire::test(EditInvoice::class, ['record' => $other->getKey()]);
+        $page->set('data.lines.'.array_key_first($page->get('data.lines')).'.product_id', $tee->id)->call('save')->assertHasNoFormErrors();
+        $this->assertNull($other->lines()->first()->gross_unit_price);
+        $this->assertSame('9.99', $other->lines()->first()->gross_price);
     }
 
     public function test_invosign_gets_the_line_own_unit_on_a_multi_qty_shelf_line(): void

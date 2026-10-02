@@ -230,6 +230,15 @@ class CsvImportTest extends TestCase
         $this->assertSame(['8.06', '10.00'], [(string) $tee->sell_price, (string) $tee->price_wvat]);
     }
 
+    public function test_a_shelf_price_that_contradicts_the_net_is_flagged_not_silently_dropped(): void
+    {
+        $this->vat(24, true);
+
+        $plan = (new ProductCsvImporter)->plan($this->tenant, $this->csv("Περιγραφή;Τιμή χωρίς ΦΠΑ;Τιμή με ΦΠΑ;ΦΠΑ\nΑ;10,00;13,00;24\n"));
+
+        $this->assertStringContainsString('δεν ταιριάζει με την καθαρή', implode(' ', $plan->rows[0]->warnings));
+    }
+
     public function test_product_tax_is_never_guessed(): void
     {
         $this->vat(24, true);

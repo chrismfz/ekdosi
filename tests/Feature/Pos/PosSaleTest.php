@@ -121,6 +121,19 @@ class PosSaleTest extends TestCase
         $this->assertSame(24.80, (float) $invoice->gross_total);
     }
 
+    public function test_a_stale_shelf_price_is_ignored(): void
+    {
+        // Legacy import: a 19%-era gross (460,00) next to a 24% category and net 386,55 —
+        // not THIS product's shelf price any more → priced from the net (479,32), as before.
+        $nas = $this->product('NAS', 386.55, ['price_wvat' => 460.00]);
+        $this->assertNull($nas->load('vatCategory')->shelfGross());
+
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $nas->id, 'qty' => 1]]);
+
+        $this->assertSame(479.32, (float) $invoice->gross_total);
+        $this->assertSame(386.55, (float) $invoice->net_total, 'the stored net is the catalogue net');
+    }
+
     public function test_what_a_till_will_not_sell(): void
     {
         [$parent] = $this->variableWithSizes();

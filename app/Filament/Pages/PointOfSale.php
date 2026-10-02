@@ -484,12 +484,16 @@ class PointOfSale extends Page
         return ProductMediaService::primaryImage($product)?->fileUrl('thumb');
     }
 
-    /** One unit's price as the customer pays it: the shelf price + its fee (bag). */
+    /** One unit's shelf price (VAT incl.) — the same number the cart row shows. */
     public function unitPrice(Product $product): float
     {
-        $one = CreatePosSale::lineTotals($product, 1);
+        return CreatePosSale::lineTotals($product, 1)['gross'];
+    }
 
-        return round($one['gross'] + $one['levy'], 2);
+    /** One unit's product-linked fee (bag, deposit…) — shown NEXT to the price, never inside it. */
+    public function unitLevy(Product $product): float
+    {
+        return round(CreatePosSale::lineTotals($product, 1)['levy'], 2);
     }
 
     // ── internals ──────────────────────────────────────────────────────────

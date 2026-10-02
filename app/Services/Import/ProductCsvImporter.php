@@ -176,13 +176,13 @@ final class ProductCsvImporter extends EntityCsvImporter
             }
             $fill = $this->blanksToFill($existing, $values, ['buy_price']);
 
-            // Prices move as a pair (price_wvat = sell_price × rate): fill both when
-            // the net is blank; a blank gross alone is recomputed from the existing net.
+            // Prices move as a pair (see prices(): a shelf gross is kept, the net is its
+            // mirror): fill both when the net is blank; a blank gross alone follows the net.
             if ((float) $existing->sell_price == 0.0 && (float) $existing->price_wvat != 0.0) {
                 // A gross is on file: the net follows IT, not the file (nothing is overwritten).
                 $fill['sell_price'] = LineMoney::netFromGross((float) $existing->price_wvat, $existingRate);
             } elseif ((float) $existing->sell_price == 0.0) {
-                [$sell, $wvat] = $this->prices($net, $gross, $existingRate);
+                [$sell, $wvat] = $this->prices($net, $gross, $existingRate, $planned);
                 if ($sell !== null) {
                     $fill['sell_price'] = $sell;
                     $fill['price_wvat'] = $wvat;
@@ -230,7 +230,7 @@ final class ProductCsvImporter extends EntityCsvImporter
         }
 
         $values['vat_category_id'] = $vatId;
-        [$values['sell_price'], $values['price_wvat']] = $this->prices($net, $gross, $this->rateOf($vatId));
+        [$values['sell_price'], $values['price_wvat']] = $this->prices($net, $gross, $this->rateOf($vatId), $planned);
         $this->resolveCategory($cid, $row, $values, $planned);
         $this->resolveUnit($cid, $row, $values, $planned);
         if ($planned->failed()) {
@@ -274,7 +274,7 @@ final class ProductCsvImporter extends EntityCsvImporter
      *
      * @return array{0: ?float, 1: ?float}
      */
-    private function prices(?float $net, ?float $gross, float $rate): array
+    private function prices(?float $net, ?float $gross, float $rate, PlannedRow $planned): array
     {
         if ($net === null && $gross === null) {
             return [null, null];
@@ -282,8 +282,14 @@ final class ProductCsvImporter extends EntityCsvImporter
         if ($gross !== null && ($net === null || LineMoney::netFromGross($gross, $rate) === round($net, 2))) {
             return [LineMoney::netFromGross($gross, $rate), round($gross, 2)];
         }
+        $recomputed = LineMoney::grossFromNet($net, $rate);
+        if ($gross !== null) {
+            // The shelf price is what the till charges — never drop it silently.
+            $planned->warn('Η «Τιμή με ΦΠΑ» '.number_format($gross, 2, ',', '.').' δεν ταιριάζει με την καθαρή — κρατήθηκε η καθαρή ('
+                .number_format($recomputed, 2, ',', '.').' με ΦΠΑ).');
+        }
 
-        return [round($net, 2), LineMoney::grossFromNet($net, $rate)];
+        return [round($net, 2), $recomputed];
     }
 
     /** A code this row would FILL onto a record but another product already holds → dropped, flagged. */
