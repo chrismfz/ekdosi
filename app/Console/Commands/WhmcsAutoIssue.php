@@ -65,7 +65,8 @@ class WhmcsAutoIssue extends Command
 
     protected $description = 'WHMCS bridge: auto-file paid inbox rows for άμεση τιμολόγηση (immediate-invoice) customers on tenants that armed it. Files at AADE — gated by the per-tenant toggle + the scheduler flag.';
 
-    private const AUDIT_NOTE = 'Αυτόματη έκδοση (άμεση τιμολόγηση) — whmcs:auto-issue.';
+    // Carries PendingWhmcsInvoice::AUTO_ISSUE_MARKER — the inbox's «Αυτόματα» signal.
+    private const AUDIT_NOTE = 'Αυτόματη έκδοση (άμεση τιμολόγηση) — '.PendingWhmcsInvoice::AUTO_ISSUE_MARKER.'.';
 
     public function handle(WhmcsInvoiceFiler $filer): int
     {
