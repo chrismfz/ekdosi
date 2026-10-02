@@ -5,6 +5,7 @@ namespace App\Filament\Resources\Products;
 use App\Filament\Resources\Products\Pages\CreateProduct;
 use App\Filament\Resources\Products\Pages\EditProduct;
 use App\Filament\Resources\Products\Pages\ListProducts;
+use App\Filament\Resources\Products\RelationManagers\MediaRelationManager;
 use App\Filament\Resources\Products\RelationManagers\PriceTiersRelationManager;
 use App\Filament\Resources\Products\RelationManagers\StockMovementsRelationManager;
 use App\Filament\Resources\Products\RelationManagers\VariantsRelationManager;
@@ -83,6 +84,7 @@ class ProductResource extends Resource
     {
         return [
             VariantsRelationManager::class,
+            MediaRelationManager::class,
             PriceTiersRelationManager::class,
             StockMovementsRelationManager::class,
         ];

@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\HasTags;
+use App\Services\Products\ProductMediaService;
 use App\Services\Products\VariantGenerator;
 use App\Support\MyData\Taric;
 use Illuminate\Database\Eloquent\Builder;
@@ -14,6 +15,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Per-tenant product catalogue row. Mirrors legacy PRODUCT.
@@ -53,6 +55,9 @@ class Product extends Model
     public const KIND_VARIABLE = 'variable';
 
     public const KIND_VARIANT = 'variant';
+
+    /** @var list<string>|null disks noted in forceDeleting, purged in forceDeleted */
+    public ?array $mediaDisksBeforeForceDelete = null;
 
     /** Mirror the column default so a freshly created (un-refreshed) model knows its kind. */
     protected $attributes = [
@@ -142,11 +147,31 @@ class Product extends Model
         // whose parent is gone or whose axes no longer match its live siblings stays
         // trashed. The UI actions check the same rule first to explain why.
         static::restoring(fn (Product $product) => app(VariantGenerator::class)->restoreBlocker($product) === null);
+
+        // A force-delete cascades product_media rows in the DB without model events:
+        // note the disks BEFORE, drop the product's media directory AFTER it commits
+        // (a failed/vetoed delete keeps its files). Block bodies: a non-null return
+        // from an «-ing» listener would halt the listeners after it.
+        static::forceDeleting(function (Product $product): void {
+            $product->mediaDisksBeforeForceDelete = app(ProductMediaService::class)->productDisks($product);
+        });
+        static::forceDeleted(function (Product $product): void {
+            $disks = $product->mediaDisksBeforeForceDelete ?? [];
+            $companyId = (int) $product->company_id;
+            $productId = (int) $product->getKey();
+            DB::afterCommit(fn () => app(ProductMediaService::class)->purgeFiles($disks, $companyId, $productId));
+        });
     }
 
     public function company(): BelongsTo
     {
         return $this->belongsTo(Company::class);
+    }
+
+    /** Photos, videos and video links (unordered — ProductMediaService::displayMedia orders; the media tab reorders by `sort`). */
+    public function media(): HasMany
+    {
+        return $this->hasMany(ProductMedia::class);
     }
 
     public function parent(): BelongsTo

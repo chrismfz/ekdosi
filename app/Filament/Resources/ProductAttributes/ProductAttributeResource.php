@@ -55,6 +55,12 @@ class ProductAttributeResource extends Resource
                 ->whereNull('products.deleted_at')
                 ->where('product_variant_values.product_attribute_id', $record->getKey())
                 ->count(),
+            // Photos tied to one of its values would silently turn general (shown on
+            // every variant) — so they block too.
+            'φωτογραφίες' => DB::table('product_media')
+                ->join('product_attribute_values', 'product_attribute_values.id', '=', 'product_media.product_attribute_value_id')
+                ->where('product_attribute_values.product_attribute_id', $record->getKey())
+                ->count(),
         ];
     }
 

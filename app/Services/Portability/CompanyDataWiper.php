@@ -7,6 +7,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\Lead;
 use App\Models\Product;
+use App\Services\Products\ProductMediaService;
 use App\Support\LegalEvidence;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -39,7 +40,7 @@ class CompanyDataWiper
     public const PARTY_TABLES = [
         'lead_activities', 'leads',
         'customer_contacts', 'customers', 'suppliers',
-        'product_billing_prices', 'product_price_tiers', 'product_variant_values', 'products',
+        'product_billing_prices', 'product_price_tiers', 'product_variant_values', 'product_media', 'products',
     ];
 
     /**
@@ -111,6 +112,8 @@ class CompanyDataWiper
         }
 
         $deleted = [];
+        // Where the media files live — noted before the rows that say so are wiped.
+        $mediaDisks = $keepParties ? [] : app(ProductMediaService::class)->companyDisks((int) $company->id);
 
         Schema::withoutForeignKeyConstraints(function () use ($company, $keepParties, $resetCounter, &$deleted): void {
             DB::transaction(function () use ($company, $keepParties, $resetCounter, &$deleted): void {
@@ -135,6 +138,12 @@ class CompanyDataWiper
                 }
             });
         });
+
+        // product_media rows went with the parties — drop their files too, once the
+        // wipe is committed (runs at once when no outer transaction is open).
+        if (! $keepParties) {
+            DB::afterCommit(fn () => app(ProductMediaService::class)->purgeFiles($mediaDisks, (int) $company->id));
+        }
 
         return $deleted;
     }

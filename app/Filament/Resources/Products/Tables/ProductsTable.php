@@ -7,6 +7,7 @@ use App\Filament\Support\GuardedDeleteAction;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Product;
 use App\Models\StockMovement;
+use App\Services\Products\ProductMediaService;
 use App\Services\Stock\StockService;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\Products\StockDisplay;
@@ -18,6 +19,7 @@ use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Tables\Columns\IconColumn;
+use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Columns\ToggleColumn;
 use Filament\Tables\Filters\SelectFilter;
@@ -37,6 +39,15 @@ class ProductsTable
                     ->label('#')
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
+
+                // The ONE display rule (ProductMediaService::displayMedia): own photos, else —
+                // for a variant — its colour's photos from the parent. Eager-loaded below.
+                ImageColumn::make('photo')
+                    ->label('Φωτογραφία')
+                    ->state(fn (Product $record) => ProductMediaService::primaryImage($record)?->fileUrl('thumb'))
+                    ->imageSize(40)
+                    ->square()
+                    ->toggleable(),
 
                 TextColumn::make('sku')
                     ->searchable()
@@ -163,6 +174,7 @@ class ProductsTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->modifyQueryUsing(fn (Builder $query) => $query
+                ->with(['media', 'parent.media', 'variantValues'])
                 ->withSum('stockMovements as stock_on_hand', 'qty_change')
                 ->withCount(['variants', 'variants as tracked_variants_count' => fn (Builder $q) => $q->where('track_stock', true)])
                 ->selectSub(fn ($q) => $q->from('stock_movements')

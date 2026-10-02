@@ -7,6 +7,7 @@ use App\Enums\MyDataMode;
 use App\Models\Scopes\CompanyScope;
 use App\Observers\CompanyObserver;
 use App\Services\Portability\CompanyPurger;
+use App\Services\Products\ProductMediaService;
 use App\Support\LegalEvidence;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -65,7 +66,11 @@ class Company extends Model
 
         $evidence = LegalEvidence::for($this)->describe();
 
-        return DB::transaction(function () use ($evidence): ?bool {
+        // Noted before the cascade removes the rows that say where the files are.
+        $mediaDisks = app(ProductMediaService::class)->companyDisks((int) $this->getKey());
+        $companyId = (int) $this->getKey();
+
+        return DB::transaction(function () use ($evidence, $mediaDisks, $companyId): ?bool {
             app(CompanyPurger::class)->clearRestrictedChildren($this);
 
             $deleted = parent::delete();
@@ -84,6 +89,10 @@ class Company extends Model
                 'evidence' => $evidence,
                 'user_id' => auth()->id(),
             ]));
+
+            // The cascade removed product_media rows without model events — drop the
+            // photo/video files too, AFTER the audit line (purgeFiles never throws).
+            DB::afterCommit(fn () => app(ProductMediaService::class)->purgeFiles($mediaDisks, $companyId));
 
             return $deleted;
         });
