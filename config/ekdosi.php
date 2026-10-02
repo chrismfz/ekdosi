@@ -648,10 +648,19 @@ return [
 
         // Default model when a tenant hasn't picked one. Sonnet = the sweet spot
         // for tool-use operator chat (see docs/ai-assistant-blueprint.md).
-        'default_model' => env('EKDOSI_AI_DEFAULT_MODEL', 'claude-sonnet-4-6'),
+        'default_model' => env('EKDOSI_AI_DEFAULT_MODEL', 'claude-sonnet-5-5'),
 
-        // Per-turn safety rails.
-        'max_tokens' => (int) env('EKDOSI_AI_MAX_TOKENS', 1024),
+        // Per-turn safety rails. The 5.x models always think (adaptive), and that
+        // thinking counts against max_tokens — 1024 could leave a reply empty, so
+        // the ceiling is higher (it's a cap, not a spend). AssistantRunner keeps
+        // the thinking short via `effort` below.
+        'max_tokens' => (int) env('EKDOSI_AI_MAX_TOKENS', 4096),
+
+        // output_config.effort for the 5.x models (thinking can't be turned off on
+        // them; effort is the knob). `low` = Anthropic's recommendation for chat:
+        // fewer, consolidated tool calls, terse answers, least spend. Not sent to
+        // older models (Haiku 4.5 rejects it).
+        'effort' => env('EKDOSI_AI_EFFORT', 'low'),
         'max_tool_iterations' => (int) env('EKDOSI_AI_MAX_TOOL_ITERATIONS', 6),
         'timeout' => (int) env('EKDOSI_AI_TIMEOUT', 60),
 
@@ -667,10 +676,13 @@ return [
         // cap — a runaway-loop net. 0 = no global cap.
         'global_monthly_token_cap' => (int) env('EKDOSI_AI_GLOBAL_TOKEN_CAP', 5_000_000),
 
-        // USD per 1,000,000 tokens. cache_read ≈ 0.1× input, cache_write ≈ 1.25×.
-        // Refresh on Anthropic price changes; cost is our estimate, reconciled to
-        // the single monthly invoice.
+        // USD per 1,000,000 tokens. cache_read defaults to 0.1× input (set it
+        // explicitly where it differs), cache_write ≈ 1.25×. Refresh on Anthropic
+        // price changes; cost is our estimate, reconciled to the monthly invoice.
+        // Retired models stay listed so historical ai_usage_log rows keep a cost.
         'pricing' => [
+            'claude-sonnet-5-5' => ['input' => 2.00, 'output' => 10.00, 'cache_read' => 0.20],
+            'claude-opus-5-5' => ['input' => 4.00, 'output' => 20.00, 'cache_read' => 0.20],
             'claude-sonnet-4-6' => ['input' => 3.00, 'output' => 15.00],
             'claude-haiku-4-5' => ['input' => 1.00, 'output' => 5.00],
             'claude-opus-4-8' => ['input' => 5.00, 'output' => 25.00],

@@ -203,6 +203,15 @@ Greek; it must cite the numbers the tool returned, not invent them.
 
 ## Model + cost
 
+> **Update 2026-10:** default is now **`claude-sonnet-5-5`** ($2/$10 per MTok), with
+> **`claude-opus-5-5`** ($4/$20) for heavy analysis; Sonnet 4.6 / Opus 4.8 / Haiku 4.5
+> remain selectable. The 5.x models think always (no off switch) — the runner sends
+> `output_config.effort` (`EKDOSI_AI_EFFORT`, default `low`, the chat
+> recommendation) only to 5.x, raised `max_tokens` to 4096 so thinking can't starve
+> the reply, and handles `stop_reason: refusal` / empty replies. History stays
+> append-only (5.x thinking blocks are bound to the conversation). The section below
+> is the original 4.x-era rationale.
+
 - **Candidate model — recommend `claude-sonnet-4-6` as the DEFAULT** for this
   workload. An operator Q&A over a *fixed tool registry* is exactly agentic
   tool-use: Sonnet 4.6 picks/sequences tools strongly, reasons well over the

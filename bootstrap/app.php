@@ -50,6 +50,13 @@ return Application::configure(basePath: dirname(__DIR__))
         // Read from config/trustedproxy.php per request: an env() call here
         // would run before .env is loaded and be ignored.
         $middleware->replace(BaseTrustProxies::class, TrustProxies::class);
+
+        // Guests hitting an `auth`-protected route (Passport's /oauth/authorize for
+        // the MCP connector, the signed ticket-attachment links) go to the panel
+        // login — there is no route named `login`, so the framework default threw
+        // «Route [login] not defined» → a 500. The login redirects back to the
+        // intended URL. The customer portal has its own guard + middleware.
+        $middleware->redirectGuestsTo(fn () => route('filament.admin.auth.login'));
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         // OPS-3: email the ops recipients when the app reports an unhandled

@@ -87,7 +87,19 @@ class AssistantRunner
                 }
 
                 $text = $this->textFrom($content);
+                // Append-only history: the 5.x models bind their thinking blocks to
+                // the conversation, so a turn is kept exactly as returned.
                 $messages[] = ['role' => 'assistant', 'content' => $content];
+
+                // The 5.x safety classifiers can decline (HTTP 200, stop_reason
+                // «refusal»); a reply with no text (e.g. max_tokens spent on
+                // thinking) must not render as a blank bubble either.
+                if (($response['stop_reason'] ?? null) === 'refusal') {
+                    return $this->refuse($messages, 'Ο βοηθός δεν μπορεί να απαντήσει σε αυτό το αίτημα. Δοκιμάστε να το διατυπώσετε διαφορετικά.');
+                }
+                if ($text === '') {
+                    return $this->refuse($messages, 'Δεν πήρα απάντηση από το AI. Δοκιμάστε ξανά ή κάντε πιο συγκεκριμένη ερώτηση.');
+                }
 
                 return [
                     'reply' => $text,
@@ -136,6 +148,17 @@ class AssistantRunner
         // Toggle: EKDOSI_AI_PROMPT_CACHE (global, default ON).
         if (config('ekdosi.ai.prompt_cache', true)) {
             $body['cache_control'] = ['type' => 'ephemeral'];
+        }
+
+        // 5.x models think always (no way to disable it); effort keeps that short
+        // for chat. Older models: unchanged request (Haiku 4.5 rejects effort).
+        // Validated: a typo in EKDOSI_AI_EFFORT would 400 every turn — fall back to low.
+        $effort = strtolower((string) config('ekdosi.ai.effort', 'low'));
+        if (! in_array($effort, ['low', 'medium', 'high', 'xhigh', 'max'], true)) {
+            $effort = 'low';
+        }
+        if (self::isFifthGeneration($model)) {
+            $body['output_config'] = ['effort' => $effort];
         }
 
         $resp = $http
@@ -206,6 +229,12 @@ class AssistantRunner
         unset($block);
 
         return $content;
+    }
+
+    /** Claude 5.x (Sonnet/Opus/Fable 5…): always-on thinking, `effort` supported. */
+    public static function isFifthGeneration(string $model): bool
+    {
+        return (bool) preg_match('/^claude-(sonnet|opus|fable)-5(-|$)/', $model);
     }
 
     /** @param  array<int, array<string, mixed>>  $content */
