@@ -588,7 +588,12 @@ class InvoiceForm
                                 ->live(onBlur: true)
                                 // G7: typing net re-derives the gross mirror — and re-prices the
                                 // line by NET (a shelf anchor no longer applies).
-                                ->afterStateUpdated(function ($state, callable $set, Get $get): void {
+                                ->afterStateUpdated(function ($state, $old, callable $set, Get $get): void {
+                                    // Only a CHANGED net re-prices (re-typing the same value keeps
+                                    // a shelf price — 10,00 must not silently become 9,99).
+                                    if (self::numOrNull($state) === self::numOrNull($old)) {
+                                        return;
+                                    }
                                     $set('gross_unit_price', null);
                                     $set('price_per_item_wvat', self::grossFromNet(self::numOrNull($state), self::numOrNull($get('vat_percent'))));
                                 }),

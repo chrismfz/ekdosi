@@ -196,6 +196,19 @@ class GrossAnchoredLineTest extends TestCase
         $this->assertSame(['8.06', '9.11'], [$line->net_price, $line->gross_price]);
     }
 
+    public function test_retyping_the_same_net_keeps_the_shelf_price(): void
+    {
+        $this->panelOperator();
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Πελάτης']);
+        $invoice = $this->invoice([[10.00, 1]]);
+        $invoice->update(['customer_id' => $customer->id]);
+
+        $page = Livewire::test(EditInvoice::class, ['record' => $invoice->getKey()]);
+        $page->set('data.lines.'.array_key_first($page->get('data.lines')).'.price_per_item', '8.06')->call('save')->assertHasNoFormErrors();
+
+        $this->assertSame(['10.00', '10.00'], [$invoice->lines()->first()->gross_unit_price, $invoice->lines()->first()->gross_price]);
+    }
+
     public function test_a_net_edit_in_the_form_drops_the_anchor(): void
     {
         $this->panelOperator();
