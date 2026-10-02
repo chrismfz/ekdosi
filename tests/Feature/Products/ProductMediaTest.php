@@ -83,6 +83,33 @@ class ProductMediaTest extends TestCase
         $this->media->storeImage($product, $this->jpeg(800, 800, noise: true), 'huge.jpg');
     }
 
+    public function test_too_many_megapixels_is_a_friendly_rejection_not_a_fatal(): void
+    {
+        config(['ekdosi.product_media.max_megapixels' => 0.01]);   // 10,000 px
+
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('MP');
+        $this->media->storeImage($this->product(), $this->jpeg(200, 100), 'huge.jpg');
+    }
+
+    public function test_videos_can_be_bigger_than_livewires_default_temp_upload_limit(): void
+    {
+        $rule = collect(config('livewire.temporary_file_upload.rules'))->first(fn ($r) => str_starts_with((string) $r, 'max:'));
+
+        $this->assertGreaterThanOrEqual((int) config('ekdosi.product_media.max_video_kb'), (int) substr((string) $rule, 4));
+    }
+
+    public function test_a_photo_can_only_be_tied_to_a_value_its_variants_use(): void
+    {
+        [$color, $size] = $this->axes();
+        $parent = $this->product(['kind' => Product::KIND_VARIABLE]);
+        app(VariantGenerator::class)->generate($parent, [$size->id => $size->values()->pluck('id')->all()]);
+
+        // «Μαύρο» exists in the company but no variant of THIS product uses it.
+        $this->expectException(InvalidArgumentException::class);
+        $this->media->storeImage($parent, $this->jpeg(50, 50), 'x.jpg', $color->values()->value('id'));
+    }
+
     public function test_video_files_and_allow_listed_links(): void
     {
         $product = $this->product();
@@ -162,6 +189,11 @@ class ProductMediaTest extends TestCase
             ->assertHeader('Cache-Control', 'immutable, max-age=31536000, public');
 
         $this->get(route('product-media.show', ['media' => $image->id, 'variant' => 'full']))->assertForbidden();
+
+        // Range requests (needed by Safari/iOS for video, and for seeking) get a 206.
+        $this->get($image->publicUrl(), ['Range' => 'bytes=0-9'])
+            ->assertStatus(206)
+            ->assertHeader('Content-Length', '10');
 
         $url = $image->publicUrl();
         $this->media->delete($image);

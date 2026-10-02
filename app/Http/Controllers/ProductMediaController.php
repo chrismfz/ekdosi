@@ -24,10 +24,18 @@ class ProductMediaController extends Controller
         abort_if(! $path || ! Storage::disk($row->disk)->exists($path), Response::HTTP_NOT_FOUND);
 
         // The file behind a given URL never changes (new uploads get new names).
-        return Storage::disk($row->disk)->response($path, $row->original_name, [
+        $headers = [
             'Content-Type' => $row->mime_type ?? 'application/octet-stream',
             'Cache-Control' => 'public, max-age=31536000, immutable',
             'X-Content-Type-Options' => 'nosniff',
-        ], 'inline');
+        ];
+
+        // Local disk → BinaryFileResponse, which answers HTTP Range (206): Safari/iOS
+        // won't play an MP4 without it, and seeking needs it everywhere.
+        if (config("filesystems.disks.{$row->disk}.driver") === 'local') {
+            return response()->file(Storage::disk($row->disk)->path($path), $headers);
+        }
+
+        return Storage::disk($row->disk)->response($path, $row->original_name, $headers, 'inline');
     }
 }

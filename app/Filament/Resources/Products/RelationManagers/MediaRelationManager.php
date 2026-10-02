@@ -18,7 +18,6 @@ use Filament\Tables\Columns\IconColumn;
 use Filament\Tables\Columns\ImageColumn;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Table;
-use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Livewire\Features\SupportFileUploads\TemporaryUploadedFile;
 
@@ -247,12 +246,7 @@ class MediaRelationManager extends RelationManager
             return [];
         }
 
-        $ids = DB::table('product_variant_values')
-            ->join('products', 'products.id', '=', 'product_variant_values.product_id')
-            ->where('products.parent_product_id', $owner->getKey())
-            ->whereNull('products.deleted_at')
-            ->distinct()
-            ->pluck('product_variant_values.product_attribute_value_id');
+        $ids = app(ProductMediaService::class)->usedValueIds($owner);
 
         return Product::orderValues(ProductAttributeValue::query()->with('attribute')->whereKey($ids)->get())
             ->mapWithKeys(fn (ProductAttributeValue $v) => [$v->id => $v->attribute?->name.': '.$v->value])

@@ -3,7 +3,6 @@
 namespace App\Services\Products;
 
 use App\Models\Product;
-use App\Models\ProductAttributeValue;
 use App\Models\ProductMedia;
 use GdImage;
 use Illuminate\Support\Collection;
@@ -55,6 +54,7 @@ class ProductMediaService
             throw new InvalidArgumentException('Μη υποστηριζόμενη εικόνα «'.$originalName.'» — δεκτά: JPG, PNG, WebP, GIF.');
         }
         $this->assertSize($sourcePath, (int) config('ekdosi.product_media.max_image_kb', 10240), $originalName);
+        $this->assertDecodable((int) $info[0], (int) $info[1], $originalName);
 
         $image = $this->load($sourcePath, $mime);
         $image = $this->applyExifOrientation($image, $sourcePath, $mime);
@@ -75,7 +75,7 @@ class ProductMediaService
         $width = imagesx($full);
         $height = imagesy($full);
 
-        return $this->createRow($product, [
+        return $this->createRowOrCleanUp($disk, [$path, $thumbPath], $product, [
             'kind' => ProductMedia::KIND_IMAGE,
             'disk' => $disk,
             'path' => $path,
@@ -109,7 +109,7 @@ class ProductMediaService
             fclose($stream);
         }
 
-        return $this->createRow($product, [
+        return $this->createRowOrCleanUp($disk, [$path], $product, [
             'kind' => ProductMedia::KIND_VIDEO,
             'disk' => $disk,
             'path' => $path,
@@ -202,12 +202,45 @@ class ProductMediaService
 
         $parentMedia = ProductMedia::query()->withoutGlobalScopes()
             ->where('product_id', $product->parent_product_id)
-            ->where(fn ($q) => $q->whereNull('product_attribute_value_id')->orWhereIn('product_attribute_value_id', $valueIds))
-            ->orderBy('sort')->orderBy('id')
             ->get();
 
-        // Value-specific (e.g. the black photos) first, then the general ones.
-        return $parentMedia->sortBy(fn (ProductMedia $m) => [$m->product_attribute_value_id === null ? 1 : 0, $m->sort, $m->id])->values();
+        return self::orderForVariant($parentMedia, $valueIds);
+    }
+
+    /**
+     * Of a parent's media, what a variant with these values shows: its values'
+     * media (e.g. the black photos) first, then the general ones; media tied to
+     * OTHER values (the white photos) are left out. Shared with the list thumbnail.
+     *
+     * @param  Collection<int, ProductMedia>  $parentMedia
+     * @param  list<int>  $valueIds
+     * @return Collection<int, ProductMedia>
+     */
+    public static function orderForVariant(Collection $parentMedia, array $valueIds): Collection
+    {
+        return $parentMedia
+            ->filter(fn (ProductMedia $m) => $m->product_attribute_value_id === null || in_array((int) $m->product_attribute_value_id, $valueIds, true))
+            ->sortBy(fn (ProductMedia $m) => [$m->product_attribute_value_id === null ? 1 : 0, $m->is_primary ? 0 : 1, $m->sort, $m->id])
+            ->values();
+    }
+
+    /**
+     * Values a photo of this variable product may be tied to: the ones its live
+     * variants actually use (a photo tied to anything else no variant would show).
+     *
+     * @return list<int>
+     */
+    public function usedValueIds(Product $product): array
+    {
+        return DB::table('product_variant_values')
+            ->join('products', 'products.id', '=', 'product_variant_values.product_id')
+            ->where('products.parent_product_id', $product->getKey())
+            ->whereNull('products.deleted_at')
+            ->distinct()
+            ->pluck('product_variant_values.product_attribute_value_id')
+            ->map(fn ($id) => (int) $id)
+            ->values()
+            ->all();
     }
 
     /** Primary image a product shows (null when it has none). */
@@ -251,15 +284,68 @@ class ProductMediaService
         if (! $product->isVariable()) {
             throw new InvalidArgumentException('Σύνδεση με χρώμα/τιμή γίνεται μόνο σε προϊόν με παραλλαγές.');
         }
-        $exists = ProductAttributeValue::query()->withoutGlobalScopes()
-            ->whereKey($valueId)
-            ->where('company_id', $product->company_id)
-            ->exists();
-        if (! $exists) {
-            throw new InvalidArgumentException('Άγνωστη τιμή χαρακτηριστικού.');
+        if (! in_array($valueId, $this->usedValueIds($product), true)) {
+            throw new InvalidArgumentException('Η τιμή δεν χρησιμοποιείται από τις παραλλαγές αυτού του προϊόντος.');
         }
 
         return $valueId;
+    }
+
+    /**
+     * GD holds the whole bitmap in memory (~4 bytes/pixel, plus the resized
+     * copies). Refuse what can't fit instead of dying with a fatal error; raise
+     * memory_limit for this request when that is enough.
+     */
+    private function assertDecodable(int $width, int $height, string $name): void
+    {
+        $pixels = $width * $height;
+        $maxMp = (float) config('ekdosi.product_media.max_megapixels', 50);   // a 48 MP phone shot ≈ 8000×6000
+        if ($pixels > $maxMp * 1_000_000) {
+            throw new InvalidArgumentException('Η εικόνα «'.$name.'» είναι πολύ μεγάλη ('.round($pixels / 1_000_000, 1).' MP) — μέχρι '
+                .$maxMp.' MP.');
+        }
+
+        $needed = (int) ($pixels * 4 * 2.5) + memory_get_usage(true);
+        $limit = $this->bytes((string) ini_get('memory_limit'));
+        if ($limit > 0 && $needed > $limit) {
+            @ini_set('memory_limit', (string) $needed);
+            if ($this->bytes((string) ini_get('memory_limit')) < $needed) {
+                throw new InvalidArgumentException('Δεν φτάνει η μνήμη για την εικόνα «'.$name.'» — ανέβασε μικρότερη ανάλυση.');
+            }
+        }
+    }
+
+    private function bytes(string $value): int
+    {
+        $value = trim($value);
+        if ($value === '' || $value === '-1') {
+            return 0;   // unlimited
+        }
+        $n = (int) $value;
+
+        return match (strtolower(substr($value, -1))) {
+            'g' => $n * 1024 ** 3,
+            'm' => $n * 1024 ** 2,
+            'k' => $n * 1024,
+            default => $n,
+        };
+    }
+
+    /**
+     * Insert the row; if that fails, delete the files just written so nothing is
+     * orphaned on disk.
+     *
+     * @param  list<string>  $paths
+     * @param  array<string, mixed>  $attributes
+     */
+    private function createRowOrCleanUp(string $disk, array $paths, Product $product, array $attributes): ProductMedia
+    {
+        try {
+            return $this->createRow($product, $attributes);
+        } catch (\Throwable $e) {
+            Storage::disk($disk)->delete($paths);
+            throw $e;
+        }
     }
 
     private function assertSize(string $path, int $maxKb, string $name): void

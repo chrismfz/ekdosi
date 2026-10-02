@@ -749,6 +749,8 @@ return [
         'disk' => (string) env('EKDOSI_PRODUCT_MEDIA_DISK', 'local'),
         'max_image_kb' => (int) env('EKDOSI_PRODUCT_MEDIA_MAX_IMAGE_KB', 10240),
         'max_video_kb' => (int) env('EKDOSI_PRODUCT_MEDIA_MAX_VIDEO_KB', 51200),
+        // GD decodes the whole bitmap (~4 B/pixel) — bigger photos are refused, not fatal.
+        'max_megapixels' => (float) env('EKDOSI_PRODUCT_MEDIA_MAX_MEGAPIXELS', 50),
         'thumb_px' => (int) env('EKDOSI_PRODUCT_MEDIA_THUMB_PX', 400),
     ],
 

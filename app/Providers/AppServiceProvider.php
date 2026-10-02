@@ -67,6 +67,13 @@ class AppServiceProvider extends ServiceProvider
     {
         LeadMatcher::listenForWrites();
 
+        // Livewire's temporary upload defaults to max 12 MB — product videos may be
+        // larger (EKDOSI_PRODUCT_MEDIA_MAX_VIDEO_KB). Each FileUpload still enforces
+        // its own maxSize; this only lifts the ceiling of the temp step.
+        config(['livewire.temporary_file_upload.rules' => [
+            'required', 'file', 'max:'.max(12288, (int) config('ekdosi.product_media.max_video_kb', 51200)),
+        ]]);
+
         // Security visibility (Πυλώνας ασφάλειας): record login/logout/failed
         // attempts on BOTH panels into `auth_events` so a super-admin can spot
         // recon / brute-force (incl. against non-existent usernames). The

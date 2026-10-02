@@ -114,19 +114,24 @@ class ProductMediaScreensTest extends TestCase
             ->assertTableActionHidden('video_link');
     }
 
-    public function test_the_list_shows_a_variant_its_parents_photo(): void
+    public function test_the_list_shows_a_variant_its_colours_photo_from_the_parent(): void
     {
-        [$parent] = $this->variableWithColours();
-        Livewire::test(MediaRelationManager::class, ['ownerRecord' => $parent, 'pageClass' => EditProduct::class])
-            ->callTableAction('upload_images', data: ['files' => [UploadedFile::fake()->image('a.jpg', 50, 50)]]);
-        $variant = $parent->variants()->first();
-        $url = ProductMedia::where('product_id', $parent->id)->first()->publicUrl('thumb');
+        [$parent, $black] = $this->variableWithColours();
+        $rm = Livewire::test(MediaRelationManager::class, ['ownerRecord' => $parent, 'pageClass' => EditProduct::class]);
+        // General photo first (→ the parent's primary), then a black-only one.
+        $rm->callTableAction('upload_images', data: ['files' => [UploadedFile::fake()->image('general.jpg', 50, 50)]]);
+        $rm->callTableAction('upload_images', data: ['files' => [UploadedFile::fake()->image('black.jpg', 50, 50)], 'product_attribute_value_id' => $black]);
+
+        $general = ProductMedia::where('product_id', $parent->id)->whereNull('product_attribute_value_id')->first();
+        $blackPhoto = ProductMedia::where('product_id', $parent->id)->where('product_attribute_value_id', $black)->first();
+        $blackVariant = $parent->variants()->get()->first(fn (Product $v) => str_ends_with($v->description_short, 'Μαύρο'));
+        $whiteVariant = $parent->variants()->get()->first(fn (Product $v) => str_ends_with($v->description_short, 'Λευκό'));
 
         Livewire::test(ListProducts::class)
-            ->assertCanSeeTableRecords([$parent])
-            ->assertTableColumnStateSet('photo', $url, $parent)
+            ->assertTableColumnStateSet('photo', $general->publicUrl('thumb'), $parent)
             ->filterTable('kind_view', 'variants')
-            ->assertTableColumnStateSet('photo', $url, $variant);
+            ->assertTableColumnStateSet('photo', $blackPhoto->publicUrl('thumb'), $blackVariant)
+            ->assertTableColumnStateSet('photo', $general->publicUrl('thumb'), $whiteVariant);
     }
 
     // ── helpers ────────────────────────────────────────────────────────────

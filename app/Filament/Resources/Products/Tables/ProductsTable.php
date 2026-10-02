@@ -6,7 +6,9 @@ use App\Filament\Resources\Products\ProductResource;
 use App\Filament\Support\GuardedDeleteAction;
 use App\Filament\Support\Tags\TagControls;
 use App\Models\Product;
+use App\Models\ProductMedia;
 use App\Models\StockMovement;
+use App\Services\Products\ProductMediaService;
 use App\Services\Stock\StockService;
 use App\Support\MyData\ClassificationGuidance;
 use App\Support\Products\StockDisplay;
@@ -39,10 +41,17 @@ class ProductsTable
                     ->sortable()
                     ->toggleable(isToggledHiddenByDefault: true),
 
-                // Own primary photo, else (a variant) its parent's — eager-loaded below.
+                // Own primary photo, else (a variant) its parent's photo for ITS colour —
+                // the same pick as ProductMediaService::mediaFor; eager-loaded below.
                 ImageColumn::make('photo')
                     ->label('')
-                    ->state(fn (Product $record) => ($record->primaryImage ?? $record->parent?->primaryImage)?->publicUrl('thumb'))
+                    ->state(fn (Product $record) => ($record->primaryImage
+                        ?? ($record->isVariant() && $record->parent
+                            ? ProductMediaService::orderForVariant(
+                                $record->parent->media->where('kind', ProductMedia::KIND_IMAGE),
+                                $record->variantValues->pluck('id')->map(fn ($id) => (int) $id)->all(),
+                            )->first()
+                            : null))?->publicUrl('thumb'))
                     ->imageSize(40)
                     ->square()
                     ->toggleable(),
@@ -172,7 +181,7 @@ class ProductsTable
                     ->toggleable(isToggledHiddenByDefault: true),
             ])
             ->modifyQueryUsing(fn (Builder $query) => $query
-                ->with(['primaryImage', 'parent.primaryImage'])
+                ->with(['primaryImage', 'parent.media', 'variantValues'])
                 ->withSum('stockMovements as stock_on_hand', 'qty_change')
                 ->withCount(['variants', 'variants as tracked_variants_count' => fn (Builder $q) => $q->where('track_stock', true)])
                 ->selectSub(fn ($q) => $q->from('stock_movements')
