@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Models\Company;
+use App\Services\Portability\CompanyPurger;
 use App\Services\TenantRoleProvisioner;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\PermissionRegistrar;
@@ -26,7 +27,10 @@ use Spatie\Permission\PermissionRegistrar;
  */
 class CompanyObserver
 {
-    public function __construct(private readonly TenantRoleProvisioner $provisioner) {}
+    public function __construct(
+        private readonly TenantRoleProvisioner $provisioner,
+        private readonly CompanyPurger $purger,
+    ) {}
 
     public function created(Company $company): void
     {
@@ -42,13 +46,23 @@ class CompanyObserver
     }
 
     /**
+     * Before the cascading DELETE: empty the tables that RESTRICT-reference other
+     * tenant tables, or MariaDB refuses the delete with 1451 for any tenant that
+     * has e.g. products (see CompanyPurger). Runs inside Company::delete()'s
+     * transaction, so a failed delete rolls these back too.
+     */
+    public function deleting(Company $company): void
+    {
+        $this->purger->clearRestrictedChildren($company);
+    }
+
+    /**
      * After a tenant is deleted, drop its roles so a reused company id can't
      * collide with leftovers. `deleted` (not `deleting`) so it only runs once the
      * delete actually succeeded. Pivots (model_has_roles / role_has_permissions)
-     * cascade from roles. Note: Filament's delete actions don't wrap the delete in
-     * a transaction, so this is NOT atomic with the company delete — on the happy
-     * path the roles are dropped right after; a one-off leftover is mopped up by
-     * `ekdosi:prune-orphan-roles`.
+     * cascade from roles. Atomic with the company delete: Company::delete() wraps
+     * both in one transaction (a leftover from before that is mopped up by
+     * `ekdosi:prune-orphan-roles`).
      */
     public function deleted(Company $company): void
     {

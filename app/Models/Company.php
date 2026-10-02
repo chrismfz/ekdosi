@@ -15,6 +15,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 #[ObservedBy(CompanyObserver::class)]
 class Company extends Model
@@ -33,6 +35,27 @@ class Company extends Model
     public const WHMCS_API_PATH_SUFFIX = '/includes/api.php';
 
     public const WHMCS_BRIDGE_PATH = '/modules/addons/ekdosi_bridge/inbound.php';
+
+    /**
+     * Deleting a tenant is all-or-nothing. CompanyObserver::deleting first empties
+     * the RESTRICT-side tables (CompanyPurger) and `deleted` drops the tenant's
+     * roles; one transaction around the lot means a failure anywhere leaves the
+     * tenant whole instead of half-deleted. Covers every path that calls
+     * delete() — the EditCompany action, the bulk action, tinker.
+     */
+    public function delete(): ?bool
+    {
+        return DB::transaction(function (): ?bool {
+            $deleted = parent::delete();
+
+            // A cancelled delete must not commit the children already cleared.
+            if ($deleted === false) {
+                throw new RuntimeException('Η διαγραφή της εταιρείας ακυρώθηκε.');
+            }
+
+            return $deleted;
+        });
+    }
 
     protected $fillable = [
         'name',
