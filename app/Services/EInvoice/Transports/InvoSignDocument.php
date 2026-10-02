@@ -344,9 +344,13 @@ class InvoSignDocument
                 $name = self::RETAIL_COUNTERPART_NAME;
             }
 
+            // …and a CounterpartVat ([88-001] too): the anonymous one is the same
+            // all-zero ΑΦΜ the internal movements send (sandbox-accepted for 11.1).
+            $vat = (string) ($invoice->vat_no ?: $invoice->customer?->afm ?? '');
+
             return self::counterpartFields(
                 $name,
-                (string) ($invoice->vat_no ?: $invoice->customer?->afm ?? ''),
+                trim($vat) !== '' ? $vat : DeliveryNote::INTERNAL_MOVEMENT_AFM,
                 (string) ($invoice->occupation ?: $invoice->customer?->occupation ?? ''),
                 (string) ($invoice->address1 ?: $invoice->customer?->address1 ?? ''),
                 (string) ($invoice->postcode ?: $invoice->customer?->postcode ?? ''),

@@ -112,6 +112,8 @@ class InvoSignTransportTest extends TestCase
         $xml = InvoSignDocument::augment($aade, $invoice);
 
         $this->assertStringContainsString('<CounterpartName>'.InvoSignDocument::RETAIL_COUNTERPART_NAME.'</CounterpartName>', $xml);
+        // …and the all-zero ΑΦΜ (sandbox-accepted 2026-10-02, ΑΛΠ13 ΜΑΡΚ 400001971998959).
+        $this->assertStringContainsString('<CounterpartVat>000000000</CounterpartVat>', $xml);
     }
 
     public function test_zero_value_line_is_not_filed_and_twins_stay_aligned(): void

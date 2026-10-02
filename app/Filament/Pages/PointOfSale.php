@@ -292,7 +292,7 @@ class PointOfSale extends Page
                 ->orWhere('sku', 'like', $like)
                 ->orWhere('internal_code', 'like', $like)
                 ->orWhere('barcode', $term))
-            ->with(['media', 'vatCategory'])
+            ->with(['media', ...CreatePosSale::withVat()])
             ->orderBy('description_short')
             ->limit(24)
             ->get();
@@ -307,7 +307,7 @@ class PointOfSale extends Page
 
         return $this->products()
             ->where('parent_product_id', $this->pickParent)
-            ->with(['variantValues.attribute', 'vatCategory'])
+            ->with(['variantValues.attribute', ...CreatePosSale::withVat()])
             ->withSum('stockMovements as stock_on_hand', 'qty_change')
             ->get()
             ->sortBy(fn (Product $v) => $v->orderedVariantValues()->map(fn ($val) => sprintf('%05d-%05d', $val->attribute?->sort ?? 0, $val->sort))->implode('|'))
@@ -322,7 +322,7 @@ class PointOfSale extends Page
     /** @return list<array{label: string, qty: float, discount: float, unit: float, gross: float, levy: float}> */
     public function getCartViewProperty(): array
     {
-        $products = $this->products()->with('vatCategory')
+        $products = $this->products()->with(CreatePosSale::withVat())
             ->whereKey(array_map(fn ($l) => (int) ($l['product_id'] ?? 0), $this->cart))
             ->get()->keyBy('id');
 
