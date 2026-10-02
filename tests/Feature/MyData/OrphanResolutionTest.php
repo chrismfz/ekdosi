@@ -255,16 +255,25 @@ class OrphanResolutionTest extends TestCase
 
         $retail = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'ΛΙΑ', 'name' => 'Λιανική', 'invcount' => 5, 'mydata_type' => '11.2']);
         try {
-            // Priced by gross elsewhere: 8,06 + 1,94 = 10,00 — our line math gives 1,93 VAT.
+            // A VAT neither formula gives (net × rate = 1,93; from the gross 10,56 = 2,04).
             app(OrphanImporter::class)->import($this->tenant, $this->doc($foreign + [
-                'netTotal' => 8.06, 'vatTotal' => 1.94, 'grossTotal' => 10.0,
-                'lines' => [['lineNumber' => 1, 'netValue' => 8.06, 'vatCategory' => 1, 'vatAmount' => 1.94, 'classifications' => []]],
+                'netTotal' => 8.06, 'vatTotal' => 2.50, 'grossTotal' => 10.56,
+                'lines' => [['lineNumber' => 1, 'netValue' => 8.06, 'vatCategory' => 1, 'vatAmount' => 2.50, 'classifications' => []]],
             ]), $retail, null, $this->cash, null);
             $this->fail('one cent off the filed document is not the filed document');
         } catch (RuntimeException $e) {
             $this->assertStringContainsString('«ΦΠΑ»', $e->getMessage());
         }
         $this->assertSame(0, Invoice::count());
+
+        // POS-2: priced by GROSS (a till: 8,06 + 1,94 = 10,00, VAT extracted from the gross)
+        // is rebuilt gross-anchored and reproduces the filed document to the cent.
+        $imported = app(OrphanImporter::class)->import($this->tenant, $this->doc($foreign + [
+            'netTotal' => 8.06, 'vatTotal' => 1.94, 'grossTotal' => 10.0,
+            'lines' => [['lineNumber' => 1, 'netValue' => 8.06, 'vatCategory' => 1, 'vatAmount' => 1.94, 'classifications' => []]],
+        ]), $retail, null, $this->cash, null);
+        $this->assertSame(['8.06', '10.00'], [$imported->net_total, $imported->gross_total]);
+        $this->assertSame('10.00', $imported->lines()->first()->gross_unit_price);
     }
 
     public function test_import_never_dead_ends_on_the_type_and_says_why_up_front(): void

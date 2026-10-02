@@ -16,6 +16,7 @@ use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Support\LineMoney;
 use App\Support\MyData\Codes;
 use App\Support\MyData\CommonTaxPresets;
 use App\Support\MyData\DeliveryCodes;
@@ -530,6 +531,8 @@ class InvoiceForm
                                         : (float) ($product->vatCategory?->rate ?? 24);
                                     $set('product_descr', $product->description_short);
                                     $set('price_per_item', $net);
+                                    // A (re)picked product is priced by its catalogue NET — no shelf anchor.
+                                    $set('gross_unit_price', null);
                                     // Normalised so the value matches a VAT-rate Select option.
                                     $set('vat_percent', VatRateOptions::normalize($vat));
                                     // MYD-007: a $set() on vat_percent does NOT fire that Select's
@@ -568,6 +571,14 @@ class InvoiceForm
                                 ->label('Μ.Μ.')
                                 ->maxLength(15),
 
+                            // POS-2: a shelf-priced line's VAT-inclusive anchor (re-issue /
+                            // «Νέο από αυτό» drafts of till receipts). The FORM owns it
+                            // explicitly: a net edit, a product pick or a VAT change clears
+                            // it; a gross edit on an anchored line moves it. The model just
+                            // honours whatever is saved (InvoiceLine::saving).
+                            Hidden::make('gross_unit_price')
+                                ->rules(['nullable', 'numeric', 'min:0']),
+
                             TextInput::make('price_per_item')
                                 ->label('Τιμή (καθαρή)')
                                 ->numeric()
@@ -575,18 +586,24 @@ class InvoiceForm
                                 ->minValue(0)
                                 ->prefix('€')
                                 ->live(onBlur: true)
-                                // G7: typing net re-derives the gross mirror.
-                                ->afterStateUpdated(fn ($state, callable $set, Get $get) => $set(
-                                    'price_per_item_wvat',
-                                    self::grossFromNet(self::numOrNull($state), self::numOrNull($get('vat_percent')))
-                                )),
+                                // G7: typing net re-derives the gross mirror — and re-prices the
+                                // line by NET (a shelf anchor no longer applies).
+                                ->afterStateUpdated(function ($state, $old, callable $set, Get $get): void {
+                                    // Only a CHANGED net re-prices (re-typing the same value keeps
+                                    // a shelf price — 10,00 must not silently become 9,99).
+                                    if (self::numOrNull($state) === self::numOrNull($old)) {
+                                        return;
+                                    }
+                                    $set('gross_unit_price', null);
+                                    $set('price_per_item_wvat', self::grossFromNet(self::numOrNull($state), self::numOrNull($get('vat_percent'))));
+                                }),
 
                             // G7: gross-price affordance — operator may type the
                             // VAT-inclusive unit price and we back-compute net
                             // (legacy GridPricesWVat / FAddInvoice2.cpp gross-edit
-                            // path). Net price_per_item stays the stored source of
-                            // truth; this field is NOT persisted (dehydrated false)
-                            // — InvoiceLine::saving recomputes line totals from net.
+                            // path). Net price_per_item is the stored source of truth for
+                            // every line EXCEPT a shelf-priced one (gross_unit_price set —
+                            // POS-2); this field is NOT persisted (dehydrated false).
                             TextInput::make('price_per_item_wvat')
                                 ->label('Τιμή (με ΦΠΑ)')
                                 ->numeric()
@@ -595,10 +612,12 @@ class InvoiceForm
                                 ->prefix('€')
                                 ->dehydrated(false)
                                 ->live(onBlur: true)
-                                // Seed from the existing net price when editing a line.
+                                // Seed from the line: a gross-anchored (shelf-priced, POS-2) line
+                                // shows its exact gross; any other line mirrors its net price.
                                 ->afterStateHydrated(fn ($state, callable $set, Get $get) => $set(
                                     'price_per_item_wvat',
-                                    self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($get('vat_percent')))
+                                    self::numOrNull($get('gross_unit_price'))
+                                        ?? self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($get('vat_percent')))
                                 ))
                                 // Typing gross back-computes the stored net price.
                                 ->afterStateUpdated(function ($state, callable $set, Get $get): void {
@@ -606,6 +625,14 @@ class InvoiceForm
                                     $entered = self::numOrNull($state);
                                     $net = self::netFromGross($entered, $vat);
                                     $set('price_per_item', $net);
+
+                                    // POS-2: on a shelf-priced (anchored) line the typed gross IS the
+                                    // new shelf price — exact, no 2dp-net rounding to warn about.
+                                    if (self::numOrNull($get('gross_unit_price')) !== null) {
+                                        $set('gross_unit_price', $entered === null ? null : round($entered, 2));
+
+                                        return;
+                                    }
 
                                     // MON-7: net is stored at 2dp (decimal(14,2)), so some gross
                                     // values can't round-trip (10.00 @24% → net 8.06 → gross 9.99).
@@ -644,6 +671,10 @@ class InvoiceForm
                                 // G7: changing the rate re-derives the gross mirror
                                 // from the (unchanged) stored net price.
                                 ->afterStateUpdated(function ($state, callable $set, Get $get) {
+                                    // A rate change keeps the NET (the classic behaviour — e.g. a
+                                    // re-issued receipt going reverse-charge at 0% must not turn its
+                                    // VAT-inclusive shelf price into the net): drop a shelf anchor.
+                                    $set('gross_unit_price', null);
                                     $set(
                                         'price_per_item_wvat',
                                         self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($state))
@@ -946,7 +977,7 @@ class InvoiceForm
             'vat_category_id' => $data['vat_category_id'] ?? null,
             'metric_unit_id' => $data['metric_unit_id'] ?? null,
             'sell_price' => $sell,
-            'price_wvat' => round($sell * (1 + $rate / 100), 2),
+            'price_wvat' => self::grossFromNet($sell, $rate),
             'is_active' => true,
         ]);
 
@@ -957,7 +988,7 @@ class InvoiceForm
 
     /**
      * G7 gross-price affordance. Convert between the NET unit price
-     * (price_per_item — the stored source of truth) and the VAT-inclusive
+     * (price_per_item — the stored source of truth, except on a gross-anchored POS-2 line) and the VAT-inclusive
      * unit price the operator may prefer to type. Mirrors the legacy
      * gross-edit path (FAddInvoice2.cpp):
      *
@@ -969,12 +1000,12 @@ class InvoiceForm
      */
     public static function grossFromNet(?float $net, ?float $vatPercent): ?float
     {
-        return $net === null ? null : round($net * (1 + (float) $vatPercent / 100), 2);
+        return LineMoney::grossFromNet($net, $vatPercent);
     }
 
     public static function netFromGross(?float $gross, ?float $vatPercent): ?float
     {
-        return $gross === null ? null : round($gross / (1 + (float) $vatPercent / 100), 2);
+        return LineMoney::netFromGross($gross, $vatPercent);
     }
 
     /** Normalise a Filament numeric-input value ('' / null → null) to float. */

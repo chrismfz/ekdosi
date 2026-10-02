@@ -209,6 +209,9 @@ class IssueCreditNote
                     'product_category_id' => $line->product_category_id,
                     'qty' => $qty,
                     'price_per_item' => $line->price_per_item,
+                    // POS-2: crediting a shelf-priced line refunds the shelf price
+                    // exactly (a partial qty too) — the anchor travels with it.
+                    'gross_unit_price' => $line->gross_unit_price,
                     'discount' => $line->discount,
                     'vat_percent' => $line->vat_percent,
                     // MYD-007: a credit note inherits the original line's §8.3 reason,

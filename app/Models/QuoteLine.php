@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\RejectsVariableProduct;
+use App\Support\LineMoney;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -50,11 +51,10 @@ class QuoteLine extends Model
                 $lineDiscount = 100;
             }
 
-            $net = round($qty * $price * (1 - $lineDiscount / 100), 2);
-            $gross = round($net * (1 + $vat / 100), 2);
+            $money = LineMoney::fromNet($qty, $price, $lineDiscount, $vat);
 
-            $line->net_price = $net;
-            $line->gross_price = $gross;
+            $line->net_price = $money['net'];
+            $line->gross_price = $money['gross'];
         });
     }
 
