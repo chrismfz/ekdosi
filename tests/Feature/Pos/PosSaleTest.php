@@ -27,6 +27,7 @@ use App\Services\RecomputeInvoiceTotals;
 use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\URL;
 use Livewire\Features\SupportLockedProperties\CannotUpdateLockedPropertyException;
@@ -395,6 +396,22 @@ class PosSaleTest extends TestCase
         $this->assertStringContainsString('16,74 €', $text);
         $this->assertStringContainsString('Συνολική ποσότητα: 1,5', $text);
         $this->assertStringNotContainsString('Τεμάχια', $text);
+    }
+
+    public function test_an_imported_line_a_cent_off_never_prints_a_phantom_discount(): void
+    {
+        // Legacy ETL stores gross verbatim (round(0,495 × 1,24) = 0,61) while the rebuilt
+        // pre-discount amount is 0,62 — with NO discount on the line, no «Έκπτωση» row.
+        $sale = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $this->product('Είδος', 1)->id, 'qty' => 1]]);
+        $line = $sale->lines()->first();
+        DB::table('invoice_lines')->where('id', $line->id)->update([
+            'qty' => 1.5, 'price_per_item' => 0.33, 'gross_unit_price' => null, 'discount' => 0, 'net_price' => 0.50, 'gross_price' => 0.61,
+        ]);
+        $this->operator();
+
+        $html = $this->get(URL::temporarySignedRoute('pos.receipt', now()->addMinutes(5), ['invoice' => $sale->id]))->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('Έκπτωση', strip_tags($html));
     }
 
     public function test_the_last_receipt_id_cannot_be_set_from_the_browser(): void

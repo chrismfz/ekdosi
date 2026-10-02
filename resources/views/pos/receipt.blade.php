@@ -54,7 +54,9 @@
                 $before = $line->gross_unit_price !== null
                     ? \App\Support\LineMoney::fromGross($qty, (float) $line->gross_unit_price, 0, $rate)['gross']
                     : \App\Support\LineMoney::fromNet($qty, (float) $line->price_per_item, 0, $rate)['gross'];
-                $discountAmount = round($before - (float) $line->gross_price, 2);
+                // Only a REAL line discount gets a row — a legacy/imported line whose stored
+                // gross is a rounding cent off the rebuilt one must not print «Έκπτωση 0%».
+                $discountAmount = (float) $line->discount > 0 ? round($before - (float) $line->gross_price, 2) : 0.0;
             @endphp
             <tr><td colspan="2">{{ $line->product_descr }}</td></tr>
             <tr>
