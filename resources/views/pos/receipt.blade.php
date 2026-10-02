@@ -17,6 +17,7 @@
     td { vertical-align: top; padding: .3mm 0; }
     .qr { width: 32mm; height: 32mm; display: block; margin: 1mm auto; }
     .small { font-size: 9px; word-break: break-all; }
+    .note { font-size: 9px; }
     @media screen { body { background: #fff; box-shadow: 0 0 4px #aaa; padding: 4mm; margin: 4mm auto; } .noprint { margin: 3mm 0; text-align: center; } }
     @media print { .noprint { display: none; } }
 </style>
@@ -36,19 +37,42 @@
     <div class="c">{{ $invoice->invcode }} · {{ optional($invoice->issued_at)->format('d/m/Y H:i') }}</div>
     <hr>
 
+    {{--
+        One block per item: description, then «qty × unit (VAT incl.) · VAT%» and the
+        amount BEFORE the line discount; a discount gets its own «Έκπτωση x%  −y» row
+        (like a cash register), so the amounts in the right column add up to the total.
+    --}}
     <table>
         @foreach($invoice->lines as $line)
+            @php
+                $qty = (float) $line->qty;
+                $rate = (float) $line->vat_percent;
+                $unitGross = $line->gross_unit_price !== null
+                    ? (float) $line->gross_unit_price
+                    : (float) \App\Support\LineMoney::grossFromNet((float) $line->price_per_item, $rate);
+                $before = $line->gross_unit_price !== null
+                    ? \App\Support\LineMoney::fromGross($qty, (float) $line->gross_unit_price, 0, $rate)['gross']
+                    : \App\Support\LineMoney::fromNet($qty, (float) $line->price_per_item, 0, $rate)['gross'];
+                $discountAmount = round($before - (float) $line->gross_price, 2);
+            @endphp
             <tr><td colspan="2">{{ $line->product_descr }}</td></tr>
             <tr>
-                <td>{{ rtrim(rtrim(number_format((float) $line->qty, 3, ',', '.'), '0'), ',') }} × {{ number_format($line->gross_unit_price !== null ? (float) $line->gross_unit_price : (float) \App\Support\LineMoney::grossFromNet((float) $line->price_per_item, (float) $line->vat_percent), 2, ',', '.') }}@if((float) $line->discount > 0) (-{{ rtrim(rtrim(number_format((float) $line->discount, 2, ',', '.'), '0'), ',') }}%)@endif</td>
-                <td class="r">{{ number_format((float) $line->gross_price, 2, ',', '.') }}</td>
+                <td>{{ rtrim(rtrim(number_format($qty, 3, ',', '.'), '0'), ',') }} × {{ number_format($unitGross, 2, ',', '.') }} · {{ rtrim(rtrim(number_format($rate, 2, ',', '.'), '0'), ',') }}%</td>
+                <td class="r">{{ number_format($discountAmount > 0 ? $before : (float) $line->gross_price, 2, ',', '.') }}</td>
             </tr>
+            @if($discountAmount > 0)
+                <tr>
+                    <td>&nbsp;&nbsp;{{ $L('line_discount') }} {{ rtrim(rtrim(number_format((float) $line->discount, 2, ',', '.'), '0'), ',') }}%</td>
+                    <td class="r">−{{ number_format($discountAmount, 2, ',', '.') }}</td>
+                </tr>
+            @endif
         @endforeach
     </table>
     <hr>
     <table>
+        {{-- Per VAT rate: the net it applies to and the VAT amount. --}}
         @foreach($totals['rows'] as $row)
-            <tr><td>{{ $L('vat') }} {{ rtrim(rtrim(number_format($row['rate'], 2, ',', '.'), '0'), ',') }}%: {{ number_format($row['net'], 2, ',', '.') }}</td><td class="r">{{ number_format($row['vat'], 2, ',', '.') }}</td></tr>
+            <tr><td>{{ $L('vat') }} {{ rtrim(rtrim(number_format($row['rate'], 2, ',', '.'), '0'), ',') }}% <span class="note">({{ $L('net') }} {{ number_format($row['net'], 2, ',', '.') }})</span></td><td class="r">{{ number_format($row['vat'], 2, ',', '.') }}</td></tr>
         @endforeach
         @foreach(['fees' => 'fees', 'stamp' => 'stamp_duty', 'other' => 'other_taxes'] as $key => $label)
             @if($totals[$key] > 0)
@@ -61,10 +85,13 @@
             @endif
         @endforeach
         <tr class="b big"><td>@gup($L('total'))</td><td class="r">{{ number_format($totals['payable'], 2, ',', '.') }} €</td></tr>
+        <tr><td colspan="2">{{ $L('items_count') }}: {{ rtrim(rtrim(number_format((float) $totals['totalQty'], 3, ',', '.'), '0'), ',') }}</td></tr>
         @if($invoice->paymentMethod)
             <tr><td colspan="2">{{ $invoice->paymentMethod->description }}</td></tr>
         @endif
     </table>
+
+    <div class="c note">{{ $L('vat_included') }}</div>
 
     @if(! empty($totals['vatExemption']))
         <hr>

@@ -353,6 +353,30 @@ class PosSaleTest extends TestCase
         $this->assertSame(2, $invoice->lines()->count());
     }
 
+    public function test_the_receipt_shows_vat_per_item_a_discount_row_and_a_per_rate_summary(): void
+    {
+        $vat6 = VatCategory::create(['company_id' => $this->tenant->id, 'description' => '6%', 'rate' => 6]);
+        $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
+        $book = $this->product('Βιβλίο', 10.66, ['vat_category_id' => $vat6->id, 'price_wvat' => 11.30]);
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [
+            ['product_id' => $tee->id, 'qty' => 2, 'discount' => 10],
+            ['product_id' => $book->id, 'qty' => 1],
+        ]);
+        $this->operator();
+
+        $html = $this->get(URL::temporarySignedRoute('pos.receipt', now()->addMinutes(5), ['invoice' => $invoice->id]))->assertOk()->getContent();
+        $text = preg_replace('/\s+/u', ' ', html_entity_decode(preg_replace('/<[^>]+>/', ' ', $html)));   // cells → spaced
+
+        $this->assertStringContainsString('2 × 10,00 · 24% 20,00', $text);     // before the discount
+        $this->assertStringContainsString('Έκπτωση 10% −2,00', $text);        // its own row
+        $this->assertStringContainsString('1 × 11,30 · 6% 11,30', $text);
+        $this->assertStringContainsString('ΦΠΑ 24% (Καθαρή 14,52) 3,48', $text);   // 18,00 → 14,52 + 3,48
+        $this->assertStringContainsString('ΦΠΑ 6% (Καθαρή 10,66) 0,64', $text);
+        $this->assertStringContainsString('29,30 €', $text);
+        $this->assertStringContainsString('Τεμάχια: 3', $text);
+        $this->assertStringContainsString('Στις τιμές συμπεριλαμβάνεται ο ΦΠΑ', $text);
+    }
+
     public function test_the_last_receipt_id_cannot_be_set_from_the_browser(): void
     {
         $this->operator();
