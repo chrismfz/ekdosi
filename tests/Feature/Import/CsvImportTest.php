@@ -230,6 +230,29 @@ class CsvImportTest extends TestCase
         $this->assertSame(['8.06', '10.00'], [(string) $tee->sell_price, (string) $tee->price_wvat]);
     }
 
+    public function test_a_three_decimal_net_still_stores_a_consistent_price_pair(): void
+    {
+        $this->vat(24, true);
+
+        (new ProductCsvImporter)->import($this->tenant, $this->csv("Περιγραφή;Κωδικός;Τιμή χωρίς ΦΠΑ;ΦΠΑ\nΑ;A-1;8,0650;24\n"));
+
+        $a = Product::where('company_id', $this->tenant->id)->where('sku', 'A-1')->sole();
+        $this->assertSame(['8.07', '10.01'], [(string) $a->sell_price, (string) $a->price_wvat], 'gross from the STORED 2dp net');
+        $this->assertSame(10.01, $a->load('vatCategory')->shelfGross());
+    }
+
+    public function test_an_existing_product_without_a_gross_takes_the_files_shelf_price(): void
+    {
+        $vat24 = $this->vat(24, true);
+        $cat = ProductCategory::create(['company_id' => $this->tenant->id, 'description_short' => 'Γ']);
+        Product::create(['company_id' => $this->tenant->id, 'description_short' => 'Μπλουζάκι', 'sku' => 'TEE-9', 'sell_price' => 8.06,
+            'price_wvat' => 0, 'vat_category_id' => $vat24->id, 'product_category_id' => $cat->id]);
+
+        (new ProductCsvImporter)->import($this->tenant, $this->csv("Κωδικός;Τιμή με ΦΠΑ;ΦΠΑ\nTEE-9;10,00;24\n"));
+
+        $this->assertSame('10.00', (string) Product::where('sku', 'TEE-9')->sole()->price_wvat, 'not 8,06 × 1,24 = 9,99');
+    }
+
     public function test_a_shelf_price_that_contradicts_the_net_is_flagged_not_silently_dropped(): void
     {
         $this->vat(24, true);

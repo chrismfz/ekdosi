@@ -352,7 +352,13 @@ class ProductForm
                                     ->default(0)
                                     ->prefix('€')
                                     ->live(onBlur: true)
-                                    ->afterStateUpdated(fn ($set, $get) => self::recomputeWvatFromSell($set, $get))
+                                    // Only a CHANGED net re-derives the gross (re-typing «8.060» must not
+                                    // turn a 10,00 shelf price into 9,99 — POS-2).
+                                    ->afterStateUpdated(function ($state, $old, $set, $get): void {
+                                        if (round((float) $state, 2) !== round((float) $old, 2)) {
+                                            self::recomputeWvatFromSell($set, $get);
+                                        }
+                                    })
                                     ->helperText('Computed from buy × markup, but you can override directly.'),
 
                                 TextInput::make('price_wvat')
@@ -525,7 +531,7 @@ class ProductForm
      */
     private static function recomputeWvatFromSell(callable $set, callable $get, ?float $sellOverride = null): void
     {
-        $sell = $sellOverride ?? (float) ($get('sell_price') ?? 0);
+        $sell = round($sellOverride ?? (float) ($get('sell_price') ?? 0), 2);   // as stored
         $rate = self::vatRate($get);
         $set('price_wvat', LineMoney::grossFromNet($sell, $rate));
     }

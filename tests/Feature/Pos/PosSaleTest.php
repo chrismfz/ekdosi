@@ -112,13 +112,17 @@ class PosSaleTest extends TestCase
         $this->assertSame(CreatePosSale::lineTotals($tee, 3)['gross'] + CreatePosSale::lineTotals($open, 1, 0.0, 10.00)['gross'], (float) $invoice->gross_total, 'screen == receipt');
     }
 
-    public function test_a_product_without_a_shelf_price_sells_at_its_net_grossed_up(): void
+    public function test_a_product_without_a_valid_shelf_price_is_net_priced_like_the_invoice_form(): void
     {
-        $legacy = $this->product('Παλιό είδος', 20.00, ['price_wvat' => 0]);
+        // No / stale shelf price → NO anchor: 3 × 4,03 net = 12,09 → 14,99, exactly what
+        // the invoice form charges for it (anchoring 4,03×1,24 = 5,00 would give 15,00).
+        $legacy = $this->product('Παλιό είδος', 4.03, ['price_wvat' => 0]);
 
-        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $legacy->id, 'qty' => 1]]);
+        $invoice = app(CreatePosSale::class)($this->tenant->fresh(), [['product_id' => $legacy->id, 'qty' => 3]]);
 
-        $this->assertSame(24.80, (float) $invoice->gross_total);
+        $this->assertSame(14.99, (float) $invoice->gross_total);
+        $this->assertNull($invoice->lines()->first()->gross_unit_price);
+        $this->assertSame(14.99, CreatePosSale::lineTotals($legacy, 3)['gross'], 'screen == receipt');
     }
 
     public function test_a_stale_shelf_price_is_ignored(): void

@@ -188,7 +188,9 @@ final class ProductCsvImporter extends EntityCsvImporter
                     $fill['price_wvat'] = $wvat;
                 }
             } elseif ((float) $existing->price_wvat == 0.0) {
-                $fill['price_wvat'] = LineMoney::grossFromNet((float) $existing->sell_price, $existingRate);
+                // The file's shelf price when it agrees with the existing net (else, flagged,
+                // the net's own gross).
+                $fill['price_wvat'] = $this->prices((float) $existing->sell_price, $gross, $existingRate, $planned)[1];
             }
 
             $this->settleExisting($planned, $existing, $fill);
@@ -279,6 +281,11 @@ final class ProductCsvImporter extends EntityCsvImporter
         if ($net === null && $gross === null) {
             return [null, null];
         }
+        // Round ONCE, first: sell_price is stored at 2dp, so the agreement check and the
+        // derived gross must use that same net (an «8,065» export would else pair 8,07
+        // with a gross computed from 8,065).
+        $net = $net === null ? null : round($net, 2);
+        $gross = $gross === null ? null : round($gross, 2);
         if ($gross !== null && ($net === null || LineMoney::netFromGross($gross, $rate) === round($net, 2))) {
             return [LineMoney::netFromGross($gross, $rate), round($gross, 2)];
         }

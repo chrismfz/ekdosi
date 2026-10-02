@@ -577,10 +577,11 @@ class InvoiceForm
                                 ->maxLength(15),
 
                             // POS-2: a shelf-priced line's VAT-inclusive anchor (re-issue /
-                            // «Νέο από αυτό» drafts of till receipts). The FORM owns it
-                            // explicitly: a net edit, a product pick or a VAT change clears
-                            // it; a gross edit on an anchored line moves it. The model just
-                            // honours whatever is saved (InvoiceLine::saving).
+                            // «Νέο από αυτό» drafts of till receipts, or a product picked on a
+                            // RETAIL 11.x document with a valid shelf price). The FORM owns it
+                            // explicitly: a product pick sets it (retail) or clears it (B2B);
+                            // a net edit or a VAT change clears it; a gross edit on an anchored
+                            // line moves it. The model honours whatever is saved.
                             Hidden::make('gross_unit_price')
                                 ->rules(['nullable', 'numeric', 'min:0']),
 

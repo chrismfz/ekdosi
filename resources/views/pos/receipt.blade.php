@@ -40,7 +40,7 @@
         @foreach($invoice->lines as $line)
             <tr><td colspan="2">{{ $line->product_descr }}</td></tr>
             <tr>
-                <td>{{ rtrim(rtrim(number_format((float) $line->qty, 3, ',', '.'), '0'), ',') }} × {{ number_format($line->gross_unit_price !== null ? (float) $line->gross_unit_price : round((float) $line->gross_price / max((float) $line->qty, 0.001), 2), 2, ',', '.') }}@if((float) $line->discount > 0) (-{{ rtrim(rtrim(number_format((float) $line->discount, 2, ',', '.'), '0'), ',') }}%)@endif</td>
+                <td>{{ rtrim(rtrim(number_format((float) $line->qty, 3, ',', '.'), '0'), ',') }} × {{ number_format($line->gross_unit_price !== null ? (float) $line->gross_unit_price : (float) \App\Support\LineMoney::grossFromNet((float) $line->price_per_item, (float) $line->vat_percent), 2, ',', '.') }}@if((float) $line->discount > 0) (-{{ rtrim(rtrim(number_format((float) $line->discount, 2, ',', '.'), '0'), ',') }}%)@endif</td>
                 <td class="r">{{ number_format((float) $line->gross_price, 2, ',', '.') }}</td>
             </tr>
         @endforeach

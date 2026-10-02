@@ -102,7 +102,7 @@
                         @php($stock = $variant->track_stock ? (float) ($variant->stock_on_hand ?? 0) : null)
                         <button type="button" wire:key="v-{{ $variant->id }}" wire:click="choose({{ $variant->id }})" class="pos-variant {{ $stock !== null && $stock <= 0 ? 'is-out' : '' }}">
                             {{ $variant->orderedVariantValues()->pluck('value')->implode(' / ') }}
-                            <small>{{ number_format($this->unitPrice($variant), 2, ',', '.') }} €@if ($stock !== null) · απόθ. {{ rtrim(rtrim(number_format($stock, 3, '.', ''), '0'), '.') }}@endif</small>
+                            <small>{{ number_format($this->unitPrice($variant), 2, ',', '.') }} €@if (($levy = $this->unitLevy($variant)) != 0) {{ $levy > 0 ? '+' : '−' }}{{ number_format(abs($levy), 2, ',', '.') }}@endif@if ($stock !== null) · απόθ. {{ rtrim(rtrim(number_format($stock, 3, '.', ''), '0'), '.') }}@endif</small>
                         </button>
                     @empty
                         <div class="pos-empty">Δεν υπάρχουν ενεργές παραλλαγές.</div>

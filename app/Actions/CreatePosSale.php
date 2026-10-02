@@ -94,7 +94,7 @@ class CreatePosSale
                     throw new RuntimeException('Το «'.$product->description_short.'» δεν έχει ενεργή κατηγορία ΦΠΑ — όρισέ τη στο είδος.');
                 }
                 $unitGross = self::unitGross($product, $item['price'] ?? null);
-                if ($unitGross === null) {
+                if ($unitGross === null && $product->isOpenPrice()) {
                     throw new RuntimeException('Το «'.$product->description_short.'» είναι ελεύθερης τιμής — γράψε την τιμή του.');
                 }
                 $invoice->lines()->create([
@@ -102,9 +102,11 @@ class CreatePosSale
                     'product_id' => $product->getKey(),
                     'product_descr' => $product->description_short,
                     'qty' => $qty,
-                    // POS-2: a till line is SHELF-priced — gross-anchored, so the receipt
-                    // charges exactly the price on the tag (price_per_item = its net mirror).
+                    // POS-2: a product with a (valid) shelf price is sold at it exactly —
+                    // gross-anchored (price_per_item becomes its net mirror). Without one, the
+                    // line is net-priced exactly like the invoice form prices it.
                     'gross_unit_price' => $unitGross,
+                    'price_per_item' => (float) $product->sell_price,
                     'discount' => $discount,
                     'vat_percent' => $vat,
                     // A 0% line carries its §8.3 reason from the product's VAT category
@@ -139,7 +141,11 @@ class CreatePosSale
      */
     public static function lineTotals(Product $product, float $qty, float $discount = 0.0, float|int|string|null $price = null): array
     {
-        $money = LineMoney::fromGross($qty, self::unitGross($product, $price) ?? 0.0, $discount, self::vatOf($product) ?? 0.0);
+        $unitGross = self::unitGross($product, $price);
+        $rate = self::vatOf($product) ?? 0.0;
+        $money = $unitGross !== null || $product->isOpenPrice()
+            ? LineMoney::fromGross($qty, $unitGross ?? 0.0, $discount, $rate)
+            : LineMoney::fromNet($qty, (float) $product->sell_price, $discount, $rate);
         $levy = 0.0;
         $perUnit = (float) ($product->mydata_tax_per_unit ?? 0);
         $taxType = (int) ($product->mydata_tax_type ?? 0);
@@ -151,19 +157,17 @@ class CreatePosSale
     }
 
     /**
-     * The VAT-inclusive SHELF price a till line is sold at (POS-2): the product's
-     * valid shelf price (Product::shelfGross — the price on the tag) — or, if it has
-     * none / a stale one, its net `sell_price` grossed up; for an open-price product
-     * only, the price the cashier TYPED.
-     * Null = an open-price product without a valid typed price.
+     * The VAT-inclusive SHELF price a till line is sold at (POS-2), i.e. its anchor:
+     * the product's valid shelf price (Product::shelfGross — the price on the tag),
+     * or for an open-price product the price the cashier TYPED.
+     * Null = no anchor: a catalogue product without a valid shelf price is NET-priced
+     * (exactly as the invoice form prices it); an open-price product without a valid
+     * typed price is refused.
      */
     public static function unitGross(Product $product, float|int|string|null $price): ?float
     {
         if (! $product->isOpenPrice()) {
-            $rate = self::vatOf($product) ?? 0.0;
-
-            // The shelf price while it is valid; otherwise (none / stale) the net grossed up.
-            return $product->shelfGross($rate) ?? (float) LineMoney::grossFromNet((float) $product->sell_price, $rate);
+            return $product->shelfGross(self::vatOf($product) ?? 0.0);
         }
 
         $gross = is_numeric($price) ? (float) $price : 0.0;
