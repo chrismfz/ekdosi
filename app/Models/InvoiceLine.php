@@ -26,6 +26,11 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  *   net_price   = qty × price_per_item × (1 - discount/100)
  *   gross_price = net_price × (1 + vat_percent/100)
  *
+ * …EXCEPT a gross-anchored (shelf-priced, POS-2) line — gross_unit_price set —
+ * whose VAT is extracted from the gross (cash-register math, App\Support\LineMoney::
+ * fromGross; price_per_item is then only a 2dp net mirror). See CLAUDE.md
+ * «Gross-anchored lines (POS-2)» — do NOT "fix" it back to net × rate.
+ *
  * These are computed automatically in a `saving` Eloquent hook so
  * every code path that creates a line gets correct values —
  * Filament form, ETL, factory, direct create, queue jobs. Bypasses

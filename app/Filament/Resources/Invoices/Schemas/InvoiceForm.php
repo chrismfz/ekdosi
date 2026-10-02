@@ -983,7 +983,7 @@ class InvoiceForm
 
     /**
      * G7 gross-price affordance. Convert between the NET unit price
-     * (price_per_item — the stored source of truth) and the VAT-inclusive
+     * (price_per_item — the stored source of truth, except on a gross-anchored POS-2 line) and the VAT-inclusive
      * unit price the operator may prefer to type. Mirrors the legacy
      * gross-edit path (FAddInvoice2.cpp):
      *

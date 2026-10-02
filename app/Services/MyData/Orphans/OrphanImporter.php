@@ -217,7 +217,7 @@ final class OrphanImporter
                     // reproduces AADE's net AND vat to the cent.
                     'gross_unit_price' => self::grossAnchor($net, (float) ($line['vatAmount'] ?? 0), $rate),
                     'discount' => 0,
-                    'vat_percent' => Codes::VAT_CATEGORY_RATES[$category],
+                    'vat_percent' => $rate,
                     'vat_exemption_category' => $line['vatExemptionCategory'] ?? null,
                     'mydata_income_class' => $class['type'] ?? null,
                     'mydata_income_class_category' => $class['category'] ?? null,

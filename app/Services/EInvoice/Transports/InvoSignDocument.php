@@ -166,25 +166,25 @@ class InvoSignDocument
 
     private static function appendLineFields(DOMDocument $dom, DOMElement $detail, $line): void
     {
-        $qty = (float) $line->qty;
-        $unit = (float) $line->price_per_item;
+        $qty = (float) $line->qty;   // > 0 — InvoiceLine::saving refuses anything else
         $discountPct = (float) ($line->discount ?? 0);
-        $unitAfter = round($unit * (1 - $discountPct / 100), 2);
-        $gross = $unit * $qty;
         $net = (float) $line->net_price;
-        $discountValue = max(0.0, round($gross - $net, 2));
 
-        // POS-2: a gross-anchored (shelf-priced) line's net is NOT 2dp-unit × qty —
-        // the VAT was extracted from the gross — so the unit is the line's own net per
-        // unit, and only a REAL line discount is a discount (never a rounding cent).
-        if ($line->gross_unit_price !== null && $qty > 0) {
-            // The pre-discount net of the SAME shelf line (VAT extracted, no discount)
-            // → the real discount is exactly pre − net.
+        if ($line->gross_unit_price !== null) {
+            // POS-2: a gross-anchored (shelf-priced) line's net is NOT 2dp-unit × qty —
+            // the VAT was extracted from the gross — so the units come from the line's
+            // own nets, and the discount is exactly pre-discount net − net (the same
+            // shelf line extracted with no discount): never a rounding cent.
             $preNet = LineMoney::fromGross($qty, (float) $line->gross_unit_price, 0.0, (float) $line->vat_percent)['net'];
             $unit = round($preNet / $qty, 2);
             $unitAfter = round($net / $qty, 2);
-            $discountValue = max(0.0, round($preNet - $net, 2));
+        } else {
+            $unit = (float) $line->price_per_item;
+            $unitAfter = round($unit * (1 - $discountPct / 100), 2);
+            $preNet = $unit * $qty;
         }
+        // Never negative — a −0,01 is half-up rounding, not a discount.
+        $discountValue = max(0.0, round($preNet - $net, 2));
 
         $fields = [
             'api_serial' => (string) ($line->product?->code ?? ''),
