@@ -3,7 +3,6 @@
 namespace App\Observers;
 
 use App\Models\Company;
-use App\Services\Portability\CompanyPurger;
 use App\Services\TenantRoleProvisioner;
 use Illuminate\Support\Facades\DB;
 use Spatie\Permission\PermissionRegistrar;
@@ -27,10 +26,7 @@ use Spatie\Permission\PermissionRegistrar;
  */
 class CompanyObserver
 {
-    public function __construct(
-        private readonly TenantRoleProvisioner $provisioner,
-        private readonly CompanyPurger $purger,
-    ) {}
+    public function __construct(private readonly TenantRoleProvisioner $provisioner) {}
 
     public function created(Company $company): void
     {
@@ -46,17 +42,6 @@ class CompanyObserver
     }
 
     /**
-     * Before the cascading DELETE: empty the tables that RESTRICT-reference other
-     * tenant tables, or MariaDB refuses the delete with 1451 for any tenant that
-     * has e.g. products (see CompanyPurger). Runs inside Company::delete()'s
-     * transaction, so a failed delete rolls these back too.
-     */
-    public function deleting(Company $company): void
-    {
-        $this->purger->clearRestrictedChildren($company);
-    }
-
-    /**
      * After a tenant is deleted, drop its roles so a reused company id can't
      * collide with leftovers. `deleted` (not `deleting`) so it only runs once the
      * delete actually succeeded. Pivots (model_has_roles / role_has_permissions)
@@ -69,7 +54,9 @@ class CompanyObserver
         DB::table('roles')->where('company_id', $company->getKey())->delete();
 
         // The role rows are gone; bust spatie's permission cache so it doesn't
-        // serve a stale role→permission map referencing them.
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        // serve a stale role→permission map referencing them. After COMMIT
+        // (Company::delete() is transactional): flushing earlier would let a
+        // concurrent request re-cache the still-committed roles for 24h.
+        DB::afterCommit(fn () => app(PermissionRegistrar::class)->forgetCachedPermissions());
     }
 }

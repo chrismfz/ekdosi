@@ -17,6 +17,11 @@ use Tests\TestCase;
  * graph from the schema (sqlite carries the same ON DELETE rules as the MariaDB
  * baseline) and prove CompanyPurger::RESTRICTED_FIRST leaves no RESTRICT edge
  * for any cascading delete to trip over.
+ *
+ * Blind spot: an FK that exists ONLY on MariaDB (a driver-guarded migration or
+ * raw ALTER) isn't in the sqlite graph — keep FKs portable, or re-run the
+ * rolled-back probe on MariaDB. Checked 2026-10: both graphs reach the same 88
+ * tables through the same 8 RESTRICT edges.
  */
 class CompanyPurgeOrderTest extends TestCase
 {

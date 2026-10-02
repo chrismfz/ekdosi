@@ -4,7 +4,6 @@ namespace App\Services\Portability;
 
 use App\Models\Company;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 
 /**
  * Makes `$company->delete()` actually work on MariaDB.
@@ -21,7 +20,7 @@ use Illuminate\Support\Facades\Schema;
  * instead the RESTRICT-side tables are emptied first, in an order where each
  * one goes before whatever it restricts; the company delete then cascades
  * through a graph with no RESTRICT edge left in it. Runs from
- * CompanyObserver::deleting, inside the transaction Company::delete() opens.
+ * Company::delete(), inside the transaction it opens.
  *
  * Not CompanyDataWiper: that one switches FK checks OFF, which on MariaDB also
  * switches cascades off — fine for its explicit table list, wrong here where
@@ -52,9 +51,7 @@ class CompanyPurger
     public function clearRestrictedChildren(Company $company): void
     {
         foreach (self::RESTRICTED_FIRST as $table) {
-            if (Schema::hasTable($table)) {
-                DB::table($table)->where('company_id', $company->getKey())->delete();
-            }
+            DB::table($table)->where('company_id', $company->getKey())->delete();
         }
     }
 }
