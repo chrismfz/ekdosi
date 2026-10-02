@@ -7,6 +7,8 @@
     <div class="pos-item-price">
         @if ($product->isVariable())
             Επιλογή παραλλαγής ›
+        @elseif (\App\Actions\CreatePosSale::vatOf($product) === null)
+            ⚠ χωρίς ενεργό ΦΠΑ
         @elseif ($product->isOpenPrice())
             Ελεύθερη τιμή ›
         @else

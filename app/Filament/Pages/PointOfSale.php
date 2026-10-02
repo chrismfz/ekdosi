@@ -125,6 +125,8 @@ class PointOfSale extends Page
         }
 
         if ($product->isVariable()) {
+            $this->pricePrompt = null;
+            $this->promptPrice = '';
             $this->pickParent = $product->getKey();
 
             return;
@@ -167,7 +169,7 @@ class PointOfSale extends Page
         $price = self::parseAmount($typed);
         if ($price === null || CreatePosSale::unitNet($product, $price) === null) {
             Notification::make()->warning()->title('Μη έγκυρη τιμή «'.$typed.'»')
-                ->body('Γράψε την τιμή με ΦΠΑ, π.χ. 24,90 ή 1.250,00.')->send();
+                ->body('Γράψε την τιμή με ΦΠΑ, π.χ. 24,90 ή 1.250,00 (όχι σκέτο «1.250»).')->send();
             $this->dispatch('pos-price-focus');
 
             return;
@@ -273,6 +275,9 @@ class PointOfSale extends Page
     public function checkout(): void
     {
         $this->normalizeCart();
+        if ($this->pricePrompt !== null && $this->pricePromptProduct === null) {
+            $this->pricePrompt = null;   // its product went away (deactivated) — nothing to finish
+        }
         if ($this->pricePrompt !== null) {
             // A typed-but-not-added price would silently drop the item from the receipt.
             Notification::make()->warning()->title('Ολοκλήρωσε πρώτα την τιμή του είδους')
@@ -434,7 +439,8 @@ class PointOfSale extends Page
             $totals = $product ? CreatePosSale::lineTotals($product, $qty, $discount, $price) : null;
 
             return [
-                'label' => $product?->description_short ?? '— μη διαθέσιμο είδος —',
+                'label' => $product === null ? '— μη διαθέσιμο είδος —'
+                    : $product->description_short.(CreatePosSale::vatOf($product) === null ? ' ⚠ χωρίς ενεργό ΦΠΑ' : ''),
                 'qty' => $qty,
                 'discount' => $discount,
                 'unit' => $product ? CreatePosSale::lineTotals($product, 1, 0.0, $price)['gross'] : 0.0,
@@ -464,13 +470,15 @@ class PointOfSale extends Page
 
     /**
      * A Greek-typed amount → float, STRICT (a misread price is a wrong legal receipt):
-     * «24,90» · «24.90» · «24» · «1.250» / «1.250,50» (dot = thousands only in groups
-     * of 3) — anything else (e.g. «1,250», «12,5,0», «abc») is null, never a guess.
+     * «24,90» · «24.90» · «24» · «1.250,50» — anything ambiguous or malformed («1.250»,
+     * «1,250», «12,5,0», «abc») is null, never a guess.
      */
     public static function parseAmount(string $typed): ?float
     {
         $s = str_replace([' ', "\u{00A0}", '€'], '', trim($typed));
-        if (preg_match('/^\d{1,3}(\.\d{3})+(,\d{1,2})?$/', $s) === 1) {        // 1.250 · 1.250,50
+        // A thousands dot ONLY with its decimals («1.250,00»): a lone «1.250» could be
+        // 1250 or 1,25 (a numpad «.») — a 1000× error either way, so it's refused.
+        if (preg_match('/^\d{1,3}(\.\d{3})+,\d{1,2}$/', $s) === 1) {           // 1.250,50
             return round((float) str_replace(['.', ','], ['', '.'], $s), 2);
         }
         if (preg_match('/^\d+([.,]\d{1,2})?$/', $s) === 1) {                     // 24 · 24,90 · 24.90

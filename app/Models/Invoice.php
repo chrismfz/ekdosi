@@ -1015,10 +1015,6 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
-     * Does this document file NO counterpart at all? True for retail (11.x), where
-     * AADE forbids one even when the customer has an ΑΦΜ.
-     */
-    /**
      * Can this document print as an 80mm till receipt? Only an ISSUED, live one —
      * never a draft or an AADE-cancelled document. The one rule for the receipt
      * route ({@see PosReceiptController}) and its buttons.
@@ -1028,6 +1024,10 @@ class Invoice extends Model implements MovableDocument
         return $this->local_status === 'active' && $this->code !== null && $this->mydata_state !== 'CANCELLED';
     }
 
+    /**
+     * Does this document file NO counterpart at all? True for retail (11.x), where
+     * AADE forbids one even when the customer has an ΑΦΜ.
+     */
     public function filesNoCounterpart(): bool
     {
         // The RELATION first, because that is what AadeInvoiceDocument::build() files

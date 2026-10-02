@@ -235,10 +235,10 @@ class PosSaleTest extends TestCase
 
     public function test_typed_amounts_are_parsed_strictly(): void
     {
-        foreach (['24,90' => 24.90, '24.90' => 24.90, '24' => 24.0, '1.250' => 1250.0, '1.250,50' => 1250.50, '€ 9,99' => 9.99] as $typed => $expected) {
+        foreach (['24,90' => 24.90, '24.90' => 24.90, '24' => 24.0, '1.250,00' => 1250.0, '1.250,50' => 1250.50, '€ 9,99' => 9.99] as $typed => $expected) {
             $this->assertSame($expected, PointOfSale::parseAmount($typed), $typed);
         }
-        foreach (['1,250', '12,5,0', '24.', 'abc', '', '0,004'] as $typed) {
+        foreach (['1.250', '1,250', '12,5,0', '24.', 'abc', '', '0,004'] as $typed) {   // «1.250»: 1250 or 1,25? refused
             $this->assertNull(PointOfSale::parseAmount($typed), $typed);
         }
     }
