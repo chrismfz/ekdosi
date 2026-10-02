@@ -45,17 +45,18 @@ class CompanyObserver
      * After a tenant is deleted, drop its roles so a reused company id can't
      * collide with leftovers. `deleted` (not `deleting`) so it only runs once the
      * delete actually succeeded. Pivots (model_has_roles / role_has_permissions)
-     * cascade from roles. Note: Filament's delete actions don't wrap the delete in
-     * a transaction, so this is NOT atomic with the company delete — on the happy
-     * path the roles are dropped right after; a one-off leftover is mopped up by
-     * `ekdosi:prune-orphan-roles`.
+     * cascade from roles. Atomic with the company delete: Company::delete() wraps
+     * both in one transaction (a leftover from before that is mopped up by
+     * `ekdosi:prune-orphan-roles`).
      */
     public function deleted(Company $company): void
     {
         DB::table('roles')->where('company_id', $company->getKey())->delete();
 
         // The role rows are gone; bust spatie's permission cache so it doesn't
-        // serve a stale role→permission map referencing them.
-        app(PermissionRegistrar::class)->forgetCachedPermissions();
+        // serve a stale role→permission map referencing them. After COMMIT
+        // (Company::delete() is transactional): flushing earlier would let a
+        // concurrent request re-cache the still-committed roles for 24h.
+        DB::afterCommit(fn () => app(PermissionRegistrar::class)->forgetCachedPermissions());
     }
 }

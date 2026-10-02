@@ -6,6 +6,7 @@ use App\Casts\MaybeEncrypted;
 use App\Enums\MyDataMode;
 use App\Models\Scopes\CompanyScope;
 use App\Observers\CompanyObserver;
+use App\Services\Portability\CompanyPurger;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -15,6 +16,8 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
 
 #[ObservedBy(CompanyObserver::class)]
 class Company extends Model
@@ -33,6 +36,43 @@ class Company extends Model
     public const WHMCS_API_PATH_SUFFIX = '/includes/api.php';
 
     public const WHMCS_BRIDGE_PATH = '/modules/addons/ekdosi_bridge/inbound.php';
+
+    /**
+     * Deleting a tenant is all-or-nothing, and must work on MariaDB.
+     *
+     * CompanyPurger first empties the RESTRICT-side tables (or InnoDB refuses the
+     * cascade with 1451 for any tenant with e.g. products); the observer's
+     * `deleted` then drops the tenant's roles. One transaction around the lot
+     * means a failure anywhere leaves the tenant whole. The purge lives HERE, not
+     * in a `deleting` observer, so deleteQuietly()/withoutEvents() get it too.
+     * Covers every instance delete — the EditCompany action, the bulk action,
+     * tinker; a query-builder delete (Company::where()->delete()) bypasses it.
+     */
+    public function delete(): ?bool
+    {
+        // Not persisted → Eloquent deletes nothing (returns null, not false), so
+        // the purge below must not run either: it would wipe this id's rows and
+        // commit with the company row still there.
+        if (! $this->exists) {
+            return parent::delete();
+        }
+
+        return DB::transaction(function (): ?bool {
+            app(CompanyPurger::class)->clearRestrictedChildren($this);
+
+            $deleted = parent::delete();
+
+            // A vetoed delete (a `deleting` listener returning false) must not
+            // commit the purge, so throw to roll it back. Callers see an
+            // exception instead of `false` — acceptable: nothing vetoes today,
+            // and a silent half-purged tenant would be far worse.
+            if ($deleted === false) {
+                throw new RuntimeException('Η διαγραφή της εταιρείας ακυρώθηκε.');
+            }
+
+            return $deleted;
+        });
+    }
 
     protected $fillable = [
         'name',
