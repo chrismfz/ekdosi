@@ -50,6 +50,13 @@ class Company extends Model
      */
     public function delete(): ?bool
     {
+        // Not persisted → Eloquent deletes nothing (returns null, not false), so
+        // the purge below must not run either: it would wipe this id's rows and
+        // commit with the company row still there.
+        if (! $this->exists) {
+            return parent::delete();
+        }
+
         return DB::transaction(function (): ?bool {
             app(CompanyPurger::class)->clearRestrictedChildren($this);
 

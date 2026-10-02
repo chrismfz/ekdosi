@@ -88,6 +88,17 @@ class CompanyPurgeOrderTest extends TestCase
         $this->assertSame(1, DB::table('invoices')->where('company_id', $c->id)->count());
     }
 
+    public function test_deleting_an_unpersisted_instance_purges_nothing(): void
+    {
+        $real = $this->seedTenant('real');
+        $ghost = new Company;
+        $ghost->id = $real->id;   // same key, but exists=false
+
+        $this->assertNull($ghost->delete());
+        $this->assertSame(1, DB::table('products')->where('company_id', $real->id)->count());
+        $this->assertSame(1, DB::table('invoices')->where('company_id', $real->id)->count());
+    }
+
     /**
      * Cascade adjacency (parent → children) and the RESTRICT/NO ACTION edges
      * between company-cascaded tables (the ones into `companies` itself excluded).
