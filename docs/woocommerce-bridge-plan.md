@@ -367,9 +367,66 @@ Tablet/PC με Chrome · USB/Bluetooth barcode scanner · θερμικός εκ�
 + επιστροφή/αλλαγή + κλείσιμο ημέρας + στοκ → Woo. Εκτός MVP: IRIS QR, δόσεις, πολλαπλά
 καταστήματα, προσφορές/κουπόνια ταμείου, offline.
 
-### 11.6 Σύνδεση με το ΤΟΠΙΚΟ τερματικό — έρευνα σε εξέλιξη
-Ανοιχτό: πώς ένα cloud app στέλνει `sale` (ποσό + `paymentToken`) σε τερματικό στο
-κατάστημα και παίρνει πίσω `transactionId`/`tid` — ανά acquirer (Viva / Cardlink /
-Worldline / Nexi / Epay): cloud API, τοπικό ECR πρωτόκολλο μέσω μικρού bridge agent στο
-PC του καταστήματος, ή Android app-to-app. Το `nsp=1` «Common WebECR» του InvoSign δείχνει
-ότι υπάρχει κοινό spec για web ECR — να βρεθεί ποιος το εκδίδει.
+### 11.6 Σύνδεση με το τερματικό — ΕΡΕΥΝΑ (2026-10-02)
+[C] = επιβεβαιωμένο από πηγή · [I] = συμπέρασμα. Πλήρεις σημειώσεις έρευνας: εκτός repo.
+
+**Βασικό εύρημα:** δεν χρειάζεται να «φτάσουμε» το τερματικό στο LAN του καταστήματος.
+Όλα τα μεγάλα δίκτυα έχουν **cloud REST API**: ο Laravel server καλεί το cloud τους, εκείνο
+στέλνει την πώληση στο τερματικό (που έχει δικό του internet) και το αποτέλεσμα γυρίζει
+σύγχρονα / με polling / με webhook. Τίποτα εγκατεστημένο στο κατάστημα, κανένα θέμα
+CORS/mixed-content στον browser. [C]
+
+**Μόνο δύο cloud πρωτόκολλα να υλοποιήσουμε** — και αντιστοιχούν ακριβώς στο `nsp` του InvoSign [C]:
+
+| | **Viva Cloud Terminal API** | **Common WebECR** (spec της Mellon, δημόσιο) |
+|---|---|---|
+| Ποιοι | Viva | Mellon, Euronet/Epay, Nexi, **Cardlink** («Common Web» → και Worldline/ex-Eurobank), Attica, Pancreta, PBT, Tora Direct (λίστα ΑΑΔΕ 13/12/2024) |
+| InvoSign `nsp` | **0** — `UID;MARK;time;Amount;Net;VAT;Total;TID` | **1** — `UID;MARK;time;Net;VAT;Total;Amount;TID` |
+| Auth | OAuth2 client credentials με **ξεχωριστά POS API credentials** (όχι τα e-shop), scope `urn:viva:payments:ecr:api` | Pairing: ο έμπορος πατά στο τερματικό «σύνδεση με 3rd party» → κωδικός → `POST /authorization/redeem/` → **`X-Api-Key`** (δεν λήγει, ανακαλείται από τον έμπορο) |
+| Πώληση | `POST https://api.vivapayments.com/ecr/v1/transactions:sale` με `sessionId` (δικό μας uuid = idempotency), `terminalId`, `cashRegisterId`, `amount` (λεπτά), `currencyCode` 978, `merchantReference`, **`aadeProviderId`**, **`aadeProviderSignatureData`** (το cleartext), **`aadeProviderSignature`** (base64) | `POST /terminal/{id}/txninit/` με `Amount`, `CustomerReference`, `Timeout` (≤180s σύγχρονα, 0 = async), **`ProviderData`** {Uid, Mark, SignatureTimestamp, NetAmount, VatAmount, TotalAmount, ProviderId, Signature}. Το TID το βάζει ο server από το τερματικό |
+| Αποτέλεσμα | `GET /ecr/v1/sessions/{sessionId}` (1204 = σε εξέλιξη) ή webhook· επιστρέφει `transactionId`, `tid`, **`aadeTransactionId`** (acquirer + RRN + auth) | Status/Result (Approved/Declined/Cancelled/Busy…), TID/RRN/auth, **`TransactionId`** π.χ. `075;121702285176;315144`· `/transactionintent/`, `/transaction/`, webhook· ακύρωση `/txnvoid/` |
+| Test | `aadeProviderId=999` + δημοσιευμένο test key pair | Mellon UAT `https://uat.mreceipts.com/api/v2.2/` (λογαριασμός μέσω email· ~16 test cases πιστοποίησης)· Cardlink simulator `virtualpos.services.novidea.gr` |
+
+- Και στα δύο: ποσά σε λεπτά, υπογραφή **ECDSA P-256 / SHA-256** — Viva base64, Mellon παράδειγμα σε hex DER. [C]
+- Το `aadeTransactionId` (Viva) / `TransactionId` (WebECR) είναι αυτό που μπαίνει στο
+  `transactionId` του myDATA. [I]
+- Κάθε πάροχος WebECR τρέχει **δικό του server** (Mellon `mreceipts.com`, Euronet
+  `webecr.epayworldwide.com:11007`, Cardlink «intermediate node»· Cardlink production URL
+  όχι δημόσιο) → ίδιος client, διαφορετικό base URL + εγγραφή/πιστοποίηση ανά πάροχο. [C/I]
+- Ιδιόκτητα πρωτόκολλα (εκτός scope): EDPS, Everypay, Adyen, INSS, myPOS, Neosoft.
+- **Ισχύς υπογραφής παρόχου: 60 ώρες** (2 ώρες εστίαση) — Α.1028/2025 (ΦΕΚ Β' 866/26-02-2025). [C]
+
+**Απορρίφθηκαν** (όλα χειρότερα από cloud-to-cloud):
+- **Local Terminal API / ECR2EFT WEB / TCP** — μόνο ίδιο LAN, στατική IP· Viva Local όχι σε PAX Paydroid.
+- **Browser → IP τερματικού** — Chrome 142+ «Local Network Access» prompt, + CORS + έμπιστο
+  HTTPS cert που δεν υπάρχουν τεκμηριωμένα → μη υποστηριζόμενο.
+- **Τοπικός agent** στο PC — μόνο αν βρεθεί τερματικό αποκλειστικά LAN.
+- **Android app-to-app** (`vivapayclient://pay/v1?...`) — μόνο αν ο browser τρέχει στην ίδια συσκευή με το SoftPOS (πιθανή μελλοντική επιλογή, όχι πρώτη).
+
+**Σύσταση:**
+1. **Πρώτα Viva Cloud Terminal API** (ο πελάτης έχει ήδη λογαριασμό Viva): POS API credentials,
+   τερματικό Viva ή **Viva Terminal App (SoftPOS)** σε Android. Ροή: InvoSign `GetPayment`
+   (`nsp=0`) → `transactions:sale` με τα τρία πεδία ΑΑΔΕ → webhook/polling session → `tid` +
+   `aadeTransactionId` στο payment τύπου 7 → υποβολή ΑΛΠ. `sessionId` = idempotency key
+   (όπως το `PaymentIntentService`). Νέος `VivaTerminalGateway` στο υπάρχον seam.
+2. **Μετά, ένας `WebEcrGateway` (`nsp=1`)** για όποιον έχει τερματικό τράπεζας — καλύπτει
+   το μεγαλύτερο μέρος της αγοράς (Cardlink/Worldline, Nexi, Euronet, Mellon), με εγγραφή +
+   πιστοποίηση ανά πάροχο. Πρώτα να μάθουμε **σε ποιο δίκτυο** είναι το τερματικό του
+   καταστήματος (header απόδειξης / εφαρμογή τερματικού).
+
+**Ερωτήσεις προς InvoSign:** (α) ο αριθμητικός provider id τους (`aadeProviderId` / `ProviderId`)·
+(β) η `signature` του `GetPayment` σε ποιο encoding — base64 (Viva) vs DER/hex (WebECR);
+(γ) για Viva ποιο `TerminalID` — το 8ψήφιο τραπεζικό `tid` ή το Viva `terminalId`;
+(δ) μερική πληρωμή με κάρτα (`Amount` ≠ `TotalAmount`) υποστηρίζεται;
+
+**Πηγές:** [developer.viva.com/aade](https://developer.viva.com/aade) ·
+[Viva EFT-POS API spec](https://developer.viva.com/downloads/eft-pos-api.yml) ·
+[ΑΑΔΕ — πρωτόκολλα Α.1155/2023](https://www.aade.gr/diasyndesi-pos-tameiakon-systimaton/protokolla-tekmiriosi-gia-diasyndesi-me-basi-tin-a11552023) ·
+[ΑΑΔΕ — λίστα παρόχων/πρωτοκόλλων 13/12/2024](https://www.aade.gr/sites/default/files/2024-12/1155Protocols_13122024_2.xlsx) ·
+[ΑΑΔΕ — υπογραφές παρόχων](https://www.aade.gr/diasyndesi-pos-tameiakon-systimaton/protokolla-tekmiriosi-gia-diasyndesi-me-basi-tin-a11552023/ypografes-parohon-ypaies) ·
+[Mellon EFTPOS-WebECR v2.5.13](https://aade.mellongroup.com/Portals/0/Library/EFTPOS-WebECR%20v2.5.13.pdf) ·
+[Mellon Token crypto proposal v1.5](https://aade.mellongroup.com/Portals/0/Library/Token%20crypto%20proposal%20-%20v1.5.pdf) ·
+[Cardlink ERP-POS](https://cardlink.gr/en/wp-lp/erp-pos-integration/) ·
+[Cardlink Cloud ERP quick guide](https://cardlink.gr/wp-content/uploads/2025/02/quick-guide-cloud-erp-7.5-android.pdf) ·
+[Α.1028/2025](https://www.taxheaven.gr/circulars/49748/a-1028-2025) ·
+[Chrome Local Network Access](https://developer.chrome.com/blog/local-network-access)
