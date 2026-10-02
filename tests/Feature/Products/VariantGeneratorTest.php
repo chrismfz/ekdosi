@@ -4,12 +4,14 @@ namespace Tests\Feature\Products;
 
 use App\Filament\Support\PickerOptions;
 use App\Models\Company;
+use App\Models\Customer;
 use App\Models\DeliveryNoteLine;
 use App\Models\InvoiceLine;
 use App\Models\Product;
 use App\Models\ProductAttribute;
 use App\Models\ProductAttributeValue;
 use App\Models\ProductCategory;
+use App\Models\Quote;
 use App\Models\QuoteLine;
 use App\Models\StockMovement;
 use App\Models\User;
@@ -124,6 +126,43 @@ class VariantGeneratorTest extends TestCase
         $this->assertStringEndsWith(' — Μαύρο / S', $variant->description_short);
         $this->assertLessThanOrEqual(40, mb_strlen($variant->sku));
         $this->assertStringEndsWith('-BLK-S', $variant->sku);
+    }
+
+    public function test_name_never_exceeds_the_column_even_with_very_long_values(): void
+    {
+        $long = $this->attribute($this->tenant, 'Μακρύ', ProductAttribute::KIND_OTHER, 3, [str_repeat('Ω', 60)]);
+        $longer = $this->attribute($this->tenant, 'Μακρύτερο', ProductAttribute::KIND_OTHER, 4, [str_repeat('Ψ', 60)]);
+        $parent = $this->parent();
+
+        $variant = app(VariantGenerator::class)->generate($parent, [
+            $long->id => $this->ids($long),
+            $longer->id => $this->ids($longer),
+        ])->first();
+
+        $this->assertSame(120, mb_strlen($variant->description_short));
+    }
+
+    public function test_sku_codes_use_the_app_transliteration_and_keep_a_zero_size(): void
+    {
+        $shoe = $this->attribute($this->tenant, 'Νούμερο', ProductAttribute::KIND_SIZE, 5, ['0']);
+        $value = $shoe->values()->first();
+
+        $this->assertSame('0', $value->skuCode(), '«0» is a real size, not empty');
+        $this->assertSame('MAVRO', ProductAttributeValue::make(['value' => 'Μαύρο'])->skuCode());
+    }
+
+    public function test_a_product_on_a_deleted_quote_cannot_become_variable(): void
+    {
+        $product = Product::create($this->productData(['description_short' => 'Μπλούζα']));
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Π']);
+        $quote = Quote::create(['company_id' => $this->tenant->id, 'customer_id' => $customer->id]);
+        $line = QuoteLine::create([
+            'company_id' => $this->tenant->id, 'quote_id' => $quote->id, 'product_id' => $product->id,
+            'qty' => 1, 'price_per_item' => 10, 'vat_percent' => 24, 'product_descr' => 'Μπλούζα',
+        ]);
+        $line->delete();
+
+        $this->assertFalse(app(VariantGenerator::class)->canBecomeVariable($product));
     }
 
     public function test_rejects_values_of_another_company_or_another_attribute(): void

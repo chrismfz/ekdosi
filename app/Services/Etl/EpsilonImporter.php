@@ -985,6 +985,9 @@ class EpsilonImporter
             ->withoutGlobalScopes()
             ->where('company_id', $this->companyId)
             ->where('description_short', $name)
+            // Never a variable parent: lines are raw-inserted (no model guard), and the
+            // parent keeps the plain name its variants extend («… — Μαύρο / M»).
+            ->sellable()
             ->value('id');
 
         return $this->productByNameCache[$name] = $id !== null ? (int) $id : null;

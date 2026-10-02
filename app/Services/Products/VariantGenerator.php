@@ -74,7 +74,8 @@ class VariantGenerator
 
         return ! StockMovement::query()->where('product_id', $id)->exists()
             && ! InvoiceLine::query()->where('product_id', $id)->exists()
-            && ! QuoteLine::query()->where('product_id', $id)->exists()
+            // withTrashed: a restored quote would bring its line back onto the parent.
+            && ! QuoteLine::query()->withTrashed()->where('product_id', $id)->exists()
             && ! DeliveryNoteLine::query()->where('product_id', $id)->exists()
             && ! ServiceContract::query()->withoutGlobalScopes()->where('product_id', $id)->exists();
     }
@@ -234,7 +235,9 @@ class VariantGenerator
         $suffix = ' — '.collect($values)->pluck('value')->implode(' / ');
         $room = max(1, self::NAME_MAX - mb_strlen($suffix));
 
-        return Str::limit((string) $parent->description_short, $room, '').$suffix;
+        // Hard cap: values may be up to 60 chars each, so the suffix alone can pass
+        // the varchar(120) — MariaDB strict mode would reject it (1406).
+        return mb_substr(Str::limit((string) $parent->description_short, $room, '').$suffix, 0, self::NAME_MAX);
     }
 
     /**

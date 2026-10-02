@@ -3,6 +3,7 @@
 namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
+use App\Support\TransliterateGreek;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -26,7 +27,11 @@ class ProductAttributeValue extends Model
         return $this->belongsTo(ProductAttribute::class, 'product_attribute_id');
     }
 
-    /** SKU suffix: the explicit code, else the value transliterated to ASCII upper-case. */
+    /**
+     * SKU suffix: the explicit code, else the value in the app's ELOT-style Latin
+     * (TransliterateGreek, «Μαύρο» → MAVRO) upper-cased. Only a value with no
+     * Latin form at all falls back to the row id — «0» is a real size, not empty.
+     */
     public function skuCode(): string
     {
         $code = trim((string) $this->code);
@@ -34,6 +39,8 @@ class ProductAttributeValue extends Model
             return Str::upper($code);
         }
 
-        return Str::upper(Str::limit(Str::slug(Str::ascii($this->value), ''), 8, '')) ?: (string) $this->id;
+        $latin = Str::upper(Str::limit(Str::slug(TransliterateGreek::toLatin($this->value), ''), 8, ''));
+
+        return $latin !== '' ? $latin : (string) $this->id;
     }
 }
