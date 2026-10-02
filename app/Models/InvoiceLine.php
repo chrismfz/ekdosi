@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Concerns\RejectsVariableProduct;
+use App\Support\LineMoney;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -104,18 +105,34 @@ class InvoiceLine extends Model
                 );
             }
 
-            // Compute line totals from qty + price + discount + VAT.
-            // Authoritative computation — overwrites any value the
-            // caller may have set, on every save. Match legacy
-            // FAddInvoice.cpp:269 semantics: round per-line (not
-            // intra-formula) for storage. The HEADER discount is
-            // applied at the aggregate level by InvoiceVatBreakdown,
-            // never here.
-            $net = round($qty * $price * (1 - $lineDiscount / 100), 2);
-            $gross = round($net * (1 + $vat / 100), 2);
+            // POS-2: a GROSS-anchored line (retail shelf price). An edit of the net
+            // price that no longer matches the anchor's own net mirror means the
+            // operator re-priced the line by NET — the anchor no longer applies.
+            if ($line->gross_unit_price !== null) {
+                $mirror = LineMoney::netFromGross((float) $line->gross_unit_price, $vat);
+                if ($line->exists && $line->isDirty('price_per_item') && round($price, 2) !== $mirror) {
+                    $line->gross_unit_price = null;
+                }
+            }
 
-            $line->net_price = $net;
-            $line->gross_price = $gross;
+            // Compute line totals — authoritative, overwrites any value the caller
+            // set, on every save; rounded per line, 2dp (legacy FAddInvoice.cpp:269).
+            // The HEADER discount is applied at the aggregate level by
+            // InvoiceVatBreakdown, never here. One formula: App\Support\LineMoney.
+            if ($line->gross_unit_price !== null) {
+                $unitGross = (float) $line->gross_unit_price;
+                if ($unitGross < 0) {
+                    throw new \RuntimeException("InvoiceLine.gross_unit_price must be >= 0; got {$unitGross}.");
+                }
+                $money = LineMoney::fromGross($qty, $unitGross, $lineDiscount, $vat);
+                // The net unit mirror — what the PDF/provider show as «unit price».
+                $line->price_per_item = LineMoney::netFromGross($unitGross, $vat);
+            } else {
+                $money = LineMoney::fromNet($qty, $price, $lineDiscount, $vat);
+            }
+
+            $line->net_price = $money['net'];
+            $line->gross_price = $money['gross'];
         });
     }
 
@@ -133,6 +150,9 @@ class InvoiceLine extends Model
         'product_category_id',
         'qty',
         'price_per_item',
+        // POS-2: the VAT-inclusive unit price of a GROSS-anchored (retail) line;
+        // null = classic net-anchored line.
+        'gross_unit_price',
         'discount',
         'vat_percent',
         // MYD-007: the §8.3 exemption reason for a 0% line, snapshotted per line
@@ -159,7 +179,8 @@ class InvoiceLine extends Model
      * snapshots — the §8.3 exemption reason (MYD-007, set in the form) and the
      * revenue category. NOT the hidden §8.6 income-class snapshot (MYD-006): the
      * form can't edit it, so the copy re-resolves it (a fixed WHMCS map / product /
-     * type then applies). Money (net/gross) is recomputed. One list for both copiers.
+     * type then applies). Money (net/gross) is recomputed — from the same anchor
+     * (a gross-anchored line copies its gross_unit_price). One list for both copiers.
      *
      * @return array<string, mixed>
      */
@@ -170,6 +191,8 @@ class InvoiceLine extends Model
             'product_category_id' => $this->product_category_id,
             'qty' => $this->qty,
             'price_per_item' => $this->price_per_item,
+            // POS-2: a copy of a shelf-priced line stays shelf-priced (exact gross).
+            'gross_unit_price' => $this->gross_unit_price,
             'discount' => $this->discount,
             'vat_percent' => $this->vat_percent,
             'vat_exemption_category' => $this->vat_exemption_category,
@@ -184,6 +207,7 @@ class InvoiceLine extends Model
         return [
             'qty' => 'decimal:3',
             'price_per_item' => 'decimal:2',
+            'gross_unit_price' => 'decimal:2',
             'discount' => 'decimal:4',
             'vat_percent' => 'decimal:2',
             'vat_exemption_category' => 'integer',

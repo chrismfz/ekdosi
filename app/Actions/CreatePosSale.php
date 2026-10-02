@@ -2,7 +2,6 @@
 
 namespace App\Actions;
 
-use App\Filament\Resources\Invoices\Schemas\InvoiceForm;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
@@ -12,6 +11,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
 use App\Services\RecomputeInvoiceTotals;
+use App\Support\LineMoney;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -136,7 +136,8 @@ class CreatePosSale
      */
     public static function lineTotals(Product $product, float $qty, float $discount = 0.0, float|int|string|null $price = null): array
     {
-        $net = round($qty * (self::unitNet($product, $price) ?? 0.0) * (1 - $discount / 100), 2);
+        $money = LineMoney::fromNet($qty, self::unitNet($product, $price) ?? 0.0, $discount, self::vatOf($product) ?? 0.0);
+        $net = $money['net'];
         $levy = 0.0;
         $perUnit = (float) ($product->mydata_tax_per_unit ?? 0);
         $taxType = (int) ($product->mydata_tax_type ?? 0);
@@ -146,7 +147,7 @@ class CreatePosSale
 
         return [
             'net' => $net,
-            'gross' => InvoiceForm::grossFromNet($net, self::vatOf($product) ?? 0.0),
+            'gross' => $money['gross'],
             'levy' => $levy,
         ];
     }
@@ -169,8 +170,8 @@ class CreatePosSale
             return null;
         }
 
-        // The invoice form's G7 gross-edit math (one formula — POS-2 changes both).
-        return InvoiceForm::netFromGross($gross, self::vatOf($product) ?? 0.0);
+        // The one gross↔net formula (App\Support\LineMoney).
+        return LineMoney::netFromGross($gross, self::vatOf($product) ?? 0.0);
     }
 
     /** VAT rate a line of this product gets (its category's rate); null = none set. */

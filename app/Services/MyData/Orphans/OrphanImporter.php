@@ -13,6 +13,7 @@ use App\Models\PaymentMethod;
 use App\Models\Scopes\CompanyScope;
 use App\Services\InvoiceBalance;
 use App\Services\RecomputeInvoiceTotals;
+use App\Support\LineMoney;
 use App\Support\MyData\Codes;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -204,11 +205,17 @@ final class OrphanImporter
             foreach (array_values($doc['lines']) as $i => $line) {
                 $category = (int) $line['vatCategory'];
                 $class = $line['classifications'][0] ?? null;
+                $rate = (float) Codes::VAT_CATEGORY_RATES[$category];
+                $net = round((float) $line['netValue'], 2);
                 InvoiceLine::create([
                     'company_id' => $company->getKey(),
                     'invoice_id' => $invoice->getKey(),
                     'qty' => 1,
-                    'price_per_item' => round((float) $line['netValue'], 2),
+                    'price_per_item' => $net,
+                    // POS-2: a line whose VAT was extracted from its GROSS (a till /
+                    // cash-register document) is rebuilt gross-anchored, so it
+                    // reproduces AADE's net AND vat to the cent.
+                    'gross_unit_price' => self::grossAnchor($net, (float) ($line['vatAmount'] ?? 0), $rate),
                     'discount' => 0,
                     'vat_percent' => Codes::VAT_CATEGORY_RATES[$category],
                     'vat_exemption_category' => $line['vatExemptionCategory'] ?? null,
@@ -305,6 +312,25 @@ final class OrphanImporter
     }
 
     /** An amount in whole cents — legal totals are compared exactly. */
+    /**
+     * The gross anchor for an imported line, or null to keep it net-anchored: only
+     * when AADE's vatAmount is NOT what the net gives (net × rate) but IS what a
+     * VAT extracted from the gross (net + vat) gives — the two coincide for most
+     * lines, and then the classic net-anchored line already matches.
+     */
+    private static function grossAnchor(float $net, float $vat, float $rate): ?float
+    {
+        $vat = round($vat, 2);
+        $fromNet = LineMoney::fromNet(1, $net, 0, $rate);
+        if (round($fromNet['gross'] - $fromNet['net'], 2) === $vat) {
+            return null;
+        }
+        $gross = round($net + $vat, 2);
+        $fromGross = LineMoney::fromGross(1, $gross, 0, $rate);
+
+        return $fromGross['net'] === $net ? $gross : null;
+    }
+
     public static function cents(float $amount): int
     {
         return (int) round($amount * 100);

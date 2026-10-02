@@ -171,7 +171,10 @@ class InvoSignDocument
         $unitAfter = round($unit * (1 - $discountPct / 100), 2);
         $gross = $unit * $qty;
         $net = (float) $line->net_price;
-        $discountValue = round($gross - $net, 2);
+        // Never negative: on a gross-anchored line (POS-2) the 2dp net unit × qty can
+        // sit a cent BELOW the line net (VAT extracted from the gross) — that's
+        // rounding, not a discount (sandbox showed «−0,01» otherwise).
+        $discountValue = max(0.0, round($gross - $net, 2));
 
         $fields = [
             'api_serial' => (string) ($line->product?->code ?? ''),

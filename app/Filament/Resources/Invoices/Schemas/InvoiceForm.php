@@ -16,6 +16,7 @@ use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\VatCategory;
+use App\Support\LineMoney;
 use App\Support\MyData\Codes;
 use App\Support\MyData\CommonTaxPresets;
 use App\Support\MyData\DeliveryCodes;
@@ -568,6 +569,12 @@ class InvoiceForm
                                 ->label('Μ.Μ.')
                                 ->maxLength(15),
 
+                            // POS-2: a shelf-priced line's VAT-inclusive anchor rides along
+                            // unchanged (re-issue / «Νέο από αυτό» drafts); a NET re-price
+                            // drops it in InvoiceLine::saving. Hydrated before the price
+                            // fields so the «Τιμή (με ΦΠΑ)» mirror can show it.
+                            Hidden::make('gross_unit_price'),
+
                             TextInput::make('price_per_item')
                                 ->label('Τιμή (καθαρή)')
                                 ->numeric()
@@ -595,10 +602,12 @@ class InvoiceForm
                                 ->prefix('€')
                                 ->dehydrated(false)
                                 ->live(onBlur: true)
-                                // Seed from the existing net price when editing a line.
+                                // Seed from the line: a gross-anchored (shelf-priced, POS-2) line
+                                // shows its exact gross; any other line mirrors its net price.
                                 ->afterStateHydrated(fn ($state, callable $set, Get $get) => $set(
                                     'price_per_item_wvat',
-                                    self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($get('vat_percent')))
+                                    self::numOrNull($get('gross_unit_price'))
+                                        ?? self::grossFromNet(self::numOrNull($get('price_per_item')), self::numOrNull($get('vat_percent')))
                                 ))
                                 // Typing gross back-computes the stored net price.
                                 ->afterStateUpdated(function ($state, callable $set, Get $get): void {
@@ -969,12 +978,12 @@ class InvoiceForm
      */
     public static function grossFromNet(?float $net, ?float $vatPercent): ?float
     {
-        return $net === null ? null : round($net * (1 + (float) $vatPercent / 100), 2);
+        return LineMoney::grossFromNet($net, $vatPercent);
     }
 
     public static function netFromGross(?float $gross, ?float $vatPercent): ?float
     {
-        return $gross === null ? null : round($gross / (1 + (float) $vatPercent / 100), 2);
+        return LineMoney::netFromGross($gross, $vatPercent);
     }
 
     /** Normalise a Filament numeric-input value ('' / null → null) to float. */
