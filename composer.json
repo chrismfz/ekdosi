@@ -23,6 +23,7 @@
         "league/flysystem-ftp": "^3.31",
         "league/flysystem-sftp-v3": "^3.33",
         "livewire/flux": "^2.18",
+        "picqer/php-barcode-generator": "^3.3",
         "spatie/laravel-activitylog": "^5.0",
         "spatie/laravel-backup": "^10.2",
         "spatie/laravel-permission": "^8.0",

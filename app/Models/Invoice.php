@@ -1015,6 +1015,17 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
+     * The code printed as a barcode on the 80mm receipt — what a till scanner reads back
+     * to find this document for a return: its ΜΑΡΚ when it has one (15 digits, also
+     * typeable by hand), else «R» + its id (a non-filing tenant has no ΜΑΡΚ). Plain
+     * ASCII, so it fits Code 128 (the series code may be Greek).
+     */
+    public function receiptCode(): string
+    {
+        return filled($this->mydata_mark) ? (string) $this->mydata_mark : 'R'.$this->getKey();
+    }
+
+    /**
      * Can this document print as an 80mm till receipt? Only an ISSUED, live one —
      * never a draft or an AADE-cancelled document. The one rule for the receipt
      * route ({@see PosReceiptController}) and its buttons.

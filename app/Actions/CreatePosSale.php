@@ -8,8 +8,7 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\Scopes\CompanyScope;
-use App\Services\EInvoiceSubmitterFactory;
-use App\Services\InvoiceNumberer;
+use App\Services\Pos\PosIssuer;
 use App\Services\RecomputeInvoiceTotals;
 use App\Support\LineMoney;
 use Illuminate\Support\Facades\DB;
@@ -36,7 +35,7 @@ class CreatePosSale
 {
     public function __construct(
         private readonly RecomputeInvoiceTotals $recompute,
-        private readonly EInvoiceSubmitterFactory $submitters,
+        private readonly PosIssuer $issuer,
     ) {}
 
     /**
@@ -125,7 +124,7 @@ class CreatePosSale
             return $invoice;
         });
 
-        $this->issue($invoice->refresh());
+        $this->issuer->issue($invoice->refresh());
 
         return $invoice->refresh();
     }
@@ -184,40 +183,6 @@ class CreatePosSale
         $rate = $product->vatCategory?->rate;
 
         return $rate === null ? null : (float) $rate;
-    }
-
-    /**
-     * Issue the draft: file it (filing tenant) or number + activate it (non-filing).
-     */
-    private function issue(Invoice $invoice): void
-    {
-        try {
-            if ($invoice->isIssuedAtFinalize()) {
-                DB::transaction(function () use ($invoice): void {
-                    if ($invoice->code === null) {
-                        app(InvoiceNumberer::class)->assign($invoice);
-                    }
-                    $invoice->update(['local_status' => 'active']);
-                });
-            } else {
-                $this->submitters->for($invoice->company)->submit($invoice);
-            }
-        } catch (\Throwable $e) {
-            // A step AFTER the filing committed (auto-email queueing…) may throw on
-            // an invoice that IS issued — that's a sale, not a failure.
-            if ($invoice->refresh()->local_status === 'active') {
-                report($e);
-
-                return;
-            }
-            throw new PosSaleNotIssued((int) $invoice->getKey(), $e);
-        }
-
-        // «Nothing threw» isn't «issued»: a submitter that returned without
-        // promoting the draft must not print as a sale.
-        if ($invoice->refresh()->local_status !== 'active') {
-            throw new PosSaleNotIssued((int) $invoice->getKey(), new RuntimeException('το παραστατικό δεν οριστικοποιήθηκε'));
-        }
     }
 
     /**

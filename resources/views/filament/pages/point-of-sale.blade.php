@@ -28,6 +28,11 @@
         .pos-cart-ctl button { border: 1px solid #d1d5db; border-radius: .35rem; width: 1.8rem; height: 1.8rem; background: transparent; color: inherit; cursor: pointer; }
         .pos-cart-ctl input { width: 4.2rem; padding: .2rem .35rem; border: 1px solid #d1d5db; border-radius: .35rem; background: transparent; color: inherit; }
         .pos-cart-gross { font-weight: 700; text-align: right; }
+        .pos-return { border: 2px dashed #dc2626; border-radius: .6rem; padding: .6rem .75rem; margin-bottom: .75rem; }
+        .pos-return-head { display: flex; justify-content: space-between; align-items: center; font-weight: 700; color: #b91c1c; }
+        .pos-return-row { display: grid; grid-template-columns: 1fr auto; gap: .3rem; padding: .4rem 0; border-bottom: 1px solid #fee2e2; }
+        .pos-minus { color: #b91c1c; font-weight: 700; text-align: right; }
+        .pos-subtotal { display: flex; justify-content: space-between; font-size: 1rem; margin-top: .5rem; }
         .pos-total { display: flex; justify-content: space-between; font-size: 1.6rem; font-weight: 800; margin-top: 1rem; }
         .pos-pay { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; margin-top: .75rem; align-items: center; }
         .pos-pay input { padding: .5rem .75rem; font-size: 1.1rem; border: 1px solid #d1d5db; border-radius: .5rem; background: transparent; color: inherit; }
@@ -65,6 +70,7 @@
         x-init="$nextTick(() => $refs.scan?.focus())"
         x-on:pos-focus.window="$nextTick(() => $refs.scan?.focus())"
         x-on:pos-price-focus.window="$nextTick(() => $refs.price?.focus())"
+        x-on:pos-return-focus.window="$nextTick(() => $refs.returnCode?.focus())"
         x-on:pos-print.window="print($event.detail.url)"
         x-on:pos-print-cancel.window="cancel()"
         x-on:keydown.window="if (! $event.target.closest('input, textarea, select, [contenteditable]') && $event.key.length === 1 && $event.key !== ' ' && ! $event.ctrlKey && ! $event.metaKey && ! $event.altKey) { $refs.scan?.focus(); }"
@@ -81,7 +87,17 @@
                 x-on:keydown.enter.prevent="const code = $el.value.trim(); $el.value = ''; if (code !== '') { $wire.scanCode(code); }"
             >
             <input class="pos-search" type="search" placeholder="Αναζήτηση με όνομα…" wire:model.live.debounce.300ms="search">
-            <div class="pos-hint">Το scanner λειτουργεί σαν πληκτρολόγιο — κράτα το πάνω πεδίο ενεργό.</div>
+            <div class="pos-hint">Το scanner λειτουργεί σαν πληκτρολόγιο — κράτα το πάνω πεδίο ενεργό. Σκανάροντας το barcode μιας απόδειξης ανοίγει η επιστροφή της.</div>
+            @if ($this->returnsEnabled())
+                @if ($returnPrompt)
+                    <div class="pos-pay">
+                        <input x-ref="returnCode" type="text" placeholder="Αριθμός απόδειξης (π.χ. ΑΛΠ36) ή ΜΑΡΚ" wire:model="returnCode" wire:keydown.enter.prevent="lookupReturn">
+                        <button type="button" class="pos-btn pos-btn-ghost pos-btn-sm" wire:click="lookupReturn">Εύρεση</button>
+                    </div>
+                @elseif ($returnOf === null)
+                    <button type="button" class="pos-btn pos-btn-ghost pos-btn-sm" style="margin-top:.5rem" wire:click="startReturn">↩ Επιστροφή / αλλαγή</button>
+                @endif
+            @endif
 
             @if ($this->pricePromptProduct)
                 <div class="pos-picker-head">
@@ -128,6 +144,29 @@
 
         {{-- Right: cart + pay --}}
         <div class="pos-card">
+            @if ($this->returnOriginal)
+                <div class="pos-return">
+                    <div class="pos-return-head">
+                        <span>↩ Επιστροφή από {{ $this->returnOriginal->invcode }}</span>
+                        <button type="button" class="pos-btn-ghost pos-btn pos-btn-xs" wire:click="cancelReturn">Ακύρωση επιστροφής</button>
+                    </div>
+                    @foreach ($this->returnView as $r)
+                        <div class="pos-return-row" wire:key="r-{{ $r['line_id'] }}">
+                            <div>
+                                <div class="pos-cart-label">{{ $r['label'] }}</div>
+                                <div class="pos-cart-ctl">
+                                    <button type="button" wire:click="returnLess({{ $r['line_id'] }})" aria-label="Λιγότερα">−</button>
+                                    <span>{{ rtrim(rtrim(number_format($r['qty'], 3, ',', '.'), '0'), ',') }} / {{ rtrim(rtrim(number_format($r['remaining'], 3, ',', '.'), '0'), ',') }}</span>
+                                    <button type="button" wire:click="returnMore({{ $r['line_id'] }})" aria-label="Περισσότερα">+</button>
+                                    × {{ number_format($r['unit'], 2, ',', '.') }} €
+                                </div>
+                            </div>
+                            <div class="pos-minus">@if ($r['qty'] > 0)−{{ number_format($r['refund'], 2, ',', '.') }} €@endif</div>
+                        </div>
+                    @endforeach
+                </div>
+            @endif
+
             @forelse ($this->cartView as $i => $line)
                 <div class="pos-cart-row" wire:key="c-{{ $i }}">
                     <div>
@@ -146,10 +185,16 @@
                     </div>
                 </div>
             @empty
-                <div class="pos-empty">Το καλάθι είναι άδειο — σκανάρισε ένα είδος.</div>
+                <div class="pos-empty">{{ $returnOf ? 'Για αλλαγή, σκανάρισε τα νέα είδη.' : 'Το καλάθι είναι άδειο — σκανάρισε ένα είδος.' }}</div>
             @endforelse
 
-            <div class="pos-total"><span>Σύνολο</span><span>{{ number_format($this->total, 2, ',', '.') }} €</span></div>
+            @if ($returnOf)
+                <div class="pos-subtotal"><span>Νέα είδη</span><span>{{ number_format($this->total, 2, ',', '.') }} €</span></div>
+                <div class="pos-subtotal pos-minus"><span>Επιστροφή</span><span>−{{ number_format($this->returnTotal, 2, ',', '.') }} €</span></div>
+                <div class="pos-total"><span>{{ $this->due >= 0 ? 'Πληρωτέο' : 'Επιστροφή χρημάτων' }}</span><span>{{ number_format(abs($this->due), 2, ',', '.') }} €</span></div>
+            @else
+                <div class="pos-total"><span>Σύνολο</span><span>{{ number_format($this->total, 2, ',', '.') }} €</span></div>
+            @endif
 
             <div class="pos-pay">
                 <input type="text" inputmode="decimal" placeholder="Πήρα (μετρητά)" wire:model.live.debounce.200ms="tendered">
@@ -161,8 +206,8 @@
             </div>
 
             <div class="pos-actions">
-                <button type="button" class="pos-btn pos-btn-issue" x-on:click="openWin()" wire:click="checkout" wire:loading.attr="disabled" wire:target="checkout" @disabled($cart === [])>
-                    <span wire:loading.remove wire:target="checkout">Έκδοση απόδειξης (μετρητά)</span>
+                <button type="button" class="pos-btn pos-btn-issue" x-on:click="openWin()" wire:click="checkout" wire:loading.attr="disabled" wire:target="checkout" @disabled($cart === [] && $returnOf === null)>
+                    <span wire:loading.remove wire:target="checkout">{{ $returnOf ? ($cart === [] ? 'Έκδοση επιστροφής' : 'Έκδοση αλλαγής') : 'Έκδοση απόδειξης (μετρητά)' }}</span>
                     <span wire:loading wire:target="checkout">Έκδοση…</span>
                 </button>
                 <button type="button" class="pos-btn pos-btn-ghost" wire:click="clearCart" wire:confirm="Άδειασμα καλαθιού;">Άδειασμα</button>

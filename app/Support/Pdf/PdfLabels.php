@@ -98,6 +98,8 @@ class PdfLabels
         'line_discount' => ['Έκπτωση', 'Discount'],
         'vat_included' => ['Στις τιμές συμπεριλαμβάνεται ο ΦΠΑ', 'Prices include VAT'],
         'items_count' => ['Τεμάχια', 'Items'],
+        'return_for' => ['Επιστροφή για την απόδειξη', 'Return for receipt'],
+        'refund_total' => ['Επιστροφή χρημάτων', 'Refund'],
 
         // Customer running-balance block («ΝΕΟ ΥΠΟΛΟΙΠΟ»)
         'customer_balance' => ['Υπόλοιπο πελάτη', 'Customer balance'],

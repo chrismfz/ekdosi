@@ -1224,6 +1224,21 @@ class CompanyForm
                                         : [])
                                     ->requiredWith('pos_enabled')
                                     ->helperText('Τρόπος με «ημέρες πίστωσης» 0 (εξοφλείται στην έκδοση) και κωδικό myDATA 3 (μετρητά).'),
+                                Select::make('pos_credit_type_id')
+                                    ->label('Σειρά πιστωτικών λιανικής (11.4) — επιστροφές')
+                                    ->visible(fn (callable $get): bool => (bool) $get('pos_enabled'))
+                                    ->options(fn (?Company $record) => $record
+                                        ? InvoiceType::query()->withoutGlobalScope(CompanyScope::class)
+                                            ->where('company_id', $record->getKey())
+                                            ->where('mydata_type', '11.4')
+                                            ->where('is_credit', true)
+                                            ->orderBy('code')
+                                            ->get()
+                                            ->mapWithKeys(fn (InvoiceType $t) => [$t->id => $t->code.' — '.$t->name])
+                                            ->all()
+                                        : [])
+                                    ->placeholder('— χωρίς επιστροφές στο ταμείο —')
+                                    ->helperText('Επιστροφή / αλλαγή στο ταμείο: πιστωτικό 11.4 που συσχετίζεται με την αρχική απόδειξη. Κενό = οι επιστροφές γίνονται μόνο από τα «Παραστατικά».'),
                             ]),
                         // Προσωπικό / ΕΡΓΑΝΗ (docs/ergani/README.md) — same kill-switch
                         // pattern as Support/Domains, plus the ΕΡΓΑΝΗ ΙΙ environment,
