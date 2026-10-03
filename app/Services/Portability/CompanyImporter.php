@@ -181,6 +181,7 @@ class CompanyImporter
             // never-populated map, else the source id would violate the FK.
             'whmcs_pending_id' => 'pending_whmcs_invoices', 'service_contract_id' => 'service_contracts',
             'pos_session_id' => 'pos_sessions',   // «Ταμείο ημέρας» — not in the bundle → nulled
+            'pos_cashier_id' => 'users',
         ],
         'invoice_lines' => ['invoice_id' => 'invoices', 'product_id' => 'products', 'original_line_id' => 'invoice_lines'],
         'mydata_marks' => ['invoice_id' => 'invoices'],

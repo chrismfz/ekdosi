@@ -1074,6 +1074,12 @@ class Invoice extends Model implements MovableDocument
         }
     }
 
+    /** «Αναφορές Ταμείου»: who rang this till document (null on non-till documents). */
+    public function posCashier(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'pos_cashier_id');
+    }
+
     public function paymentMethod(): BelongsTo
     {
         return $this->belongsTo(PaymentMethod::class);

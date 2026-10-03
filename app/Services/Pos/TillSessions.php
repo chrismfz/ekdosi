@@ -4,6 +4,7 @@ namespace App\Services\Pos;
 
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\InvoiceLine;
 use App\Models\PaymentMethod;
 use App\Models\PosCashMovement;
 use App\Models\PosSession;
@@ -11,6 +12,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Models\User;
 use App\Services\InvoiceVatBreakdown;
 use App\Support\InvoiceScope;
+use App\Support\LineMoney;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -160,45 +162,7 @@ class TillSessions
             ];
         }
 
-        $byMethod = [];
-        $vat = [];
-        $levies = 0.0;
-        $totals = ['sales_count' => 0, 'sales_total' => 0.0, 'refunds_count' => 0, 'refunds_total' => 0.0, 'cash_sales' => 0.0, 'cash_refunds' => 0.0];
-        foreach ($docs as $doc) {
-            $refund = (bool) $doc->invoiceType?->is_credit;
-            $amount = (float) $doc->payableTotal();
-            $method = $doc->paymentMethod;
-            $cash = self::isCash($method);
-            $key = $method?->getKey() ?? 0;
-            $byMethod[$key] ??= ['method' => (string) ($method?->description ?? '—'), 'cash' => $cash, 'sales_count' => 0, 'sales' => 0.0, 'refunds_count' => 0, 'refunds' => 0.0];
-
-            if ($refund) {
-                $byMethod[$key]['refunds_count']++;
-                $byMethod[$key]['refunds'] += $amount;
-                $totals['refunds_count']++;
-                $totals['refunds_total'] += $amount;
-                $totals['cash_refunds'] += $cash ? $amount : 0.0;
-            } else {
-                $byMethod[$key]['sales_count']++;
-                $byMethod[$key]['sales'] += $amount;
-                $totals['sales_count']++;
-                $totals['sales_total'] += $amount;
-                $totals['cash_sales'] += $cash ? $amount : 0.0;
-            }
-
-            // VAT per rate, net of the returns (a credit note subtracts); what the
-            // document charges beyond it is its product fees (the bag) — own line.
-            $breakdown = InvoiceVatBreakdown::for($doc);
-            $levies += ($refund ? -1 : 1) * ($amount - $breakdown->totalGross());
-            foreach ($breakdown->rows as $row) {
-                $rate = (string) round((float) $row['rate'], 2);
-                $vat[$rate] ??= ['rate' => (float) $rate, 'net' => 0.0, 'vat' => 0.0, 'gross' => 0.0];
-                $sign = $refund ? -1 : 1;
-                $vat[$rate]['net'] += $sign * (float) $row['net'];
-                $vat[$rate]['vat'] += $sign * (float) $row['vat'];
-                $vat[$rate]['gross'] += $sign * ((float) $row['net'] + (float) $row['vat']);
-            }
-        }
+        $agg = self::aggregate($docs);
 
         $movements = PosCashMovement::query()->withoutGlobalScope(CompanyScope::class)
             ->where('pos_session_id', $session->getKey())
@@ -213,24 +177,21 @@ class TillSessions
 
         return [
             'opening_float' => $r2($float),
-            'sales_count' => $totals['sales_count'],
-            'sales_total' => $r2($totals['sales_total']),
-            'refunds_count' => $totals['refunds_count'],
-            'refunds_total' => $r2($totals['refunds_total']),
-            'net_total' => $r2($totals['sales_total'] - $totals['refunds_total']),
-            'by_method' => array_values(array_map(fn (array $m) => array_merge($m, ['sales' => $r2($m['sales']), 'refunds' => $r2($m['refunds'])]), $byMethod)),
-            'vat' => array_values(array_filter(
-                array_map(fn (array $v) => ['rate' => $v['rate'], 'net' => $r2($v['net']), 'vat' => $r2($v['vat']), 'gross' => $r2($v['gross'])], $vat),
-                fn (array $v) => $v['net'] != 0.0 || $v['vat'] != 0.0,   // a rate whose sales were all returned
-            )),
-            'levies' => $r2($levies),
-            'cash_sales' => $r2($totals['cash_sales']),
-            'cash_refunds' => $r2($totals['cash_refunds']),
+            'sales_count' => $agg['sales_count'],
+            'sales_total' => $agg['sales_total'],
+            'refunds_count' => $agg['refunds_count'],
+            'refunds_total' => $agg['refunds_total'],
+            'net_total' => $agg['net_total'],
+            'by_method' => $agg['by_method'],
+            'vat' => $agg['vat'],
+            'levies' => $agg['levies'],
+            'cash_sales' => $agg['cash_sales'],
+            'cash_refunds' => $agg['cash_refunds'],
             'cash_in' => $r2($cashIn),
             'cash_out' => $r2($cashOut),
             'pending' => $pending,
             'pending_cash' => $r2($pendingCash),
-            'expected_cash' => $r2($float + $totals['cash_sales'] - $totals['cash_refunds'] + $pendingCash + $cashIn - $cashOut),
+            'expected_cash' => $r2($float + $agg['cash_sales'] - $agg['cash_refunds'] + $pendingCash + $cashIn - $cashOut),
             'movements' => $movements->map(fn (PosCashMovement $m) => [
                 'at' => $m->created_at?->format('H:i') ?? '',
                 'direction' => $m->direction,
@@ -260,6 +221,97 @@ class TillSessions
         }
 
         return $locked;
+    }
+
+    /**
+     * The money of a set of ISSUED till documents (sales + return credit notes) —
+     * the one calculation behind a session's report AND «Αναφορές Ταμείου»: totals,
+     * per payment method, per VAT rate (returns subtract; product fees on their own
+     * line), the cash part, and the line discounts given (net of returns).
+     *
+     * @param  iterable<Invoice>  $docs  with paymentMethod, invoiceType, lines loaded
+     * @return array{sales_count: int, sales_total: float, refunds_count: int, refunds_total: float, net_total: float, levies: float, discounts: float, by_method: list<array{method: string, cash: bool, sales_count: int, sales: float, refunds_count: int, refunds: float}>, vat: list<array{rate: float, net: float, vat: float, gross: float}>, cash_sales: float, cash_refunds: float}
+     */
+    public static function aggregate(iterable $docs): array
+    {
+        $byMethod = [];
+        $vat = [];
+        $levies = 0.0;
+        $totals = ['sales_count' => 0, 'sales_total' => 0.0, 'refunds_count' => 0, 'refunds_total' => 0.0, 'cash_sales' => 0.0, 'cash_refunds' => 0.0];
+        $discounts = 0.0;
+        foreach ($docs as $doc) {
+            $refund = (bool) $doc->invoiceType?->is_credit;
+            $amount = (float) $doc->payableTotal();
+            $method = $doc->paymentMethod;
+            $cash = self::isCash($method);
+            $key = $method?->getKey() ?? 0;
+            $byMethod[$key] ??= ['method' => (string) ($method?->description ?? '—'), 'cash' => $cash, 'sales_count' => 0, 'sales' => 0.0, 'refunds_count' => 0, 'refunds' => 0.0];
+
+            if ($refund) {
+                $byMethod[$key]['refunds_count']++;
+                $byMethod[$key]['refunds'] += $amount;
+                $totals['refunds_count']++;
+                $totals['refunds_total'] += $amount;
+                $totals['cash_refunds'] += $cash ? $amount : 0.0;
+            } else {
+                $byMethod[$key]['sales_count']++;
+                $byMethod[$key]['sales'] += $amount;
+                $totals['sales_count']++;
+                $totals['sales_total'] += $amount;
+                $totals['cash_sales'] += $cash ? $amount : 0.0;
+            }
+
+            // VAT per rate, net of the returns (a credit note subtracts); what the
+            // document charges beyond it is its product fees (the bag) — own line.
+            $sign = $refund ? -1 : 1;
+            foreach ($doc->lines as $line) {
+                $discounts += $sign * self::lineDiscount($line);
+            }
+            $breakdown = InvoiceVatBreakdown::for($doc);
+            $levies += ($refund ? -1 : 1) * ($amount - $breakdown->totalGross());
+            foreach ($breakdown->rows as $row) {
+                $rate = (string) round((float) $row['rate'], 2);
+                $vat[$rate] ??= ['rate' => (float) $rate, 'net' => 0.0, 'vat' => 0.0, 'gross' => 0.0];
+                $sign = $refund ? -1 : 1;
+                $vat[$rate]['net'] += $sign * (float) $row['net'];
+                $vat[$rate]['vat'] += $sign * (float) $row['vat'];
+                $vat[$rate]['gross'] += $sign * ((float) $row['net'] + (float) $row['vat']);
+            }
+        }
+
+        $r2 = fn (float $v): float => round($v, 2);
+
+        return [
+            'sales_count' => $totals['sales_count'],
+            'sales_total' => $r2($totals['sales_total']),
+            'refunds_count' => $totals['refunds_count'],
+            'refunds_total' => $r2($totals['refunds_total']),
+            'net_total' => $r2($totals['sales_total'] - $totals['refunds_total']),
+            'levies' => $r2($levies),
+            'discounts' => $r2($discounts),
+            'by_method' => array_values(array_map(fn (array $m) => array_merge($m, ['sales' => $r2($m['sales']), 'refunds' => $r2($m['refunds'])]), $byMethod)),
+            'vat' => array_values(array_filter(
+                array_map(fn (array $v) => ['rate' => $v['rate'], 'net' => $r2($v['net']), 'vat' => $r2($v['vat']), 'gross' => $r2($v['gross'])], $vat),
+                fn (array $v) => $v['net'] != 0.0 || $v['vat'] != 0.0,   // a rate whose sales were all returned
+            )),
+            'cash_sales' => $r2($totals['cash_sales']),
+            'cash_refunds' => $r2($totals['cash_refunds']),
+        ];
+    }
+
+    /** What a line's own discount took off its gross (same anchor, same formula as InvoiceLine::saving). */
+    public static function lineDiscount(InvoiceLine $line): float
+    {
+        if ((float) $line->discount <= 0) {
+            return 0.0;
+        }
+        $qty = (float) $line->qty;
+        $rate = (float) $line->vat_percent;
+        $full = $line->gross_unit_price !== null
+            ? LineMoney::fromGross($qty, (float) $line->gross_unit_price, 0.0, $rate)['gross']
+            : LineMoney::fromNet($qty, (float) $line->price_per_item, 0.0, $rate)['gross'];
+
+        return max(0.0, $full - (float) $line->gross_price);
     }
 
     /**

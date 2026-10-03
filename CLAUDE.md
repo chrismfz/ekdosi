@@ -337,6 +337,12 @@ idempotent money write (pending/expired → settled, stamps intent + channel met
 ring the operators' bell on unattended settle, get a receipt PDF. Design/threat model:
 `docs/payment-gateways-design.md`; B2 (PayPal/Stripe) research `docs/payment-gateways-b2-paypal-stripe.md`.
 
+**Κάρτα στο ταμείο (Α.1155/2023) — ΕΡΕΥΝΗΜΕΝΟ, μην το ξαναψάξεις → `docs/pos-card-payments.md`.** Ο πάροχος
+(InvoSign `GetPayment`) μόνο ΥΠΟΓΡΑΦΕΙ· το ekdosi στέλνει υπογραφή + ποσό στο τερματικό (Viva Cloud Terminal API ή Common
+WebECR — Cardlink/epay/Nexi), παίρνει `tid`/`transactionId` → τύπος 7 + `ProvidersSignature`. Το ERP-απευθείας-myDATA ΔΕΝ
+επιτρέπεται στη λιανική (FAQ Q37 — μόνο μέσω παρόχου)· το e-shop/vPOS εξαιρείται (Ε.2044/2024)· θέλει Δήλωση
+Συμβατότητας Α.1054/2024 ανά δίκτυο τερματικών.
+
 ## WHMCS bridge (built)
 Operator-gated **draft-first inbox** (NOT auto-issuing — invoices are legally significant): WHMCS
 push/poll → ekdosi webhook → `pending_whmcs_invoices` → operator «Δημιουργία Παραστατικού» (editable

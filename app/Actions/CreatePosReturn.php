@@ -70,7 +70,7 @@ class CreatePosReturn
             $sessionId = $session === null ? null : (int) app(TillSessions::class)->lockOpen($session, $company)->getKey();
             $credit = ($this->creditNotes)($original, $creditType, $selections);
             if ($sessionId !== null) {
-                $credit->forceFill(['pos_session_id' => $sessionId])->saveQuietly();
+                $credit->forceFill(['pos_session_id' => $sessionId, 'pos_cashier_id' => auth()->id()])->saveQuietly();
             }
 
             return $credit;
