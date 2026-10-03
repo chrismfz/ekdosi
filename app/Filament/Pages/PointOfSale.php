@@ -784,7 +784,9 @@ class PointOfSale extends Page
         }
 
         $diff = round((float) $closed->counted_cash - (float) $closed->expected_cash, 2);
-        $url = PosSessionReportController::signedUrl($closed->getKey());
+        // The «Το ταμείο έκλεισε» notice stays on screen: its link lives a working day,
+        // not the 30' of a print-now link (an expired signature reads as a 403).
+        $url = PosSessionReportController::signedUrl($closed->getKey(), 12 * 60);
         Notification::make()->success()->title('Το ταμείο έκλεισε')
             ->body('Αναμενόμενα '.number_format((float) $closed->expected_cash, 2, ',', '.').' € · μετρήθηκαν '
                 .number_format((float) $closed->counted_cash, 2, ',', '.').' € · διαφορά '.($diff > 0 ? '+' : '').number_format($diff, 2, ',', '.').' €')
