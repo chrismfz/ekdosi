@@ -99,8 +99,11 @@ class PointOfSale extends Page
 
     public string $cashReason = '';
 
-    /** The «Κλείσιμο ταμείου» box (summary + count). */
+    /** The «Κλείσιμο ταμείου» box (summary + count) — of THIS session (server-set). */
     public bool $closing = false;
+
+    #[Locked]
+    public ?int $closingSessionId = null;
 
     public string $countedCash = '';
 
@@ -614,8 +617,9 @@ class PointOfSale extends Page
 
             return;
         } catch (RuntimeException $e) {
-            // Refused before anything was created (settings, an unsellable item):
-            // keep the cart so the cashier can fix it.
+            // Refused before anything was created (settings, an unsellable item, a
+            // till closed in another tab): keep the cart so the cashier can fix it.
+            $this->forgetTill();
             $this->dispatch('pos-print-cancel');
             Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()->send();
 
@@ -675,7 +679,7 @@ class PointOfSale extends Page
             Notification::make()->warning()->title($e->getMessage())->send();
         }
         $this->openingFloat = '';
-        unset($this->tillSession);
+        $this->forgetTill();
         $this->dispatch('pos-focus');
     }
 
@@ -706,6 +710,7 @@ class PointOfSale extends Page
             app(TillSessions::class)->move($session, auth()->user(), $this->cashPanel, $amount, $this->cashReason);
         } catch (RuntimeException $e) {
             Notification::make()->warning()->title($e->getMessage())->send();
+            $this->forgetTill();
 
             return;
         }
@@ -715,7 +720,8 @@ class PointOfSale extends Page
 
     public function startClose(): void
     {
-        $this->closing = true;
+        $this->closingSessionId = $this->tillSession?->getKey();
+        $this->closing = $this->closingSessionId !== null;
         $this->cashPanel = null;
         $this->countedCash = '';
         $this->closeNotes = '';
@@ -725,6 +731,7 @@ class PointOfSale extends Page
     {
         $this->cashPanel = null;
         $this->closing = false;
+        $this->closingSessionId = null;
         $this->dispatch('pos-focus');
     }
 
@@ -733,9 +740,13 @@ class PointOfSale extends Page
         $this->tillTenant();
         $session = $this->tillSession;
         $counted = self::parseAmount($this->countedCash);
-        if ($session === null) {
+        if ($session === null || $session->getKey() !== $this->closingSessionId) {
+            // The till changed under this box (another tab closed / reopened it):
+            // never apply this count to a session it wasn't made for.
             $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title('Το ταμείο άλλαξε σε άλλη καρτέλα — ξεκίνα το κλείσιμο από την αρχή.')->send();
             $this->cancelTillPanel();
+            $this->forgetTill();
 
             return;
         }
@@ -755,7 +766,8 @@ class PointOfSale extends Page
             $closed = app(TillSessions::class)->close($session, auth()->user(), $counted, $this->closeNotes);
         } catch (RuntimeException $e) {
             $this->dispatch('pos-print-cancel');
-            Notification::make()->warning()->title($e->getMessage())->send();
+            Notification::make()->warning()->title($e->getMessage())->persistent()->send();
+            $this->forgetTill();
 
             return;
         }
@@ -769,15 +781,17 @@ class PointOfSale extends Page
             ->persistent()
             ->send();
         $this->closing = false;
+        $this->closingSessionId = null;
         $this->lastInvoiceId = null;
         $this->lastWithId = null;
-        unset($this->tillSession, $this->recentSessions);
+        $this->forgetTill();
         $this->dispatch('pos-print', url: $url);
     }
 
     /** An interim (X-style) report of the open till. */
     public function printTillReport(): void
     {
+        $this->tillTenant();
         $session = $this->tillSession;
         if ($session === null) {
             $this->dispatch('pos-print-cancel');
@@ -787,9 +801,24 @@ class PointOfSale extends Page
         $this->dispatch('pos-print', url: PosSessionReportController::signedUrl($session->getKey()));
     }
 
-    public function sessionReportUrl(int $sessionId): string
+    /** Re-print a past closing (one of «Τελευταία κλεισίματα»). */
+    public function printSession(int $sessionId): void
     {
-        return PosSessionReportController::signedUrl($sessionId, 12 * 60);
+        $tenant = $this->tillTenant();
+        $exists = PosSession::query()->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $tenant->getKey())->whereKey($sessionId)->exists();
+        if (! $exists) {
+            $this->dispatch('pos-print-cancel');
+
+            return;
+        }
+        $this->dispatch('pos-print', url: PosSessionReportController::signedUrl($sessionId));
+    }
+
+    /** Drop the memoized till state — after a refusal the same render must not show a stale till. */
+    private function forgetTill(): void
+    {
+        unset($this->tillSession, $this->tillReport, $this->recentSessions);
     }
 
     public function getTillSessionProperty(): ?PosSession
@@ -804,7 +833,9 @@ class PointOfSale extends Page
     {
         $session = $this->tillSession;
 
-        return $this->closing && $session !== null ? app(TillSessions::class)->report($session) : null;
+        return $this->closing && $session !== null && $session->getKey() === $this->closingSessionId
+            ? app(TillSessions::class)->report($session)
+            : null;
     }
 
     /** @return Collection<int, PosSession> the last closings, for their reports */

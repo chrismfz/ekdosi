@@ -197,13 +197,29 @@
                                 <div class="pos-till-row" style="font-size:.8rem;color:#6b7280"><span>&nbsp;&nbsp;{{ $m['method'] }}</span><span>{{ number_format($m['sales'] - $m['refunds'], 2, ',', '.') }} €</span></div>
                             @endforeach
                             <div class="pos-till-row"><span>Ρέστα ανοίγματος</span><span>{{ number_format($r['opening_float'], 2, ',', '.') }} €</span></div>
+                            @if ($r['pending_cash'] != 0)
+                                <div class="pos-till-row"><span>Εκκρεμή (μετρητά)</span><span>{{ number_format($r['pending_cash'], 2, ',', '.') }} €</span></div>
+                            @endif
                             <div class="pos-till-row"><span>Καταθέσεις / αναλήψεις</span><span>+{{ number_format($r['cash_in'], 2, ',', '.') }} / −{{ number_format($r['cash_out'], 2, ',', '.') }} €</span></div>
                             <div class="pos-till-row b"><span>Αναμενόμενα μετρητά</span><span>{{ number_format($r['expected_cash'], 2, ',', '.') }} €</span></div>
-                            <input type="text" inputmode="decimal" placeholder="Μετρητά που μέτρησες" wire:model.live.debounce.300ms="countedCash">
-                            @if (($counted = \App\Filament\Pages\PointOfSale::parseAmount($countedCash)) !== null)
-                                @php($diff = round($counted - $r['expected_cash'], 2))
-                                <div class="pos-till-row b" style="color: {{ $diff == 0 ? '#15803d' : '#b91c1c' }}"><span>Διαφορά</span><span>{{ $diff > 0 ? '+' : '' }}{{ number_format($diff, 2, ',', '.') }} €</span></div>
+                            @if ($r['levies'] != 0)
+                                <div class="pos-till-row" style="font-size:.8rem;color:#6b7280"><span>&nbsp;&nbsp;(εκ των οποίων τέλη, π.χ. σακούλα)</span><span>{{ number_format($r['levies'], 2, ',', '.') }} €</span></div>
                             @endif
+                            @if ($r['pending'] !== [])
+                                <div class="pos-till-row" style="color:#b91c1c"><span>⚠ Εκκρεμή (δεν έχουν εκδοθεί ακόμη — μετρούν στα μετρητά): {{ collect($r['pending'])->map(fn ($p) => $p['code'].' '.number_format($p['amount'], 2, ',', '.').' €')->implode(', ') }}</span></div>
+                            @endif
+                            {{-- The difference is worked out in the browser: no round-trip (and no whole-day report) per keystroke. --}}
+                            <div wire:key="close-{{ $closingSessionId }}-{{ $r['expected_cash'] }}" x-data="{ c: @js($countedCash), expected: {{ json_encode((float) $r['expected_cash']) }},
+                                    parse(t) { const s = String(t).replace(/[\s€]/g, '');
+                                        if (/^\d{1,3}(\.\d{3})+,\d{1,2}$/.test(s)) return parseFloat(s.replace(/\./g, '').replace(',', '.'));
+                                        if (/^\d+([.,]\d{1,2})?$/.test(s)) return parseFloat(s.replace(',', '.'));
+                                        return null; },
+                                    get diff() { const v = this.parse(this.c); return v === null ? null : Math.round((v - this.expected) * 100) / 100; } }">
+                                <input type="text" inputmode="decimal" placeholder="Μετρητά που μέτρησες" wire:model="countedCash" x-on:input="c = $event.target.value">
+                                <template x-if="diff !== null">
+                                    <div class="pos-till-row b" :style="'color:' + (diff === 0 ? '#15803d' : '#b91c1c')"><span>Διαφορά</span><span x-text="(diff > 0 ? '+' : '') + diff.toLocaleString('el-GR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €'"></span></div>
+                                </template>
+                            </div>
                             <textarea rows="2" placeholder="Σημειώσεις (προαιρετικά)" wire:model="closeNotes"></textarea>
                             <div class="pos-till-btns" style="margin-top:.4rem">
                                 <button type="button" class="pos-btn pos-btn-issue pos-btn-sm" x-on:click="openWin()" wire:click="closeTill" wire:confirm="Κλείσιμο ταμείου;">Κλείσιμο &amp; εκτύπωση αναφοράς</button>
@@ -291,7 +307,7 @@
                 <div class="pos-till-hist">
                     Τελευταία κλεισίματα:
                     @foreach ($this->recentSessions as $past)
-                        <div>#{{ $past->id }} · {{ $past->closed_at?->format('d/m H:i') }} · διαφορά {{ number_format((float) $past->counted_cash - (float) $past->expected_cash, 2, ',', '.') }} € · <a href="{{ $this->sessionReportUrl($past->id) }}" target="_blank">αναφορά</a></div>
+                        <div>#{{ $past->id }} · {{ $past->closed_at?->format('d/m H:i') }} · διαφορά {{ number_format((float) $past->counted_cash - (float) $past->expected_cash, 2, ',', '.') }} € · <a href="#" x-on:click.prevent="openWin(); $wire.printSession({{ $past->id }})">αναφορά</a></div>
                     @endforeach
                 </div>
             @endif

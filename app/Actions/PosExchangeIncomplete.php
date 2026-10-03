@@ -20,8 +20,11 @@ class PosExchangeIncomplete extends RuntimeException
         Throwable $previous,
     ) {
         parent::__construct(
-            'Η επιστροφή εκδόθηκε ('.$creditCode.'), αλλά η νέα πώληση όχι: '.$previous->getMessage()
-            .' — δώσε πίσω τα χρήματα της επιστροφής ή ξαναχτύπησε τη νέα πώληση.',
+            'Η επιστροφή εκδόθηκε ('.$creditCode.'), αλλά η νέα πώληση όχι'.($saleDraftId !== null
+                // A draft may already be filed (in doubt) — finishing IT is the only safe retry.
+                ? ' (έμεινε πρόχειρο #'.$saleDraftId.' — ολοκληρώνεται από εκεί, μην την ξαναχτυπήσεις)'
+                : ': '.$previous->getMessage())
+            .' — δώσε πίσω τα χρήματα της επιστροφής· η νέα πώληση πληρώνεται όταν εκδοθεί.',
             previous: $previous,
         );
     }

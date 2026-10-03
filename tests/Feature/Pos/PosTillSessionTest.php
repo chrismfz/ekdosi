@@ -4,6 +4,8 @@ namespace Tests\Feature\Pos;
 
 use App\Actions\CreatePosReturn;
 use App\Actions\CreatePosSale;
+use App\Actions\PosExchangeIncomplete;
+use App\Actions\PosSaleNotIssued;
 use App\Filament\Pages\PointOfSale;
 use App\Http\Controllers\PosSessionReportController;
 use App\Models\Company;
@@ -11,11 +13,14 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\PosCashMovement;
+use App\Models\PosSession;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\User;
 use App\Models\VatCategory;
+use App\Services\Pos\PosIssuer;
 use App\Services\Pos\TillSessions;
+use App\Services\RecomputeInvoiceTotals;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
@@ -100,7 +105,7 @@ class PosTillSessionTest extends TestCase
 
         // A closed day is frozen: cancelling one of its receipts later does not rewrite it.
         $sale->forceFill(['local_status' => 'cancelled'])->save();
-        $this->assertEquals(75.00, app(TillSessions::class)->report($closed->fresh())['expected_cash']);   // (JSON: 75 comes back an int)
+        $this->assertSame(75.00, app(TillSessions::class)->report($closed->fresh())['expected_cash'], 'frozen — and still a float after the JSON round-trip');
 
         $html = $this->get(PosSessionReportController::signedUrl($closed->id))->assertOk()->getContent();
         $text = preg_replace('/\s+/u', ' ', html_entity_decode(strip_tags(str_replace('<', ' <', $html))));
@@ -108,6 +113,83 @@ class PosTillSessionTest extends TestCase
         $this->assertStringContainsString('Αναμενόμενα 75,00 €', $text);
         $this->assertStringContainsString('Διαφορά −0,50 €', $text);
         $this->assertStringContainsString('κούριερ', $text);
+    }
+
+    public function test_unissued_documents_are_pending_cash_and_the_bag_fee_has_its_own_line(): void
+    {
+        $tills = app(TillSessions::class);
+        $session = $tills->open($this->tenant, null, 0);
+        $bag = $this->product('Σακούλα', 0.01, ['price_wvat' => 0.01, 'mydata_tax_type' => 2, 'mydata_tax_per_unit' => 0.07]);
+        $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
+        app(CreatePosSale::class)($this->tenant, [['product_id' => $tee->id, 'qty' => 1], ['product_id' => $bag->id, 'qty' => 2]], $session);
+
+        $report = $tills->report($session);
+        $this->assertSame(10.16, $report['net_total'], '10,00 + 2 × (0,01 + 0,07)');
+        $this->assertSame(0.14, $report['levies'], 'the bag fee has its own line');
+        $this->assertSame(10.16, round(array_sum(array_column($report['vat'], 'gross')) + $report['levies'], 2), 'VAT table + fees = turnover');
+
+        // A sale stuck as a DRAFT (being filed / AADE down / in doubt) never blocks the close:
+        // its cash is in the drawer — listed as pending and counted.
+        $draft = app(CreatePosSale::class)($this->tenant, [['product_id' => $tee->id, 'qty' => 1]], $session);
+        $draft->forceFill(['local_status' => 'draft', 'invcode' => null])->saveQuietly();
+        $report = $tills->report($session);
+        $this->assertSame([['code' => '#'.$draft->id, 'amount' => 10.0]], $report['pending']);
+        $this->assertSame(10.16, $report['net_total'], 'not a sale until issued');
+        $this->assertSame(20.16, $report['expected_cash'], 'but its cash is in the drawer');
+
+        $tills->close($session, null, 20.16);
+        $this->assertFalse($session->fresh()->isOpen());
+        $this->assertSame(20.16, $tills->report($session->fresh())['expected_cash']);
+    }
+
+    public function test_a_failed_exchange_sale_and_a_failed_return_never_count_as_drawer_cash(): void
+    {
+        $tills = app(TillSessions::class);
+        $session = $tills->open($this->tenant, null, 0);
+        $tee = $this->product('Μπλουζάκι', 8.06, ['price_wvat' => 10.00]);
+        $sale = app(CreatePosSale::class)($this->tenant, [['product_id' => $tee->id, 'qty' => 1]], $session);
+
+        // The exchange's NEW sale is rung as a draft, then fails to issue.
+        $this->app->bind(CreatePosSale::class, fn ($app) => new class($app->make(RecomputeInvoiceTotals::class), $app->make(PosIssuer::class)) extends CreatePosSale
+        {
+            public function __invoke(Company $company, array $items, ?PosSession $session = null): Invoice
+            {
+                $draft = Invoice::create(['company_id' => $company->id, 'invoice_type_id' => $company->pos_invoice_type_id, 'issued_at' => now(),
+                    'local_status' => 'draft', 'header_discount_percent' => 0, 'payment_method_id' => $company->pos_payment_method_id, 'country' => 'GR']);
+                $draft->forceFill(['pos_session_id' => $session?->id, 'payable_total' => 10])->saveQuietly();
+
+                throw new PosSaleNotIssued($draft->id, new RuntimeException('AADE down'));
+            }
+        });
+        try {
+            app(CreatePosReturn::class)($this->tenant, $sale, [$sale->lines()->first()->id => 1], [['product_id' => $tee->id, 'qty' => 1]], $session);
+            $this->fail('expected an incomplete exchange');
+        } catch (PosExchangeIncomplete $e) {
+            $this->assertStringContainsString('μην την ξαναχτυπήσεις', $e->getMessage());
+            $this->assertNull(Invoice::find($e->saleDraftId)->pos_session_id, 'no money was taken for it');
+        }
+
+        // A return credit DRAFT (not issued) is listed, never counted as cash paid out.
+        $credit = Invoice::whereNotNull('credited_invoice_id')->sole();
+        $credit->forceFill(['local_status' => 'draft'])->saveQuietly();
+        $report = $tills->report($session);
+        $this->assertSame(10.00, $report['expected_cash'], 'the sale\'s 10,00 — nothing refunded, nothing pending');
+        $this->assertCount(1, $report['pending']);
+    }
+
+    public function test_a_count_is_never_applied_to_a_session_it_was_not_made_for(): void
+    {
+        $this->operator();
+        $first = app(TillSessions::class)->current($this->tenant);
+        $page = Livewire::test(PointOfSale::class)->call('startClose')->assertSet('closingSessionId', $first->id);
+
+        // Another tab closes it and opens a new one.
+        app(TillSessions::class)->close($first, null, 0);
+        $second = app(TillSessions::class)->open($this->tenant, null, 30);
+
+        $page->set('countedCash', '30')->call('closeTill')->assertDispatched('pos-print-cancel');
+        $this->assertTrue($second->fresh()->isOpen(), 'the new session stays open');
+        $this->assertSame(0.0, (float) $first->fresh()->counted_cash);
     }
 
     public function test_nothing_is_rung_while_the_till_is_closed(): void

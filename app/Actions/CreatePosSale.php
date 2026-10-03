@@ -55,7 +55,7 @@ class CreatePosSale
         $invoice = DB::transaction(function () use ($company, $items, $products, $type, $method, $session): Invoice {
             // «Ταμείο ημέρας» (PR 2b): rung into the open session — locked, so a
             // concurrent «Κλείσιμο» never freezes a report without this sale.
-            $sessionId = $session === null ? null : self::openSessionId($company, $session);
+            $sessionId = $session === null ? null : (int) app(TillSessions::class)->lockOpen($session, $company)->getKey();
             $invoice = Invoice::create([
                 'company_id' => $company->getKey(),
                 'invoice_type_id' => $type->getKey(),
@@ -105,16 +105,6 @@ class CreatePosSale
         $this->issuer->issue($invoice->refresh());
 
         return $invoice->refresh();
-    }
-
-    /** The till session a document is rung into — this company's, still open (locked). */
-    public static function openSessionId(Company $company, PosSession $session): int
-    {
-        if ((int) $session->company_id !== (int) $company->getKey()) {
-            throw new RuntimeException('Λάθος ταμείο για αυτή την εταιρεία.');
-        }
-
-        return (int) app(TillSessions::class)->lockOpen($session)->getKey();
     }
 
     /**

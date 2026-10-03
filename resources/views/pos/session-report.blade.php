@@ -43,6 +43,9 @@
         <tr><td>Πωλήσεις ({{ $report['sales_count'] }})</td><td class="r">{{ $money($report['sales_total']) }} €</td></tr>
         <tr><td>Επιστροφές ({{ $report['refunds_count'] }})</td><td class="r">−{{ $money($report['refunds_total']) }} €</td></tr>
         <tr class="b"><td>Καθαρός τζίρος</td><td class="r">{{ $money($report['net_total']) }} €</td></tr>
+        @if (($report['levies'] ?? 0) != 0)
+            <tr class="small"><td>&nbsp;&nbsp;εκ των οποίων τέλη (π.χ. σακούλα)</td><td class="r">{{ $money($report['levies']) }} €</td></tr>
+        @endif
     </table>
 
     @if ($report['by_method'] !== [])
@@ -73,6 +76,9 @@
         <tr><td>Ρέστα ανοίγματος</td><td class="r">{{ $money($report['opening_float']) }} €</td></tr>
         <tr><td>+ Πωλήσεις μετρητοίς</td><td class="r">{{ $money($report['cash_sales']) }} €</td></tr>
         <tr><td>− Επιστροφές μετρητοίς</td><td class="r">{{ $money($report['cash_refunds']) }} €</td></tr>
+        @if (($report['pending_cash'] ?? 0) != 0)
+            <tr><td>± Εκκρεμή (μη εκδοθέντα)</td><td class="r">{{ $money($report['pending_cash']) }} €</td></tr>
+        @endif
         <tr><td>+ Καταθέσεις στο ταμείο</td><td class="r">{{ $money($report['cash_in']) }} €</td></tr>
         <tr><td>− Αναλήψεις από το ταμείο</td><td class="r">{{ $money($report['cash_out']) }} €</td></tr>
         <tr class="b"><td>Αναμενόμενα</td><td class="r">{{ $money($report['expected_cash']) }} €</td></tr>
@@ -82,6 +88,17 @@
             <tr class="b big"><td>Διαφορά</td><td class="r">{{ $diff > 0 ? '+' : ($diff < 0 ? '−' : '') }}{{ $money(abs($diff)) }} €</td></tr>
         @endif
     </table>
+
+    @if (($report['pending'] ?? []) !== [])
+        <hr>
+        <div class="b">⚠ Εκκρεμή — δεν είχαν εκδοθεί στο κλείσιμο</div>
+        <table>
+            @foreach ($report['pending'] as $p)
+                <tr><td>{{ $p['code'] }}</td><td class="r">{{ $money($p['amount']) }} €</td></tr>
+            @endforeach
+        </table>
+        <div class="small">Ολοκληρώνονται από τα «Παραστατικά» — τα μετρητά τους είναι ήδη στο συρτάρι.</div>
+    @endif
 
     @if ($report['movements'] !== [])
         <hr>
