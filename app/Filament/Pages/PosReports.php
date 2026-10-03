@@ -5,6 +5,8 @@ namespace App\Filament\Pages;
 use App\Http\Controllers\PosSessionReportController;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\PosCashMovement;
+use App\Models\PosEvent;
 use App\Models\PosSession;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Pos\PosReports as ReportBuilder;
@@ -183,10 +185,27 @@ class PosReports extends Page
             ->orderBy('id')
             ->get();
 
+        // One timeline: documents, cash movements and the cashier's actions, by time.
+        $timeline = collect()
+            ->merge($docs->map(fn (Invoice $d) => ['at' => $d->issued_at ?? $d->created_at, 'who' => $d->posCashier?->name,
+                'what' => ($d->invoiceType?->is_credit ? 'Επιστροφή ' : 'Απόδειξη ').($d->invcode ?: '#'.$d->id).($d->local_status !== 'active' ? ' (μη εκδοθέν/ακυρωμένο)' : ''),
+                'amount' => ($d->invoiceType?->is_credit ? -1 : 1) * $d->payableTotal(), 'flag' => false]))
+            ->merge(PosCashMovement::query()->withoutGlobalScope(CompanyScope::class)->where('pos_session_id', $session->getKey())->with('user')->get()
+                ->map(fn (PosCashMovement $m) => ['at' => $m->created_at, 'who' => $m->user?->name,
+                    'what' => ($m->direction === PosCashMovement::IN ? 'Κατάθεση: ' : 'Ανάληψη: ').$m->reason,
+                    'amount' => ($m->direction === PosCashMovement::IN ? 1 : -1) * (float) $m->amount, 'flag' => false]))
+            ->merge(PosEvent::query()->withoutGlobalScope(CompanyScope::class)->where('pos_session_id', $session->getKey())->with(['user', 'product'])->get()
+                ->map(fn (PosEvent $e) => ['at' => $e->created_at, 'who' => $e->user?->name,
+                    'what' => $e->label().($e->product ? ' — '.$e->product->description_short : '').($e->qty !== null && (float) $e->qty != 1.0 ? ' ×'.rtrim(rtrim(number_format((float) $e->qty, 3, ',', ''), '0'), ',') : '').($e->note ? ' ('.$e->note.')' : ''),
+                    'amount' => $e->amount === null ? null : (float) $e->amount, 'flag' => in_array($e->type, ReportBuilder::WATCH, true)]))
+            ->sortBy(fn (array $row) => $row['at']?->getTimestamp() ?? 0)
+            ->values();
+
         return [
             'session' => $session,
             'report' => app(TillSessions::class)->report($session),
             'docs' => $docs,
+            'timeline' => $timeline,
             'print_url' => PosSessionReportController::signedUrl($session->getKey(), 12 * 60),
         ];
     }

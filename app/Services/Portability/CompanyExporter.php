@@ -127,6 +127,7 @@ class CompanyExporter
         // and they travel). invoices.pos_session_id is nulled on import.
         'pos_sessions',
         'pos_cash_movements',
+        'pos_events',   // «Ιστορικό ενεργειών ταμία» — the same operational log
         // AI «Βοηθός» operational state — metering/billing log + the transient
         // confirm queue & reminders. Not part of the accounting dataset a tenant
         // carries across VMs (re-accrues per usage; pending actions are ephemeral).

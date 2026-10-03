@@ -46,6 +46,7 @@
         .pr-link { color:#2563eb; font-weight:500; }
         .dark .pr-link { color:#60a5fa; }
         .pr-empty { padding:1.25rem; text-align:center; color:#6b7280; }
+        .pr-nowrap { white-space:nowrap; }
         .pr-two { display:grid; grid-template-columns:1fr; gap:1rem; }
         @media (min-width:1024px){ .pr-two{ grid-template-columns:repeat(2,minmax(0,1fr)); } }
     </style>
@@ -96,7 +97,7 @@
             <div class="pr-empty">Καμία κίνηση στην περίοδο.</div>
         @else
             <div class="pr-wrap"><table class="pr-table">
-                <thead><tr><th>Ταμίας</th><th class="pr-num">Αποδείξεις</th><th class="pr-num">Πωλήσεις</th><th class="pr-num">Επιστροφές</th><th class="pr-num">Καθαρά</th><th class="pr-num">Εκπτώσεις</th><th class="pr-num">Κλεισίματα</th><th class="pr-num">Διαφορά ταμείου</th></tr></thead>
+                <thead><tr><th>Ταμίας</th><th class="pr-num">Αποδείξεις</th><th class="pr-num">Πωλήσεις</th><th class="pr-num">Επιστροφές</th><th class="pr-num">Καθαρά</th><th class="pr-num">Εκπτώσεις</th><th class="pr-num">Κλεισίματα</th><th class="pr-num">Διαφορά ταμείου</th><th class="pr-num" title="«Άδειασμα» καλαθιού με είδη">Αδειάσματα</th><th class="pr-num" title="Είδη που αφαιρέθηκαν / λιγότερα τεμάχια μετά το σκανάρισμα">Αφαιρέσεις</th><th class="pr-num">Επανεκτ.</th></tr></thead>
                 <tbody>
                     @foreach ($r['by_cashier'] as $c)
                         <tr>
@@ -108,6 +109,34 @@
                             <td class="pr-num">{{ $money($c['discounts']) }}</td>
                             <td class="pr-num">{{ $c['sessions_closed'] }}</td>
                             <td class="pr-num {{ $c['difference'] != 0 ? 'pr-bad' : '' }}">{{ $c['sessions_closed'] ? $signed($c['difference']) : '—' }}</td>
+                            <td class="pr-num">{{ $c['cleared'] ? $c['cleared'].' · '.$money($c['cleared_amount']) : '—' }}</td>
+                            <td class="pr-num">{{ $c['removed'] ? $c['removed'].' · '.$money($c['removed_amount']) : '—' }}</td>
+                            <td class="pr-num">{{ $c['reprints'] ?: '—' }}</td>
+                        </tr>
+                    @endforeach
+                </tbody>
+            </table></div>
+        @endif
+    </x-filament::section>
+
+    <x-filament::section>
+        <x-slot name="heading">Ενέργειες ταμία προς έλεγχο</x-slot>
+        <x-slot name="description">Ό,τι έγινε στο ταμείο και δεν έγινε απόδειξη: αδειάσματα, αφαιρέσεις, εκπτώσεις, επανεκτυπώσεις, αποτυχίες, ακυρωμένες επιστροφές.</x-slot>
+        @if ($r['events']->isEmpty())
+            <div class="pr-empty">Καμία τέτοια ενέργεια στην περίοδο.</div>
+        @else
+            <div class="pr-wrap"><table class="pr-table">
+                <thead><tr><th>Πότε</th><th>Ταμίας</th><th>Ενέργεια</th><th>Είδος</th><th class="pr-num">Ποσ.</th><th class="pr-num">Αξία</th><th>Σημείωση</th></tr></thead>
+                <tbody>
+                    @foreach ($r['events'] as $e)
+                        <tr wire:key="e-{{ $e->id }}">
+                            <td class="pr-nowrap">{{ $e->created_at?->format('d/m H:i') }}</td>
+                            <td>{{ $e->user?->name ?? '—' }}</td>
+                            <td>{{ $e->label() }}</td>
+                            <td>{{ $e->product?->description_short ?? ($e->invoice?->invcode ?? '') }}</td>
+                            <td class="pr-num">{{ $e->qty !== null ? rtrim(rtrim(number_format((float) $e->qty, 3, ',', ''), '0'), ',') : '' }}</td>
+                            <td class="pr-num">{{ $e->amount !== null ? $money($e->amount) : '' }}</td>
+                            <td class="pr-muted">{{ $e->note }}</td>
                         </tr>
                     @endforeach
                 </tbody>
@@ -169,6 +198,17 @@
                                             <p><a class="pr-link" href="{{ $detail['print_url'] }}" target="_blank">🖨 Αναφορά ταμείου (80mm)</a></p>
                                         </div>
                                     </div>
+                                    <strong>Χρονολόγιο</strong>
+                                    <table class="pr-table">
+                                        @foreach ($detail['timeline'] as $row)
+                                            <tr class="{{ $row['flag'] ? 'pr-bad' : '' }}">
+                                                <td class="pr-nowrap">{{ $row['at']?->format('H:i') }}</td>
+                                                <td>{{ $row['who'] ?? '—' }}</td>
+                                                <td>{{ $row['what'] }}</td>
+                                                <td class="pr-num">{{ $row['amount'] === null ? '' : $signed($row['amount']) }}</td>
+                                            </tr>
+                                        @endforeach
+                                    </table>
                                 </td>
                             </tr>
                         @endif

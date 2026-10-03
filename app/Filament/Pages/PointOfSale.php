@@ -12,9 +12,11 @@ use App\Http\Controllers\PosSessionReportController;
 use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\PosCashMovement;
+use App\Models\PosEvent;
 use App\Models\PosSession;
 use App\Models\Product;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Pos\PosActivity;
 use App\Services\Pos\ReceiptLookup;
 use App\Services\Pos\TillSessions;
 use App\Services\Products\ProductMediaService;
@@ -233,6 +235,7 @@ class PointOfSale extends Page
         // Always its own line — two «ΡΟΥΧΑ» at different prices never merge. The line
         // is shelf-priced (POS-2): it charges exactly the typed price.
         $this->cart[] = ['product_id' => $product->getKey(), 'qty' => 1.0, 'discount' => 0.0, 'price' => $price];
+        $this->activity(PosEvent::OPEN_PRICE, $product->getKey(), 1, $price);
         $this->closePrice();
     }
 
@@ -265,17 +268,22 @@ class PointOfSale extends Page
         if (! isset($this->cart[$index])) {
             return;
         }
-        $this->cart[$index]['qty'] = (float) ($this->cart[$index]['qty'] ?? 0) - 1;
-        if ($this->cart[$index]['qty'] <= 0) {
-            $this->remove($index);
+        if ((float) ($this->cart[$index]['qty'] ?? 0) <= 1) {
+            $this->remove($index);   // its last unit → the item is taken off
 
             return;
         }
+        $this->activity(PosEvent::QTY_REDUCED, $this->cart[$index]['product_id'] ?? null, 1, $this->lineValue($this->cart[$index], 1));
+        $this->cart[$index]['qty'] = (float) ($this->cart[$index]['qty'] ?? 0) - 1;
         $this->refocus();
     }
 
     public function remove(int $index): void
     {
+        if (isset($this->cart[$index])) {
+            $line = $this->cart[$index];
+            $this->activity(PosEvent::ITEM_REMOVED, $line['product_id'] ?? null, (float) ($line['qty'] ?? 0), $this->lineValue($line));
+        }
         unset($this->cart[$index]);
         $this->cart = array_values($this->cart);
         $this->refocus();
@@ -289,8 +297,42 @@ class PointOfSale extends Page
 
     public function clearCart(): void
     {
+        if ($this->returnOf !== null) {
+            $this->activity(PosEvent::RETURN_CANCELLED, invoiceId: $this->returnOf);
+        }
+        if ($this->cart !== []) {
+            $total = array_sum($this->lineValues($this->cart));
+            $this->activity(PosEvent::CART_CLEARED, null, array_sum(array_map(fn (array $l) => (float) ($l['qty'] ?? 0), $this->cart)), $total, count($this->cart).' γραμμές');
+        }
         $this->resetTill();
         $this->closePrice();
+    }
+
+    /**
+     * A typed change in the cart: fewer units than scanned, or a line discount, goes to
+     * the activity log — compared AFTER the same coercion normalizeCart() applies (a
+     * typed «150» % IS a 100% discount, an emptied / negative qty IS the item gone).
+     */
+    public function updatingCart(mixed $value, ?string $key = null): void
+    {
+        if ($key === null) {
+            return;   // the whole cart replaced at once — not a typed edit of one line
+        }
+        [$index, $field] = array_pad(explode('.', $key, 2), 2, null);
+        $line = $this->cart[(int) $index] ?? null;
+        if (! is_array($line) || ! in_array($field, ['qty', 'discount'], true)) {
+            return;
+        }
+        $old = (float) ($line[$field] ?? 0);
+        $new = $field === 'qty'
+            ? max(0.001, round(is_scalar($value) && is_numeric($value) ? (float) $value : 0.0, 3))
+            : min(100, max(0, round(is_scalar($value) && is_numeric($value) ? (float) $value : 0.0, 2)));
+        if ($field === 'qty' && $new < $old) {
+            $this->activity(PosEvent::QTY_REDUCED, $line['product_id'] ?? null, $old - $new, $this->lineValue($line, $old - $new));
+        } elseif ($field === 'discount' && $new > $old) {
+            $this->activity(PosEvent::DISCOUNT, $line['product_id'] ?? null, (float) ($line['qty'] ?? 0),
+                $this->lineValue($line) - $this->lineValue(['discount' => $new] + $line), rtrim(rtrim(number_format($new, 2, ',', ''), '0'), ',').'%');
+        }
     }
 
     /**
@@ -374,6 +416,7 @@ class PointOfSale extends Page
 
         $this->resetReturn();
         $this->returnOf = $original->getKey();
+        $this->activity(PosEvent::RETURN_OPENED, invoiceId: $original->getKey(), note: (string) $original->invcode);
         $this->dispatch('pos-focus');
 
         return true;
@@ -399,6 +442,9 @@ class PointOfSale extends Page
 
     public function cancelReturn(): void
     {
+        if ($this->returnOf !== null) {
+            $this->activity(PosEvent::RETURN_CANCELLED, invoiceId: $this->returnOf);
+        }
         $this->resetReturn();
         $this->refocus();
     }
@@ -514,6 +560,7 @@ class PointOfSale extends Page
             // Before/inside the (transactional) credit note — nothing issued: keep the till.
             report($e);
             $this->dispatch('pos-print-cancel');
+            $this->activity(PosEvent::ISSUE_FAILED, note: 'Απρόσμενο σφάλμα');
             Notification::make()->danger()->title('Δεν εκδόθηκε')
                 ->body($this->unexpectedErrorHint())->persistent()->send();
 
@@ -614,6 +661,7 @@ class PointOfSale extends Page
         } catch (Throwable $e) {
             report($e);
             $this->dispatch('pos-print-cancel');
+            $this->activity(PosEvent::ISSUE_FAILED, note: 'Απρόσμενο σφάλμα');
             Notification::make()->danger()->title('Δεν εκδόθηκε')
                 ->body($this->unexpectedErrorHint())->persistent()->send();
 
@@ -643,10 +691,51 @@ class PointOfSale extends Page
     public function reprint(): void
     {
         if ($this->lastInvoiceId !== null) {
+            $this->activity(PosEvent::REPRINT, invoiceId: $this->lastInvoiceId);
             $this->dispatch('pos-print', url: $this->receiptUrl($this->lastInvoiceId, $this->lastWithId));
         } else {
             $this->dispatch('pos-print-cancel');
         }
+    }
+
+    /** Log a till action (best-effort — never blocks the sale). */
+    private function activity(string $type, ?int $productId = null, ?float $qty = null, ?float $amount = null, ?string $note = null, ?int $invoiceId = null): void
+    {
+        $tenant = Filament::getTenant();
+        if ($tenant instanceof Company) {
+            app(PosActivity::class)->log($tenant, $type, $productId, $qty, $amount, $note, $invoiceId);
+        }
+    }
+
+    /** What a cart line (or `$qty` of it) is worth on the receipt — shelf price, discount, fee. */
+    private function lineValue(array $line, ?float $qty = null): float
+    {
+        return $this->lineValues([['qty' => $qty ?? ($line['qty'] ?? 0)] + $line])[0];
+    }
+
+    /**
+     * The receipt value of cart lines, one query for all — the product as it IS (even
+     * if deactivated meanwhile: the log must not say an item was worth 0).
+     *
+     * @param  list<array<string, mixed>>  $lines
+     * @return list<float>
+     */
+    private function lineValues(array $lines): array
+    {
+        $products = Product::query()->withTrashed()->with('vatCategory')
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->whereKey(array_map(fn ($l) => (int) ($l['product_id'] ?? 0), $lines))
+            ->get()->keyBy('id');
+
+        return array_values(array_map(function (array $line) use ($products): float {
+            $product = $products->get((int) ($line['product_id'] ?? 0));
+            if ($product === null) {
+                return 0.0;
+            }
+            $t = CreatePosSale::lineTotals($product, (float) ($line['qty'] ?? 0), (float) ($line['discount'] ?? 0), $line['price'] ?? null);
+
+            return round($t['gross'] + $t['levy'], 2);
+        }, $lines));
     }
 
     /** What to do after an unexpected error — a cashier can't open «Παραστατικά». */
@@ -663,6 +752,7 @@ class PointOfSale extends Page
      */
     private function draftNotice(Notification $notification, ?int $draftId): void
     {
+        $this->activity(PosEvent::ISSUE_FAILED, invoiceId: $draftId, note: mb_substr((string) $notification->getTitle(), 0, 120));
         $notification->persistent();
         if ($draftId !== null && (bool) auth()->user()?->can('View:Invoice')) {
             $notification->actions([Action::make('open')->label('Άνοιγμα πρόχειρου #'.$draftId)
@@ -811,6 +901,7 @@ class PointOfSale extends Page
 
             return;
         }
+        $this->activity(PosEvent::X_REPORT);
         $this->dispatch('pos-print', url: PosSessionReportController::signedUrl($session->getKey()));
     }
 
