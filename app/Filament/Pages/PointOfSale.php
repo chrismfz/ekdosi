@@ -8,11 +8,15 @@ use App\Actions\PosExchangeIncomplete;
 use App\Actions\PosSaleNotIssued;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Http\Controllers\PosReceiptController;
+use App\Http\Controllers\PosSessionReportController;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Models\PosCashMovement;
+use App\Models\PosSession;
 use App\Models\Product;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Pos\ReceiptLookup;
+use App\Services\Pos\TillSessions;
 use App\Services\Products\ProductMediaService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -34,7 +38,8 @@ use UnitEnum;
  * the item. A product with variants opens its colour × size picker. «Έκδοση»
  * issues a 11.1 receipt on the spot through CreatePosSale (cash in this version)
  * and opens the 80mm receipt for printing. Gate: company `pos_enabled` +
- * View:PointOfSale.
+ * View:PointOfSale. Nothing is rung while the till («Ταμείο ημέρας», PR 2b) is
+ * closed: it is opened with a cash float and closed with a count (TillSessions).
  */
 class PointOfSale extends Page
 {
@@ -83,6 +88,27 @@ class PointOfSale extends Page
 
     public string $returnCode = '';
 
+    // «Ταμείο ημέρας» (PR 2b)
+
+    public string $openingFloat = '';
+
+    /** The cash in/out box: 'in' | 'out' | null. */
+    public ?string $cashPanel = null;
+
+    public string $cashAmount = '';
+
+    public string $cashReason = '';
+
+    /** The «Κλείσιμο ταμείου» box (summary + count) — of THIS session (server-set). */
+    public bool $closing = false;
+
+    #[Locked]
+    public ?int $closingSessionId = null;
+
+    public string $countedCash = '';
+
+    public string $closeNotes = '';
+
     public function getTitle(): string
     {
         return 'Ταμείο';
@@ -125,8 +151,12 @@ class PointOfSale extends Page
             ->where(fn ($q) => $q->where('barcode', $code)->orWhere('sku', $code)->orWhere('internal_code', $code))
             ->first();
 
-        if ($product === null && $this->returnsEnabled() && $this->openReturn($code, quiet: true)) {
-            return;   // the receipt's own barcode (ΜΑΡΚ / «R…») or its number → its return
+        if ($product === null && $this->returnsEnabled() && $this->findReceipt($code) !== null) {
+            // The receipt's own barcode (ΜΑΡΚ / «R…») or its number → its return (or why
+            // it can't be returned) — never also a «no such product» search.
+            $this->openReturn($code);
+
+            return;
         }
 
         if ($product === null) {
@@ -311,16 +341,21 @@ class PointOfSale extends Page
         }
     }
 
-    /** Find the receipt and open its return; false (with a notice unless quiet) if none. */
-    public function openReturn(string $code, bool $quiet = false): bool
+    private function findReceipt(string $code): ?Invoice
     {
         $tenant = Filament::getTenant();
-        $original = $tenant instanceof Company ? app(ReceiptLookup::class)->find($tenant, $code) : null;
+
+        return $tenant instanceof Company ? app(ReceiptLookup::class)->find($tenant, $code) : null;
+    }
+
+    /** Find the receipt and open its return; false (with a notice) if none / not returnable. */
+    public function openReturn(string $code): bool
+    {
+        $tenant = Filament::getTenant();
+        $original = $this->findReceipt($code);
         if ($original === null) {
-            if (! $quiet) {
-                Notification::make()->warning()->title('Δεν βρέθηκε απόδειξη «'.trim($code).'»')
-                    ->body('Γράψε τον αριθμό (π.χ. ΑΛΠ36) ή το ΜΑΡΚ, ή σκάναρε το barcode της απόδειξης.')->send();
-            }
+            Notification::make()->warning()->title('Δεν βρέθηκε απόδειξη του Ταμείου «'.trim($code).'»')
+                ->body('Γράψε τον αριθμό (π.χ. ΑΛΠ36) ή το ΜΑΡΚ, ή σκάναρε το barcode της απόδειξης. Άλλα παραστατικά επιστρέφονται από τα «Παραστατικά».')->send();
 
             return false;
         }
@@ -429,7 +464,7 @@ class PointOfSale extends Page
         return round($this->total - $this->returnTotal, 2);
     }
 
-    private function checkoutReturn(Company $tenant): void
+    private function checkoutReturn(Company $tenant, PosSession $session): void
     {
         $original = $this->returnOriginal;
         if ($original === null) {
@@ -450,7 +485,7 @@ class PointOfSale extends Page
         }
 
         try {
-            ['credit' => $credit, 'sale' => $sale] = app(CreatePosReturn::class)($tenant, $original, $qty, $this->cart);
+            ['credit' => $credit, 'sale' => $sale] = app(CreatePosReturn::class)($tenant, $original, $qty, $this->cart, $session);
         } catch (PosExchangeIncomplete $e) {
             // The credit note IS issued (a filed legal document): print it, clear
             // everything, and say what to do about the new sale.
@@ -541,8 +576,17 @@ class PointOfSale extends Page
             abort(403);
         }
 
+        $session = $this->tillSession;
+        if ($session === null) {
+            Notification::make()->warning()->title('Το ταμείο είναι κλειστό')
+                ->body('Άνοιξε το ταμείο (ρέστα συρταριού) πριν την πρώτη απόδειξη.')->send();
+            $this->dispatch('pos-print-cancel');
+
+            return;
+        }
+
         if ($this->returnOf !== null) {
-            $this->checkoutReturn($tenant);
+            $this->checkoutReturn($tenant, $session);
 
             return;
         }
@@ -555,7 +599,7 @@ class PointOfSale extends Page
         }
 
         try {
-            $invoice = app(CreatePosSale::class)($tenant, $this->cart);
+            $invoice = app(CreatePosSale::class)($tenant, $this->cart, $session);
         } catch (PosSaleNotIssued $e) {
             // The draft EXISTS (and a timed-out filing may already be at AADE):
             // empty the cart so the same sale can't be rung up again as a new
@@ -573,8 +617,9 @@ class PointOfSale extends Page
 
             return;
         } catch (RuntimeException $e) {
-            // Refused before anything was created (settings, an unsellable item):
-            // keep the cart so the cashier can fix it.
+            // Refused before anything was created (settings, an unsellable item, a
+            // till closed in another tab): keep the cart so the cashier can fix it.
+            $this->forgetTill();
             $this->dispatch('pos-print-cancel');
             Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()->send();
 
@@ -615,6 +660,202 @@ class PointOfSale extends Page
         } else {
             $this->dispatch('pos-print-cancel');
         }
+    }
+
+    // ── «Ταμείο ημέρας» (PR 2b) ────────────────────────────────────────────
+
+    public function openTill(): void
+    {
+        $tenant = $this->tillTenant();
+        $float = $this->openingFloat === '' ? 0.0 : self::parseAmount($this->openingFloat);
+        if ($float === null) {
+            Notification::make()->warning()->title('Γράψε τα ρέστα του συρταριού (π.χ. 50 ή 50,00).')->send();
+
+            return;
+        }
+        try {
+            app(TillSessions::class)->open($tenant, auth()->user(), $float);
+        } catch (RuntimeException $e) {
+            Notification::make()->warning()->title($e->getMessage())->send();
+        }
+        $this->openingFloat = '';
+        $this->forgetTill();
+        $this->dispatch('pos-focus');
+    }
+
+    public function startCash(string $direction): void
+    {
+        $this->cashPanel = $direction === PosCashMovement::OUT ? PosCashMovement::OUT : PosCashMovement::IN;
+        $this->cashAmount = '';
+        $this->cashReason = '';
+        $this->closing = false;
+    }
+
+    public function saveCash(): void
+    {
+        $this->tillTenant();
+        $session = $this->tillSession;
+        $amount = self::parseAmount($this->cashAmount);
+        if ($session === null || $this->cashPanel === null) {
+            $this->cancelTillPanel();
+
+            return;
+        }
+        if ($amount === null) {
+            Notification::make()->warning()->title('Γράψε το ποσό (π.χ. 20 ή 20,50).')->send();
+
+            return;
+        }
+        try {
+            app(TillSessions::class)->move($session, auth()->user(), $this->cashPanel, $amount, $this->cashReason);
+        } catch (RuntimeException $e) {
+            Notification::make()->warning()->title($e->getMessage())->send();
+            $this->forgetTill();
+
+            return;
+        }
+        Notification::make()->success()->title(($this->cashPanel === PosCashMovement::IN ? 'Κατάθεση ' : 'Ανάληψη ').number_format($amount, 2, ',', '.').' € καταχωρίστηκε')->send();
+        $this->cancelTillPanel();
+    }
+
+    public function startClose(): void
+    {
+        $this->closingSessionId = $this->tillSession?->getKey();
+        $this->closing = $this->closingSessionId !== null;
+        $this->cashPanel = null;
+        $this->countedCash = '';
+        $this->closeNotes = '';
+    }
+
+    public function cancelTillPanel(): void
+    {
+        $this->cashPanel = null;
+        $this->closing = false;
+        $this->closingSessionId = null;
+        $this->dispatch('pos-focus');
+    }
+
+    public function closeTill(): void
+    {
+        $this->tillTenant();
+        $session = $this->tillSession;
+        $counted = self::parseAmount($this->countedCash);
+        if ($session === null || $session->getKey() !== $this->closingSessionId) {
+            // The till changed under this box (another tab closed / reopened it):
+            // never apply this count to a session it wasn't made for.
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title('Το ταμείο άλλαξε σε άλλη καρτέλα — ξεκίνα το κλείσιμο από την αρχή.')->send();
+            $this->cancelTillPanel();
+            $this->forgetTill();
+
+            return;
+        }
+        if ($counted === null) {
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title('Γράψε τα μετρητά που μέτρησες στο συρτάρι.')->send();
+
+            return;
+        }
+        if ($this->cart !== [] || $this->returnOf !== null) {
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title('Ολοκλήρωσε ή άδειασε το καλάθι πριν το κλείσιμο.')->send();
+
+            return;
+        }
+        try {
+            $closed = app(TillSessions::class)->close($session, auth()->user(), $counted, $this->closeNotes);
+        } catch (RuntimeException $e) {
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title($e->getMessage())->persistent()->send();
+            $this->forgetTill();
+
+            return;
+        }
+
+        $diff = round((float) $closed->counted_cash - (float) $closed->expected_cash, 2);
+        $url = PosSessionReportController::signedUrl($closed->getKey());
+        Notification::make()->success()->title('Το ταμείο έκλεισε')
+            ->body('Αναμενόμενα '.number_format((float) $closed->expected_cash, 2, ',', '.').' € · μετρήθηκαν '
+                .number_format((float) $closed->counted_cash, 2, ',', '.').' € · διαφορά '.($diff > 0 ? '+' : '').number_format($diff, 2, ',', '.').' €')
+            ->actions([Action::make('print')->label('Εκτύπωση αναφοράς')->url($url, shouldOpenInNewTab: true)])
+            ->persistent()
+            ->send();
+        $this->closing = false;
+        $this->closingSessionId = null;
+        $this->lastInvoiceId = null;
+        $this->lastWithId = null;
+        $this->forgetTill();
+        $this->dispatch('pos-print', url: $url);
+    }
+
+    /** An interim (X-style) report of the open till. */
+    public function printTillReport(): void
+    {
+        $this->tillTenant();
+        $session = $this->tillSession;
+        if ($session === null) {
+            $this->dispatch('pos-print-cancel');
+
+            return;
+        }
+        $this->dispatch('pos-print', url: PosSessionReportController::signedUrl($session->getKey()));
+    }
+
+    /** Re-print a past closing (one of «Τελευταία κλεισίματα»). */
+    public function printSession(int $sessionId): void
+    {
+        $tenant = $this->tillTenant();
+        $exists = PosSession::query()->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $tenant->getKey())->whereKey($sessionId)->exists();
+        if (! $exists) {
+            $this->dispatch('pos-print-cancel');
+
+            return;
+        }
+        $this->dispatch('pos-print', url: PosSessionReportController::signedUrl($sessionId));
+    }
+
+    /** Drop the memoized till state — after a refusal the same render must not show a stale till. */
+    private function forgetTill(): void
+    {
+        unset($this->tillSession, $this->tillReport, $this->recentSessions);
+    }
+
+    public function getTillSessionProperty(): ?PosSession
+    {
+        $tenant = Filament::getTenant();
+
+        return $tenant instanceof Company ? app(TillSessions::class)->current($tenant)?->load('opener') : null;
+    }
+
+    /** The open till's live figures — only while the «Κλείσιμο» box is open (it reads the whole day). */
+    public function getTillReportProperty(): ?array
+    {
+        $session = $this->tillSession;
+
+        return $this->closing && $session !== null && $session->getKey() === $this->closingSessionId
+            ? app(TillSessions::class)->report($session)
+            : null;
+    }
+
+    /** @return Collection<int, PosSession> the last closings, for their reports */
+    public function getRecentSessionsProperty(): Collection
+    {
+        return PosSession::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->whereNotNull('closed_at')
+            ->with('closer')
+            ->latest('closed_at')
+            ->limit(5)
+            ->get();
+    }
+
+    private function tillTenant(): Company
+    {
+        $tenant = Filament::getTenant();
+        abort_unless($tenant instanceof Company && static::canAccess(), 403);
+
+        return $tenant;
     }
 
     // ── view data ──────────────────────────────────────────────────────────

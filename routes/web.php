@@ -15,6 +15,7 @@ use App\Http\Controllers\Portal\ReceiptShowController as PortalReceiptShowContro
 use App\Http\Controllers\Portal\StatementController as PortalStatementController;
 use App\Http\Controllers\Portal\TicketController as PortalTicketController;
 use App\Http\Controllers\PosReceiptController;
+use App\Http\Controllers\PosSessionReportController;
 use App\Http\Controllers\ProductMediaController;
 use App\Http\Controllers\PublicInvoicePdfController;
 use App\Http\Controllers\TicketAttachmentController;
@@ -224,6 +225,12 @@ Route::get('/pos/receipt/{invoice}', PosReceiptController::class)
     ->where('invoice', '[0-9]+')
     ->middleware(['auth', 'signed'])
     ->name('pos.receipt');
+
+// «Ταμείο ημέρας» report (internal, 80mm) — AUTH + SIGNED + tenant-checked (see controller).
+Route::get('/pos/session/{session}/report', PosSessionReportController::class)
+    ->where('session', '[0-9]+')
+    ->middleware(['auth', 'signed'])
+    ->name('pos.session-report');
 
 // Expense attachment — AUTH + SIGNED + tenant-checked (see controller). Streams
 // the private supplier-document scan from the local disk.

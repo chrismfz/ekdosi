@@ -6,10 +6,13 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceLine;
 use App\Models\InvoiceType;
+use App\Models\PosSession;
 use App\Models\ReturnInvoiceExtra;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Pos\PosIssuer;
+use App\Services\Pos\TillSessions;
 use App\Support\LineMoney;
+use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
 /**
@@ -39,7 +42,7 @@ class CreatePosReturn
      * @param  list<array<string, mixed>>  $saleItems  CreatePosSale items (empty = plain return)
      * @return array{credit: Invoice, sale: ?Invoice}
      */
-    public function __invoke(Company $company, Invoice $original, array $returnQty, array $saleItems = []): array
+    public function __invoke(Company $company, Invoice $original, array $returnQty, array $saleItems = [], ?PosSession $session = null): array
     {
         $creditType = self::creditType($company);
         self::assertReturnable($company, $original);
@@ -62,14 +65,29 @@ class CreatePosReturn
         }
 
         // Locked + validated against the remaining (already-returned) quantities.
-        $credit = ($this->creditNotes)($original, $creditType, $selections);
+        $credit = DB::transaction(function () use ($company, $original, $creditType, $selections, $session): Invoice {
+            // «Ταμείο ημέρας» (PR 2b): the return belongs to the open session (locked).
+            $sessionId = $session === null ? null : (int) app(TillSessions::class)->lockOpen($session, $company)->getKey();
+            $credit = ($this->creditNotes)($original, $creditType, $selections);
+            if ($sessionId !== null) {
+                $credit->forceFill(['pos_session_id' => $sessionId])->saveQuietly();
+            }
+
+            return $credit;
+        });
         $this->issuer->issue($credit);
 
         $sale = null;
         if ($saleItems !== []) {
             try {
-                $sale = ($this->sales)($company, $saleItems);
+                $sale = ($this->sales)($company, $saleItems, $session);
             } catch (\Throwable $e) {
+                $draftId = $e instanceof PosSaleNotIssued ? $e->invoiceId : null;
+                if ($draftId !== null) {
+                    // No money was taken for it (the cashier refunds the return) — it
+                    // must not count as drawer cash in the till's report (TillSessions).
+                    Invoice::query()->withoutGlobalScope(CompanyScope::class)->whereKey($draftId)->update(['pos_session_id' => null]);
+                }
                 throw new PosExchangeIncomplete(
                     (int) $credit->getKey(),
                     (string) $credit->refresh()->invcode,

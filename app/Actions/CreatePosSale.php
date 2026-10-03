@@ -6,9 +6,11 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
+use App\Models\PosSession;
 use App\Models\Product;
 use App\Models\Scopes\CompanyScope;
 use App\Services\Pos\PosIssuer;
+use App\Services\Pos\TillSessions;
 use App\Services\RecomputeInvoiceTotals;
 use App\Support\LineMoney;
 use Illuminate\Support\Collection;
@@ -46,11 +48,14 @@ class CreatePosSale
      *
      * @param  list<array{product_id: int, qty: float|int|string, discount?: float|int|string|null, price?: float|int|string|null}>  $items
      */
-    public function __invoke(Company $company, array $items): Invoice
+    public function __invoke(Company $company, array $items, ?PosSession $session = null): Invoice
     {
         [$type, $method, $products] = $this->validate($company, $items);
 
-        $invoice = DB::transaction(function () use ($company, $items, $products, $type, $method): Invoice {
+        $invoice = DB::transaction(function () use ($company, $items, $products, $type, $method, $session): Invoice {
+            // «Ταμείο ημέρας» (PR 2b): rung into the open session — locked, so a
+            // concurrent «Κλείσιμο» never freezes a report without this sale.
+            $sessionId = $session === null ? null : (int) app(TillSessions::class)->lockOpen($session, $company)->getKey();
             $invoice = Invoice::create([
                 'company_id' => $company->getKey(),
                 'invoice_type_id' => $type->getKey(),
@@ -62,6 +67,9 @@ class CreatePosSale
                 'country' => $company->country_code ?: 'GR',
                 'language' => null,   // auto = from the frozen country, as any no-choice document
             ]);
+            if ($sessionId !== null) {
+                $invoice->forceFill(['pos_session_id' => $sessionId])->saveQuietly();
+            }
 
             foreach ($items as $item) {
                 $product = $products->get((int) $item['product_id']);
