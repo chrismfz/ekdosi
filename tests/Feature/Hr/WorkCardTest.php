@@ -207,6 +207,21 @@ class WorkCardTest extends HrTestCase
         }
     }
 
+    public function test_a_cashier_punches_from_their_page_too(): void
+    {
+        $this->enable();
+        $this->fakeErgani();
+        $user = $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_CASHIER));   // «Ταμίας» (POS PR 2c) is staff too
+        $e = $this->cardEmployee($user);
+        $token = app(WorkCardService::class)->kioskToken($this->company);
+
+        $this->assertTrue(WorkCard::canAccess());
+        $this->get(WorkCard::getUrl(tenant: $this->company))->assertOk();   // allowed by the till confinement
+        Livewire::test(WorkCard::class, ['kiosk' => $token])->callAction('punch');
+
+        $this->assertSame([$e->id, 'in'], [WorkCardEvent::query()->sole()->employee_id, WorkCardEvent::query()->sole()->type]);
+    }
+
     public function test_admin_sees_kiosk_and_list(): void
     {
         $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_COMPANY_ADMIN));

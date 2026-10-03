@@ -53,9 +53,27 @@ class TenantRoleProvisioner
      * must not issue documents) but request their own leave. Holds ONLY
      * ERGANI_PERMISSION_MAP; App\Http\Middleware\RestrictErganiStaff confines them
      * to those screens (default-deny for every other panel page), and
-     * PanelRecipients keeps them off the operator bell broadcasts.
+     * ErganiStaff::staffRecipients keeps them off the operator bell broadcasts.
      */
     public const ROLE_ERGANI = 'ergani';
+
+    /**
+     * «Ταμίας — μόνο Ταμείο» (POS PR 2c) — shop staff who ring sales/returns and
+     * open/close the till, and nothing else (no invoices, customers, reports).
+     * Holds ONLY CASHIER_PERMISSION_MAP; RestrictErganiStaff confines them to the
+     * till (+ their own leave / work card), default-deny like `ergani`, and
+     * ErganiStaff::staffRecipients keeps them off the operator bell broadcasts.
+     */
+    public const ROLE_CASHIER = 'cashier';
+
+    /** @var array<string, list<string>> */
+    public const CASHIER_PERMISSION_MAP = [
+        'PointOfSale' => ['View'],
+        // Staff too: their own leave + the team calendar + their punch screen.
+        'LeaveRequest' => ['ViewAny', 'View', 'Create'],
+        'LeaveCalendar' => ['View'],
+        'WorkCard' => ['View'],
+    ];
 
     /**
      * The ERGANI (staff-only) role's permissions — own leave requests + the team
@@ -240,6 +258,9 @@ class TenantRoleProvisioner
 
         $ergani = $this->upsertRole(self::ROLE_ERGANI, $guard, $company);
         $ergani->syncPermissions($this->mapPermissions(self::ERGANI_PERMISSION_MAP, $guard));
+
+        $cashier = $this->upsertRole(self::ROLE_CASHIER, $guard, $company);
+        $cashier->syncPermissions($this->mapPermissions(self::CASHIER_PERMISSION_MAP, $guard));
     }
 
     /**
@@ -290,6 +311,7 @@ class TenantRoleProvisioner
             self::ROLE_COMPANY_ADMIN => $this->companyAdminPermissions($guard),
             self::ROLE_OPERATOR => $this->operatorPermissions($guard),
             self::ROLE_ERGANI => $this->mapPermissions(self::ERGANI_PERMISSION_MAP, $guard),
+            self::ROLE_CASHIER => $this->mapPermissions(self::CASHIER_PERMISSION_MAP, $guard),
             default => collect(),
         };
     }
@@ -433,7 +455,7 @@ class TenantRoleProvisioner
      */
     public function assignStandardRole(User $user, Company $company, string $roleName): void
     {
-        if (! in_array($roleName, [self::ROLE_COMPANY_ADMIN, self::ROLE_OPERATOR, self::ROLE_ERGANI], true)) {
+        if (! in_array($roleName, [self::ROLE_COMPANY_ADMIN, self::ROLE_OPERATOR, self::ROLE_CASHIER, self::ROLE_ERGANI], true)) {
             throw new \InvalidArgumentException("Unknown standard role: {$roleName}");
         }
 
@@ -444,7 +466,7 @@ class TenantRoleProvisioner
     // ── Role picker (per user × company) ───────────────────────────────────
     //
     // The role-picker treats each (user, company) pivot as holding AT MOST ONE
-    // managed role: super_admin | company_admin | operator. These helpers read
+    // managed role: super_admin | company_admin | operator | cashier | ergani. These helpers read
     // and set that single role within a team.
 
     /**
@@ -459,6 +481,7 @@ class TenantRoleProvisioner
             ShieldUtils::getSuperAdminName(),
             self::ROLE_COMPANY_ADMIN,
             self::ROLE_OPERATOR,
+            self::ROLE_CASHIER,
             self::ROLE_ERGANI,
         ];
     }

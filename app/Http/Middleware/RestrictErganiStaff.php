@@ -2,8 +2,10 @@
 
 namespace App\Http\Middleware;
 
+use App\Filament\Pages\PointOfSale;
 use App\Filament\Resources\LeaveRequests\LeaveRequestResource;
 use App\Models\Company;
+use App\Services\TenantRoleProvisioner;
 use App\Support\Hr\ErganiStaff;
 use Closure;
 use Filament\Facades\Filament;
@@ -11,7 +13,8 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Confines the `ergani` role («Προσωπικό — μόνο άδειες») to the leave screens.
+ * Confines the `ergani` role («Προσωπικό — μόνο άδειες») to the leave screens —
+ * and the `cashier` role («Ταμίας», POS PR 2c) to the till plus the same staff screens.
  * DEFAULT-DENY: any tenant route not on the allowlist — including pages added
  * in the future that forget a permission check (the dashboard widgets, the
  * mydata reconciliation page, …) — redirects to «Άδειες». Registered as a
@@ -32,13 +35,20 @@ class RestrictErganiStaff
         '.pages.my-sessions',   // per-USER self-service (their own login sessions)
     ];
 
+    /** …plus, for a cashier, the till (exact page — its receipt/report routes are outside the panel). */
+    private const CASHIER_PAGES = [
+        '.pages.point-of-sale',
+    ];
+
     public function handle(Request $request, Closure $next): Response
     {
         $tenant = Filament::getTenant();
 
-        if (! $tenant instanceof Company || ! ErganiStaff::isRestricted($request->user(), $tenant)) {
+        $role = $tenant instanceof Company ? ErganiStaff::restrictedRole($request->user(), $tenant) : null;
+        if ($role === null) {
             return $next($request);
         }
+        $cashier = $role === TenantRoleProvisioner::ROLE_CASHIER;
 
         $name = (string) $request->route()?->getName();
         foreach (self::ALLOWED_PREFIXES as $fragment) {
@@ -46,7 +56,7 @@ class RestrictErganiStaff
                 return $next($request);
             }
         }
-        foreach (self::ALLOWED_PAGES as $page) {
+        foreach ($cashier ? [...self::ALLOWED_PAGES, ...self::CASHIER_PAGES] : self::ALLOWED_PAGES as $page) {
             if (str_ends_with($name, $page)) {   // exact page — a future «work-card-x» stays denied
                 return $next($request);
             }
@@ -57,6 +67,10 @@ class RestrictErganiStaff
             abort(403);
         }
 
-        return redirect()->to(LeaveRequestResource::getUrl('index', tenant: $tenant));
+        // A cashier lands on the till — unless it isn't usable (till switched off):
+        // then on their own leave screens, never on a 403 dead end.
+        return redirect()->to($cashier && PointOfSale::canAccess()
+            ? PointOfSale::getUrl(tenant: $tenant)
+            : LeaveRequestResource::getUrl('index', tenant: $tenant));
     }
 }

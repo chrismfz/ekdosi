@@ -18,9 +18,11 @@ use Illuminate\Support\Collection;
  *   - staffRecipients()                         — operator bell broadcasts
  *   - Dashboard / Assistant availability
  *
- * «Restricted» = the user's managed role in THIS company is exactly `ergani`
- * (the picker holds one managed role per company) and they are not a system
- * super_admin. An operator/admin is never restricted.
+ * «Restricted» = the user's managed role in THIS company is `ergani` — or
+ * `cashier` («Ταμίας — μόνο Ταμείο», POS PR 2c: the same confinement, to the till)
+ * — (the picker holds one managed role per company) and they are not a system
+ * super_admin. An operator/admin is never restricted. restrictedRole() says WHICH
+ * (the middleware's allowlist / landing page differ per role).
  */
 final class ErganiStaff
 {
@@ -32,7 +34,7 @@ final class ErganiStaff
      */
     private const MEMO = 'hr.ergani-staff.memo';
 
-    /** @return \ArrayObject<string, bool> */
+    /** @return \ArrayObject<string, string> */
     private static function memo(): \ArrayObject
     {
         if (! app()->bound(self::MEMO)) {
@@ -44,8 +46,14 @@ final class ErganiStaff
 
     public static function isRestricted(?User $user, ?Company $company): bool
     {
+        return self::restrictedRole($user, $company) !== null;
+    }
+
+    /** The confining role (`ergani` | `cashier`) the user holds in the company, or null. */
+    public static function restrictedRole(?User $user, ?Company $company): ?string
+    {
         if (! $user instanceof User || ! $company instanceof Company) {
-            return false;
+            return null;
         }
 
         $key = $user->getKey().':'.$company->getKey();
@@ -53,11 +61,12 @@ final class ErganiStaff
 
         if (! $memo->offsetExists($key)) {
             $roles = app(TenantRoleProvisioner::class);
-            $memo[$key] = $roles->roleInCompany($user, $company) === TenantRoleProvisioner::ROLE_ERGANI
-                && ! $roles->isSystemSuperAdmin($user);
+            $role = $roles->roleInCompany($user, $company);
+            $memo[$key] = in_array($role, [TenantRoleProvisioner::ROLE_ERGANI, TenantRoleProvisioner::ROLE_CASHIER], true)
+                && ! $roles->isSystemSuperAdmin($user) ? $role : '';
         }
 
-        return $memo[$key];
+        return $memo[$key] === '' ? null : $memo[$key];
     }
 
     /**

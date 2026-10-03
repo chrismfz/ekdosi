@@ -19,7 +19,7 @@ use Filament\Tables\Columns\TextColumn;
  *   - CompanyResource → Users relation manager (record = User, owner = Company)
  *
  * It edits the ONE managed role a user holds within a company's team
- * (super_admin | company_admin | operator | none) via
+ * (super_admin | company_admin | operator | cashier | ergani | none) via
  * TenantRoleProvisioner::setRoleInCompany — picker semantics. The two callbacks
  * resolve the (User, Company) pair from whatever record the manager hands us.
  *
@@ -149,6 +149,7 @@ final class ManageTenantRoleAction
 
         $options[TenantRoleProvisioner::ROLE_COMPANY_ADMIN] = self::roleLabel(TenantRoleProvisioner::ROLE_COMPANY_ADMIN);
         $options[TenantRoleProvisioner::ROLE_OPERATOR] = self::roleLabel(TenantRoleProvisioner::ROLE_OPERATOR);
+        $options[TenantRoleProvisioner::ROLE_CASHIER] = self::roleLabel(TenantRoleProvisioner::ROLE_CASHIER);
         $options[TenantRoleProvisioner::ROLE_ERGANI] = self::roleLabel(TenantRoleProvisioner::ROLE_ERGANI);
 
         return $options;
@@ -163,6 +164,7 @@ final class ManageTenantRoleAction
             ShieldUtils::getSuperAdminName() => 'Super admin (όλα τα δικαιώματα)',
             TenantRoleProvisioner::ROLE_COMPANY_ADMIN => 'Διαχειριστής εταιρίας',
             TenantRoleProvisioner::ROLE_OPERATOR => 'Χειριστής',
+            TenantRoleProvisioner::ROLE_CASHIER => 'Ταμίας (μόνο Ταμείο)',
             TenantRoleProvisioner::ROLE_ERGANI => 'Προσωπικό (άδειες & κάρτα)',
             default => 'Κανένας ρόλος',
         };
@@ -178,6 +180,7 @@ final class ManageTenantRoleAction
             ShieldUtils::getSuperAdminName() => 'danger',
             TenantRoleProvisioner::ROLE_COMPANY_ADMIN => 'warning',
             TenantRoleProvisioner::ROLE_OPERATOR => 'success',
+            TenantRoleProvisioner::ROLE_CASHIER => 'primary',
             TenantRoleProvisioner::ROLE_ERGANI => 'info',
             default => 'gray',
         };

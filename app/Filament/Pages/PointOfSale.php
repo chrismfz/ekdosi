@@ -355,7 +355,7 @@ class PointOfSale extends Page
         $original = $this->findReceipt($code);
         if ($original === null) {
             Notification::make()->warning()->title('Δεν βρέθηκε απόδειξη του Ταμείου «'.trim($code).'»')
-                ->body('Γράψε τον αριθμό (π.χ. ΑΛΠ36) ή το ΜΑΡΚ, ή σκάναρε το barcode της απόδειξης. Άλλα παραστατικά επιστρέφονται από τα «Παραστατικά».')->send();
+                ->body('Γράψε τον αριθμό (π.χ. ΑΛΠ36) ή το ΜΑΡΚ, ή σκάναρε το barcode της απόδειξης. Άλλα παραστατικά δεν επιστρέφονται από το ταμείο.')->send();
 
             return false;
         }
@@ -494,12 +494,7 @@ class PointOfSale extends Page
             $this->lastInvoiceId = $e->creditId;
             $this->lastWithId = null;
             $this->dispatch('pos-print', url: $this->receiptUrl($e->creditId));
-            $notification = Notification::make()->danger()->title('Η αλλαγή ολοκληρώθηκε μόνο ως επιστροφή')->body($e->getMessage())->persistent();
-            if ($e->saleDraftId !== null) {
-                $notification->actions([Action::make('open')->label('Άνοιγμα πρόχειρου #'.$e->saleDraftId)
-                    ->url(InvoiceResource::getUrl('view', ['record' => $e->saleDraftId]), shouldOpenInNewTab: true)]);
-            }
-            $notification->send();
+            $this->draftNotice(Notification::make()->danger()->title('Η αλλαγή ολοκληρώθηκε μόνο ως επιστροφή')->body($e->getMessage()), $e->saleDraftId);
 
             return;
         } catch (PosSaleNotIssued $e) {
@@ -507,10 +502,7 @@ class PointOfSale extends Page
             report($e);
             $this->resetTill();
             $this->dispatch('pos-print-cancel');
-            Notification::make()->danger()->title('Η επιστροφή δεν εκδόθηκε')->body($e->getMessage())->persistent()
-                ->actions([Action::make('open')->label('Άνοιγμα πρόχειρου #'.$e->invoiceId)
-                    ->url(InvoiceResource::getUrl('view', ['record' => $e->invoiceId]), shouldOpenInNewTab: true)])
-                ->send();
+            $this->draftNotice(Notification::make()->danger()->title('Η επιστροφή δεν εκδόθηκε')->body($e->getMessage()), $e->invoiceId);
 
             return;
         } catch (RuntimeException $e) {
@@ -523,7 +515,7 @@ class PointOfSale extends Page
             report($e);
             $this->dispatch('pos-print-cancel');
             Notification::make()->danger()->title('Δεν εκδόθηκε')
-                ->body('Απρόσμενο σφάλμα — δες τα «Παραστατικά» πριν το ξαναχτυπήσεις.')->persistent()->send();
+                ->body($this->unexpectedErrorHint())->persistent()->send();
 
             return;
         }
@@ -608,12 +600,7 @@ class PointOfSale extends Page
             $this->cart = [];
             $this->tendered = '';
             $this->dispatch('pos-print-cancel');
-            Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()
-                ->actions([
-                    Action::make('open')->label('Άνοιγμα πρόχειρου #'.$e->invoiceId)
-                        ->url(InvoiceResource::getUrl('view', ['record' => $e->invoiceId]), shouldOpenInNewTab: true),
-                ])
-                ->send();
+            $this->draftNotice(Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage()), $e->invoiceId);
 
             return;
         } catch (RuntimeException $e) {
@@ -628,7 +615,7 @@ class PointOfSale extends Page
             report($e);
             $this->dispatch('pos-print-cancel');
             Notification::make()->danger()->title('Δεν εκδόθηκε')
-                ->body('Απρόσμενο σφάλμα — δες τα «Παραστατικά» πριν το ξαναχτυπήσεις.')->persistent()->send();
+                ->body($this->unexpectedErrorHint())->persistent()->send();
 
             return;
         }
@@ -660,6 +647,30 @@ class PointOfSale extends Page
         } else {
             $this->dispatch('pos-print-cancel');
         }
+    }
+
+    /** What to do after an unexpected error — a cashier can't open «Παραστατικά». */
+    private function unexpectedErrorHint(): string
+    {
+        return (bool) auth()->user()?->can('View:Invoice')
+            ? 'Απρόσμενο σφάλμα — δες τα «Παραστατικά» πριν το ξαναχτυπήσεις.'
+            : 'Απρόσμενο σφάλμα — ενημέρωσε τον υπεύθυνο πριν το ξαναχτυπήσεις.';
+    }
+
+    /**
+     * A «stuck draft» notice: with a link to the draft for whoever may open it — a
+     * cashier («Ταμίας», PR 2c) can't, and is told to hand it over instead.
+     */
+    private function draftNotice(Notification $notification, ?int $draftId): void
+    {
+        $notification->persistent();
+        if ($draftId !== null && (bool) auth()->user()?->can('View:Invoice')) {
+            $notification->actions([Action::make('open')->label('Άνοιγμα πρόχειρου #'.$draftId)
+                ->url(InvoiceResource::getUrl('view', ['record' => $draftId]), shouldOpenInNewTab: true)]);
+        } elseif ($draftId !== null) {
+            $notification->body($notification->getBody().' Ενημέρωσε τον υπεύθυνο για το πρόχειρο #'.$draftId.'.');
+        }
+        $notification->send();
     }
 
     // ── «Ταμείο ημέρας» (PR 2b) ────────────────────────────────────────────
