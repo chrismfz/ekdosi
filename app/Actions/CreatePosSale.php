@@ -8,10 +8,10 @@ use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\Product;
 use App\Models\Scopes\CompanyScope;
-use App\Services\EInvoiceSubmitterFactory;
-use App\Services\InvoiceNumberer;
+use App\Services\Pos\PosIssuer;
 use App\Services\RecomputeInvoiceTotals;
 use App\Support\LineMoney;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -36,7 +36,7 @@ class CreatePosSale
 {
     public function __construct(
         private readonly RecomputeInvoiceTotals $recompute,
-        private readonly EInvoiceSubmitterFactory $submitters,
+        private readonly PosIssuer $issuer,
     ) {}
 
     /**
@@ -48,20 +48,7 @@ class CreatePosSale
      */
     public function __invoke(Company $company, array $items): Invoice
     {
-        [$type, $method] = $this->settings($company);
-
-        if ($items === []) {
-            throw new RuntimeException('Το καλάθι είναι άδειο.');
-        }
-
-        $products = Product::query()->withoutGlobalScope(CompanyScope::class)
-            ->with(['vatCategory', 'metricUnit'])
-            ->where('company_id', $company->getKey())
-            ->whereKey(array_map(fn (array $i) => (int) $i['product_id'], $items))
-            ->sellable()
-            ->where('is_active', true)
-            ->get()
-            ->keyBy('id');
+        [$type, $method, $products] = $this->validate($company, $items);
 
         $invoice = DB::transaction(function () use ($company, $items, $products, $type, $method): Invoice {
             $invoice = Invoice::create([
@@ -78,36 +65,18 @@ class CreatePosSale
 
             foreach ($items as $item) {
                 $product = $products->get((int) $item['product_id']);
-                if ($product === null) {
-                    throw new RuntimeException('Το είδος #'.(int) $item['product_id'].' δεν πουλιέται (ανενεργό, γονικό με παραλλαγές ή άλλης εταιρείας).');
-                }
-                $qty = (float) $item['qty'];
-                $discount = (float) ($item['discount'] ?? 0);
-                if ($qty <= 0 || $discount < 0 || $discount > 100) {
-                    throw new RuntimeException('Μη έγκυρη ποσότητα/έκπτωση για «'.$product->description_short.'».');
-                }
-
                 $vat = self::vatOf($product);
-                if ($vat === null) {
-                    // No live category (none, or a retired/deleted one): never guess a
-                    // rate on a legal receipt — the operator re-points the product.
-                    throw new RuntimeException('Το «'.$product->description_short.'» δεν έχει ενεργή κατηγορία ΦΠΑ — όρισέ τη στο είδος.');
-                }
-                $unitGross = self::unitGross($product, $item['price'] ?? null);
-                if ($unitGross === null && $product->isOpenPrice()) {
-                    throw new RuntimeException('Το «'.$product->description_short.'» είναι ελεύθερης τιμής — γράψε την τιμή του.');
-                }
                 $invoice->lines()->create([
                     'company_id' => $company->getKey(),
                     'product_id' => $product->getKey(),
                     'product_descr' => $product->description_short,
-                    'qty' => $qty,
+                    'qty' => (float) $item['qty'],
                     // POS-2: a product with a (valid) shelf price is sold at it exactly —
                     // gross-anchored (price_per_item becomes its net mirror). Without one, the
                     // line is net-priced exactly like the invoice form prices it.
-                    'gross_unit_price' => $unitGross,
+                    'gross_unit_price' => self::unitGross($product, $item['price'] ?? null),
                     'price_per_item' => (float) $product->sell_price,
-                    'discount' => $discount,
+                    'discount' => (float) ($item['discount'] ?? 0),
                     'vat_percent' => $vat,
                     // A 0% line carries its §8.3 reason from the product's VAT category
                     // (null → the tenant's single 0% reason, as on any invoice).
@@ -125,9 +94,63 @@ class CreatePosSale
             return $invoice;
         });
 
-        $this->issue($invoice->refresh());
+        $this->issuer->issue($invoice->refresh());
 
         return $invoice->refresh();
+    }
+
+    /**
+     * Every refusal a sale can meet BEFORE anything is written — the settings, each
+     * item sellable / priced / with a VAT rate, a non-zero total. Public so an
+     * exchange (CreatePosReturn) checks the new cart BEFORE it issues the credit note.
+     *
+     * @param  list<array<string, mixed>>  $items
+     * @return array{0: InvoiceType, 1: PaymentMethod, 2: Collection<int, Product>}
+     */
+    public function validate(Company $company, array $items): array
+    {
+        [$type, $method] = $this->settings($company);
+
+        if ($items === []) {
+            throw new RuntimeException('Το καλάθι είναι άδειο.');
+        }
+
+        $products = Product::query()->withoutGlobalScope(CompanyScope::class)
+            ->with(['vatCategory', 'metricUnit'])
+            ->where('company_id', $company->getKey())
+            ->whereKey(array_map(fn (array $i) => (int) ($i['product_id'] ?? 0), $items))
+            ->sellable()
+            ->where('is_active', true)
+            ->get()
+            ->keyBy('id');
+
+        $total = 0.0;
+        foreach ($items as $item) {
+            $product = $products->get((int) ($item['product_id'] ?? 0));
+            if ($product === null) {
+                throw new RuntimeException('Το είδος #'.(int) ($item['product_id'] ?? 0).' δεν πουλιέται (ανενεργό, γονικό με παραλλαγές ή άλλης εταιρείας).');
+            }
+            $qty = (float) ($item['qty'] ?? 0);
+            $discount = (float) ($item['discount'] ?? 0);
+            if ($qty <= 0 || $discount < 0 || $discount > 100) {
+                throw new RuntimeException('Μη έγκυρη ποσότητα/έκπτωση για «'.$product->description_short.'».');
+            }
+            if (self::vatOf($product) === null) {
+                // No live category (none, or a retired/deleted one): never guess a
+                // rate on a legal receipt — the operator re-points the product.
+                throw new RuntimeException('Το «'.$product->description_short.'» δεν έχει ενεργή κατηγορία ΦΠΑ — όρισέ τη στο είδος.');
+            }
+            if (self::unitGross($product, $item['price'] ?? null) === null && $product->isOpenPrice()) {
+                throw new RuntimeException('Το «'.$product->description_short.'» είναι ελεύθερης τιμής — γράψε την τιμή του.');
+            }
+            $line = self::lineTotals($product, $qty, $discount, $item['price'] ?? null);
+            $total += $line['gross'] + $line['levy'];
+        }
+        if (round($total, 2) <= 0) {
+            throw new RuntimeException('Η απόδειξη βγαίνει 0,00 € — έλεγξε τιμές/εκπτώσεις.');
+        }
+
+        return [$type, $method, $products];
     }
 
     /**
@@ -146,14 +169,19 @@ class CreatePosSale
         $money = $unitGross !== null || $product->isOpenPrice()
             ? LineMoney::fromGross($qty, $unitGross ?? 0.0, $discount, $rate)
             : LineMoney::fromNet($qty, (float) $product->sell_price, $discount, $rate);
-        $levy = 0.0;
-        $perUnit = (float) ($product->mydata_tax_per_unit ?? 0);
-        $taxType = (int) ($product->mydata_tax_type ?? 0);
-        if ($perUnit > 0 && in_array($taxType, [2, 3, 4, 5], true)) {
-            $levy = ($taxType === 5 ? -1 : 1) * $qty * $perUnit;
-        }
 
-        return ['net' => $money['net'], 'gross' => $money['gross'], 'levy' => $levy];
+        return ['net' => $money['net'], 'gross' => $money['gross'], 'levy' => self::levyOf($product, $qty)];
+    }
+
+    /** The product-linked tax/fee of `$qty` (RecomputeInvoiceTaxes: qty × per-unit), signed (a deduction is negative). */
+    public static function levyOf(?Product $product, float $qty): float
+    {
+        $perUnit = (float) ($product?->mydata_tax_per_unit ?? 0);
+        $taxType = (int) ($product?->mydata_tax_type ?? 0);
+
+        return $perUnit > 0 && in_array($taxType, [2, 3, 4, 5], true)
+            ? ($taxType === 5 ? -1 : 1) * $qty * $perUnit
+            : 0.0;
     }
 
     /**
@@ -184,40 +212,6 @@ class CreatePosSale
         $rate = $product->vatCategory?->rate;
 
         return $rate === null ? null : (float) $rate;
-    }
-
-    /**
-     * Issue the draft: file it (filing tenant) or number + activate it (non-filing).
-     */
-    private function issue(Invoice $invoice): void
-    {
-        try {
-            if ($invoice->isIssuedAtFinalize()) {
-                DB::transaction(function () use ($invoice): void {
-                    if ($invoice->code === null) {
-                        app(InvoiceNumberer::class)->assign($invoice);
-                    }
-                    $invoice->update(['local_status' => 'active']);
-                });
-            } else {
-                $this->submitters->for($invoice->company)->submit($invoice);
-            }
-        } catch (\Throwable $e) {
-            // A step AFTER the filing committed (auto-email queueing…) may throw on
-            // an invoice that IS issued — that's a sale, not a failure.
-            if ($invoice->refresh()->local_status === 'active') {
-                report($e);
-
-                return;
-            }
-            throw new PosSaleNotIssued((int) $invoice->getKey(), $e);
-        }
-
-        // «Nothing threw» isn't «issued»: a submitter that returned without
-        // promoting the draft must not print as a sale.
-        if ($invoice->refresh()->local_status !== 'active') {
-            throw new PosSaleNotIssued((int) $invoice->getKey(), new RuntimeException('το παραστατικό δεν οριστικοποιήθηκε'));
-        }
     }
 
     /**

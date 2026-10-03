@@ -2,12 +2,17 @@
 
 namespace App\Filament\Pages;
 
+use App\Actions\CreatePosReturn;
 use App\Actions\CreatePosSale;
+use App\Actions\PosExchangeIncomplete;
 use App\Actions\PosSaleNotIssued;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Http\Controllers\PosReceiptController;
 use App\Models\Company;
+use App\Models\Invoice;
 use App\Models\Product;
+use App\Models\Scopes\CompanyScope;
+use App\Services\Pos\ReceiptLookup;
 use App\Services\Products\ProductMediaService;
 use BackedEnum;
 use Filament\Actions\Action;
@@ -62,6 +67,22 @@ class PointOfSale extends Page
     #[Locked]
     public ?int $lastInvoiceId = null;
 
+    /** …and the document printed WITH it (an exchange's sale next to its credit note). */
+    #[Locked]
+    public ?int $lastWithId = null;
+
+    /** Return / exchange (PR 2a): the original receipt being returned — server-set only. */
+    #[Locked]
+    public ?int $returnOf = null;
+
+    /** @var array<int|string, float> original line id => qty to return (client-writable, re-validated) */
+    public array $returnQty = [];
+
+    /** The «Επιστροφή / αλλαγή» box: receipt number / ΜΑΡΚ typed by hand. */
+    public bool $returnPrompt = false;
+
+    public string $returnCode = '';
+
     public function getTitle(): string
     {
         return 'Ταμείο';
@@ -103,6 +124,10 @@ class PointOfSale extends Page
         $product = $this->products()
             ->where(fn ($q) => $q->where('barcode', $code)->orWhere('sku', $code)->orWhere('internal_code', $code))
             ->first();
+
+        if ($product === null && $this->returnsEnabled() && $this->openReturn($code, quiet: true)) {
+            return;   // the receipt's own barcode (ΜΑΡΚ / «R…») or its number → its return
+        }
 
         if ($product === null) {
             // Not an exact code → treat it as a search.
@@ -234,8 +259,7 @@ class PointOfSale extends Page
 
     public function clearCart(): void
     {
-        $this->cart = [];
-        $this->tendered = '';
+        $this->resetTill();
         $this->closePrice();
     }
 
@@ -263,6 +287,239 @@ class PointOfSale extends Page
 
     // ── checkout ───────────────────────────────────────────────────────────
 
+    // ── returns / exchanges ────────────────────────────────────────────────
+
+    public function returnsEnabled(): bool
+    {
+        $tenant = Filament::getTenant();
+
+        return $tenant instanceof Company && $tenant->pos_credit_type_id !== null;
+    }
+
+    /** «Επιστροφή / αλλαγή» clicked: a box for the receipt number / ΜΑΡΚ (or just scan it). */
+    public function startReturn(): void
+    {
+        $this->returnPrompt = true;
+        $this->returnCode = '';
+        $this->dispatch('pos-return-focus');
+    }
+
+    public function lookupReturn(): void
+    {
+        if (! $this->openReturn($this->returnCode)) {
+            $this->dispatch('pos-return-focus');
+        }
+    }
+
+    /** Find the receipt and open its return; false (with a notice unless quiet) if none. */
+    public function openReturn(string $code, bool $quiet = false): bool
+    {
+        $tenant = Filament::getTenant();
+        $original = $tenant instanceof Company ? app(ReceiptLookup::class)->find($tenant, $code) : null;
+        if ($original === null) {
+            if (! $quiet) {
+                Notification::make()->warning()->title('Δεν βρέθηκε απόδειξη «'.trim($code).'»')
+                    ->body('Γράψε τον αριθμό (π.χ. ΑΛΠ36) ή το ΜΑΡΚ, ή σκάναρε το barcode της απόδειξης.')->send();
+            }
+
+            return false;
+        }
+        try {
+            CreatePosReturn::assertReturnable($tenant, $original);
+        } catch (RuntimeException $e) {
+            Notification::make()->warning()->title($e->getMessage())->send();
+
+            return false;
+        }
+        if (CreatePosReturn::returnableLines($original) === []) {
+            Notification::make()->warning()->title('Η '.$original->invcode.' έχει ήδη επιστραφεί ολόκληρη.')->send();
+
+            return false;
+        }
+
+        $this->resetReturn();
+        $this->returnOf = $original->getKey();
+        $this->dispatch('pos-focus');
+
+        return true;
+    }
+
+    public function returnMore(int $lineId): void
+    {
+        $original = $this->returnOriginal;
+        $line = $original === null ? null : collect(CreatePosReturn::returnableLines($original))->firstWhere('line_id', $lineId);
+        if ($line !== null) {
+            $this->returnQty[$lineId] = min($line['remaining'], self::qtyOf($this->returnQty[$lineId] ?? 0) + 1);
+        }
+        $this->forgetReturnView();
+        $this->refocus();
+    }
+
+    public function returnLess(int $lineId): void
+    {
+        $this->returnQty[$lineId] = max(0.0, self::qtyOf($this->returnQty[$lineId] ?? 0) - 1);
+        $this->forgetReturnView();
+        $this->refocus();
+    }
+
+    public function cancelReturn(): void
+    {
+        $this->resetReturn();
+        $this->refocus();
+    }
+
+    /** returnQty is client-writable: only a number counts (an array / text = 0). */
+    private static function qtyOf(mixed $qty): float
+    {
+        return is_numeric($qty) ? (float) $qty : 0.0;
+    }
+
+    private function resetReturn(): void
+    {
+        $this->returnOf = null;
+        $this->returnQty = [];
+        $this->returnPrompt = false;
+        $this->returnCode = '';
+        $this->forgetReturnView();
+    }
+
+    /**
+     * Livewire memoizes a computed property for the whole request — after returnQty /
+     * returnOf change, drop the cached panel so THIS render shows the new numbers
+     * (else it lags one click behind the qty the credit note will be issued for).
+     */
+    private function forgetReturnView(): void
+    {
+        unset($this->returnOriginal, $this->returnView, $this->returnTotal, $this->due);
+    }
+
+    /** @return list<array{line_id: int, label: string, remaining: float, unit: float, rate: float, qty: float, refund: float}> */
+    public function getReturnViewProperty(): array
+    {
+        $original = $this->returnOriginal;
+        if ($original === null) {
+            return [];
+        }
+        $lines = $original->lines->keyBy('id');
+
+        return array_map(function (array $l) use ($lines): array {
+            $qty = min($l['remaining'], max(0.0, round(self::qtyOf($this->returnQty[$l['line_id']] ?? 0), 3)));
+
+            return $l + ['qty' => $qty, 'refund' => $qty > 0 ? CreatePosReturn::refundOf($lines[$l['line_id']], $qty) : 0.0];
+        }, CreatePosReturn::returnableLines($original));
+    }
+
+    public function getReturnOriginalProperty(): ?Invoice
+    {
+        $tenant = Filament::getTenant();
+
+        return $this->returnOf === null || ! $tenant instanceof Company ? null
+            : Invoice::query()->withoutGlobalScope(CompanyScope::class)->where('company_id', $tenant->getKey())
+                ->with(['lines.product', 'invoiceType'])->find($this->returnOf);
+    }
+
+    public function getReturnTotalProperty(): float
+    {
+        return round(array_sum(array_column($this->returnView, 'refund')), 2);
+    }
+
+    /** What the customer pays (> 0) or gets back (< 0): new items − returned items. */
+    public function getDueProperty(): float
+    {
+        return round($this->total - $this->returnTotal, 2);
+    }
+
+    private function checkoutReturn(Company $tenant): void
+    {
+        $original = $this->returnOriginal;
+        if ($original === null) {
+            // The receipt went away under us (deleted / no longer this till's) — start over
+            // (its exchange cart too: never ring the new items as a plain full-price sale).
+            $this->resetTill();
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title('Η απόδειξη της επιστροφής δεν είναι πια διαθέσιμη — η επιστροφή ακυρώθηκε.')->send();
+
+            return;
+        }
+        $qty = collect($this->returnView)->filter(fn ($l) => $l['qty'] > 0)->mapWithKeys(fn ($l) => [$l['line_id'] => $l['qty']])->all();
+        if ($qty === []) {
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->warning()->title('Διάλεξε τι επιστρέφεται (+ στα είδη της απόδειξης) — ή «Ακύρωση επιστροφής».')->send();
+
+            return;
+        }
+
+        try {
+            ['credit' => $credit, 'sale' => $sale] = app(CreatePosReturn::class)($tenant, $original, $qty, $this->cart);
+        } catch (PosExchangeIncomplete $e) {
+            // The credit note IS issued (a filed legal document): print it, clear
+            // everything, and say what to do about the new sale.
+            report($e);
+            $this->resetTill();
+            $this->lastInvoiceId = $e->creditId;
+            $this->lastWithId = null;
+            $this->dispatch('pos-print', url: $this->receiptUrl($e->creditId));
+            $notification = Notification::make()->danger()->title('Η αλλαγή ολοκληρώθηκε μόνο ως επιστροφή')->body($e->getMessage())->persistent();
+            if ($e->saleDraftId !== null) {
+                $notification->actions([Action::make('open')->label('Άνοιγμα πρόχειρου #'.$e->saleDraftId)
+                    ->url(InvoiceResource::getUrl('view', ['record' => $e->saleDraftId]), shouldOpenInNewTab: true)]);
+            }
+            $notification->send();
+
+            return;
+        } catch (PosSaleNotIssued $e) {
+            // The credit-note DRAFT exists — never re-ring the return as a new document.
+            report($e);
+            $this->resetTill();
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->danger()->title('Η επιστροφή δεν εκδόθηκε')->body($e->getMessage())->persistent()
+                ->actions([Action::make('open')->label('Άνοιγμα πρόχειρου #'.$e->invoiceId)
+                    ->url(InvoiceResource::getUrl('view', ['record' => $e->invoiceId]), shouldOpenInNewTab: true)])
+                ->send();
+
+            return;
+        } catch (RuntimeException $e) {
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->danger()->title('Δεν εκδόθηκε')->body($e->getMessage())->persistent()->send();
+
+            return;
+        } catch (Throwable $e) {
+            // Before/inside the (transactional) credit note — nothing issued: keep the till.
+            report($e);
+            $this->dispatch('pos-print-cancel');
+            Notification::make()->danger()->title('Δεν εκδόθηκε')
+                ->body('Απρόσμενο σφάλμα — δες τα «Παραστατικά» πριν το ξαναχτυπήσεις.')->persistent()->send();
+
+            return;
+        }
+
+        $due = round(($sale?->payableTotal() ?? 0.0) - $credit->payableTotal(), 2);
+        $change = $due > 0 ? $this->change($due) : null;
+        $this->lastInvoiceId = $credit->getKey();
+        $this->lastWithId = $sale?->getKey();
+        $url = $this->receiptUrl($credit->getKey(), $sale?->getKey());
+        $this->resetTill();
+
+        Notification::make()->success()
+            ->title('Εκδόθηκε '.$credit->invcode.($sale ? ' + '.$sale->invcode : ''))
+            ->body($due >= 0
+                ? 'Πληρωτέο: '.number_format($due, 2, ',', '.').' €'.($change !== null ? ' · Ρέστα: '.number_format($change, 2, ',', '.').' €' : '')
+                : 'Επιστροφή χρημάτων: '.number_format(-$due, 2, ',', '.').' €')
+            ->actions([Action::make('print')->label('Εκτύπωση')->url($url, shouldOpenInNewTab: true)])
+            ->send();
+
+        $this->dispatch('pos-print', url: $url);
+        $this->dispatch('pos-focus');
+    }
+
+    private function resetTill(): void
+    {
+        $this->cart = [];
+        $this->tendered = '';
+        $this->resetReturn();
+        unset($this->cartView, $this->total);
+    }
+
     public function checkout(): void
     {
         $this->normalizeCart();
@@ -278,17 +535,23 @@ class PointOfSale extends Page
 
             return;
         }
+        $tenant = Filament::getTenant();
+        if (! $tenant instanceof Company || ! static::canAccess()) {
+            $this->dispatch('pos-print-cancel');
+            abort(403);
+        }
+
+        if ($this->returnOf !== null) {
+            $this->checkoutReturn($tenant);
+
+            return;
+        }
+
         if ($this->cart === []) {
             Notification::make()->warning()->title('Το καλάθι είναι άδειο.')->send();
             $this->dispatch('pos-print-cancel');
 
             return;
-        }
-
-        $tenant = Filament::getTenant();
-        if (! $tenant instanceof Company || ! static::canAccess()) {
-            $this->dispatch('pos-print-cancel');
-            abort(403);
         }
 
         try {
@@ -328,6 +591,7 @@ class PointOfSale extends Page
         $payable = $invoice->payableTotal();
         $change = $this->change($payable);
         $this->lastInvoiceId = $invoice->getKey();
+        $this->lastWithId = null;
         $this->cart = [];
         $this->tendered = '';
         $url = $this->receiptUrl($invoice->getKey());
@@ -347,7 +611,7 @@ class PointOfSale extends Page
     public function reprint(): void
     {
         if ($this->lastInvoiceId !== null) {
-            $this->dispatch('pos-print', url: $this->receiptUrl($this->lastInvoiceId));
+            $this->dispatch('pos-print', url: $this->receiptUrl($this->lastInvoiceId, $this->lastWithId));
         } else {
             $this->dispatch('pos-print-cancel');
         }
@@ -454,7 +718,10 @@ class PointOfSale extends Page
     public function change(?float $total = null): ?float
     {
         $paid = self::parseAmount($this->tendered);
-        $total ??= $this->total;
+        $total ??= $this->due;
+        if ($total <= 0) {
+            return null;   // nothing to pay (a refund is shown as «Επιστροφή χρημάτων», not as change)
+        }
 
         return $paid !== null && $paid >= $total ? round($paid - $total, 2) : null;
     }
@@ -523,8 +790,8 @@ class PointOfSale extends Page
         ];
     }
 
-    private function receiptUrl(int $invoiceId): string
+    private function receiptUrl(int $invoiceId, ?int $withId = null): string
     {
-        return PosReceiptController::signedUrl($invoiceId);
+        return PosReceiptController::signedUrl($invoiceId, 30, $withId);
     }
 }

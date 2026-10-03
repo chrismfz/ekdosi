@@ -152,6 +152,7 @@ class Company extends Model
         'pos_enabled',
         'pos_invoice_type_id',
         'pos_payment_method_id',
+        'pos_credit_type_id',
         'ergani_mode',
         'ergani_username',
         'ergani_password',
