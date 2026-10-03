@@ -46,6 +46,16 @@
         .pos-btn-sm { padding: .35rem .7rem; font-size: .85rem; }
         .pos-btn-xs { padding: .2rem .5rem; font-size: .75rem; margin-top: .3rem; }
         .pos-btn-block { width: 100%; margin-top: .5rem; font-size: .9rem; }
+        .pos-till { border: 1px solid #e5e7eb; border-radius: .6rem; padding: .6rem .75rem; margin-bottom: .75rem; font-size: .9rem; }
+        .dark .pos-till { border-color: #374151; }
+        .pos-till.is-closed { border: 2px solid #f59e0b; }
+        .pos-till-head { display: flex; justify-content: space-between; align-items: center; gap: .5rem; flex-wrap: wrap; }
+        .pos-till-btns { display: flex; gap: .35rem; flex-wrap: wrap; }
+        .pos-till-row { display: flex; justify-content: space-between; padding: .15rem 0; }
+        .pos-till .b, .pos-till-row.b { font-weight: 700; }
+        .pos-till input, .pos-till textarea { width: 100%; padding: .4rem .6rem; border: 1px solid #d1d5db; border-radius: .4rem; background: transparent; color: inherit; margin-top: .35rem; }
+        .pos-till-hist { font-size: .8rem; color: #6b7280; margin-top: .75rem; }
+        .pos-till-hist a { color: #b45309; }
     </style>
 
     {{--
@@ -144,6 +154,66 @@
 
         {{-- Right: cart + pay --}}
         <div class="pos-card">
+            @php($till = $this->tillSession)
+            @if ($till === null)
+                <div class="pos-till is-closed">
+                    <div class="b">🔒 Το ταμείο είναι κλειστό</div>
+                    <div class="pos-hint">Άνοιξέ το με τα ρέστα που έχει το συρτάρι — μετά χτυπάς αποδείξεις.</div>
+                    <div class="pos-pay">
+                        <input type="text" inputmode="decimal" placeholder="Ρέστα συρταριού (π.χ. 50)" wire:model="openingFloat" wire:keydown.enter.prevent="openTill">
+                        <button type="button" class="pos-btn pos-btn-issue pos-btn-sm" wire:click="openTill">Άνοιγμα ταμείου</button>
+                    </div>
+                </div>
+            @else
+                <div class="pos-till">
+                    <div class="pos-till-head">
+                        <span>🟢 Ταμείο #{{ $till->id }} · από {{ $till->opened_at?->format('H:i') }}@if ($till->opener) · {{ $till->opener->name }}@endif</span>
+                        <span class="pos-till-btns">
+                            <button type="button" class="pos-btn pos-btn-ghost pos-btn-xs" wire:click="startCash('in')">+ Κατάθεση</button>
+                            <button type="button" class="pos-btn pos-btn-ghost pos-btn-xs" wire:click="startCash('out')">− Ανάληψη</button>
+                            <button type="button" class="pos-btn pos-btn-ghost pos-btn-xs" x-on:click="openWin()" wire:click="printTillReport">Αναφορά (X)</button>
+                            <button type="button" class="pos-btn pos-btn-ghost pos-btn-xs" wire:click="startClose">Κλείσιμο ταμείου</button>
+                        </span>
+                    </div>
+
+                    @if ($cashPanel)
+                        <div style="margin-top:.5rem">
+                            <div class="b">{{ $cashPanel === 'in' ? 'Κατάθεση μετρητών στο ταμείο' : 'Ανάληψη μετρητών από το ταμείο' }}</div>
+                            <input type="text" inputmode="decimal" placeholder="Ποσό (π.χ. 20)" wire:model="cashAmount">
+                            <input type="text" placeholder="Αιτία (π.χ. ψιλά, πληρωμή κούριερ)" wire:model="cashReason" wire:keydown.enter.prevent="saveCash">
+                            <div class="pos-till-btns" style="margin-top:.4rem">
+                                <button type="button" class="pos-btn pos-btn-issue pos-btn-sm" wire:click="saveCash">Καταχώριση</button>
+                                <button type="button" class="pos-btn pos-btn-ghost pos-btn-sm" wire:click="cancelTillPanel">Άκυρο</button>
+                            </div>
+                        </div>
+                    @endif
+
+                    @if ($closing && ($r = $this->tillReport))
+                        <div style="margin-top:.5rem">
+                            <div class="b">Κλείσιμο ταμείου</div>
+                            <div class="pos-till-row"><span>Πωλήσεις ({{ $r['sales_count'] }})</span><span>{{ number_format($r['sales_total'], 2, ',', '.') }} €</span></div>
+                            <div class="pos-till-row"><span>Επιστροφές ({{ $r['refunds_count'] }})</span><span>−{{ number_format($r['refunds_total'], 2, ',', '.') }} €</span></div>
+                            @foreach ($r['by_method'] as $m)
+                                <div class="pos-till-row" style="font-size:.8rem;color:#6b7280"><span>&nbsp;&nbsp;{{ $m['method'] }}</span><span>{{ number_format($m['sales'] - $m['refunds'], 2, ',', '.') }} €</span></div>
+                            @endforeach
+                            <div class="pos-till-row"><span>Ρέστα ανοίγματος</span><span>{{ number_format($r['opening_float'], 2, ',', '.') }} €</span></div>
+                            <div class="pos-till-row"><span>Καταθέσεις / αναλήψεις</span><span>+{{ number_format($r['cash_in'], 2, ',', '.') }} / −{{ number_format($r['cash_out'], 2, ',', '.') }} €</span></div>
+                            <div class="pos-till-row b"><span>Αναμενόμενα μετρητά</span><span>{{ number_format($r['expected_cash'], 2, ',', '.') }} €</span></div>
+                            <input type="text" inputmode="decimal" placeholder="Μετρητά που μέτρησες" wire:model.live.debounce.300ms="countedCash">
+                            @if (($counted = \App\Filament\Pages\PointOfSale::parseAmount($countedCash)) !== null)
+                                @php($diff = round($counted - $r['expected_cash'], 2))
+                                <div class="pos-till-row b" style="color: {{ $diff == 0 ? '#15803d' : '#b91c1c' }}"><span>Διαφορά</span><span>{{ $diff > 0 ? '+' : '' }}{{ number_format($diff, 2, ',', '.') }} €</span></div>
+                            @endif
+                            <textarea rows="2" placeholder="Σημειώσεις (προαιρετικά)" wire:model="closeNotes"></textarea>
+                            <div class="pos-till-btns" style="margin-top:.4rem">
+                                <button type="button" class="pos-btn pos-btn-issue pos-btn-sm" x-on:click="openWin()" wire:click="closeTill" wire:confirm="Κλείσιμο ταμείου;">Κλείσιμο &amp; εκτύπωση αναφοράς</button>
+                                <button type="button" class="pos-btn pos-btn-ghost pos-btn-sm" wire:click="cancelTillPanel">Άκυρο</button>
+                            </div>
+                        </div>
+                    @endif
+                </div>
+            @endif
+
             @if ($this->returnOriginal)
                 <div class="pos-return">
                     <div class="pos-return-head">
@@ -206,7 +276,7 @@
             </div>
 
             <div class="pos-actions">
-                <button type="button" class="pos-btn pos-btn-issue" x-on:click="openWin()" wire:click="checkout" wire:loading.attr="disabled" wire:target="checkout" @disabled($cart === [] && $returnOf === null)>
+                <button type="button" class="pos-btn pos-btn-issue" x-on:click="openWin()" wire:click="checkout" wire:loading.attr="disabled" wire:target="checkout" @disabled($till === null || ($cart === [] && $returnOf === null))>
                     <span wire:loading.remove wire:target="checkout">{{ $returnOf ? ($cart === [] ? 'Έκδοση επιστροφής' : 'Έκδοση αλλαγής') : 'Έκδοση απόδειξης (μετρητά)' }}</span>
                     <span wire:loading wire:target="checkout">Έκδοση…</span>
                 </button>
@@ -215,6 +285,15 @@
 
             @if ($lastInvoiceId)
                 <button type="button" class="pos-btn pos-btn-ghost pos-btn-block" x-on:click="openWin()" wire:click="reprint">Επανεκτύπωση τελευταίας απόδειξης</button>
+            @endif
+
+            @if ($this->recentSessions->isNotEmpty())
+                <div class="pos-till-hist">
+                    Τελευταία κλεισίματα:
+                    @foreach ($this->recentSessions as $past)
+                        <div>#{{ $past->id }} · {{ $past->closed_at?->format('d/m H:i') }} · διαφορά {{ number_format((float) $past->counted_cash - (float) $past->expected_cash, 2, ',', '.') }} € · <a href="{{ $this->sessionReportUrl($past->id) }}" target="_blank">αναφορά</a></div>
+                    @endforeach
+                </div>
             @endif
         </div>
     </div>

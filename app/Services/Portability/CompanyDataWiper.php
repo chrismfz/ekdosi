@@ -34,6 +34,7 @@ class CompanyDataWiper
         'delivery_marks', 'delivery_note_lines', 'stock_movements', 'service_contracts',
         'pending_whmcs_invoices', 'delivery_notes', 'quotes', 'expenses', 'invoices',
         'activity_log', 'notes', 'attachments',
+        'pos_cash_movements', 'pos_sessions',
     ];
 
     /** Customers/suppliers/products — wiped unless --keep-parties. */

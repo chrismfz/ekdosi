@@ -11,6 +11,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
+use App\Models\PosSession;
 use App\Models\Product;
 use App\Models\ProductCategory;
 use App\Models\StockMovement;
@@ -18,6 +19,7 @@ use App\Models\User;
 use App\Models\VatCategory;
 use App\Services\Pos\PosIssuer;
 use App\Services\Pos\ReceiptLookup;
+use App\Services\Pos\TillSessions;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\Stock\StockService;
 use Filament\Facades\Filament;
@@ -187,7 +189,7 @@ class PosReturnTest extends TestCase
         // The sale passes its checks but fails while issuing (e.g. the filing times out).
         $this->app->bind(CreatePosSale::class, fn ($app) => new class($app->make(RecomputeInvoiceTotals::class), $app->make(PosIssuer::class)) extends CreatePosSale
         {
-            public function __invoke(Company $company, array $items): Invoice
+            public function __invoke(Company $company, array $items, ?PosSession $session = null): Invoice
             {
                 throw new RuntimeException('filing down');
             }
@@ -289,6 +291,7 @@ class PosReturnTest extends TestCase
         $this->tenant->users()->attach($user);
         $this->actingAs($user);
         Filament::setTenant($this->tenant->fresh());
+        app(TillSessions::class)->open($this->tenant->fresh(), $user, 0);   // «Ταμείο ημέρας»: the till is open
 
         return $user;
     }

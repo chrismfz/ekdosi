@@ -122,6 +122,11 @@ class CompanyExporter
         // history bound to THIS deployment's traffic, not config or accounting data;
         // it re-accrues on the target as returns arrive. Never travels in the bundle.
         'payment_gateway_events',
+        // «Ταμείο ημέρας» (POS) — the till's open/close sessions + cash in/out: an
+        // internal, per-shop operational log (not a legal record — the receipts are,
+        // and they travel). invoices.pos_session_id is nulled on import.
+        'pos_sessions',
+        'pos_cash_movements',
         // AI «Βοηθός» operational state — metering/billing log + the transient
         // confirm queue & reminders. Not part of the accounting dataset a tenant
         // carries across VMs (re-accrues per usage; pending actions are ephemeral).

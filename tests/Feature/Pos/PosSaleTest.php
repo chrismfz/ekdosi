@@ -22,6 +22,7 @@ use App\Models\User;
 use App\Models\VatCategory;
 use App\Services\EInvoiceSubmitterFactory;
 use App\Services\InvoiceNumberer;
+use App\Services\Pos\TillSessions;
 use App\Services\Products\VariantGenerator;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\Stock\StockService;
@@ -556,6 +557,7 @@ class PosSaleTest extends TestCase
         $this->tenant->users()->attach($user);
         $this->actingAs($user);
         Filament::setTenant($this->tenant->fresh());
+        app(TillSessions::class)->open($this->tenant->fresh(), $user, 0);   // «Ταμείο ημέρας»: the till is open
 
         return $user;
     }
