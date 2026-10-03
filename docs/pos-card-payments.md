@@ -108,13 +108,31 @@ AADE): δεν ταιριάζει σε web εφαρμογή — ο server του 
 **Δοκιμή χωρίς φυσικό τερματικό:** το **Viva Terminal app** (Android, Tap-on-Phone) σε demo λογαριασμό = demo τερματικό.
 Χρειάζεται: demo λογαριασμός εμπόρου (demo.vivapayments.com) + POS API credentials + κινητό Android με NFC.
 
-**Cardlink** (το τερματικό του καταστήματος): Common WebECR / «Cardlink Web» — ζητάμε πρόσβαση developer/τερματικό
-δοκιμών από το πρόγραμμα ECR integration της Cardlink. Το `TerminalGateway` του ekdosi σχεδιάζεται ώστε Viva και
-WebECR να είναι δύο υλοποιήσεις του ίδιου flow (υπογραφή παρόχου → πώληση → αποτέλεσμα → υποβολή).
+## Cardlink (το τερματικό του καταστήματος) — 2026-10-03
+
+- **Τρία πρωτόκολλα** για τη διασύνδεση ERP–POS: **Cardlink Web based**, **Cardlink TCPSocket based** (DLL) και **Common Web**
+  (πλέον για όλα τα POS της). [Β] https://support.cardlink.gr/support/discussions/topics/7000043333
+- **«Cloud ERP»** (Android POS, app ≥ 7.5· και VX520): το τερματικό κάνει «Εγγραφή στον ενδιάμεσο κόμβο» της Cardlink και
+  δείχνει **κωδικό σύζευξης (5 λεπτά)** που καταχωρείται στο ERP· χωρίς static IP / LAN — μέσω internet όπως η Viva Cloud.
+  Το τερματικό περιμένει εντολή από το Cloud ERP (εικονίδιο «σύννεφο» = επανασύνδεση στον κόμβο). [Β]
+  https://cardlink.gr/wp-content/uploads/2025/02/quick-guide-cloud-erp-7.5-android.pdf ·
+  https://cardlink.gr/wp-content/uploads/2025/02/cardlink-cloud-erp-vx520-manual.pdf
+- **Δοκιμή χωρίς τερματικό: VPOS Simulator** (Verifone + Android) για προμηθευτές ERP — εγγραφή με φόρμα
+  (https://cardlink.wufoo.com/forms/z1uf80ag1qy4v89/), οι κωδικοί έρχονται στο email· είσοδος https://virtualpos.services.novidea.gr/login.
+  ⚠ **Ο simulator ΔΕΝ υποστηρίζει το Common Web** — μόνο Cardlink Web / TCPSocket. Υπάρχει θέμα «Τι κλειδιά (Provider Keys)
+  μπορώ να χρησιμοποιήσω στο VPOS?» (δοκιμαστικά κλειδιά παρόχου). [Β]
+- **Πολιτική δοκιμών Cardlink:** μελέτη/επιλογή spec → ερωτήσεις μέσω φόρμας → ανάπτυξη → **δοκιμές στον simulator** με
+  τους τύπους συναλλαγών του πελάτη → **πιλοτικό με επιλεγμένο πελάτη σε πραγματικό POS** (version με Α.1098/Α.1155) →
+  rollout. Τα αναλυτικά specs ανά πρωτόκολλο βρίσκονται στο developer portal (support.cardlink.gr, ενότητα «Διασύνδεση
+  POS-ERP — ΑΑΔΕ Α.1155. Τεχνικά Θέματα (Developers)»· κάποια θέματα θέλουν login). [Β]
+- **Συμπέρασμα:** για το κατάστημα → **Cardlink Web (Cloud ERP)**, δοκιμή στον VPOS simulator, πιλοτικό στο ίδιο το
+  κατάστημα. Η Viva (demo + Tap-on-Phone) μένει ως δεύτερη υλοποίηση / γρήγορο πρωτότυπο. Το `TerminalGateway` του
+  ekdosi: ένα flow (υπογραφή παρόχου → πώληση → αποτέλεσμα → υποβολή), υλοποιήσεις Cardlink Web και Viva Cloud.
 
 ## Επόμενα βήματα
 
-1. Ποιο τερματικό έχει σήμερα το κατάστημα (κεφαλίδα στο απόκομμα κάρτας). Με SoftOne: πιθανότατα Cardlink ή epay.
+1. ✅ Το κατάστημα έχει **Cardlink**. → Εγγραφή στον **VPOS simulator** της Cardlink (φόρμα — ο ιδιοκτήτης/προμηθευτής) +
+   specs «Cardlink Web» από το developer portal.
 2. Ερώτηση στην GV Solutions (InvoSign): δοκιμασμένοι acquirers · χρεώνει credit το `GetPayment`;
 3. Sandbox: InvoSign `GetPayment` + το αντίστοιχο cloud API (Viva demo / Mellon UAT).
 4. Δήλωση Συμβατότητας Α.1054/2024 για το ekdosi πριν τη ζωντανή χρήση.
