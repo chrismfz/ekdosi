@@ -48,7 +48,7 @@ cutover.
   multi-tenancy package).
 - **myDATA**: `firebed/aade-mydata`.
 - **Roles/permissions**: `spatie/laravel-permission` + `bezhanSalleh/filament-shield` (teams
-  mode; managed roles per tenant: `super_admin`, `company_admin`, `operator` — provisioned by
+  mode; managed roles per tenant: `super_admin`, `company_admin`, `operator` (+ confined `cashier`/`ergani`) — provisioned by
   `TenantRoleProvisioner`, see latent items).
 - **PDF**: `barryvdh/laravel-dompdf`. **Backups**: `spatie/laravel-backup`.
 - **Audit log**: `spatie/laravel-activitylog` (wired on invoices/customers/payments via
@@ -393,6 +393,8 @@ Open items → `docs/BACKLOG.md` (roadmap; decided-don't-reopen → «Guardrails
 - **Role `ergani` («Προσωπικό — μόνο άδειες», non-operator staff).** `RestrictErganiStaff` (persistent tenant middleware)
   default-denies every tenant route except the leave screens; `Dashboard`/Βοηθός check `ErganiStaff::isRestricted`. **Rule for
   ANY new tenant-wide bell/broadcast: recipients = `ErganiStaff::staffRecipients($company)`, never `$company->users`.**
+  Role **`cashier`** («Ταμίας — μόνο Ταμείο», POS) rides the SAME guard (`ErganiStaff::restrictedRole`): confined to the till
+  (+ own leave/card), lands on «Ταμείο», off the broadcasts. A till message linking to an invoice must check `View:Invoice`.
 - **Activity log** (`TracksActivity` on Invoice/Customer/Payment): `logOnly(loggedAttributes())` —
   business columns only, NEVER the money/myDATA CACHE columns; `logOnlyDirty()` +
   `dontLogEmptyChanges()`. v5 stores the diff in **`attribute_changes`** (not `properties`); causer

@@ -58,7 +58,7 @@ class SyncSuperAdmin extends Command
         foreach ($companies as $company) {
             $provisioner->ensureSuperAdminRole($company);
             $provisioner->ensureStandardRoles($company);
-            $this->line("✓ roles ensured (super_admin, company_admin, operator) for: {$company->slug}");
+            $this->line("✓ roles ensured (super_admin, company_admin, operator, cashier, ergani) for: {$company->slug}");
         }
 
         // 2) Assignment.
