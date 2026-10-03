@@ -4,6 +4,8 @@
         $t = $r['totals'];
         $detail = $this->getSessionDetail();
         $money = fn ($v) => number_format((float) $v, 2, ',', '.').' €';
+        // A refund column: «−12,00 €», but a plain «0,00 €» when there were none (never «−0,00»).
+        $minus = fn ($v) => ((float) $v > 0.004 ? '−' : '').number_format((float) $v, 2, ',', '.').' €';
         $signed = fn ($v) => ((float) $v > 0 ? '+' : ((float) $v < 0 ? '−' : '')).number_format(abs((float) $v), 2, ',', '.').' €';
         $tenant = \Filament\Facades\Filament::getTenant();
         $invoiceUrl = fn ($id) => \App\Filament\Resources\Invoices\InvoiceResource::getUrl('view', ['record' => $id, 'tenant' => $tenant]);
@@ -78,7 +80,7 @@
 
     <div class="pr-cards">
         <div class="pr-card"><div class="pr-card__label">Πωλήσεις ({{ $t['sales_count'] }} αποδείξεις)</div><div class="pr-card__value">{{ $money($t['sales_total']) }}</div></div>
-        <div class="pr-card"><div class="pr-card__label">Επιστροφές ({{ $t['refunds_count'] }} · {{ number_format($r['return_rate'], 1, ',', '.') }}%)</div><div class="pr-card__value">−{{ $money($t['refunds_total']) }}</div></div>
+        <div class="pr-card"><div class="pr-card__label">Επιστροφές ({{ $t['refunds_count'] }} · {{ number_format($r['return_rate'], 1, ',', '.') }}%)</div><div class="pr-card__value">{{ $minus($t['refunds_total']) }}</div></div>
         <div class="pr-card"><div class="pr-card__label">Καθαρός τζίρος</div><div class="pr-card__value">{{ $money($t['net_total']) }}</div></div>
         <div class="pr-card"><div class="pr-card__label">Μέσο καλάθι</div><div class="pr-card__value">{{ $money($r['avg_basket']) }}</div></div>
         <div class="pr-card"><div class="pr-card__label">Εκπτώσεις που δόθηκαν</div><div class="pr-card__value">{{ $money($t['discounts']) }}</div></div>
@@ -101,7 +103,7 @@
                             <td>{{ $c['name'] }}</td>
                             <td class="pr-num">{{ $c['sales_count'] }}</td>
                             <td class="pr-num">{{ $money($c['sales']) }}</td>
-                            <td class="pr-num">{{ $c['refunds_count'] }} · −{{ $money($c['refunds']) }}</td>
+                            <td class="pr-num">{{ $c['refunds_count'] }} · {{ $minus($c['refunds']) }}</td>
                             <td class="pr-num">{{ $money($c['net']) }}</td>
                             <td class="pr-num">{{ $money($c['discounts']) }}</td>
                             <td class="pr-num">{{ $c['sessions_closed'] }}</td>
@@ -186,7 +188,7 @@
                     <thead><tr><th>Ημέρα</th><th class="pr-num">Αποδείξεις</th><th class="pr-num">Πωλήσεις</th><th class="pr-num">Επιστροφές</th><th class="pr-num">Καθαρά</th></tr></thead>
                     <tbody>
                         @foreach ($r['by_day'] as $d)
-                            <tr><td>{{ \Carbon\Carbon::parse($d['date'])->translatedFormat('D d/m') }}</td><td class="pr-num">{{ $d['sales_count'] }}</td><td class="pr-num">{{ $money($d['sales']) }}</td><td class="pr-num">−{{ $money($d['refunds']) }}</td><td class="pr-num">{{ $money($d['net']) }}</td></tr>
+                            <tr><td>{{ \Carbon\Carbon::parse($d['date'])->translatedFormat('D d/m') }}</td><td class="pr-num">{{ $d['sales_count'] }}</td><td class="pr-num">{{ $money($d['sales']) }}</td><td class="pr-num">{{ $minus($d['refunds']) }}</td><td class="pr-num">{{ $money($d['net']) }}</td></tr>
                         @endforeach
                     </tbody>
                 </table>
@@ -202,7 +204,7 @@
                     <thead><tr><th>Τρόπος</th><th class="pr-num">Πωλήσεις</th><th class="pr-num">Επιστροφές</th><th class="pr-num">Καθαρά</th></tr></thead>
                     <tbody>
                         @foreach ($t['by_method'] as $m)
-                            <tr><td>{{ $m['method'] }}</td><td class="pr-num">{{ $money($m['sales']) }}</td><td class="pr-num">−{{ $money($m['refunds']) }}</td><td class="pr-num">{{ $money($m['sales'] - $m['refunds']) }}</td></tr>
+                            <tr><td>{{ $m['method'] }}</td><td class="pr-num">{{ $money($m['sales']) }}</td><td class="pr-num">{{ $minus($m['refunds']) }}</td><td class="pr-num">{{ $money($m['sales'] - $m['refunds']) }}</td></tr>
                         @endforeach
                     </tbody>
                 </table>
