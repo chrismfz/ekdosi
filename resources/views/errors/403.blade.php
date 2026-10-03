@@ -38,6 +38,11 @@
             <p>Για να χρησιμοποιήσεις την εφαρμογή, ένας διαχειριστής πρέπει να σε
                συνδέσει με τουλάχιστον μία εταιρεία (Users → ο λογαριασμός σου →
                «Companies»). Επικοινώνησε μαζί του.</p>
+        @elseif ($exception instanceof \Illuminate\Routing\Exceptions\InvalidSignatureException)
+            {{-- A signed link (receipt, till report, document…) that expired or was altered — not a permission problem. --}}
+            <h1>Ο σύνδεσμος έληξε</h1>
+            <p>Οι σύνδεσμοι εκτύπωσης/λήψης ισχύουν για περιορισμένο χρόνο. Άνοιξέ τον ξανά από την εφαρμογή
+               (π.χ. «Τελευταία κλεισίματα» στο Ταμείο ή το παραστατικό).</p>
         @else
             <h1>Δεν έχεις πρόσβαση σε αυτή τη σελίδα</h1>
             <p>{{ $exception?->getMessage() ?: 'Δεν έχεις δικαίωμα πρόσβασης στο συγκεκριμένο περιεχόμενο.' }}</p>

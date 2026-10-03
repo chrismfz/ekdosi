@@ -24,6 +24,7 @@ use App\Services\RecomputeInvoiceTotals;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\URL;
 use Livewire\Livewire;
 use RuntimeException;
 use Tests\TestCase;
@@ -237,6 +238,23 @@ class PosTillSessionTest extends TestCase
 
         $this->operator(open: false);
         $this->get($url)->assertOk()->assertSee('ΕΝΔΙΑΜΕΣΗ ΑΝΑΦΟΡΑ ΤΑΜΕΙΟΥ');
+    }
+
+    public function test_an_expired_report_link_says_so_and_the_closing_link_lives_a_working_day(): void
+    {
+        $session = app(TillSessions::class)->open($this->tenant, null, 10);
+        $this->operator(open: false);
+
+        $expired = URL::temporarySignedRoute('pos.session-report', now()->subMinute(), ['session' => $session->id]);
+        $this->get($expired)->assertForbidden()->assertSee('Ο σύνδεσμος έληξε');
+
+        $page = Livewire::test(PointOfSale::class)->call('startClose')->set('countedCash', '10')->call('closeTill');
+        $this->travel(11)->hours();
+        $page->assertDispatched('pos-print', function ($name, $params) {
+            $this->get($params['url'])->assertOk();
+
+            return true;
+        });
     }
 
     public function test_scanning_a_fully_returned_receipt_says_so_once_and_searches_nothing(): void
