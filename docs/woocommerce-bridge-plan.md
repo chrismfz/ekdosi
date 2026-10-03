@@ -297,7 +297,7 @@ Woo (οι κατηγορίες του shop είναι ιεραρχικές). Σ�
 > **Πρόοδος (2026-10-03):** ✅ **PR 1 — πώληση με μετρητά** (module, ρυθμίσεις σειράς/μετρητών, οθόνη πώλησης με
 > barcode/αναζήτηση/παραλλαγές, `CreatePosSale` → ΑΛΠ χωρίς πελάτη που εκδίδεται αμέσως, απόδειξη 80mm). ✅ **PR 2a —
 > επιστροφές/αλλαγές** (`CreatePosReturn`: barcode/ΜΑΡΚ/αριθμός απόδειξης → πιστωτικό 11.4 συσχετισμένο + νέα ΑΛΠ, μόνο με
-> απόδειξη). ✅ **PR 2b — ταμείο ημέρας** (`TillSessions`, `pos_sessions`/`pos_cash_movements`, `invoices.pos_session_id`, αναφορά `pos.session-report`). ✅ **PR 2c — ρόλος «Ταμίας»** (`cashier`, `RestrictErganiStaff`). Οι **θέσεις ταμείου** (registers) πάνε στο PR 3 (τερματικό καρτών ανά θέση). ⏳ PR 3 — κάρτα (InvoSign `GetPayment` + Viva) / IRIS, μικτή πληρωμή.
+> απόδειξη). ✅ **PR 2b — ταμείο ημέρας** (`TillSessions`, `pos_sessions`/`pos_cash_movements`, `invoices.pos_session_id`, αναφορά `pos.session-report`). ✅ **PR 2c — ρόλος «Ταμίας»** (`cashier`, `RestrictErganiStaff`). Οι **θέσεις ταμείου** (registers) πάνε στο PR 3 (τερματικό καρτών ανά θέση). ⏳ PR 3 — κάρτα / IRIS, μικτή πληρωμή — **έρευνα & επιλογές: `docs/pos-card-payments.md`** (2026-10-03: ο πάροχος μόνο υπογράφει· ekdosi × πρωτόκολλο Viva/WebECR· Δήλωση Συμβατότητας Α.1054/2024). ✅ «Αναφορές ταμείου».
 > ✅ **POS-2 (2026-10-04):** οι γραμμές του ταμείου είναι «με σταθερή την τελική τιμή» — χρεώνουν ΑΚΡΙΒΩΣ την τιμή ραφιού
 > (`Product::shelfGross`, η `price_wvat` όσο ισχύει· αλλιώς καθαρή × (1+ΦΠΑ)).
 

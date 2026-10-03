@@ -68,7 +68,8 @@ class CreatePosSale
                 'language' => null,   // auto = from the frozen country, as any no-choice document
             ]);
             if ($sessionId !== null) {
-                $invoice->forceFill(['pos_session_id' => $sessionId])->saveQuietly();
+                // …and who rang it («Αναφορές Ταμείου» — a session can have several cashiers).
+                $invoice->forceFill(['pos_session_id' => $sessionId, 'pos_cashier_id' => auth()->id()])->saveQuietly();
             }
 
             foreach ($items as $item) {
