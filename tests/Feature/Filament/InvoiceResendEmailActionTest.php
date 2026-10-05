@@ -10,6 +10,7 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\User;
 use App\Models\VatCategory;
+use Filament\Actions\Testing\TestAction;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Gate;
@@ -96,6 +97,44 @@ class InvoiceResendEmailActionTest extends TestCase
         Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->invoice->is($invoice)
             && $job->trigger === 'manual'
             && $job->toOverride === 'logistis@example.gr');
+    }
+
+    public function test_email2_hint_fills_the_field_for_a_copy_to_the_secondary_only(): void
+    {
+        // A customer with an «Email 2»: the hint action puts it in the field in one
+        // click, so a copy ONLY to the alt address needs no retyping.
+        $invoice = $this->issuedInvoice();
+        $invoice->customer->update(['secondary_email' => 'alt@example.com']);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->mountAction('resend_email')
+            ->callAction(TestAction::make('use_secondary_email')->schemaComponent('to_override', schema: 'mountedActionSchema0'))
+            ->assertSchemaStateSet(['to_override' => 'alt@example.com'], 'mountedActionSchema0')
+            ->callMountedAction()
+            ->assertHasNoActionErrors();
+
+        Queue::assertPushed(fn (SendInvoiceEmail $job) => $job->toOverride === 'alt@example.com');
+    }
+
+    public function test_referrer_hint_fills_the_field_with_the_referrers_email(): void
+    {
+        $invoice = $this->issuedInvoice();
+        $referrer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Reseller', 'email' => 'reseller@example.com']);
+        $invoice->customer->update(['referred_by_customer_id' => $referrer->id]);
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->mountAction('resend_email')
+            ->callAction(TestAction::make('use_referrer_email')->schemaComponent('to_override', schema: 'mountedActionSchema0'))
+            ->assertSchemaStateSet(['to_override' => 'reseller@example.com'], 'mountedActionSchema0');
+    }
+
+    public function test_email2_hint_is_hidden_without_a_secondary_email(): void
+    {
+        $invoice = $this->issuedInvoice();
+
+        Livewire::test(ViewInvoice::class, ['record' => $invoice->getRouteKey()])
+            ->mountAction('resend_email')
+            ->assertActionDoesNotExist(TestAction::make('use_secondary_email')->schemaComponent('to_override', schema: 'mountedActionSchema0'));
     }
 
     public function test_action_is_visible_even_when_the_customer_has_no_email(): void

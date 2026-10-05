@@ -63,6 +63,14 @@ class MailLogRelationManager extends RelationManager
                     ->copyable()
                     ->limit(30),
 
+                // The customer's «Email 2» rides along as CC on the normal path —
+                // without this column the history looked like it went to the To only.
+                TextColumn::make('cc_list')
+                    ->label('Cc')
+                    ->separator(', ')
+                    ->placeholder('—')
+                    ->limit(30),
+
                 TextColumn::make('subject')
                     ->label('Subject')
                     ->limit(40)

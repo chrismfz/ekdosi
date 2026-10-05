@@ -88,6 +88,13 @@ class InvoiceMailLogResource extends Resource
                     ->searchable()
                     ->limit(28),
 
+                TextColumn::make('cc_list')
+                    ->label('Cc')
+                    ->separator(', ')
+                    ->placeholder('—')
+                    ->limit(28)
+                    ->toggleable(),
+
                 TextColumn::make('trigger')
                     ->label('Τρόπος')
                     ->badge()

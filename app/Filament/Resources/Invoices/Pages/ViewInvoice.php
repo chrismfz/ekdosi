@@ -48,6 +48,7 @@ use Filament\Forms\Components\Toggle;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\ViewRecord;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -1316,10 +1317,29 @@ class ViewInvoice extends ViewRecord
                         // email» and do nothing.
                         ->placeholder(fn (Invoice $record) => $record->customer?->email ?: 'π.χ. logistis@example.gr')
                         ->required(fn (Invoice $record) => blank($record->customer?->email))
+                        // One-click fill with the addresses already on file, so a copy ONLY to
+                        // the «Email 2» (or the referrer) doesn't mean retyping it by hand.
+                        ->hintActions([
+                            Action::make('use_secondary_email')
+                                ->label('Email 2')
+                                ->icon('heroicon-m-at-symbol')
+                                ->link()
+                                ->visible(fn (Invoice $record) => filled($record->customer?->secondary_email))
+                                ->action(fn (Invoice $record, Set $set) => $set('to_override', $record->customer->secondary_email)),
+                            Action::make('use_referrer_email')
+                                ->label('Συστήσας')
+                                ->icon('heroicon-m-user')
+                                ->link()
+                                ->visible(fn (Invoice $record) => filled($record->customer?->referredBy?->email))
+                                ->action(fn (Invoice $record, Set $set) => $set('to_override', $record->customer->referredBy->email)),
+                        ])
                         ->helperText(function (Invoice $record) {
                             $parts = [];
+                            $cc = $record->customer?->secondary_email;
                             $parts[] = filled($record->customer?->email)
-                                ? 'Κενό → στον πελάτη ('.$record->customer->email.'). Συμπληρωμένο → μόνο σε αυτή τη διεύθυνση (χωρίς CC στον πελάτη).'
+                                ? 'Κενό → στον πελάτη ('.$record->customer->email.')'
+                                    .(filled($cc) ? ' με CC στο Email 2 ('.$cc.')' : '')
+                                    .'. Συμπληρωμένο → μόνο σε αυτή τη διεύθυνση (χωρίς CC στον πελάτη).'
                                 : 'Ο πελάτης δεν έχει καταχωρημένο email — συμπλήρωσε διεύθυνση παραλήπτη.';
                             // Surface the referrer (reseller/συστήσας) here so the operator can
                             // send the copy there without hunting for the address — this folds in
@@ -1361,7 +1381,9 @@ class ViewInvoice extends ViewRecord
                         ->title('Το email μπήκε στην ουρά')
                         ->body($override !== ''
                             ? 'Παραλήπτης: '.$override.'. Δες το «Ιστορικό αποστολών» για την κατάσταση.'
-                            : 'Παραλήπτης: ο πελάτης ('.($record->customer?->email ?: '—').'). Δες το «Ιστορικό αποστολών» για την κατάσταση.')
+                            : 'Παραλήπτης: ο πελάτης ('.($record->customer?->email ?: '—').')'
+                                .(filled($record->customer?->secondary_email) ? ', CC: '.$record->customer->secondary_email : '')
+                                .'. Δες το «Ιστορικό αποστολών» για την κατάσταση.')
                         ->success()->send();
                 }),
 

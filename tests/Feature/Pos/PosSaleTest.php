@@ -232,6 +232,20 @@ class PosSaleTest extends TestCase
             ->assertSet('cart.0.qty', 3.0);
     }
 
+    public function test_cart_qty_and_discount_reach_the_server_on_blur_or_enter(): void
+    {
+        // Livewire 4: a bare `wire:model.blur` only syncs the CLIENT on blur — no request,
+        // so a typed 50% left the line at its full price until the next unrelated action.
+        // `.live.blur.enter` sends on blur OR Enter, and the line re-prices at once.
+        $this->operator();
+        Livewire::test(PointOfSale::class)
+            ->call('choose', $this->product('SSL', 60)->id)
+            ->assertSeeHtml('wire:model.live.blur.enter="cart.0.qty"')
+            ->assertSeeHtml('wire:model.live.blur.enter="cart.0.discount"')
+            ->set('cart.0.discount', 50)
+            ->assertSee('37,20 €');   // 60 net + 24% = 74,40 → −50%
+    }
+
     public function test_a_step_failing_after_the_filing_committed_is_still_a_sale(): void
     {
         $this->tenant->update(['einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'sandbox']);
