@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Invoice;
+use App\Support\DocumentTotals;
 
 /**
  * Recompute invoice.net_total / gross_total from its persisted lines,
@@ -37,12 +38,14 @@ class RecomputeInvoiceTotals
             return $invoice;
         }
 
-        $rawNet = $fresh->lines->sum(fn ($l) => (float) $l->net_price);
-        $rawGross = $fresh->lines->sum(fn ($l) => (float) $l->gross_price);
-        $discountFactor = 1 - ((float) $fresh->header_discount_percent / 100);
+        $totals = DocumentTotals::applyHeaderDiscount(
+            $fresh->lines->sum(fn ($l) => (float) $l->net_price),
+            $fresh->lines->sum(fn ($l) => (float) $l->gross_price),
+            (float) $fresh->header_discount_percent,
+        );
 
-        $fresh->net_total = round($rawNet * $discountFactor, 2);
-        $fresh->gross_total = round($rawGross * $discountFactor, 2);
+        $fresh->net_total = $totals['net'];
+        $fresh->gross_total = $totals['gross'];
         $fresh->save();
 
         // myDATA taxesTotals: product-linked fees (Σ qty × per_unit) + rate-driven

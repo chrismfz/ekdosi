@@ -3,6 +3,7 @@
 namespace App\Services;
 
 use App\Models\Quote;
+use App\Support\DocumentTotals;
 use Illuminate\Support\Collection;
 
 /**
@@ -24,16 +25,15 @@ class QuoteTotals
             return $quote;
         }
 
-        $rawNet = $fresh->lines->sum(fn ($l) => (float) $l->net_price);
-        $rawGross = $fresh->lines->sum(fn ($l) => (float) $l->gross_price);
-        $discountFactor = 1 - ((float) $fresh->header_discount_percent / 100);
+        $totals = DocumentTotals::applyHeaderDiscount(
+            $fresh->lines->sum(fn ($l) => (float) $l->net_price),
+            $fresh->lines->sum(fn ($l) => (float) $l->gross_price),
+            (float) $fresh->header_discount_percent,
+        );
 
-        $net = round($rawNet * $discountFactor, 2);
-        $gross = round($rawGross * $discountFactor, 2);
-
-        $fresh->net_total = $net;
-        $fresh->gross_total = $gross;
-        $fresh->vat_total = round($gross - $net, 2);
+        $fresh->net_total = $totals['net'];
+        $fresh->gross_total = $totals['gross'];
+        $fresh->vat_total = $totals['vat'];
         $fresh->save();
 
         return $fresh;

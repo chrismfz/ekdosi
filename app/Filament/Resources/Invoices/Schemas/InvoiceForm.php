@@ -3,6 +3,7 @@
 namespace App\Filament\Resources\Invoices\Schemas;
 
 use App\Filament\Support\BankAccountField;
+use App\Filament\Support\LiveDocumentTotals;
 use App\Filament\Support\PickerOptions;
 use App\Filament\Support\Tags\TagControls;
 use App\Filament\Support\VatRateOptions;
@@ -289,6 +290,7 @@ class InvoiceForm
                         ->maxValue(99.99)
                         ->default(0)
                         ->suffix('%')
+                        ->live(onBlur: true)
                         ->helperText('Εφαρμόζεται σε όλες τις γραμμές. Πρέπει να είναι < 100. Η επιλογή πελάτη επαναφέρει την έκπτωση στην προεπιλογή του πελάτη.'),
 
                     TagControls::field()
@@ -570,7 +572,8 @@ class InvoiceForm
                                 ->numeric()
                                 ->step('0.001')
                                 ->default(1)
-                                ->minValue(0.001),
+                                ->minValue(0.001)
+                                ->live(onBlur: true),
 
                             TextInput::make('metric_unit')
                                 ->label('Μ.Μ.')
@@ -665,7 +668,8 @@ class InvoiceForm
                                 ->minValue(0)
                                 ->maxValue(100)
                                 ->default(0)
-                                ->suffix('%'),
+                                ->suffix('%')
+                                ->live(onBlur: true),
 
                             Select::make('vat_percent')
                                 ->label('ΦΠΑ %')
@@ -761,6 +765,9 @@ class InvoiceForm
                         ->addActionLabel('+ Προσθήκη γραμμής')
                         ->reorderable(false)
                         ->disabled(fn ($record) => $record && $record->mydata_state !== null),
+
+                    // Live «Σύνολα» of the unsaved lines — no calculator needed.
+                    LiveDocumentTotals::make(),
                 ]),
 
             // ─── Στοιχεία πελάτη (snapshot) — collapsed ───

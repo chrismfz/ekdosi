@@ -2,6 +2,7 @@
 
 namespace App\Filament\Resources\Quotes\Schemas;
 
+use App\Filament\Support\LiveDocumentTotals;
 use App\Filament\Support\PickerOptions;
 use App\Filament\Support\VatRateOptions;
 use App\Models\Customer;
@@ -107,7 +108,8 @@ class QuoteForm
                         ->minValue(0)
                         ->maxValue(99.99)
                         ->default(0)
-                        ->suffix('%'),
+                        ->suffix('%')
+                        ->live(onBlur: true),
                 ]),
 
             // ─── Γραμμές (Excel-style) ───
@@ -206,7 +208,8 @@ class QuoteForm
                                 ->numeric()
                                 ->step('0.001')
                                 ->default(1)
-                                ->minValue(0.001),
+                                ->minValue(0.001)
+                                ->live(onBlur: true),
 
                             TextInput::make('metric_unit')
                                 ->label('Μ.Μ.')
@@ -218,7 +221,8 @@ class QuoteForm
                                 ->step('0.01')
                                 ->minValue(0)
                                 ->default(0)
-                                ->prefix('€'),
+                                ->prefix('€')
+                                ->live(onBlur: true),
 
                             TextInput::make('discount')
                                 ->label('Έκπτωση %')
@@ -227,17 +231,22 @@ class QuoteForm
                                 ->minValue(0)
                                 ->maxValue(100)
                                 ->default(0)
-                                ->suffix('%'),
+                                ->suffix('%')
+                                ->live(onBlur: true),
 
                             Select::make('vat_percent')
                                 ->label('ΦΠΑ %')
                                 ->options(fn () => VatRateOptions::options())
                                 ->default(VatRateOptions::normalize(24))
                                 // allowHtml off; native select so it fits a table cell.
-                                ->selectablePlaceholder(false),
+                                ->selectablePlaceholder(false)
+                                ->live(),
                         ])
                         ->addActionLabel('+ Προσθήκη γραμμής')
                         ->reorderable(false),
+
+                    // Live «Σύνολα» of the unsaved lines — no calculator needed.
+                    LiveDocumentTotals::make(hasTaxes: false),
                 ]),
 
             // ─── Στοιχεία πελάτη (snapshot) — collapsed by default ───
