@@ -24,6 +24,9 @@ class CustomerLedgerStats extends StatsOverviewWidget
     /** @var array<string, mixed> */
     public array $ledgerStats = [];
 
+    /** @var array<string, mixed> */
+    public array $ledgerAging = [];
+
     /** @var array<int, array<string, mixed>> */
     public array $ledgerYearly = [];
 
@@ -54,7 +57,15 @@ class CustomerLedgerStats extends StatsOverviewWidget
             // EXPLAIN the number: χρεώσεις − πιστωτικά − πληρωμές = υπόλοιπο, so a
             // credit note (or a payment) that flipped the balance is visible instead
             // of a mystery (the whole reason someone couldn't tell «από πού ήρθε»).
-            ->description($this->balanceBreakdown($s, $fmt));
+            ->description(view('filament.customers.balance-description', [
+                'breakdown' => $this->balanceBreakdown($s, $fmt),
+                'aging' => $balance > 0.005 ? [
+                    '0–30 ημ.' => $fmt($this->ledgerAging['bucket_0_30'] ?? 0),
+                    '31–60 ημ.' => $fmt($this->ledgerAging['bucket_31_60'] ?? 0),
+                    '61–90 ημ.' => $fmt($this->ledgerAging['bucket_61_90'] ?? 0),
+                    '90+ ημ.' => $fmt($this->ledgerAging['bucket_90_plus'] ?? 0),
+                ] : [],
+            ]));
 
         if (count($spark) > 1) {
             $balanceStat->chart($spark);
@@ -107,8 +118,8 @@ class CustomerLedgerStats extends StatsOverviewWidget
 
     /**
      * A one-line explanation of the balance: «Χρεώσεις 186,00 € · Πιστωτικά
-     * −18,60 € · Πληρωμές −185,00 €» (only the non-zero terms). Falls back to the
-     * ανεξόφλητο-age hint when there's nothing to break down. `charges` are the
+     * −18,60 € · Πληρωμές −185,00 €» (only the non-zero terms). Settled and credit
+     * balances explain their status here instead of needing an aging card. `charges` are the
      * collectible debits that count toward the balance (credit-term + paid
      * cash-term); cash sales settled at issue don't appear.
      *
@@ -135,11 +146,12 @@ class CustomerLedgerStats extends StatsOverviewWidget
             $parts[] = 'Πληρωμές '.$fmt(-$payments);
         }
 
-        if ($parts === []) {
-            return 'Χωρίς κινήσεις υπολοίπου';
+        $balance = (float) ($s['balance'] ?? 0);
+        if ($balance <= 0.005) {
+            array_unshift($parts, $balance < -0.005 ? 'Πιστωτικό υπόλοιπο' : 'Χωρίς οφειλές');
         }
 
-        $line = implode(' · ', $parts);
+        $line = $parts === [] ? 'Χωρίς κινήσεις υπολοίπου' : implode(' · ', $parts);
         if (! empty($s['oldest_unpaid_days'])) {
             $line .= ' · Παλαιότερο ανεξόφλητο '.$s['oldest_unpaid_days'].' ημ.';
         }

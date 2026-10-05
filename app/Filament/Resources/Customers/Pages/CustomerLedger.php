@@ -491,6 +491,7 @@ class CustomerLedger extends Page implements HasTable
             // από πάνω προς τα κάτω χτίζεται το «Υπόλοιπο», με τα σύνολα στο τέλος.
             // (Ο operator κλικάρει την «Ημερομηνία» για ανάποδα όποτε θέλει.)
             ->defaultSort('date', 'asc')
+            ->persistSortInSession()
             ->paginated([25, 50, 100, 'all'])
             ->defaultPaginationPageOption(25)
             ->emptyStateHeading('Δεν βρέθηκαν κινήσεις')

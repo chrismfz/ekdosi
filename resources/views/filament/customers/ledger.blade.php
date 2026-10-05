@@ -197,15 +197,8 @@
         {{-- ============= KPI stats ============= --}}
         @livewire(
             \App\Filament\Resources\Customers\Widgets\CustomerLedgerStats::class,
-            ['ledgerStats' => $stats, 'ledgerYearly' => $yearly],
+            ['ledgerStats' => $stats, 'ledgerYearly' => $yearly, 'ledgerAging' => $aging],
             key('ledger-stats-' . $cust->id)
-        )
-
-        {{-- ============= Aging buckets ============= --}}
-        @livewire(
-            \App\Filament\Resources\Customers\Widgets\CustomerLedgerAging::class,
-            ['ledgerAging' => $aging, 'ledgerStats' => $stats],
-            key('ledger-aging-' . $cust->id)
         )
 
         {{-- Year comparison + balance trend charts moved BELOW the ledger table
