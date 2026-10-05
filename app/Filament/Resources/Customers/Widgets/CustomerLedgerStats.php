@@ -107,8 +107,8 @@ class CustomerLedgerStats extends StatsOverviewWidget
 
     /**
      * A one-line explanation of the balance: «Χρεώσεις 186,00 € · Πιστωτικά
-     * −18,60 € · Πληρωμές −185,00 €» (only the non-zero terms). Falls back to the
-     * ανεξόφλητο-age hint when there's nothing to break down. `charges` are the
+     * −18,60 € · Πληρωμές −185,00 €» (only the non-zero terms). Settled and credit
+     * balances explain their status here instead of needing an aging card. `charges` are the
      * collectible debits that count toward the balance (credit-term + paid
      * cash-term); cash sales settled at issue don't appear.
      *
@@ -135,11 +135,12 @@ class CustomerLedgerStats extends StatsOverviewWidget
             $parts[] = 'Πληρωμές '.$fmt(-$payments);
         }
 
-        if ($parts === []) {
-            return 'Χωρίς κινήσεις υπολοίπου';
+        $balance = (float) ($s['balance'] ?? 0);
+        if ($balance <= 0.005) {
+            array_unshift($parts, $balance < -0.005 ? 'Πιστωτικό υπόλοιπο' : 'Χωρίς οφειλές');
         }
 
-        $line = implode(' · ', $parts);
+        $line = $parts === [] ? 'Χωρίς κινήσεις υπολοίπου' : implode(' · ', $parts);
         if (! empty($s['oldest_unpaid_days'])) {
             $line .= ' · Παλαιότερο ανεξόφλητο '.$s['oldest_unpaid_days'].' ημ.';
         }

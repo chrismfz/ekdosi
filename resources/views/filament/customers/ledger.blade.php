@@ -202,11 +202,13 @@
         )
 
         {{-- ============= Aging buckets ============= --}}
-        @livewire(
-            \App\Filament\Resources\Customers\Widgets\CustomerLedgerAging::class,
-            ['ledgerAging' => $aging, 'ledgerStats' => $stats],
-            key('ledger-aging-' . $cust->id)
-        )
+        @if ((float) ($stats['balance'] ?? 0) > 0.005)
+            @livewire(
+                \App\Filament\Resources\Customers\Widgets\CustomerLedgerAging::class,
+                ['ledgerAging' => $aging, 'ledgerStats' => $stats],
+                key('ledger-aging-' . $cust->id)
+            )
+        @endif
 
         {{-- Year comparison + balance trend charts moved BELOW the ledger table
              (compact, side-by-side) so they don't push the actual κινήσεις down. --}}

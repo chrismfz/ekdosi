@@ -150,6 +150,80 @@ class CustomerLedgerPagePolishTest extends TestCase
         $this->assertEqualsWithDelta(372.0, $summary['gross'], 0.01);
     }
 
+    public function test_sort_preference_survives_reopening_the_ledger_and_changing_customer(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0);
+        $this->makeInvoice('2025-09-01', 248.0);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->sortTable('date', 'desc');
+
+        $reopened = Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertSet('tableSort', 'date:desc');
+
+        $this->assertSame(
+            ['2025-09-01', '2025-06-01'],
+            array_column($reopened->instance()->getTableRecords()->items(), 'date'),
+        );
+        $this->assertEquals(
+            [372.0, 124.0],
+            array_column($reopened->instance()->getTableRecords()->items(), 'running_balance'),
+        );
+
+        $other = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Other']);
+        Livewire::test(CustomerLedger::class, ['record' => $other->id])
+            ->assertSet('tableSort', 'date:desc');
+
+        $reopened->sortTable('date', 'asc');
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertSet('tableSort', 'date:asc');
+    }
+
+    public function test_settled_ledger_hides_the_redundant_aging_section(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0);
+        Payment::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'pay_date' => '2025-06-02',
+            'amount' => 124.0,
+        ]);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertOk()
+            ->assertDontSee('Ανάλυση ανεξόφλητων κατά ηλικία');
+
+        Livewire::test(CustomerLedgerStats::class, ['ledgerStats' => ['balance' => 0]])
+            ->assertSee('Χωρίς οφειλές');
+    }
+
+    public function test_outstanding_ledger_keeps_the_aging_analysis(): void
+    {
+        $this->makeInvoice('2025-06-01', 124.0);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertOk()
+            ->assertSee('Ανάλυση ανεξόφλητων κατά ηλικία');
+    }
+
+    public function test_credit_balance_hides_aging_and_explains_the_balance(): void
+    {
+        Payment::create([
+            'company_id' => $this->tenant->id,
+            'customer_id' => $this->customer->id,
+            'pay_date' => '2025-06-02',
+            'amount' => 50.0,
+        ]);
+
+        Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
+            ->assertOk()
+            ->assertDontSee('Ανάλυση ανεξόφλητων κατά ηλικία');
+
+        Livewire::test(CustomerLedgerStats::class, ['ledgerStats' => ['balance' => -50, 'payments' => 50]])
+            ->assertSee('Πιστωτικό υπόλοιπο')
+            ->assertSee('Πληρωμές');
+    }
+
     public function test_empty_customer_shows_empty_state_and_still_renders(): void
     {
         Livewire::test(CustomerLedger::class, ['record' => $this->customer->id])
