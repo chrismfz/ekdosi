@@ -197,18 +197,9 @@
         {{-- ============= KPI stats ============= --}}
         @livewire(
             \App\Filament\Resources\Customers\Widgets\CustomerLedgerStats::class,
-            ['ledgerStats' => $stats, 'ledgerYearly' => $yearly],
+            ['ledgerStats' => $stats, 'ledgerYearly' => $yearly, 'ledgerAging' => $aging],
             key('ledger-stats-' . $cust->id)
         )
-
-        {{-- ============= Aging buckets ============= --}}
-        @if ((float) ($stats['balance'] ?? 0) > 0.005)
-            @livewire(
-                \App\Filament\Resources\Customers\Widgets\CustomerLedgerAging::class,
-                ['ledgerAging' => $aging, 'ledgerStats' => $stats],
-                key('ledger-aging-' . $cust->id)
-            )
-        @endif
 
         {{-- Year comparison + balance trend charts moved BELOW the ledger table
              (compact, side-by-side) so they don't push the actual κινήσεις down. --}}

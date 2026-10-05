@@ -3,7 +3,6 @@
 namespace Tests\Feature\CustomerLedger;
 
 use App\Filament\Resources\Customers\Pages\CustomerLedger;
-use App\Filament\Resources\Customers\Widgets\CustomerLedgerAging;
 use App\Filament\Resources\Customers\Widgets\CustomerLedgerBalanceChart;
 use App\Filament\Resources\Customers\Widgets\CustomerLedgerRevenueChart;
 use App\Filament\Resources\Customers\Widgets\CustomerLedgerStats;
@@ -266,12 +265,25 @@ class CustomerLedgerPagePolishTest extends TestCase
         ])->assertOk();
     }
 
-    public function test_aging_widget_collapses_when_settled(): void
+    public function test_balance_card_hides_aging_when_settled(): void
     {
-        Livewire::test(CustomerLedgerAging::class, [
+        Livewire::test(CustomerLedgerStats::class, [
             'ledgerAging' => ['bucket_0_30' => 0, 'bucket_31_60' => 0, 'bucket_61_90' => 0, 'bucket_90_plus' => 0],
             'ledgerStats' => ['balance' => 0.0],
-        ])->assertOk()->assertSee('Καμία');
+        ])->assertOk()->assertSee('Χωρίς οφειλές')->assertDontSee('data-ledger-aging', false);
+    }
+
+    public function test_balance_card_contains_all_four_aging_buckets(): void
+    {
+        Livewire::test(CustomerLedgerStats::class, [
+            'ledgerAging' => ['bucket_0_30' => 10, 'bucket_31_60' => 20, 'bucket_61_90' => 30, 'bucket_90_plus' => 40],
+            'ledgerStats' => ['balance' => 100.0, 'charges' => 100.0],
+        ])
+            ->assertOk()
+            ->assertSee('Υπόλοιπο')
+            ->assertSee('Χρεώσεις')
+            ->assertSee('data-ledger-aging', false)
+            ->assertSeeInOrder(['0–30 ημ.', '10,00', '31–60 ημ.', '20,00', '61–90 ημ.', '30,00', '90+ ημ.', '40,00']);
     }
 
     public function test_balance_chart_widget_renders(): void

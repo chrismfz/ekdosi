@@ -24,6 +24,9 @@ class CustomerLedgerStats extends StatsOverviewWidget
     /** @var array<string, mixed> */
     public array $ledgerStats = [];
 
+    /** @var array<string, mixed> */
+    public array $ledgerAging = [];
+
     /** @var array<int, array<string, mixed>> */
     public array $ledgerYearly = [];
 
@@ -54,7 +57,15 @@ class CustomerLedgerStats extends StatsOverviewWidget
             // EXPLAIN the number: χρεώσεις − πιστωτικά − πληρωμές = υπόλοιπο, so a
             // credit note (or a payment) that flipped the balance is visible instead
             // of a mystery (the whole reason someone couldn't tell «από πού ήρθε»).
-            ->description($this->balanceBreakdown($s, $fmt));
+            ->description(view('filament.customers.balance-description', [
+                'breakdown' => $this->balanceBreakdown($s, $fmt),
+                'aging' => $balance > 0.005 ? [
+                    '0–30 ημ.' => $fmt($this->ledgerAging['bucket_0_30'] ?? 0),
+                    '31–60 ημ.' => $fmt($this->ledgerAging['bucket_31_60'] ?? 0),
+                    '61–90 ημ.' => $fmt($this->ledgerAging['bucket_61_90'] ?? 0),
+                    '90+ ημ.' => $fmt($this->ledgerAging['bucket_90_plus'] ?? 0),
+                ] : [],
+            ]));
 
         if (count($spark) > 1) {
             $balanceStat->chart($spark);
