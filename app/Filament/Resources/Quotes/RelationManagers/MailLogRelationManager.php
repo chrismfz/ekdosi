@@ -52,6 +52,12 @@ class MailLogRelationManager extends RelationManager
                     ->copyable()
                     ->limit(30),
 
+                TextColumn::make('cc_list')
+                    ->label('Cc')
+                    ->separator(', ')
+                    ->placeholder('—')
+                    ->limit(30),
+
                 TextColumn::make('subject')
                     ->label('Θέμα')
                     ->limit(40)
