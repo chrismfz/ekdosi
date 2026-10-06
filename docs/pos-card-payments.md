@@ -47,7 +47,7 @@ FAQ myDATA https://www.aade.gr/sites/default/files/2023-02/FAQs_myDATA_epixeiris
 |---|---|---|
 | **Viva** | Cloud Terminal API (REST, OAuth2· `aadeProviderId` + υπογραφή) | επίσης **η ίδια πάροχος** («Viva Fiscal») — βλ. Β [Β] |
 | **Mellon** (Ingenico· NBG Pay, PayzyPOS) | Common WebECR (REST, JWT + `X-Api-Key` από το μενού του τερματικού· webhook/polling) | έχει SaaS mode για ERP πολλών εμπόρων· UAT `uat.mreceipts.com`· 19 σενάρια πιστοποίησης — βλ. ενότητα «Mellon WebECR» [Β] |
-| **Cardlink/Worldline** (και πρώην Eurobank) | Cardlink Web / Common WebECR | ό,τι χρησιμοποιεί ο «SOFT1 POS Connector» [Π] |
+| **Cardlink/Worldline** (και πρώην Eurobank) | **cloud ERP → Common Web = το WebECR της Mellon** (production `wl.mreceipts.com`) · τοπικά: ECR2EFT WEB / DLL | NSP κωδ. **122** [Β] |
 | **Euronet/epay** (Πειραιώς) | Common WebECR | [Π] |
 | Nexi (Alpha), Attica, Pancreta | Common WebECR | [Π] |
 | SumUp, Revolut | — | δεν βρέθηκαν στη λίστα Α.1155 — να αποφευχθούν [;] |
@@ -108,7 +108,18 @@ AADE): δεν ταιριάζει σε web εφαρμογή — ο server του 
 **Δοκιμή χωρίς φυσικό τερματικό:** το **Viva Terminal app** (Android, Tap-on-Phone) σε demo λογαριασμό = demo τερματικό.
 Χρειάζεται: demo λογαριασμός εμπόρου (demo.vivapayments.com) + POS API credentials + κινητό Android με NFC.
 
-## Cardlink (το τερματικό του καταστήματος) — 2026-10-03
+## Ίδιο μηχάνημα ≠ ίδιο δίκτυο (για να μη μπερδευτούμε ξανά)
+
+- **Οι κατασκευαστές** (PAX, Verifone, Ingenico, Castles) φτιάχνουν το *μηχάνημα*. **Τα δίκτυα/NSP** (Cardlink, Viva, Mellon,
+  Euronet/epay, Nexi…) βάζουν το *λογισμικό*, το δίκτυο, την υποστήριξη και τη σύνδεση με τον acquirer. Ένα Ingenico μπορεί να
+  είναι Cardlink, Mellon ή άλλου — το κουτί δεν το λέει.
+- **Πώς το αναγνωρίζεις:** το λογότυπο/επωνυμία στο απόκομμα (slip) που τυπώνει το τερματικό (π.χ. «CARDLINK S.A»), το
+  αυτοκόλλητο με το τηλέφωνο υποστήριξης, η σύμβαση του καταστήματος· στο slip φαίνεται και ο acquirer (π.χ. WORLDLINE).
+- **Cardlink ↔ Mellon:** διαφορετικές εταιρείες, ΑΛΛΑ για **cloud ERP** η Cardlink χρησιμοποιεί την **πλατφόρμα WebECR της
+  Mellon** («Common Web») για **όλα** τα τερματικά της (PAX, Verifone, Ingenico)· δοκιμές στο UAT της Mellon, παραγωγή στο
+  `https://wl.mreceipts.com`. Άρα για το ekdosi «Cardlink» = «WebECR της Mellon» σε επίπεδο πρωτοκόλλου. [Β — βλ. παρακάτω]
+
+## Cardlink (το τερματικό του καταστήματος) — 2026-10-03, διορθώθηκε 2026-10-06
 
 - **Τρία πρωτόκολλα** για τη διασύνδεση ERP–POS: **Cardlink Web based**, **Cardlink TCPSocket based** (DLL) και **Common Web**
   (πλέον για όλα τα POS της). [Β] https://support.cardlink.gr/support/discussions/topics/7000043333
@@ -125,18 +136,36 @@ AADE): δεν ταιριάζει σε web εφαρμογή — ο server του 
   τους τύπους συναλλαγών του πελάτη → **πιλοτικό με επιλεγμένο πελάτη σε πραγματικό POS** (version με Α.1098/Α.1155) →
   rollout. Τα αναλυτικά specs ανά πρωτόκολλο βρίσκονται στο developer portal (support.cardlink.gr, ενότητα «Διασύνδεση
   POS-ERP — ΑΑΔΕ Α.1155. Τεχνικά Θέματα (Developers)»· κάποια θέματα θέλουν login). [Β]
-- **Συμπέρασμα:** για το κατάστημα → **Cardlink Web (Cloud ERP)**, δοκιμή στον VPOS simulator, πιλοτικό στο ίδιο το
-  κατάστημα. Η Viva (demo + Tap-on-Phone) μένει ως δεύτερη υλοποίηση / γρήγορο πρωτότυπο. Το `TerminalGateway` του
-  ekdosi: ένα flow (υπογραφή παρόχου → πώληση → αποτέλεσμα → υποβολή), υλοποιήσεις Cardlink Web και Viva Cloud.
+- ~~Συμπέρασμα 2026-10-03: Cardlink Web + VPOS simulator~~ — **ΛΑΘΟΣ, διορθώθηκε 2026-10-06** από το forum developers της Cardlink
+  (https://support.cardlink.gr/support/discussions/topics/7000043244 — το link που στέλνει η Cardlink μετά την εγγραφή):
+  - Τύποι POS Cardlink: **Android (PAX A920/A920Pro/A80…)**, **Verifone VX-520**, **Ingenico ICT-220**. (topic 7000043243)
+  - **ECR2EFT DLL** (TCP socket, σύγχρονο) και **ECR2EFT WEB** (json) = για ERP **στο τοπικό δίκτυο** — το ECR2EFT WEB είναι
+    service σε Java 8 που τρέχει σε PC του καταστήματος (Windows 7 SP1+). Δεν ταιριάζει σε web εφαρμογή χωρίς τοπικό agent.
+  - **«Για Cloud-based ERP συστήματα θα γίνεται χρήση του Common web πρωτοκόλλου για όλους τους τύπους POS της Cardlink»**
+    (topic 7000043243) — **αυτό είναι το ekdosi**. Common Web = το **WebECR της Mellon** (το topic 7000044019 παραπέμπει στο
+    WebECR documentation της Mellon, API `v2.2`).
+  - **Δοκιμές:** οι VPOS simulators της Cardlink (Verifone + Android) καλύπτουν μόνο τα δικά της πρωτόκολλα· για Common Web
+    οι δοκιμές γίνονται στον **Mellon simulator** (topic 7000043245). Μετά: **production URL `https://wl.mreceipts.com`** για
+    **όλους** τους τύπους Cardlink, με τα παραγωγικά credentials της Mellon (topic 7000043432).
+  - Λοιπά [Β]: NSP κωδ. Cardlink **122** · κωδικοί παρόχων στο site ΑΑΔΕ (7000043515) · στο VPOS provider id `00X` = test
+    κλειδιά, `50X` = production κλειδιά· φυσικό τερματικό μόνο production (7000043546) · `uniqueIntegratorId` μόνο VPOS
+    (7000043550) · **Unique Payment ID** = acquirer + batch + sequence + approval → void/refund έχουν **νέο** ID (7000043300) ·
+    prepayment vs sale: για το POS ίδια συναλλαγή (7000043301) · υπογραφή base64, τα πεδία επαλήθευσης **ακριβώς** όπως τα
+    έδωσε ο πάροχος (χωρίς υποδιαστολές/κενά) + provider id (7000043722) · IRIS: `CardType` "IRIS", PAN αστεράκια, AuthCode
+    "000000", RRN έως 35 (7000044018/44019).
+  - Το «Cloud ERP» με κωδικό σύζευξης (quick guides παραπάνω) ταιριάζει με το «Link with 3rd party services» του WebECR. [Π]
+- **Συμπέρασμα (ισχύει):** για το κατάστημα → **driver `webecr`** (Common Web/Mellon): UAT της Mellon → σενάρια → πιστοποίηση
+  → πιλοτικό στο κατάστημα με το Cardlink τερματικό του → `wl.mreceipts.com`. Η Viva (demo + Tap-on-Phone) μένει δεύτερη
+  υλοποίηση. Ένα flow (υπογραφή παρόχου → πώληση → αποτέλεσμα → υποβολή), drivers `webecr` + `viva_cloud`.
 
 ## Mellon WebECR — διαδικασία πιστοποίησης + πρωτόκολλο (v2.5.13) — 2026-10-06
 
 > Spec στο repo: **`docs/EFTPOS-WebECR v2.5.13.pdf`** (δημοσ. 7/10/2025). Σελίδα για ERP: **https://aade.mellongroup.com/**
-> («Βήματα Διασύνδεσης», «Συχνές Ερωτήσεις», λίστα πιστοποιημένων ERP). Αφορά τα τερματικά **Mellon** (Ingenico — NBG Pay,
-> PayzyPOS κ.ά.)· **όχι** απαραίτητα το Cardlink του καταστήματος (εκεί ισχύει η ενότητα Cardlink). Η αξία του για εμάς:
-> **sandbox WebECR που αποκτιέται με ένα email**, χωρίς φυσικό τερματικό — ο πιο γρήγορος δρόμος για έναν driver `webecr`.
+> («Βήματα Διασύνδεσης», «Συχνές Ερωτήσεις», λίστα πιστοποιημένων ERP). Αφορά τα τερματικά Mellon (Ingenico — NBG Pay,
+> PayzyPOS κ.ά.) **ΚΑΙ όλα τα Cardlink τερματικά όταν το ERP είναι cloud** (βλ. ενότητα Cardlink) → **είναι ο δρόμος για το
+> κατάστημα**. Sandbox με ένα email, χωρίς φυσικό τερματικό. Production για Cardlink: `https://wl.mreceipts.com`.
 
-### Η «γραφειοκρατία» — 5 βήματα (ανά δίκτυο· η Cardlink έχει τα δικά της, βλ. πάνω)
+### Η «γραφειοκρατία» — 5 βήματα (ισχύουν και για Cardlink μέσω Common Web)
 
 1. **Simulator (UAT).** Email στο **mellonwebecr@mellongroup.com** με: (α) ένα email που γίνεται το username του λογαριασμού,
    (β) αν χρησιμοποιείται ΦΗΜΑΣ ή πάροχος και **το provider id του παρόχου** (→ του InvoSign: να το επιβεβαιώσει η GV Solutions),
@@ -216,11 +245,11 @@ Cardlink → ίδια οθόνη «Σύζευξη τερματικού» για 
 
 ## Επόμενα βήματα
 
-1. ✅ Το κατάστημα έχει **Cardlink**. → Εγγραφή στον **VPOS simulator** της Cardlink (φόρμα — ο ιδιοκτήτης/προμηθευτής) +
-   specs «Cardlink Web» από το developer portal.
+1. ✅ Το κατάστημα έχει **Cardlink** (✅ εγγραφή στο μητρώο Cardlink 2026-10-06 — απάντησαν με το forum). Για cloud ERP →
+   **Common Web = Mellon WebECR**: **email στο mellonwebecr@mellongroup.com** για λογαριασμό UAT (ο ιδιοκτήτης). Ο VPOS
+   simulator της Cardlink δεν χρειάζεται για εμάς.
 2. Ερώτηση στην GV Solutions (InvoSign): δοκιμασμένοι acquirers · χρεώνει credit το `GetPayment`; · **ποιο είναι το provider id
    τους και έχουν δώσει το test public key στη Mellon (WebECR UAT);**
-3. Sandbox: InvoSign `GetPayment` + το αντίστοιχο cloud API (Viva demo / Mellon UAT).
-   **Mellon UAT:** email στο mellonwebecr@mellongroup.com (username-email · πάροχος InvoSign + provider id · επωνυμία) — ο ιδιοκτήτης.
+3. Sandbox: InvoSign `GetPayment` + Mellon UAT (username-email · πάροχος InvoSign + provider id · επωνυμία) · Viva demo δεύτερο.
 4. Δήλωση Συμβατότητας Α.1054/2024 για το ekdosi πριν τη ζωντανή χρήση.
 5. Θέσεις ταμείου (registers) στο ίδιο PR: ένα τερματικό (TerminalID) ανά θέση.
