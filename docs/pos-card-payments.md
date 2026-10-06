@@ -61,6 +61,7 @@ https://cardlink.gr/wp-lp/ecr-pos-integration/ · https://go.prosvasis.com/softo
 - Ταυτόχρονη: `iNVOSign_GetPayment.php` (external_id, issueDate, branch, Type, series, aa, `markid` κενό, Net/Vat/Total,
   `Amount` → μικτή πληρωμή, tipAmount, **TerminalID**, `nsp`) → `uid` + `paymentToken{timestamp, signature, amount}` →
   χρέωση στο τερματικό → κανονική υποβολή με τα στοιχεία πληρωμής. Ετεροχρονισμένη: `iNVOSign_Payment.php`. [Β]
+- **Κωδικός Παρόχου ΑΑΔΕ: `030`** (ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ Γ – ΚΑΡΙΝΟΣ Β Ο.Ε., άδεια `2025_05_130GVSolutions_001_iNVO Sign_V1_07052025`, Α.1158/2023, 7/5/2025). [Β]
 - Δεν δημοσιεύει λίστα acquirers — είναι ουδέτερος (υπογράφει). Αδειοδοτήθηκε 05/2025: **να ρωτηθεί η GV Solutions
   ποιοι acquirers έχουν ήδη δοκιμάσει την υπογραφή του** και αν το `GetPayment` χρεώνει credit. [;]
 - Κόστος: πακέτα 1.000 = €50 (€0,05/παραστατικό) … 10.000 = €350 + ΦΠΑ. [Β]
@@ -168,7 +169,8 @@ AADE): δεν ταιριάζει σε web εφαρμογή — ο server του 
 ### Η «γραφειοκρατία» — 5 βήματα (ισχύουν και για Cardlink μέσω Common Web)
 
 1. **Simulator (UAT).** Email στο **mellonwebecr@mellongroup.com** με: (α) ένα email που γίνεται το username του λογαριασμού,
-   (β) αν χρησιμοποιείται ΦΗΜΑΣ ή πάροχος και **το provider id του παρόχου** (→ του InvoSign: να το επιβεβαιώσει η GV Solutions),
+   (β) αν χρησιμοποιείται ΦΗΜΑΣ ή πάροχος και **το provider id του παρόχου** (→ **InvoSign = Κωδικός Παρόχου ΑΑΔΕ `030`**,
+   ΓΕΩΡΓΑΚΟΠΟΥΛΟΣ Γ – ΚΑΡΙΝΟΣ Β Ο.Ε. / GV Solutions, άδεια ΥΠΑΗΕΣ 7/5/2025 — production· το test id μπορεί να διαφέρει),
    (γ) την επίσημη επωνυμία της εταιρείας. **Ο λογαριασμός είναι του ΚΑΤΑΣΚΕΥΑΣΤΗ του ERP (εμείς — «3rd party servicer»),
    όχι του εμπόρου:** ένας για όλο το ekdosi· κάθε κατάστημα συνδέει το τερματικό του με κωδικό από το μενού του POS
    (API key ανά έμπορο). Username = ένα μόνιμο role-mailbox της εταιρείας ανάπτυξης, όχι προσωπικό. Έρχεται email με URL → **Authorization Code (λήγει σε 5', resend γίνεται)** →
