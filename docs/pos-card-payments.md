@@ -154,6 +154,13 @@ AADE): δεν ταιριάζει σε web εφαρμογή — ο server του 
     prepayment vs sale: για το POS ίδια συναλλαγή (7000043301) · υπογραφή base64, τα πεδία επαλήθευσης **ακριβώς** όπως τα
     έδωσε ο πάροχος (χωρίς υποδιαστολές/κενά) + provider id (7000043722) · IRIS: `CardType` "IRIS", PAN αστεράκια, AuthCode
     "000000", RRN έως 35 (7000044018/44019).
+  - **VPOS λογαριασμός Cardlink: ✅ άνοιξε 2026-10-06** (Worldline «Client Emulator», virtualpos.services.novidea.gr). Τι είναι:
+    το **ECR2EFT WEB** — ένα Java service (μενού «Ecr2Eft Web Service 6.4.0», «Run Ecr As Service») που τρέχει **τοπικά**
+    (`Service Url http://localhost:8080`) και μιλάει TCP στο POS (`Pos IP virtualpos.services.novidea.gr`, port `4000`, TID,
+    `uniqueIntegratorId`). Συναλλαγές: Sale / Sale ERP (υπογραφή παρόχου) / Sale Ecr Token, Refund, Free Refund, Full Void,
+    Pre Auth (+ Completion), Reconciliation, Resend All, Registration Receipt, FORCE IRIS Sale, Echo, Control. Χρήσιμο για να
+    δούμε τη ροή — **αλλά** στην παραγωγή το service πρέπει να «βλέπει» το τερματικό στο LAN του καταστήματος → τοπικός agent
+    στο PC του ταμείου. Γι' αυτό η Cardlink συστήνει Common Web για cloud ERP.
   - Το «Cloud ERP» με κωδικό σύζευξης (quick guides παραπάνω) ταιριάζει με το «Link with 3rd party services» του WebECR. [Π]
 - **Συμπέρασμα (ισχύει):** για το κατάστημα → **driver `webecr`** (Common Web/Mellon): UAT της Mellon → σενάρια → πιστοποίηση
   → πιλοτικό στο κατάστημα με το Cardlink τερματικό του → `wl.mreceipts.com`. Η Viva (demo + Tap-on-Phone) μένει δεύτερη
