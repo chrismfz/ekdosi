@@ -169,11 +169,15 @@ AADE): δεν ταιριάζει σε web εφαρμογή — ο server του 
 
 1. **Simulator (UAT).** Email στο **mellonwebecr@mellongroup.com** με: (α) ένα email που γίνεται το username του λογαριασμού,
    (β) αν χρησιμοποιείται ΦΗΜΑΣ ή πάροχος και **το provider id του παρόχου** (→ του InvoSign: να το επιβεβαιώσει η GV Solutions),
-   (γ) την επίσημη επωνυμία της εταιρείας. Έρχεται email με URL → **Authorization Code (λήγει σε 5', resend γίνεται)** →
+   (γ) την επίσημη επωνυμία της εταιρείας. **Ο λογαριασμός είναι του ΚΑΤΑΣΚΕΥΑΣΤΗ του ERP (εμείς — «3rd party servicer»),
+   όχι του εμπόρου:** ένας για όλο το ekdosi· κάθε κατάστημα συνδέει το τερματικό του με κωδικό από το μενού του POS
+   (API key ανά έμπορο). Username = ένα μόνιμο role-mailbox της εταιρείας ανάπτυξης, όχι προσωπικό. Έρχεται email με URL → **Authorization Code (λήγει σε 5', resend γίνεται)** →
    το ERP τον κάνει redeem (§3.7.3) → TXN INIT (§3.7.5). Στο sandbox δεν υπάρχει τερματικό: προσομοιωμένες απαντήσεις,
    έγκριση/απόρριψη «ρεαλιστικά» από αλγόριθμο. **Ο λογαριασμός ανοίγει από τον ιδιοκτήτη (email), όχι από εμάς.**
    - Token: `https://uat.mreceipts.com/api/token` και `…/api/token/refresh`
    - Όλα τα άλλα: `https://uat.mreceipts.com/api/v2.2/` (π.χ. `…/v2.2/authorization/redeem/`, `…/v2.2/terminal/`)
+   - Βοηθητικό: «Διαδικασία Δημιουργίας Σφραγίδας από Παρόχους» v1.5 (πώς υπογράφει ο **πάροχος** — πληροφοριακό για εμάς):
+     https://aade.mellongroup.com/Portals/0/Library/Token%20crypto%20proposal%20-%20v1.5.pdf
    - FAQ «Provider id — public key»: **ο ΠΑΡΟΧΟΣ** στέλνει το test public key του και η Mellon του αναθέτει provider id. Εμείς
      δεν είμαστε πάροχος → **να ρωτηθεί η Mellon αν έχει ήδη το test κλειδί του InvoSign** (αλλιώς η επαλήθευση της
      υπογραφής στο UAT θα αποτυγχάνει) ή αν δέχεται τα δοκιμαστικά κλειδιά της ΑΑΔΕ. [;]
