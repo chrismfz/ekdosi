@@ -46,14 +46,14 @@ FAQ myDATA https://www.aade.gr/sites/default/files/2023-02/FAQs_myDATA_epixeiris
 | Δίκτυο | Πρωτόκολλο | Σημείωση |
 |---|---|---|
 | **Viva** | Cloud Terminal API (REST, OAuth2· `aadeProviderId` + υπογραφή) | επίσης **η ίδια πάροχος** («Viva Fiscal») — βλ. Β [Β] |
-| **Mellon** (Ingenico· NBG Pay, PayzyPOS) | Common WebECR (REST, JWT + `X-Api-Key` από το μενού του τερματικού· webhook/polling) | έχει SaaS mode για ERP πολλών εμπόρων· UAT `uat.mreceipts.com`· ~16 test cases πιστοποίησης [Β] |
+| **Mellon** (Ingenico· NBG Pay, PayzyPOS) | Common WebECR (REST, JWT + `X-Api-Key` από το μενού του τερματικού· webhook/polling) | έχει SaaS mode για ERP πολλών εμπόρων· UAT `uat.mreceipts.com`· 19 σενάρια πιστοποίησης — βλ. ενότητα «Mellon WebECR» [Β] |
 | **Cardlink/Worldline** (και πρώην Eurobank) | Cardlink Web / Common WebECR | ό,τι χρησιμοποιεί ο «SOFT1 POS Connector» [Π] |
 | **Euronet/epay** (Πειραιώς) | Common WebECR | [Π] |
 | Nexi (Alpha), Attica, Pancreta | Common WebECR | [Π] |
 | SumUp, Revolut | — | δεν βρέθηκαν στη λίστα Α.1155 — να αποφευχθούν [;] |
 
 Πηγές: https://developer.viva.com/apis-for-point-of-sale/card-terminals-devices/ ·
-https://aade.mellongroup.com/Portals/0/Library/EFTPOS-WebECR%20v2.5.12%201.pdf · https://pos.mellongroup.com/erp/ ·
+https://aade.mellongroup.com/ (spec v2.5.13 στο `docs/`) · https://pos.mellongroup.com/erp/ ·
 https://cardlink.gr/wp-lp/ecr-pos-integration/ · https://go.prosvasis.com/softone-prosvasis-go-diasyndesi-me-pos/
 
 ## InvoSign
@@ -129,13 +129,98 @@ AADE): δεν ταιριάζει σε web εφαρμογή — ο server του 
   κατάστημα. Η Viva (demo + Tap-on-Phone) μένει ως δεύτερη υλοποίηση / γρήγορο πρωτότυπο. Το `TerminalGateway` του
   ekdosi: ένα flow (υπογραφή παρόχου → πώληση → αποτέλεσμα → υποβολή), υλοποιήσεις Cardlink Web και Viva Cloud.
 
+## Mellon WebECR — διαδικασία πιστοποίησης + πρωτόκολλο (v2.5.13) — 2026-10-06
+
+> Spec στο repo: **`docs/EFTPOS-WebECR v2.5.13.pdf`** (δημοσ. 7/10/2025). Σελίδα για ERP: **https://aade.mellongroup.com/**
+> («Βήματα Διασύνδεσης», «Συχνές Ερωτήσεις», λίστα πιστοποιημένων ERP). Αφορά τα τερματικά **Mellon** (Ingenico — NBG Pay,
+> PayzyPOS κ.ά.)· **όχι** απαραίτητα το Cardlink του καταστήματος (εκεί ισχύει η ενότητα Cardlink). Η αξία του για εμάς:
+> **sandbox WebECR που αποκτιέται με ένα email**, χωρίς φυσικό τερματικό — ο πιο γρήγορος δρόμος για έναν driver `webecr`.
+
+### Η «γραφειοκρατία» — 5 βήματα (ανά δίκτυο· η Cardlink έχει τα δικά της, βλ. πάνω)
+
+1. **Simulator (UAT).** Email στο **mellonwebecr@mellongroup.com** με: (α) ένα email που γίνεται το username του λογαριασμού,
+   (β) αν χρησιμοποιείται ΦΗΜΑΣ ή πάροχος και **το provider id του παρόχου** (→ του InvoSign: να το επιβεβαιώσει η GV Solutions),
+   (γ) την επίσημη επωνυμία της εταιρείας. Έρχεται email με URL → **Authorization Code (λήγει σε 5', resend γίνεται)** →
+   το ERP τον κάνει redeem (§3.7.3) → TXN INIT (§3.7.5). Στο sandbox δεν υπάρχει τερματικό: προσομοιωμένες απαντήσεις,
+   έγκριση/απόρριψη «ρεαλιστικά» από αλγόριθμο. **Ο λογαριασμός ανοίγει από τον ιδιοκτήτη (email), όχι από εμάς.**
+   - Token: `https://uat.mreceipts.com/api/token` και `…/api/token/refresh`
+   - Όλα τα άλλα: `https://uat.mreceipts.com/api/v2.2/` (π.χ. `…/v2.2/authorization/redeem/`, `…/v2.2/terminal/`)
+   - FAQ «Provider id — public key»: **ο ΠΑΡΟΧΟΣ** στέλνει το test public key του και η Mellon του αναθέτει provider id. Εμείς
+     δεν είμαστε πάροχος → **να ρωτηθεί η Mellon αν έχει ήδη το test κλειδί του InvoSign** (αλλιώς η επαλήθευση της
+     υπογραφής στο UAT θα αποτυγχάνει) ή αν δέχεται τα δοκιμαστικά κλειδιά της ΑΑΔΕ. [;]
+2. **Προετοιμασία ERP για τα 19 σενάρια** (v2.4.2 — υπάρχει και ως Excel στη σελίδα). Όλα με κλήσεις WebECR:
+   | # | σενάριο | τι σημαίνει για τον driver |
+   |---|---|---|
+   | 1 | pairing ERP ↔ τερματικό / λίστα τερματικών | redeem κωδικού + `GET terminal/` |
+   | 2–3 | πώληση 1 € / 2 € (chip, contactless) → έγκριση | `txninit` TxnType 0 |
+   | 4 | ακύρωση (void) της πώλησης 1 € από το ERP | `txnvoid` |
+   | 5 | επιστροφή 2 € συσχετισμένη | TxnType 1 + `InitialTransaction` |
+   | 6 | επιστροφή τυχαίου ποσού **χωρίς** συσχέτιση | TxnType 1 χωρίς `InitialTransaction` |
+   | 7 | δόσεις | `Instalments` |
+   | 8–9 | **ετεροχρονισμένη** 2 €: προφόρτωση στο POS, πληρωμή αργότερα με κάρτα | `PreloadTransaction` + `PreloadExpiration` |
+   | 10 | mail order 3 € | TxnType 4 |
+   | 11–12 | προέγκριση (μόνο από το POS) → ολοκλήρωση από το ERP | TxnType 3 |
+   | 13 | πώληση 2 € — **διακοπή από τον χειριστή** (κόκκινο κουμπί) | Result 3 CANCELLED |
+   | 14 | πώληση **9,99 €** → **απόρριψη** από τον host | Result 2 DECLINED |
+   | 15 | πώληση **22,22 €** → έγκριση **μετά από 150''** | περιμένουμε/κάνουμε poll — όχι timeout στα 180'' |
+   | 16 | πώληση **13,13 €** → **χάνεται η επικοινωνία** POS↔ERP την ώρα της έγκρισης | `in_doubt` + ανάκτηση με poll |
+   | 17 | τακτοποίηση (το τερματικό πρώτα, μετά το ERP): προφορτωμένες, επιστροφές, προεγκρίσεις | λίστα intents/transactions |
+   | 18 | κλείσιμο πακέτου στο POS — το ERP δεν παίρνει απάντηση | Result 7 MAX_TRANSACTIONS αν δεν γίνει |
+   | 19 | έλεγχος διαφορών ERP ↔ POS | `GET transaction/` ανά ημέρα — συμφωνία με τα `pos_card_payments` |
+
+   Τα «μαγικά» ποσά (9,99 / 22,22 / 13,13) να τα μιμείται και ο **`FakeDriver`** — ίδια σενάρια στα tests μας.
+3. **Ραντεβού δοκιμών** με email στο **mellonerpappointment@mellongroup.com**, Subject «ERP Testing εξ αποστάσεως» ή «ERP Testing
+   στο Mellon Lab». Τα τερματικά + μηχανικός είναι πάντα στο Mellon Lab (και στις εξ αποστάσεως).
+4. **ERP 2 POS Certification** από τη Mellon μετά το end-to-end των σεναρίων → μπαίνουμε στη λίστα πιστοποιημένων ERP.
+5. **Πιλοτικό** σε έναν έμπορο, σε παραγωγή.
+
+(+ από τη δική μας πλευρά, ανεξάρτητα: **Δήλωση Συμβατότητας Α.1054/2024** στην ΑΑΔΕ ανά δίκτυο.)
+
+### Το πρωτόκολλο σε μία σελίδα
+
+- **REST/JSON, πεδία PascalCase, ποσά σε λεπτά (int), `CurrencyCode` 978.** Υποχρέωση: αγνοούμε άγνωστα πεδία. Σφάλματα: HTTP
+  400 (λάθος αίτημα — π.χ. λείπουν τα ProviderData όπου απαιτούνται) / 401 / 403 / 404 / 500.
+- **Auth:** JWT — `POST token/` (username/password) → `access` + `refresh`· `Authorization: Bearer …`.
+  - *Direct* (2.2.1): ο λογαριασμός ανήκει στον έμπορο και του αντιστοιχίζονται τα τερματικά του.
+  - ***3rd party servicer*** (2.2.2 — **αυτό είναι το ekdosi**, SaaS πολλών εμπόρων): ένας λογαριασμός-πελάτης του ekdosi χωρίς
+    τερματικά + **`X-Api-Key` ανά έμπορο**: στο POS μενού «Link with 3rd party services» → κωδικός → ο χρήστης τον πληκτρολογεί στο
+    ekdosi → `POST authorization/redeem/` `{"Type":"webecr","Code":"…"}` → `Id` = API key. **Δεν λήγει ποτέ** (FAQ), αλλά ο
+    έμπορος μπορεί να το ανακαλέσει → 401/403 = «χρειάζεται νέα σύζευξη», όχι σφάλμα πληρωμής.
+- **Τερματικά:** `GET terminal/` (φίλτρα `TerminalID`, `Merchant`, `Acquirer`) → `id`, `TerminalID`, `Merchant`, `Acquirer`.
+  ⚠ Στο `terminal/{id}/…` μπαίνει το **`id`** της λίστας, **ΟΧΙ** το TID (FAQ).
+- **Πώληση:** `POST terminal/{id}/txninit/` — `TxnType` (0 πώληση · 1 επιστροφή · 2 προέγκριση · 3 ολοκλήρωση · 4 MOTO …),
+  `Amount`, `CurrencyCode`, **`CustomerReference`** (δικό μας, ≤50 — το uuid `session_ref` = idempotency/ανάκτηση),
+  `Instalments`, `PreloadTransaction`/`PreloadExpiration` (λεπτά), `InitialTransaction` (επιστροφή), `PaymentType` (0 κάρτα · 1 IRIS),
+  **`Timeout`** (0 = ασύγχρονα· έως **180''** σύγχρονα) και **`ProviderData`**:
+  `Uid`, `Mark` (null στην ταυτόχρονη), `SignatureTimestamp` (`YYYYMMDDhhmmss`, ώρα Ελλάδας — ίδιο με την υπογραφή),
+  `NetAmount`, `VatAmount`, `TotalAmount` (λεπτά), `ProviderId`, `Signature`. Το WebECR επαληθεύει με
+  Uid/Mark/timestamp/Amount/Net/Vat/Total **+ το TID του τερματικού** → το `TerminalID` που δίνουμε στο InvoSign `GetPayment`
+  πρέπει να είναι το **`TerminalID` της λίστας**. (Εναλλακτικά `EcrTokenData` + `ecrbind`/`ecrkeyexchange` — μόνο για ΦΗΜΑΣ, όχι εμάς.)
+- **Απάντηση/intent:** `Status` 1 PENDING · 2 SENT · 3 COMPLETED — `Result` 1 APPROVED · 2 DECLINED · 3 CANCELLED · 4 FAILED ·
+  **5 UNKNOWN** (→ `in_doubt`) · 6 BUSY · 7 MAX_TRANSACTIONS (κλείσιμο πακέτου). Στην έγκριση: **`TransactionId`**
+  (`"075;RRN;AuthCode"` = το Unique Payment ID → myDATA `transactionId`) και `Transaction` {`TID`, `MID`, `RRN`, `AuthCode`,
+  `CardPAN` (masked), `CardType`, `STAN`, `BatchNumber`, `Instalments`, `CustomerReceipt`/`MerchantReceipt`}.
+- **Ανάκτηση (timeout / async / σενάριο 16):** `GET transactionintent/?CustomerReference=…` ή `transactionintent/{id}/` · συναλλαγές
+  `GET transaction/` (φίλτρα ημερομηνίας/TID/RRN — η συμφωνία του σεναρίου 19). Σελιδοποίηση `count/next/previous/results`.
+- **Webhook:** εναλλακτικά του polling — **το callback URL ορίζεται μία φορά στη δημιουργία του λογαριασμού** (άρα να το δώσουμε
+  στο email του βήματος 1 αν το θέλουμε· στην αρχή αρκεί polling).
+- **Ακύρωση:** `POST terminal/{id}/txnvoid/` `{OriginalIdentifier, OriginalIdentifierType: 1 intent id | 2 TransactionId, Timeout}`.
+- **Ηλεκτρονική απόδειξη τερματικού:** `GET r/{ReceiptReference}` → PNG (προαιρετικό).
+
+**Αντιστοίχιση στο σχέδιο (`docs/pos-terminals-design.md`):** driver `webecr`· στο `pos_terminals` → `terminal_ref` = TID,
+`config` = { webecr `id`, **API key** (κρυπτογραφημένο) }· τα username/password του λογαριασμού-πελάτη είναι **του ekdosi** (ένα ανά
+περιβάλλον UAT/live — ρύθμιση εγκατάστασης, όχι εταιρείας). Η σύζευξη (κωδικός από το μενού του POS) μοιάζει με το «Cloud ERP» της
+Cardlink → ίδια οθόνη «Σύζευξη τερματικού» για όλους τους drivers.
+
 > **Σχέδιο υλοποίησης** (τερματικά, θέσεις ταμείου, failover, κάρτα σε τιμολόγια, φάσεις) → **`docs/pos-terminals-design.md`**.
 
 ## Επόμενα βήματα
 
 1. ✅ Το κατάστημα έχει **Cardlink**. → Εγγραφή στον **VPOS simulator** της Cardlink (φόρμα — ο ιδιοκτήτης/προμηθευτής) +
    specs «Cardlink Web» από το developer portal.
-2. Ερώτηση στην GV Solutions (InvoSign): δοκιμασμένοι acquirers · χρεώνει credit το `GetPayment`;
+2. Ερώτηση στην GV Solutions (InvoSign): δοκιμασμένοι acquirers · χρεώνει credit το `GetPayment`; · **ποιο είναι το provider id
+   τους και έχουν δώσει το test public key στη Mellon (WebECR UAT);**
 3. Sandbox: InvoSign `GetPayment` + το αντίστοιχο cloud API (Viva demo / Mellon UAT).
+   **Mellon UAT:** email στο mellonwebecr@mellongroup.com (username-email · πάροχος InvoSign + provider id · επωνυμία) — ο ιδιοκτήτης.
 4. Δήλωση Συμβατότητας Α.1054/2024 για το ekdosi πριν τη ζωντανή χρήση.
 5. Θέσεις ταμείου (registers) στο ίδιο PR: ένα τερματικό (TerminalID) ανά θέση.

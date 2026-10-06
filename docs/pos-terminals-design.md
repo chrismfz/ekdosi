@@ -14,7 +14,7 @@
 ```
 
 Το «ποιο τερματικό» είναι **ρύθμιση/επιλογή**, όχι κώδικας. Ο driver ξέρει μόνο το πρωτόκολλο του δικτύου του
-(Cardlink Web, Viva Cloud, αργότερα Common WebECR). Το ίδιο ακριβώς flow καλείται από το **Ταμείο** (απόδειξη) και από
+(Cardlink Web, Viva Cloud, Common WebECR — Mellon). Το ίδιο ακριβώς flow καλείται από το **Ταμείο** (απόδειξη) και από
 ένα **τιμολόγιο** (β) — άρα δεν το «κλειδώνουμε» μέσα στη σελίδα του ταμείου.
 
 ## 2. Οντότητες
@@ -24,7 +24,7 @@
 |---|---|
 | `company_id` | |
 | `name` | «Ταμείο 1 — Cardlink», «Viva κινητό (εφεδρικό)» |
-| `driver` | `cardlink_web` · `viva_cloud` · (αργότερα `webecr`) · `fake` (δοκιμές/demo) |
+| `driver` | `cardlink_web` · `viva_cloud` · `webecr` (Mellon — spec v2.5.13, UAT με email) · `fake` (δοκιμές/demo) |
 | `environment` | `test` / `live` (Viva demo-api vs api · Cardlink VPOS simulator vs πραγματικός κόμβος) |
 | `terminal_ref` | το αναγνωριστικό στο δίκτυο: Viva `terminalId` («Source Terminal ID») · Cardlink TID |
 | `config` (κρυπτογραφημένο) | ό,τι θέλει ο driver: Viva client id/secret, Cardlink pairing token… — `HasSecretConfig`, ίδιο μοτίβο με `PaymentGatewayConnection` |
@@ -134,6 +134,7 @@ credentials της Cardlink/Viva.
 - **Επιστροφή σε κάρτα** (πιστωτικό 11.4 πληρωμένο με κάρτα): θέλει υπογραφή παρόχου στο refund; (Viva: `transactions:refund`
   δέχεται τα ίδια AADE πεδία) — έλεγχος στα specs Cardlink/Viva + InvoSign.
 - Cardlink Web: πλήρες spec από το developer portal (μετά την εγγραφή στον VPOS simulator).
+- WebECR: δέχεται το UAT την υπογραφή του InvoSign (test public key/provider id στη Mellon); θέλει `ProviderData` η επιστροφή (TxnType 1);
 - Χρεώνει credit το `GetPayment` του InvoSign; ποιοι acquirers έχουν δοκιμάσει την υπογραφή του;
 - IRIS (Α.1160/2025, `EndToEndReferenceID`) — ίδια ραφή (§7), αργότερα.
 
@@ -144,6 +145,7 @@ credentials της Cardlink/Viva.
 | **3a** | σχήμα (`pos_terminals`, `pos_registers`, `pos_card_payments`, `pos_sessions.pos_register_id`), καρτέλα «Κάρτες (POS)», θέσεις + δήλωση συσκευής, `CardPaymentService` + **FakeDriver**, κουμπί «Κάρτα» στο ταμείο, τύπος 7 στο payload | — (ξεκινά τώρα) |
 | **3b** | `CardlinkWebDriver` + σύζευξη, δοκιμές στον VPOS simulator | εγγραφή Cardlink |
 | **3c** | `VivaCloudDriver` (demo + Tap-on-Phone) | demo λογαριασμός Viva |
+| **3c′** | `WebEcrDriver` (Mellon UAT, 19 σενάρια → ραντεβού Mellon Lab → πιστοποίηση) | email Mellon + provider id InvoSign |
 | **3d** | failover + μικτή πληρωμή | 3a |
 | **3e** | (β) κάρτα σε τιμολόγιο — ταυτόχρονη + ετεροχρονισμένη | 3a + InvoSign `Payment.php` |
 | **3f** | επιστροφή σε κάρτα | έρευνα §9 |
