@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Payments;
 
+use App\Console\Commands\MigrateFromFirebird;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
@@ -9,14 +10,16 @@ use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Services\InvoiceBalance;
+use App\Services\Payments\ImportedCreditPool;
 use App\Services\Payments\PaymentAllocator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
 
 /**
- * The Epsilon-import cleanup: FIFO-link a customer's imported «έναντι» on-account
- * credits (transaction_id EPS:…) onto their open invoices — net-zero, idempotent,
- * EPS-scoped — via PaymentAllocator + the payments:apply-imported-credits command.
+ * The import cleanup: FIFO-link a customer's imported «έναντι» on-account credits
+ * onto their open invoices — net-zero, idempotent, pool-scoped — via
+ * PaymentAllocator + the payments:apply-imported-credits command. Two pools:
+ * Epsilon (transaction_id EPS:…) and the legacy Έκδοση ETL (legacy_id set).
  */
 class ApplyImportedCreditsTest extends TestCase
 {
@@ -101,7 +104,7 @@ class ApplyImportedCreditsTest extends TestCase
 
         // The genuine advance is still on-account, untouched.
         $this->assertNull($manual->fresh()->invoice_id);
-        $this->assertSame(0.0, $allocator->availableCredit($this->customer, 'EPS:'), 'all EPS credit linked');
+        $this->assertSame(0.0, $allocator->availableCredit($this->customer, ImportedCreditPool::epsilon()), 'all EPS credit linked');
         $this->assertSame(80.0, $allocator->availableCredit($this->customer), 'only the non-EPS advance remains on-account');
 
         // Simulate and apply agreed on the per-invoice plan.
@@ -143,7 +146,7 @@ class ApplyImportedCreditsTest extends TestCase
 
         $this->assertSame(0.0, $this->balance($a), 'oldest settled first');
         $this->assertSame(180.0, $this->balance($b), '200 − 20 leftover credit');
-        $this->assertSame(0.0, $allocator->availableCredit($this->customer, 'EPS:'));
+        $this->assertSame(0.0, $allocator->availableCredit($this->customer, ImportedCreditPool::epsilon()));
     }
 
     public function test_command_dry_run_writes_nothing_then_real_run_links(): void
@@ -181,5 +184,115 @@ class ApplyImportedCreditsTest extends TestCase
         $result = $allocator->applyImportedCreditsFifo($this->customer);
         $this->assertSame($plan['total_applied'], $result['total_applied'], 'dry-run == real');
         $this->assertSame(30.0, $this->balance($inv), 'invoice 100 − 70 applied');
+    }
+
+    private function legacyCredit(float $amount, int $legacyId, int $ageDays): Payment
+    {
+        // What migrate:firebird writes: legacy PAYMENT_ID, no invoice, no transaction_id.
+        return Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => null, 'kind' => 'payment', 'amount' => $amount,
+            'pay_date' => now()->subDays($ageDays), 'legacy_id' => $legacyId,
+        ]);
+    }
+
+    public function test_firebird_pool_links_legacy_credit_and_leaves_eps_and_manual_alone(): void
+    {
+        $a = $this->invoice('ΤΠΥ1', 186, 4000);
+        $b = $this->invoice('ΤΠΥ2', 338, 3900);
+        $this->legacyCredit(150, 12, 3950);
+        $this->legacyCredit(300, 16, 3800);
+        $eps = $this->epsCredit(40, 'X', 10);
+        $manual = Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => null, 'kind' => 'payment', 'amount' => 25, 'pay_date' => now(),
+        ]);
+
+        $allocator = app(PaymentAllocator::class);
+        $pool = ImportedCreditPool::firebird();
+
+        $plan = $allocator->simulateImportedCreditsFifo($this->customer, $pool);
+        $result = $allocator->applyImportedCreditsFifo($this->customer, $pool);
+
+        $this->assertSame(450.0, $result['total_applied']);
+        $this->assertSame($plan['allocations'], $result['allocations'], 'dry-run == real');
+        $this->assertSame([['invcode' => 'ΤΠΥ1', 'amount' => 186.0], ['invcode' => 'ΤΠΥ2', 'amount' => 264.0]], $result['allocations']);
+        $this->assertSame(0.0, $this->balance($a));
+        $this->assertSame(74.0, $this->balance($b), '338 − 264');
+        $this->assertStringStartsWith('ΕΦΑ-FB-', $result['reference']);
+
+        // Net-zero (450 legacy + 40 EPS + 25 manual), other pools untouched.
+        $this->assertSame(515.0, (float) Payment::where('customer_id', $this->customer->id)->sum('amount'));
+        $this->assertNull($eps->fresh()->invoice_id);
+        $this->assertNull($manual->fresh()->invoice_id);
+        $this->assertSame(0.0, $allocator->availableCredit($this->customer, $pool));
+        $this->assertSame(65.0, $allocator->availableCredit($this->customer));
+    }
+
+    public function test_firebird_split_keeps_legacy_remainder_in_the_pool(): void
+    {
+        // One legacy €300 payment, €186 open → split: 186 applied, 114 stays έναντι
+        // carrying the legacy_id (so a re-run still sees it as imported credit).
+        $a = $this->invoice('ΤΠΥ1', 186, 100);
+        $legacy = $this->legacyCredit(300, 16, 90);
+
+        $allocator = app(PaymentAllocator::class);
+        $allocator->applyImportedCreditsFifo($this->customer, ImportedCreditPool::firebird());
+
+        $this->assertSame(0.0, $this->balance($a));
+        $legacy->refresh();
+        $this->assertNull($legacy->invoice_id);
+        $this->assertSame(114.0, (float) $legacy->amount);
+        $this->assertSame(16, (int) $legacy->legacy_id);
+        $this->assertSame(114.0, $allocator->availableCredit($this->customer, ImportedCreditPool::firebird()));
+
+        // The split-off applied part carries the legacy PAYMENT_ID (trail + ETL re-run guard).
+        $part = Payment::where('customer_id', $this->customer->id)->where('invoice_id', $a->id)->sole();
+        $this->assertSame(186.0, (float) $part->amount);
+        $this->assertNull($part->legacy_id);
+        $this->assertSame(PaymentAllocator::LEGACY_SPLIT_PREFIX.'16', $part->transaction_id);
+
+        $again = $allocator->applyImportedCreditsFifo($this->customer, ImportedCreditPool::firebird());
+        $this->assertSame(0.0, $again['total_applied'], 'no open invoice left → no-op');
+
+        // An ETL re-run re-writes this row from the legacy VALUE (300): it must
+        // subtract the split part, or the customer would be credited 186 twice.
+        $this->assertSame(114.0, MigrateFromFirebird::legacyPaymentAmount($this->tenant->id, 16, '300.00'));
+        $this->assertSame('70.00', MigrateFromFirebird::legacyPaymentAmount($this->tenant->id, 17, '70.00'), 'unsplit row: VALUE as-is');
+    }
+
+    public function test_after_firebird_sweep_a_new_receipt_lands_on_the_genuinely_open_invoice(): void
+    {
+        // The live symptom: legacy invoices fully covered by legacy on-account
+        // payments, then a fresh invoice. Before the sweep a FIFO receipt landed on
+        // the oldest legacy invoice; after it, it must land on the fresh one.
+        $old = $this->invoice('ΤΠΥ1', 186, 4000);
+        $this->legacyCredit(186, 12, 3950);
+        $fresh = $this->invoice('ΤΠΥ9001', 500, 3);
+
+        $this->artisan('payments:apply-imported-credits', [
+            '--company' => $this->tenant->slug, '--source' => 'firebird',
+        ])->assertSuccessful();
+
+        $receipt = app(PaymentAllocator::class)->allocate($this->customer, 100, now());
+
+        $this->assertSame([['invcode' => 'ΤΠΥ9001', 'amount' => 100.0]], $receipt->allocations);
+        $this->assertSame(0.0, $this->balance($old));
+        $this->assertSame(400.0, $this->balance($fresh));
+    }
+
+    public function test_command_default_source_ignores_legacy_credit_and_rejects_unknown_source(): void
+    {
+        $a = $this->invoice('ΤΠΥ1', 186, 100);
+        $this->legacyCredit(186, 12, 90);
+
+        $this->artisan('payments:apply-imported-credits', ['--company' => $this->tenant->slug])
+            ->expectsOutputToContain('--source=firebird')
+            ->assertSuccessful();
+        $this->assertSame(186.0, $this->balance($a), 'default eps pool must not touch legacy rows');
+
+        $this->artisan('payments:apply-imported-credits', ['--company' => $this->tenant->slug, '--source' => 'nope'])
+            ->assertFailed();
+        $this->assertSame(186.0, $this->balance($a));
     }
 }

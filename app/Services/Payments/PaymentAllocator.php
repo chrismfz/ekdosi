@@ -27,6 +27,9 @@ use InvalidArgumentException;
  */
 class PaymentAllocator
 {
+    /** transaction_id of the split-off part of a legacy (Firebird ETL) payment: «FB-SPLIT:<legacy PAYMENT_ID>». */
+    public const LEGACY_SPLIT_PREFIX = 'FB-SPLIT:';
+
     public function allocate(
         Customer $customer,
         float $amount,
@@ -354,37 +357,34 @@ class PaymentAllocator
      * the money just moves from "credit" to "this invoice". Returns the amount
      * actually applied (capped by the invoice balance AND the available credit).
      *
-     * $txPrefix scopes BOTH the pool and the credit cap to payments whose
-     * transaction_id starts with it (e.g. 'EPS:' = only the imported «έναντι»
-     * credits) — so a targeted cleanup never consumes a genuine advance. Null =
-     * the whole on-account pool (the operator «Χρήση πίστωσης» default). It is a
-     * LITERAL prefix used in a SQL LIKE, so it must contain no `%`/`_` wildcards.
+     * $pool scopes BOTH the pool and the credit cap to one family of imported
+     * «έναντι» credits ({@see ImportedCreditPool}: Epsilon EPS:… or the legacy
+     * Firebird ETL rows) — so a targeted cleanup never consumes a genuine advance.
+     * Null = the whole on-account pool (the operator «Χρήση πίστωσης» default).
      * $reference lets a caller share ONE ledger reference across many applies
      * (the mass import-linking sweep); null mints a fresh «ΕΦΑ-…» per call.
      */
-    public function applyCredit(Customer $customer, Invoice $target, float $amount, ?string $txPrefix = null, ?string $reference = null): float
+    public function applyCredit(Customer $customer, Invoice $target, float $amount, ?ImportedCreditPool $pool = null, ?string $reference = null): float
     {
         $amount = round($amount, 2);
         if ($amount <= 0) {
             throw new InvalidArgumentException('Το ποσό πρέπει να είναι θετικό.');
         }
 
-        return DB::transaction(function () use ($customer, $target, $amount, $txPrefix, $reference) {
+        return DB::transaction(function () use ($customer, $target, $amount, $pool, $reference) {
             // Lock the WHOLE on-account pool FIRST (payments AND refunds) so
             // concurrent applies — and concurrent on-account refunds, which
             // shift the available-credit cap — serialise; only then read the
             // caps, so they reflect any prior committed apply/refund (otherwise
             // two writers read stale pre-lock figures and over-apply / misreport).
             // We still only RE-POINT 'payment' rows below; refund rows are locked
-            // for the cap but never moved. $txPrefix (when set) narrows the pool
-            // to a payment family (e.g. imported «έναντι», transaction_id EPS:…).
+            // for the cap but never moved. $pool (when set) narrows it to one
+            // imported «έναντι» family (Epsilon EPS:… / legacy Firebird rows).
             $poolQuery = Payment::query()
                 ->where('company_id', $customer->company_id)
                 ->where('customer_id', $customer->id)
                 ->whereNull('invoice_id');
-            if ($txPrefix !== null) {
-                $poolQuery->where('transaction_id', 'like', $txPrefix.'%');
-            }
+            $pool?->scope($poolQuery);
             $onAccount = $poolQuery
                 ->orderBy('pay_date')
                 ->orderBy('id')
@@ -393,12 +393,12 @@ class PaymentAllocator
 
             // Caps read UNDER the lock: invoice balance from a fresh compute (post
             // any prior move) and available credit net of on-account refunds —
-            // scoped to the SAME $txPrefix, so cap and pool never disagree.
+            // scoped to the SAME $pool, so cap and pool never disagree.
             $balance = round((float) app(InvoiceBalance::class)->for($target->fresh(['paymentMethod']))->balance, 2);
             if ($balance <= 0.005) {
                 throw new InvalidArgumentException('Το τιμολόγιο δεν έχει ανοιχτό υπόλοιπο.');
             }
-            $available = $this->availableCredit($customer, $txPrefix);
+            $available = $this->availableCredit($customer, $pool);
             if ($available <= 0.005) {
                 throw new InvalidArgumentException('Δεν υπάρχει διαθέσιμη πίστωση προς εφαρμογή.');
             }
@@ -440,7 +440,14 @@ class PaymentAllocator
                         'pay_date' => $payment->pay_date,
                         'amount' => $remaining,
                         'reference' => $ref,
-                        'transaction_id' => $payment->transaction_id,
+                        // A legacy (Firebird ETL) row has no transaction_id: tag the
+                        // split-off part with its legacy PAYMENT_ID instead, so the
+                        // trail survives AND an ETL re-run (which re-applies the
+                        // legacy VALUE to the row it keys by legacy_id) can subtract
+                        // these parts rather than re-crediting them — see
+                        // MigrateFromFirebird::copyPayments().
+                        'transaction_id' => $payment->transaction_id
+                            ?? ($payment->legacy_id !== null ? self::LEGACY_SPLIT_PREFIX.$payment->legacy_id : null),
                         'notes' => trim((string) ($payment->notes ?? '').' · εφαρμογή πίστωσης'),
                     ]);
                     $applied = round($applied + $remaining, 2);
@@ -456,18 +463,16 @@ class PaymentAllocator
     /**
      * A customer's available on-account credit = Σ unallocated payments −
      * Σ unallocated refunds (invoice_id null). The pool {@see applyCredit} draws from.
-     * $txPrefix narrows it to a payment family by transaction_id (e.g. 'EPS:' =
-     * only the imported «έναντι» credits); null = the whole on-account pool.
+     * $pool narrows it to one imported «έναντι» family ({@see ImportedCreditPool});
+     * null = the whole on-account pool.
      */
-    public function availableCredit(Customer $customer, ?string $txPrefix = null): float
+    public function availableCredit(Customer $customer, ?ImportedCreditPool $pool = null): float
     {
         $q = Payment::query()
             ->where('company_id', $customer->company_id)
             ->where('customer_id', $customer->id)
             ->whereNull('invoice_id');
-        if ($txPrefix !== null) {
-            $q->where('transaction_id', 'like', $txPrefix.'%');
-        }
+        $pool?->scope($q);
         $row = $q
             ->selectRaw('COALESCE(SUM('.Payment::NET_AMOUNT_SQL.'), 0) AS net_credit')
             ->first();
@@ -477,26 +482,27 @@ class PaymentAllocator
 
     /**
      * Bulk import-cleanup: FIFO-apply a customer's imported «έναντι» on-account
-     * credits (transaction_id EPS:…) onto their open invoices, oldest first, by
+     * credits (one {@see ImportedCreditPool}) onto their open invoices, oldest first, by
      * re-pointing the payment rows — reusing {@see applyCredit} per invoice with a
      * SHARED reference. Net-zero to the customer balance: it only turns the
      * import's customer-level credit into per-invoice settlement, so the
      * historically-paid invoices stop reading as «ανοιχτά» and a later FIFO
      * receipt can't wrongly land on them. Idempotent — a re-run finds no open
-     * invoice (or no EPS credit) and no-ops; a moved row keeps its transaction_id,
-     * so a re-import stays idempotent (its existence check is by transaction_id).
+     * invoice (or no pool credit) and no-ops; a moved row keeps its transaction_id
+     * / legacy_id, so a re-import stays idempotent (its upsert key is unchanged).
      *
      * @return array{reference: string, allocations: array<int, array{invcode: string, amount: float}>, total_applied: float, credit_before: float, credit_left: float}
      */
-    public function applyImportedCreditsFifo(Customer $customer, string $txPrefix = 'EPS:'): array
+    public function applyImportedCreditsFifo(Customer $customer, ?ImportedCreditPool $pool = null): array
     {
-        $ref = 'ΕΦΑ-EPS-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
+        $pool ??= ImportedCreditPool::epsilon();
+        $ref = 'ΕΦΑ-'.$pool->referenceTag().'-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
 
         // ONE transaction per customer (like allocate()/allocateManual()): the
         // whole sweep is atomic, so a mid-sweep failure leaves the customer
         // untouched rather than half-linked. A re-run is still a clean no-op.
-        return DB::transaction(function () use ($customer, $txPrefix, $ref): array {
-            $creditBefore = $this->availableCredit($customer, $txPrefix);
+        return DB::transaction(function () use ($customer, $pool, $ref): array {
+            $creditBefore = $this->availableCredit($customer, $pool);
             $creditLeft = $creditBefore;
 
             $allocations = [];
@@ -514,7 +520,7 @@ class PaymentAllocator
                 // Both caps pre-checked > 0, so applyCredit links rather than
                 // throwing — no silent skip. A genuine failure propagates and
                 // rolls back the whole customer (the command isolates per customer).
-                $applied = $this->applyCredit($customer, $invoice, min($balance, $creditLeft), $txPrefix, $ref);
+                $applied = $this->applyCredit($customer, $invoice, min($balance, $creditLeft), $pool, $ref);
                 if ($applied > 0.005) {
                     $allocations[] = ['invcode' => (string) $invoice->invcode, 'amount' => $applied];
                     $totalApplied = round($totalApplied + $applied, 2);
@@ -537,21 +543,22 @@ class PaymentAllocator
      * computed WITHOUT writing a row, so `--dry-run` shows what the real run would
      * link (absent a concurrent payment/refund between preview and apply — this is
      * an unlocked read, matched for a one-off off-hours command). Mirrors the write
-     * path's target set (openInvoicesQuery), pool (EPS on-account payments, oldest
-     * first) AND cap: the total is bounded by the NET available credit
-     * (availableCredit, i.e. payments − refunds), so an EPS refund — though the
-     * importer creates none — can't make the preview over-state.
+     * path's target set (openInvoicesQuery), pool (the imported on-account
+     * payments, oldest first) AND cap: the total is bounded by the NET available
+     * credit (availableCredit, i.e. payments − refunds), so a pool refund — though
+     * the importers create none — can't make the preview over-state.
      *
      * @return array{allocations: array<int, array{invcode: string, amount: float}>, total_applied: float, credit_before: float, credit_left: float}
      */
-    public function simulateImportedCreditsFifo(Customer $customer, string $txPrefix = 'EPS:'): array
+    public function simulateImportedCreditsFifo(Customer $customer, ?ImportedCreditPool $creditPool = null): array
     {
-        $pool = Payment::query()
+        $creditPool ??= ImportedCreditPool::epsilon();
+        $poolQuery = Payment::query()
             ->where('company_id', $customer->company_id)
             ->where('customer_id', $customer->id)
             ->whereNull('invoice_id')
-            ->where('kind', 'payment')
-            ->where('transaction_id', 'like', $txPrefix.'%')
+            ->where('kind', 'payment');
+        $pool = $creditPool->scope($poolQuery)
             ->orderBy('pay_date')
             ->orderBy('id')
             ->pluck('amount')
@@ -560,8 +567,8 @@ class PaymentAllocator
 
         // The real run caps every apply at the NET available credit; mirror that
         // ceiling here so the two never disagree (they're identical when, as the
-        // importer guarantees, no EPS refund exists — but robust if one ever does).
-        $creditBefore = $this->availableCredit($customer, $txPrefix);
+        // importers guarantee, no pool refund exists — but robust if one ever does).
+        $creditBefore = $this->availableCredit($customer, $creditPool);
         $creditLeft = $creditBefore;
 
         $allocations = [];
