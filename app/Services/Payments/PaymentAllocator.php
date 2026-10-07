@@ -508,7 +508,7 @@ class PaymentAllocator
             $allocations = [];
             $totalApplied = 0.0;
 
-            foreach ($this->openInvoicesQuery($customer)->with('paymentMethod')->get() as $invoice) {
+            foreach ($pool->scopeTargets($this->openInvoicesQuery($customer))->with('paymentMethod')->get() as $invoice) {
                 if ($creditLeft <= 0.005) {
                     break; // pool exhausted — nothing left to link
                 }
@@ -576,7 +576,7 @@ class PaymentAllocator
         $idx = 0;
         $poolCount = count($pool);
 
-        foreach ($this->openInvoicesQuery($customer)->with('paymentMethod')->get() as $invoice) {
+        foreach ($creditPool->scopeTargets($this->openInvoicesQuery($customer))->with('paymentMethod')->get() as $invoice) {
             if ($idx >= $poolCount || $creditLeft <= 0.005) {
                 break; // pool / credit exhausted
             }

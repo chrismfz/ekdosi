@@ -1102,7 +1102,9 @@ class MigrateFromFirebird extends Command
             ->whereNull('deleted_at')
             ->sum('amount');
 
-        return $splitParts > 0.005 ? round((float) $value - $splitParts, 2) : $value;
+        // Never below zero (MON-8): a legacy VALUE lowered after the split would
+        // otherwise write a negative amount through this raw upsert.
+        return $splitParts > 0.005 ? max(0.0, round((float) $value - $splitParts, 2)) : $value;
     }
 
     /**

@@ -13,6 +13,7 @@ use App\Services\InvoiceBalance;
 use App\Services\Payments\ImportedCreditPool;
 use App\Services\Payments\PaymentAllocator;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 /**
@@ -186,6 +187,14 @@ class ApplyImportedCreditsTest extends TestCase
         $this->assertSame(30.0, $this->balance($inv), 'invoice 100 − 70 applied');
     }
 
+    private function legacyInvoice(string $code, float $gross, int $ageDays, int $legacyId): Invoice
+    {
+        $inv = $this->invoice($code, $gross, $ageDays);
+        $inv->forceFill(['legacy_id' => $legacyId])->save();
+
+        return $inv;
+    }
+
     private function legacyCredit(float $amount, int $legacyId, int $ageDays): Payment
     {
         // What migrate:firebird writes: legacy PAYMENT_ID, no invoice, no transaction_id.
@@ -198,8 +207,8 @@ class ApplyImportedCreditsTest extends TestCase
 
     public function test_firebird_pool_links_legacy_credit_and_leaves_eps_and_manual_alone(): void
     {
-        $a = $this->invoice('ΤΠΥ1', 186, 4000);
-        $b = $this->invoice('ΤΠΥ2', 338, 3900);
+        $a = $this->legacyInvoice('ΤΠΥ1', 186, 4000, 96);
+        $b = $this->legacyInvoice('ΤΠΥ2', 338, 3900, 237);
         $this->legacyCredit(150, 12, 3950);
         $this->legacyCredit(300, 16, 3800);
         $eps = $this->epsCredit(40, 'X', 10);
@@ -233,7 +242,7 @@ class ApplyImportedCreditsTest extends TestCase
     {
         // One legacy €300 payment, €186 open → split: 186 applied, 114 stays έναντι
         // carrying the legacy_id (so a re-run still sees it as imported credit).
-        $a = $this->invoice('ΤΠΥ1', 186, 100);
+        $a = $this->legacyInvoice('ΤΠΥ1', 186, 100, 96);
         $legacy = $this->legacyCredit(300, 16, 90);
 
         $allocator = app(PaymentAllocator::class);
@@ -266,7 +275,7 @@ class ApplyImportedCreditsTest extends TestCase
         // The live symptom: legacy invoices fully covered by legacy on-account
         // payments, then a fresh invoice. Before the sweep a FIFO receipt landed on
         // the oldest legacy invoice; after it, it must land on the fresh one.
-        $old = $this->invoice('ΤΠΥ1', 186, 4000);
+        $old = $this->legacyInvoice('ΤΠΥ1', 186, 4000, 96);
         $this->legacyCredit(186, 12, 3950);
         $fresh = $this->invoice('ΤΠΥ9001', 500, 3);
 
@@ -283,7 +292,7 @@ class ApplyImportedCreditsTest extends TestCase
 
     public function test_command_default_source_ignores_legacy_credit_and_rejects_unknown_source(): void
     {
-        $a = $this->invoice('ΤΠΥ1', 186, 100);
+        $a = $this->legacyInvoice('ΤΠΥ1', 186, 100, 96);
         $this->legacyCredit(186, 12, 90);
 
         $this->artisan('payments:apply-imported-credits', ['--company' => $this->tenant->slug])
@@ -294,5 +303,74 @@ class ApplyImportedCreditsTest extends TestCase
         $this->artisan('payments:apply-imported-credits', ['--company' => $this->tenant->slug, '--source' => 'nope'])
             ->assertFailed();
         $this->assertSame(186.0, $this->balance($a));
+    }
+
+    public function test_firebird_pool_skips_non_positive_legacy_rows_and_dry_run_matches_real(): void
+    {
+        // The ETL writes raw, so a legacy zero/negative correction row can exist.
+        // It must stay out of the pool (re-pointing it trips the amount > 0 guard)
+        // and dry-run and real run must agree instead of the real run failing.
+        $a = $this->legacyInvoice('ΤΠΥ1', 100, 100, 96);
+        $neg = $this->legacyCredit(150, 30, 95);
+        DB::table('payments')->where('id', $neg->id)->update(['amount' => -20]);
+        $zero = $this->legacyCredit(150, 31, 94);
+        DB::table('payments')->where('id', $zero->id)->update(['amount' => 0]);
+        $this->legacyCredit(150, 32, 90);
+
+        $allocator = app(PaymentAllocator::class);
+        $pool = ImportedCreditPool::firebird();
+
+        $plan = $allocator->simulateImportedCreditsFifo($this->customer, $pool);
+        $result = $allocator->applyImportedCreditsFifo($this->customer, $pool);
+
+        $this->assertSame(150.0, $plan['credit_before'], 'only the positive row counts');
+        $this->assertSame($plan['allocations'], $result['allocations']);
+        $this->assertSame($plan['credit_left'], $result['credit_left']);
+        $this->assertSame(0.0, $this->balance($a));
+        $this->assertSame(-20.0, (float) $neg->fresh()->amount, 'non-positive rows untouched');
+        $this->assertNull($neg->fresh()->invoice_id);
+        $this->assertSame(0.0, (float) $zero->fresh()->amount);
+        $this->assertNull($zero->fresh()->invoice_id);
+    }
+
+    public function test_firebird_surplus_stays_on_account_and_never_lands_on_an_app_issued_invoice(): void
+    {
+        // Legacy credit > legacy debt: the surplus must NOT spill onto an invoice
+        // issued in the app (its WHMCS link would push «paid» to WHMCS) — it stays
+        // έναντι for the operator to apply deliberately.
+        $old = $this->legacyInvoice('ΤΠΥ1', 100, 4000, 96);
+        $this->legacyCredit(250, 12, 3950);
+        $fresh = $this->invoice('ΤΠΥ9001', 500, 3);
+
+        $allocator = app(PaymentAllocator::class);
+        $pool = ImportedCreditPool::firebird();
+        $plan = $allocator->simulateImportedCreditsFifo($this->customer, $pool);
+        $result = $allocator->applyImportedCreditsFifo($this->customer, $pool);
+
+        $this->assertSame([['invcode' => 'ΤΠΥ1', 'amount' => 100.0]], $result['allocations']);
+        $this->assertSame($plan['allocations'], $result['allocations']);
+        $this->assertSame(150.0, $result['credit_left']);
+        $this->assertSame(0.0, $this->balance($old));
+        $this->assertSame(500.0, $this->balance($fresh), 'app-issued invoice untouched');
+        $this->assertSame(0, Payment::where('invoice_id', $fresh->id)->count());
+    }
+
+    public function test_etl_amount_subtracts_every_live_split_part_and_never_goes_negative(): void
+    {
+        $part = fn (float $amount, int $legacyId) => Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id,
+            'invoice_id' => $this->invoice('ΤΙΜ'.uniqid(), 1000, 1)->id, 'kind' => 'payment', 'amount' => $amount,
+            'pay_date' => now(), 'transaction_id' => PaymentAllocator::LEGACY_SPLIT_PREFIX.$legacyId,
+        ]);
+        $part(100, 40);
+        $part(50, 40);
+        $part(70, 40)->delete(); // a removed part no longer reduces the row
+
+        $this->assertSame(150.0, MigrateFromFirebird::legacyPaymentAmount($this->tenant->id, 40, '300.00'));
+        $this->assertSame(0.0, MigrateFromFirebird::legacyPaymentAmount($this->tenant->id, 40, '120.00'), 'clamped at zero');
+
+        // Another tenant's FB-SPLIT:40 must not count.
+        $other = Company::create(['name' => 'B', 'slug' => 'b-'.uniqid(), 'country_code' => 'GR']);
+        $this->assertSame('300.00', MigrateFromFirebird::legacyPaymentAmount($other->id, 40, '300.00'));
     }
 }
