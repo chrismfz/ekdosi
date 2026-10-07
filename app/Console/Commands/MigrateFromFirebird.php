@@ -8,6 +8,7 @@ use App\Services\Etl\BackupNoteSync;
 use App\Services\Etl\LegacyAfmConflictReport;
 use App\Services\Etl\LegacyAfmConflicts;
 use App\Services\Etl\TenantRowUpserter;
+use App\Services\Payments\PaymentAllocator;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Afm;
 use App\Support\DocumentSeries;
@@ -1077,13 +1078,33 @@ class MigrateFromFirebird extends Command
                 [
                     'customer_id' => $customer,
                     'pay_date' => $r['PAY_DATE'],
-                    'amount' => $r['VALUE'],
+                    'amount' => self::legacyPaymentAmount($this->companyId, (int) $r['PAYMENT_ID'], $r['VALUE']),
                     'notes' => $this->fld($r, 'NOTES'),
                     'updated_at' => now(),
                 ],
                 ['created_at' => now()],
             );
         }
+    }
+
+    /**
+     * The amount to (re-)write on the legacy payment row PAYMENT_ID. Normally the
+     * legacy VALUE. But once the app has SPLIT that row (PaymentAllocator::applyCredit
+     * links part of it to an invoice as a new «FB-SPLIT:<PAYMENT_ID>» row and leaves
+     * the rest on this row), re-applying the full VALUE on an ETL re-run would credit
+     * the split parts twice — so the row keeps VALUE − Σ its live split parts.
+     */
+    public static function legacyPaymentAmount(int $companyId, int $paymentId, mixed $value): mixed
+    {
+        $splitParts = (float) DB::table('payments')
+            ->where('company_id', $companyId)
+            ->where('transaction_id', PaymentAllocator::LEGACY_SPLIT_PREFIX.$paymentId)
+            ->whereNull('deleted_at')
+            ->sum('amount');
+
+        // Never below zero (MON-8): a legacy VALUE lowered after the split would
+        // otherwise write a negative amount through this raw upsert.
+        return $splitParts > 0.005 ? max(0.0, round((float) $value - $splitParts, 2)) : $value;
     }
 
     /**
