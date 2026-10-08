@@ -74,6 +74,9 @@ class ListFilterUrlTest extends TestCase
         );
 
         $this->assertSame('debtor', $state(TableFilterUrl::with(['balance_status' => ['value' => 'debtor']])));
+        // List pages persist filters in the session — start the wrong-key probe
+        // clean, or it would just read back the filter the first call stored.
+        session()->flush();
         $this->assertNull(
             $state(['tableFilters' => ['balance_status' => ['value' => 'debtor']]]),
             'the property name is NOT the query-string key — this is the bug TableFilterUrl exists to prevent',
