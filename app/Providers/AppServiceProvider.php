@@ -11,12 +11,15 @@ use App\Services\Support\Inbound\WebklexImapMailbox;
 use App\Support\ErrorAlerts\ExceptionNotifier;
 use App\Support\Hr\EmployeeAccountMatcher;
 use App\Support\Settings\SystemSettings;
+use App\Support\TableFilterUrl;
 use App\Support\Tenancy\CompanyContext;
 use App\Support\Tenancy\PortalHost;
 use Filament\Events\TenantSet;
 use Filament\Forms\Components\DateTimePicker;
+use Filament\Resources\Pages\ListRecords;
 use Filament\Support\Assets\Css;
 use Filament\Support\Facades\FilamentAsset;
+use Filament\Tables\Table;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Console\Events\CommandStarting;
 use Illuminate\Http\Request;
@@ -267,6 +270,35 @@ class AppServiceProvider extends ServiceProvider
             ->defaultDateDisplayFormat('d/m/Y')
             ->defaultDateTimeDisplayFormat('d/m/Y H:i')
             ->defaultDateTimeWithSecondsDisplayFormat('d/m/Y H:i:s'));
+
+        /*
+         * Resource LIST pages remember sort / filters / search for the session, so
+         * «άνοιξε ένα παραστατικό → πίσω» lands on the same filtered, sorted list
+         * instead of a reset one. Per-page + visible columns are already persisted
+         * by Filament by default; the page number lives in the URL (?page=).
+         *
+         * ONLY ListRecords: Filament keys sort/search by component CLASS alone, so on
+         * a record-scoped table (relation manager, the Καρτέλα, ManageRelatedRecords)
+         * a search/filter typed for record A would silently reapply to record B.
+         * Those opt in themselves where safe (CustomerLedger: sort only). Session-
+         * scoped on purpose — never permanent: a forgotten filter must not hide
+         * tomorrow's invoices (the session ends after SESSION_LIFETIME idle).
+         */
+        Table::configureUsing(function (Table $table): void {
+            if (! $table->getLivewire() instanceof ListRecords) {
+                return;
+            }
+            $table
+                ->persistSortInSession()
+                ->persistFiltersInSession()
+                // A deep link that carries its own filters (dashboard «Ανεξόφλητα»
+                // card, overdue notification — TableFilterUrl) wins over the session
+                // filters already, but a leftover session SEARCH would still narrow
+                // it («12 ανεξόφλητα» opening on 1 row). Don't restore the search on
+                // such a request; typing in the box later persists as usual.
+                ->persistSearchInSession(fn (): bool => ! request()->has(TableFilterUrl::KEY))
+                ->persistColumnSearchesInSession(fn (): bool => ! request()->has(TableFilterUrl::KEY));
+        });
 
         /*
          * @gup('Κείμενο') — Greek ALL-CAPS without τόνος, for PDF/print labels.
