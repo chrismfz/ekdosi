@@ -749,7 +749,7 @@ class CompanyForm
                                         Toggle::make('whmcs_amount_includes_tax')
                                             ->label('WHMCS line amounts include VAT')
                                             ->default(true)
-                                            ->helperText('Last-resort fallback only. ekdosi reads net-vs-gross from each invoice\'s own VAT, and — with ekdosi_bridge ≥ 0.54.0 — from WHMCS\'s declared Tax Type (Setup → Tax Configuration). This toggle is used ONLY when neither is available (no VAT on the invoice, older plugin / native API). Set it to match WHMCS: ON = Inclusive (gross amounts), OFF = Exclusive (net amounts).'),
+                                            ->helperText('Last-resort fallback only. ekdosi reads net-vs-gross from each invoice\'s own VAT, and — with ekdosi_bridge ≥ 0.54.0 — from WHMCS\'s declared Tax Type (Setup → Tax Configuration). This toggle is used ONLY when neither is available (older plugin / native API with no usable VAT breakdown). Set it to match WHMCS: ON = Inclusive (gross amounts), OFF = Exclusive (net amounts). An invoice on which WHMCS charged NO VAT is never auto-issued, whatever this says.'),
                                         FormAction::make('test_whmcs_connection')
                                             ->label('Test connection')
                                             ->icon('heroicon-o-signal')

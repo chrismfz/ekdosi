@@ -113,7 +113,11 @@
             $grossMismatch = $candidates !== [] && collect($candidates)->every(fn ($v) => abs($v - $gross) > $tol);
             $vat = (float) $preview->totals['vat_total'];
             // Also when WHMCS reported 0 VAT (exempt client) but we'd file some.
-            $vatMismatch = ($wTax > 0.005 || ! empty($src['whmcs_tax_reported'])) && abs($wTax - $vat) > $tol;
+            // Same thresholds as WhmcsFilingGuard: WHMCS reported 0 VAT but we'd file
+            // any → warn (the auto path holds at > 0.005); otherwise beyond tolerance.
+            $vatMismatch = ! empty($src['whmcs_tax_reported']) && $wTax <= 0.005
+                ? $vat > 0.005
+                : $wTax > 0.005 && abs($wTax - $vat) > $tol;
         @endphp
         <div class="text-xs text-gray-500 space-y-1">
             <div>

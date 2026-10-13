@@ -23,8 +23,8 @@ use LogicException;
  *   - assertTotalsReconcile(): the recomputed gross must match the WHMCS
  *     invoice total (WH-2 wrong VAT rate, WH-5 accumulated rounding). This is
  *     a WHOLE-invoice check — a split group is deliberately a SUBSET of the
- *     total, so only the whole-invoice paths (file / createDraft) call it, and
- *     the split path does not.
+ *     total, and createDraft is the operator's review path — so ONLY file()
+ *     (i.e. the unattended whmcs:auto-issue) calls it.
  *
  * Throws LogicException with an operator-facing Greek message; the Filament
  * inbox action and whmcs:auto-issue both catch Throwable and surface it (the
@@ -279,6 +279,22 @@ final class WhmcsFilingGuard
      */
     public static function assertNoUntaxedForUnattendedIssue(array $mapped, PendingWhmcsInvoice $pending): void
     {
+        // Belt-and-braces, independent of how the lines were mapped: WHMCS itself
+        // REPORTED zero VAT on an invoice that charges something (a tax-exempt /
+        // foreign client, or a product left untaxed). Whatever ekdosi would file —
+        // 0% (legal only with the right exemption) or 24% (VAT the client was never
+        // charged) — a human decides; never auto-file it. Waits in the inbox.
+        $chargesSomething = (float) ($mapped['totals']['gross_total'] ?? 0.0) > 0.005;
+        if (! empty($mapped['source']['whmcs_tax_reported'])
+            && (float) ($mapped['source']['whmcs_tax'] ?? 0.0) <= 0.005
+            && $chargesSomething) {
+            throw new LogicException(
+                'Το WHMCS #'.$pending->whmcs_invoice_id.' δεν χρέωσε ΦΠΑ. Η άμεση τιμολόγηση ΔΕΝ εκδίδει '
+                .'αυτόματα τιμολόγιο χωρίς ΦΠΑ (μπορεί να χρειάζεται 24% ή απαλλαγή με αιτία). Η γραμμή '
+                .'κρατείται στα εισερχόμενα — έλεγξέ το και έκδωσέ το χειροκίνητα.'
+            );
+        }
+
         $zero = $mapped['totals']['zero_vat_lines'] ?? [];
         if ($zero === []) {
             return;
