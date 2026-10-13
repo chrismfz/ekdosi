@@ -212,6 +212,55 @@ class WhmcsFilingGuardTest extends TestCase
         $this->assertHeldWith($pending, 'δεν συμφωνεί στα σύνολα');
     }
 
+    public function test_credit_applied_zero_total_invoice_files_with_the_vat_whmcs_charged(): void
+    {
+        // WHMCS #32488 shape: paid from credit (total 0, no `credit` in the feed).
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+        $pending = $this->makePending(
+            [
+                ['description' => 'Hosting A', 'amount' => '134.00', 'taxed' => 1],
+                ['description' => 'Hosting B', 'amount' => '134.00', 'taxed' => 1],
+            ],
+            total: '0.00',
+            payloadExtra: ['subtotal' => '268.00', 'tax' => '64.32', 'taxrate' => '24.000'],
+        );
+
+        $this->file($pending);
+
+        $invoice = Invoice::sole();
+        $this->assertSame('268.00', (string) $invoice->net_total);
+        $this->assertSame('332.32', (string) $invoice->gross_total);
+    }
+
+    public function test_partially_credit_applied_invoice_files_against_its_pre_credit_value(): void
+    {
+        // total 13,64 = 32,24 − 18,60 credit: the gross must reconcile with
+        // subtotal + tax, not be held against the reduced total.
+        $pending = $this->makePending(
+            [['description' => 'Hosting', 'amount' => '26.00', 'taxed' => 1]],
+            total: '13.64',
+            payloadExtra: ['subtotal' => '26.00', 'tax' => '6.24', 'taxrate' => '24.000'],
+        );
+
+        $this->file($pending);
+        $this->assertSame('32.24', (string) Invoice::sole()->gross_total);
+    }
+
+    public function test_vat_mismatch_is_held_even_when_the_whmcs_total_is_zero(): void
+    {
+        // Detection can't place this tax (10 on a 268 base at 24% is neither net
+        // nor gross) and total is 0 → the gross check can't run. The VAT check
+        // must still hold it instead of filing a VAT that WHMCS never charged.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+        $pending = $this->makePending(
+            [['description' => 'Hosting', 'amount' => '268.00', 'taxed' => 1]],
+            total: '0.00',
+            payloadExtra: ['subtotal' => '268.00', 'tax' => '10.00', 'taxrate' => '24.000'],
+        );
+
+        $this->assertHeldWith($pending, 'δεν συμφωνεί στον ΦΠΑ');
+    }
+
     public function test_cent_level_rounding_is_within_tolerance(): void
     {
         // A €0.01 back-computation residue must NOT block (WH-5 tolerance).

@@ -238,6 +238,84 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(124.0, $line['gross_price']);
     }
 
+    public function test_credit_applied_invoice_with_zero_total_is_detected_net_from_the_tax_ratio(): void
+    {
+        // The real WHMCS #32488: paid from credit → total 0, and the feed has no
+        // `credit` field, so subtotal + tax ≠ total and subtotal ≠ total. The old
+        // detection fell through to the (wrong, gross) tenant toggle and filed
+        // 2 × 134 net as 216,12 + 51,87. tax = 268 × 24% proves the amounts are net.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 32488, 'userid' => 1, 'date' => '2026-10-13', 'status' => 'Paid',
+            'subtotal' => '268.00', 'tax' => '64.32', 'taxrate' => '24.000', 'total' => '0.00',
+            'items' => ['item' => [
+                ['description' => 'Semi Dedicated Hosting 50% (26/10 - 25/11)', 'amount' => '134.00', 'taxed' => 1],
+                ['description' => 'Semi Dedicated Hosting 50% (26/11 - 25/12)', 'amount' => '134.00', 'taxed' => 1],
+            ]],
+        ]);
+
+        $result = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $this->assertSame(134.0, $result['lines'][0]['net_price']);
+        $this->assertSame(268.0, $result['totals']['net_total']);
+        $this->assertSame(64.32, $result['totals']['vat_total']);
+        $this->assertSame(332.32, $result['totals']['gross_total']);
+    }
+
+    public function test_partially_credit_applied_invoice_is_detected_net(): void
+    {
+        // WHMCS #32388: 26 net + 6,24 VAT, 18,60 paid from credit → total 13,64.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 32388, 'subtotal' => '26.00', 'tax' => '6.24', 'taxrate' => '24.000', 'total' => '13.64',
+            'items' => ['item' => [['description' => 'Hosting', 'amount' => '26.00', 'taxed' => 1]]],
+        ]);
+
+        $totals = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType)['totals'];
+
+        $this->assertSame(26.0, $totals['net_total']);
+        $this->assertSame(32.24, $totals['gross_total']);
+    }
+
+    public function test_credit_applied_gross_invoice_is_detected_gross_from_the_tax_ratio(): void
+    {
+        // Tax-INCLUSIVE WHMCS paid from credit: tax = 124 × 24/124 → gross amounts,
+        // even with total 0 and a tenant toggle that says net.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => false])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31478, 'subtotal' => '124.00', 'tax' => '24.00', 'taxrate' => '24.000', 'total' => '0.00',
+            'items' => ['item' => [['description' => 'Gross line', 'amount' => '124.00', 'taxed' => '1']]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame(100.0, $line['net_price']);
+        $this->assertSame(124.0, $line['gross_price']);
+    }
+
+    public function test_tax_ratio_ignores_untaxed_lines(): void
+    {
+        // Mixed invoice: VAT is on the taxed line only (100 × 24% = 24); the
+        // untaxed 50 must not enter the base. Paid from credit → total 0.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31479, 'subtotal' => '150.00', 'tax' => '24.00', 'taxrate' => '24.000', 'total' => '0.00',
+            'items' => ['item' => [
+                ['description' => 'Taxed', 'amount' => '100.00', 'taxed' => '1'],
+                ['description' => 'Untaxed', 'amount' => '50.00', 'taxed' => '0'],
+            ]],
+        ]);
+
+        $totals = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType)['totals'];
+
+        $this->assertSame(150.0, $totals['net_total']);
+        $this->assertSame(24.0, $totals['vat_total']);
+    }
+
     public function test_no_payload_breakdown_falls_back_to_toggle(): void
     {
         // No subtotal/tax fields → detection returns null → tenant toggle
@@ -299,6 +377,28 @@ class WhmcsInvoiceMapperTest extends TestCase
 
         $this->assertCount(1, $lines, 'only the selected item is mapped');
         $this->assertSame(100.0, $lines[0]['net_price'], 'subset line still treats amount as net');
+        $this->assertSame(124.0, $lines[0]['gross_price']);
+    }
+
+    public function test_credit_applied_split_subset_is_detected_from_the_whole_invoice(): void
+    {
+        // Multi-party split of a credit-paid invoice (total 0): the subset's lines
+        // alone don't match the invoice-level tax, so detection must read the
+        // whole invoice — 300 × 24% = 72 → net, despite a gross tenant toggle.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 1010, 'subtotal' => '300.00', 'tax' => '72.00', 'taxrate' => '24.000', 'total' => '0.00',
+            'items' => ['item' => [
+                ['id' => 11, 'description' => 'Party A', 'amount' => '100.00', 'taxed' => '1'],
+                ['id' => 22, 'description' => 'Party B', 'amount' => '200.00', 'taxed' => '1'],
+            ]],
+        ]);
+
+        $lines = app(WhmcsInvoiceMapper::class)
+            ->map($this->tenant, $pending, $this->customer, $this->invoiceType, [11])['lines'];
+
+        $this->assertSame(100.0, $lines[0]['net_price']);
         $this->assertSame(124.0, $lines[0]['gross_price']);
     }
 
