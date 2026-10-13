@@ -11,6 +11,7 @@ use App\Models\VatCategory;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\WhmcsInbox\MassPayConsolidator;
+use App\Services\WhmcsInbox\WhmcsFilingGuard;
 use App\Services\WhmcsInbox\WhmcsInvoiceMapper;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use RuntimeException;
@@ -490,5 +491,30 @@ class MassPayConsolidatorTest extends TestCase
         $this->assertSame(100.0, $byRate[0]['net'], 'exempt line stays at 0%, never taxed');
         $this->assertSame(200.0, $byRate[24]['net']);
         $this->assertSame(48.0, $byRate[24]['vat']);
+    }
+
+    public function test_consolidated_payload_drops_the_containers_credit_so_the_guard_reconciles(): void
+    {
+        // Feed ≥ 0.54.0 carries `credit`. The consolidated payload rewrites `total`
+        // to the FULL reconstructed value, so a credit inherited from the mass-pay
+        // container would make the guard read total + credit and HOLD a correct row.
+        $massPay = $this->massPayRow();
+        $massPay->payload = array_merge($massPay->payload, ['credit' => '100.00', 'tax2' => '0.00', 'taxtype' => 'Exclusive']);
+        $massPay->save();
+        $fetcher = $this->fetcherReturning([
+            32256 => $this->child(32256, 'Hosting', 'Supermicro AMD Server', '437.00') + ['credit' => '50.00'],
+            32263 => $this->child(32263, 'Hosting', 'Semi Dedicated 8C', '66.34'),
+            32280 => $this->child(32280, 'Domain', 'Ανανέωση Domain', '19.00'),
+        ]);
+
+        $this->consolidator($fetcher)->consolidate($this->tenant, $massPay);
+
+        $merged = $massPay->fresh();
+        $this->assertSame('0.00', $merged->payload['credit']);
+        $mapped = app(WhmcsInvoiceMapper::class)->map($this->tenant, $merged, $this->customer, $this->invoiceType);
+        $this->assertSame(647.7, $mapped['totals']['gross_total']);
+        $this->assertFalse($mapped['totals']['taxtype_conflict']);
+
+        WhmcsFilingGuard::assertTotalsReconcile($mapped, $merged);   // must not throw
     }
 }

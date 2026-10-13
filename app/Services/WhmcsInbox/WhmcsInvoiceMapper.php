@@ -117,7 +117,7 @@ class WhmcsInvoiceMapper
         // can't be absorbed (no matching charge, or it exceeds the charges) is LEFT
         // negative → the filing guard (assertPayloadFilable) still HOLDS the row.
         // ONLY on the whole-invoice path: a per-party SPLIT subset skips
-        // assertTotalsReconcile, and detectAmountIncludesTax reads the WHOLE-invoice
+        // assertTotalsReconcile, and the net/gross detection reads the WHOLE-invoice
         // breakdown (not the subset), so folding a subset could hide a wrong net/gross
         // split with no guard to catch it. A split group's negative line stays → held
         // (its pre-fold behaviour), which the operator resolves by hand.
@@ -131,8 +131,8 @@ class WhmcsInvoiceMapper
         // DETECT it from the invoice's own tax breakdown — the WHMCS payload
         // carries subtotal/tax/taxrate/total + per-line `taxed`, so we don't
         // have to guess. Only fall back to the per-tenant toggle when the
-        // payload has no usable breakdown. detectAmountIncludesTax returns
-        // null when it can't tell.
+        // payload has no usable breakdown. Each detector returns null when it
+        // can't tell.
         // An EXPLICIT declaration wins over both detection and the tenant toggle:
         // a synthetic payload we built ourselves (mass-pay consolidate/explode
         // reconstructs net-by-construction line amounts) says so via
@@ -145,10 +145,26 @@ class WhmcsInvoiceMapper
         // so a per-party split subset's lines would never match them (the tax-ratio
         // check needs every taxed line). Promo lines stay in as negatives there, so
         // the taxed base is the same discounted base WHMCS computed `tax` on.
-        $detected = $this->detectAmountIncludesTax($payload);
+        //
+        // Order, most → least specific:
+        //   1. explicit (our own synthetic payloads)
+        //   2. THIS invoice's tax-to-base ratio (evidence about this document)
+        //   3. WHMCS's DECLARED tax mode (`taxtype`, ekdosi_bridge ≥ 0.54.0) — the
+        //      current global setting; it covers what the ratio can't decide (no
+        //      VAT, tax2, a dead heat on a tiny base)
+        //   4. the subtotal/total(+credit) shape
+        //   5. the per-tenant toggle — only for a WHMCS that declares nothing
+        // A ratio that CONTRADICTS the declared mode (WHMCS setting changed since,
+        // or a hand-edited invoice) is surfaced as `taxtype_conflict`: the
+        // unattended filer holds it and the preview warns.
+        $byRatio = $this->detectByTaxRatio($payload);
+        $declared = $this->declaredAmountIncludesTax($payload);
         $amountIncludesTax = $explicit
-            ?? $detected
+            ?? $byRatio
+            ?? $declared
+            ?? $this->detectByTotals($payload)
             ?? (bool) ($tenant->whmcs_amount_includes_tax ?? true);
+        $taxTypeConflict = $explicit === null && $byRatio !== null && $declared !== null && $byRatio !== $declared;
 
         $lines = $this->buildLines($linePayload, $defaultVat, $amountIncludesTax);
         $totals = $this->computeTotals($lines);
@@ -159,6 +175,9 @@ class WhmcsInvoiceMapper
         // the filing guard HOLDS the row for the operator instead. Scanned from
         // the payload (not the dropped lines) — same shape as hasZeroVatLine.
         $totals['blank_description_charge_lines'] = $this->blankDescriptionChargeLines($linePayload);
+        // The invoice's own tax ratio contradicts WHMCS's declared tax mode → the
+        // unattended filer HOLDS it (WhmcsFilingGuard) and the preview warns.
+        $totals['taxtype_conflict'] = $taxTypeConflict;
 
         // §8.12: a WHMCS invoice records HOW it was paid in its gateway
         // (payload['paymentmethod']: banktransfer / stripe / paypal …). Map it to
@@ -247,6 +266,11 @@ class WhmcsInvoiceMapper
                 // when the invoice was paid from credit (total 0).
                 'whmcs_tax' => (float) ($payload['tax'] ?? 0.0) + (float) ($payload['tax2'] ?? 0.0),
                 'whmcs_subtotal' => (float) ($payload['subtotal'] ?? 0.0),
+                // Applied account credit (feed ≥ 0.54.0 / native GetInvoice): the
+                // document value is total + credit. Null = not reported.
+                'whmcs_credit' => array_key_exists('credit', $payload) ? (float) $payload['credit'] : null,
+                // WHMCS's declared tax mode ('Inclusive' | 'Exclusive' | '').
+                'whmcs_taxtype' => (string) ($payload['taxtype'] ?? ''),
             ],
         ];
     }
@@ -407,75 +431,88 @@ class WhmcsInvoiceMapper
     }
 
     /**
-     * Detect from the WHMCS payload whether line `amount`s are tax-EXCLUSIVE
-     * (net) or tax-INCLUSIVE (gross), instead of guessing per tenant. The
-     * GetInvoice payload carries the authoritative breakdown:
-     *   subtotal (sum of line amounts), tax, taxrate, total.
-     *
-     * Decision (only when tax > 0 and there is a positive taxrate — i.e. the
-     * invoice actually charges VAT):
-     *   - subtotal ≈ Σ(taxed line amounts)  AND  subtotal + tax ≈ total
-     *       → the line amounts are NET, WHMCS added tax on top → return FALSE.
-     *   - subtotal ≈ total (tax already inside)
-     *       → line amounts are GROSS → return TRUE.
-     * Returns null when the payload has no usable breakdown (no tax / missing
-     * fields / inconsistent) — caller falls back to the tenant toggle.
+     * Whether WHMCS line amounts are GROSS (true) or NET (false), from THIS
+     * invoice's tax-to-base ratio: WHMCS computes `tax` on the taxed line amounts,
+     * net → tax = base × r/100, gross → tax = base × r/(100+r). Needs neither
+     * `total` nor `subtotal`, so it survives a credit-applied invoice (WHMCS #32488).
+     * Null when it can't tell: no VAT, a second tax level (tax2), no taxed line, or
+     * a dead heat on a tiny base.
      *
      * @param  array<string, mixed>  $payload
      */
-    private function detectAmountIncludesTax(array $payload): ?bool
+    private function detectByTaxRatio(array $payload): ?bool
     {
         $taxRate = (float) ($payload['taxrate'] ?? 0);
         $tax = (float) ($payload['tax'] ?? 0);
-
-        // No VAT on this invoice → can't tell (and nothing to split).
-        if ($taxRate <= 0.0 || $tax <= 0.005) {
+        if ($taxRate <= 0.0 || $tax <= 0.005 || (float) ($payload['tax2'] ?? 0) > 0.005) {
             return null;
         }
 
-        // PRIMARY: the tax-to-base ratio. WHMCS computes `tax` on the TAXED line
-        // amounts: net amounts → tax = base × r/100; gross → tax = base × r/(100+r).
-        // This needs neither `total` nor `subtotal`, so it survives a credit-applied
-        // invoice — WHMCS then reports total = subtotal + tax − credit (0 when fully
-        // paid from credit) and the plugin feed carries no `credit` field, which made
-        // the total-based checks below fall through to the tenant toggle and file
-        // net amounts as gross (WHMCS #32488: 2 × 134 net filed as 216,12 + 51,87).
-        // A second tax level (tax2) breaks the single-rate ratio → skip to fallback.
         $taxedBase = $this->taxedLineBase($payload);
-        if ($taxedBase !== null && (float) ($payload['tax2'] ?? 0) <= 0.005) {
-            $tolerance = 0.02 + 0.01 * $taxedBase['lines'];
-            $netGap = abs($taxedBase['sum'] * $taxRate / 100 - $tax);
-            $grossGap = abs($taxedBase['sum'] * $taxRate / (100 + $taxRate) - $tax);
-            // On a tiny base (≲ €1.7) BOTH formulas fall inside the tolerance — pick
-            // the CLOSER one instead of whichever is checked first (a €0.50 gross line
-            // with tax 0.10 is gross, not net); a dead heat defers to the fallback.
-            if (min($netGap, $grossGap) <= $tolerance && abs($netGap - $grossGap) > 0.0001) {
-                return $grossGap < $netGap;
-            }
-        }
-
-        $subtotal = isset($payload['subtotal']) ? (float) $payload['subtotal'] : null;
-        $total = isset($payload['total']) ? (float) $payload['total'] : null;
-        if ($subtotal === null || $total === null) {
+        if ($taxedBase === null) {
             return null;
         }
 
+        $tolerance = 0.02 + 0.01 * $taxedBase['lines'];
+        $netGap = abs($taxedBase['sum'] * $taxRate / 100 - $tax);
+        $grossGap = abs($taxedBase['sum'] * $taxRate / (100 + $taxRate) - $tax);
+        // On a tiny base (≲ €1.7) BOTH formulas fall inside the tolerance — pick
+        // the CLOSER one instead of whichever is checked first (a €0.50 gross line
+        // with tax 0.10 is gross, not net); a dead heat defers to the next rule.
+        if (min($netGap, $grossGap) <= $tolerance && abs($netGap - $grossGap) > 0.0001) {
+            return $grossGap < $netGap;
+        }
+
+        return null;
+    }
+
+    /**
+     * WHMCS's declared tax mode, as the ekdosi_bridge feed (≥ 0.54.0) reports it:
+     * `taxtype` Inclusive → amounts are gross (true), Exclusive → net (false).
+     * Null when absent (older plugin, native API) or tax is disabled.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function declaredAmountIncludesTax(array $payload): ?bool
+    {
+        return match (strtolower(trim((string) ($payload['taxtype'] ?? '')))) {
+            'inclusive' => true,
+            'exclusive' => false,
+            default => null,
+        };
+    }
+
+    /**
+     * Last payload-based rule: the subtotal / tax / total shape. WHMCS reports
+     * total = subtotal + tax − credit, so the applied `credit` (feed ≥ 0.54.0,
+     * native GetInvoice) is added back; without it a credit-paid invoice matches
+     * neither branch and returns null. Only reached when the ratio can't decide
+     * and WHMCS declares no tax mode.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private function detectByTotals(array $payload): ?bool
+    {
+        $tax = (float) ($payload['tax'] ?? 0) + (float) ($payload['tax2'] ?? 0);
+        if ((float) ($payload['taxrate'] ?? 0) <= 0.0 || $tax <= 0.005
+            || ! isset($payload['subtotal'], $payload['total'])) {
+            return null;
+        }
+
+        $subtotal = (float) $payload['subtotal'];
+        $documentTotal = (float) $payload['total'] + (float) ($payload['credit'] ?? 0);
         $eps = 0.02;   // rounding tolerance between the two systems
 
-        // Net amounts: WHMCS adds tax on top, so subtotal + tax == total and
-        // subtotal is the pre-tax base.
-        if (abs(($subtotal + $tax) - $total) <= $eps) {
+        // Net amounts: WHMCS adds tax on top.
+        if (abs(($subtotal + $tax) - $documentTotal) <= $eps) {
             return false;
         }
-
-        // Gross amounts: the tax is already inside subtotal, so subtotal ==
-        // total (tax is informational).
-        if (abs($subtotal - $total) <= $eps) {
+        // Gross amounts: the tax is already inside subtotal.
+        if (abs($subtotal - $documentTotal) <= $eps) {
             return true;
         }
 
-        // Inconsistent / unrecognised shape → defer to the tenant toggle.
-        return null;
+        return null;   // inconsistent / unrecognised shape
     }
 
     /**

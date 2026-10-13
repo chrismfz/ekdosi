@@ -90,16 +90,52 @@
             </div>
         </div>
 
-        {{-- Source row footer --}}
-        <div class="text-xs text-gray-500">
-            Από WHMCS παραστατικό #{{ $preview->source['whmcs_invoice_id'] }},
-            ημερομηνία {{ $preview->source['whmcs_date'] }},
-            σύνολο WHMCS: {{ $fmt($preview->source['whmcs_total']) }}.
-            @if (abs($preview->source['whmcs_total'] - $preview->totals['gross_total']) > 0.01)
-                <span class="text-warning-600 font-semibold">
-                    ⚠️ Διαφορά από το ekdosi σύνολο ({{ $fmt(abs($preview->source['whmcs_total'] - $preview->totals['gross_total'])) }}) —
+        {{-- Source row footer — reconciles against the WHMCS DOCUMENT value. A
+             credit-paid WHMCS invoice reports total = subtotal + tax − credit (0 when
+             paid fully from credit), so comparing against `total` alone flagged a
+             false ⚠ on every one of them; the VAT is compared too (the field that
+             exposes a net/gross mix-up). Mirrors WhmcsFilingGuard::assertTotalsReconcile. --}}
+        @php
+            $src = $preview->source;
+            $wTotal = (float) ($src['whmcs_total'] ?? 0);
+            $wCredit = isset($src['whmcs_credit']) ? (float) $src['whmcs_credit'] : null;
+            $wSubtotal = (float) ($src['whmcs_subtotal'] ?? 0);
+            $wTax = (float) ($src['whmcs_tax'] ?? 0);
+            $tol = 0.02 + 0.01 * count($preview->lines);
+            $gross = (float) $preview->totals['gross_total'];
+            $documentValue = $wCredit !== null ? $wTotal + $wCredit : $wTotal;
+            $candidates = $wCredit !== null
+                ? [$documentValue]
+                : array_filter([$wTotal, $wSubtotal > 0.005 ? $wSubtotal + $wTax : null, $wSubtotal > 0.005 ? $wSubtotal : null], fn ($v) => $v !== null && $v > 0.005);
+            $grossMismatch = $candidates !== [] && collect($candidates)->every(fn ($v) => abs($v - $gross) > $tol);
+            $vatMismatch = $wTax > 0.005 && abs($wTax - (float) $preview->totals['vat_total']) > $tol;
+        @endphp
+        <div class="text-xs text-gray-500 space-y-1">
+            <div>
+                Από WHMCS παραστατικό #{{ $src['whmcs_invoice_id'] }},
+                ημερομηνία {{ $src['whmcs_date'] }},
+                αξία WHMCS: {{ $fmt($documentValue) }}@if ($wTax > 0.005) (ΦΠΑ {{ $fmt($wTax) }})@endif
+                @if ($wCredit !== null && $wCredit > 0.005)
+                    — εξοφλήθηκε {{ $fmt($wCredit) }} από πίστωση, υπόλοιπο {{ $fmt($wTotal) }}
+                @endif.
+            </div>
+            @if (! empty($preview->totals['taxtype_conflict']))
+                <div class="text-warning-600 font-semibold">
+                    ⚠️ Το WHMCS δηλώνει ΦΠΑ «{{ $src['whmcs_taxtype'] ?? '' }}» αλλά τα ποσά αυτού του τιμολογίου
+                    αντιστοιχούν στο αντίθετο (καθαρά/μικτά) — έλεγξε τα ποσά πριν την έκδοση.
+                </div>
+            @endif
+            @if ($vatMismatch)
+                <div class="text-warning-600 font-semibold">
+                    ⚠️ ΦΠΑ ekdosi {{ $fmt($preview->totals['vat_total']) }} ≠ ΦΠΑ WHMCS {{ $fmt($wTax) }} —
+                    πιθανή σύγχυση καθαρών/μικτών ή άλλος συντελεστής.
+                </div>
+            @endif
+            @if ($grossMismatch)
+                <div class="text-warning-600 font-semibold">
+                    ⚠️ Διαφορά από το ekdosi σύνολο ({{ $fmt(abs($documentValue - $gross)) }}) —
                     έλεγξε τους υπολογισμούς ΦΠΑ.
-                </span>
+                </div>
             @endif
         </div>
     </div>
