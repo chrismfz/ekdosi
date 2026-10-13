@@ -444,11 +444,13 @@ class WhmcsInvoiceMapper
         $taxedBase = $this->taxedLineBase($payload);
         if ($taxedBase !== null && (float) ($payload['tax2'] ?? 0) <= 0.005) {
             $tolerance = 0.02 + 0.01 * $taxedBase['lines'];
-            if (abs($taxedBase['sum'] * $taxRate / 100 - $tax) <= $tolerance) {
-                return false;
-            }
-            if (abs($taxedBase['sum'] * $taxRate / (100 + $taxRate) - $tax) <= $tolerance) {
-                return true;
+            $netGap = abs($taxedBase['sum'] * $taxRate / 100 - $tax);
+            $grossGap = abs($taxedBase['sum'] * $taxRate / (100 + $taxRate) - $tax);
+            // On a tiny base (≲ €1.7) BOTH formulas fall inside the tolerance — pick
+            // the CLOSER one instead of whichever is checked first (a €0.50 gross line
+            // with tax 0.10 is gross, not net); a dead heat defers to the fallback.
+            if (min($netGap, $grossGap) <= $tolerance && abs($netGap - $grossGap) > 0.0001) {
+                return $grossGap < $netGap;
             }
         }
 
@@ -477,7 +479,7 @@ class WhmcsInvoiceMapper
     }
 
     /**
-     * Σ of the TAXED line amounts (WHMCS `taxed` truthy) + how many, or null when
+     * Σ of the TAXED line amounts (WHMCS `taxed` ≠ 0, absent = taxed) + how many, or null when
      * the payload has no taxed line — the base WHMCS computed `tax` on.
      *
      * @param  array<string, mixed>  $payload
@@ -493,7 +495,8 @@ class WhmcsInvoiceMapper
         $sum = 0.0;
         $lines = 0;
         foreach ((array) $items as $item) {
-            if (! is_array($item) || ! filter_var($item['taxed'] ?? false, FILTER_VALIDATE_BOOL)) {
+            // Same `taxed` reading as buildLines / foldPromoDiscounts: absent = taxed.
+            if (! is_array($item) || ((int) ($item['taxed'] ?? 1)) === 0) {
                 continue;
             }
             $sum += (float) ($item['amount'] ?? 0);

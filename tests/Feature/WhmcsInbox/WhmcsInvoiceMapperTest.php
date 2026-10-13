@@ -296,6 +296,38 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(124.0, $line['gross_price']);
     }
 
+    public function test_tiny_gross_invoice_is_not_misread_as_net(): void
+    {
+        // A €0.50 gross line, tax 0.10: on such a tiny base BOTH formulas sit inside
+        // the tolerance (net would expect 0.12, gross 0.0968) — the closer one wins.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => false])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31480, 'subtotal' => '0.50', 'tax' => '0.10', 'taxrate' => '24.000', 'total' => '0.50',
+            'items' => ['item' => [['description' => 'Tiny', 'amount' => '0.50', 'taxed' => '1']]],
+        ]);
+
+        $totals = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType)['totals'];
+
+        $this->assertSame(0.5, $totals['gross_total'], 'gross detected → not inflated to 0.62');
+    }
+
+    public function test_tiny_net_invoice_paid_from_credit_is_still_net(): void
+    {
+        // The mirror case on a net (tax-exclusive) WHMCS: €0.50 net + 0.12 VAT,
+        // paid from credit (total 0), gross toggle — must stay net.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31481, 'subtotal' => '0.50', 'tax' => '0.12', 'taxrate' => '24.000', 'total' => '0.00',
+            'items' => ['item' => [['description' => 'Tiny', 'amount' => '0.50', 'taxed' => 1]]],
+        ]);
+
+        $totals = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType)['totals'];
+
+        $this->assertSame(0.62, $totals['gross_total']);
+    }
+
     public function test_tax_ratio_ignores_untaxed_lines(): void
     {
         // Mixed invoice: VAT is on the taxed line only (100 × 24% = 24); the
