@@ -6,26 +6,32 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Payment;
 use App\Models\Scopes\CompanyScope;
+use App\Services\Payments\ImportedCreditPool;
 use App\Services\Payments\PaymentAllocator;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 
 /**
- * One-off cleanup for Epsilon-imported customers: link each customer's imported
- * «έναντι» on-account credits (transaction_id EPS:…) to their open invoices,
- * FIFO oldest-first, so the historically-paid invoices stop reading as «ανοιχτά».
+ * One-off cleanup for imported customers: link each customer's imported «έναντι»
+ * on-account credits to their open invoices, FIFO oldest-first, so the
+ * historically-paid invoices stop reading as «ανοιχτά». Two import families
+ * ({@see ImportedCreditPool}, `--source`):
+ *   eps      — Epsilon (transaction_id EPS:…), the default.
+ *   firebird — the legacy Έκδοση ETL (migrate:firebird; payments.legacy_id set).
  *
- * WHY: Epsilon exports payments as customer-account movements, not per-invoice,
- * so the importer lands them on-account (invoice_id null). Every imported invoice
+ * WHY: neither source links a payment to an invoice — Epsilon exports
+ * customer-account movements, and the legacy Έκδοση only ever kept a customer-level
+ * balance (GET_CUSTOMER_BALANCE) — so the importers land them on-account
+ * (invoice_id null). Every imported invoice
  * then shows «χωρίς πληρωμή» individually even though the customer nets to zero —
  * and the auto-FIFO «Είσπραξη» targets those oldest phantom-open invoices, dumping
- * a new receipt on 2021 docs instead of the one it was meant for. This re-points
+ * a new receipt on years-old docs instead of the one it was meant for. This re-points
  * the existing έναντι credit onto those invoices (net-zero to the customer
  * balance), closing them so a future receipt can only land on a genuinely-open
  * invoice.
  *
  * Safe: net-zero (no money created/removed), idempotent (a re-run finds nothing
- * open), scoped to EPS: rows only (never a genuine advance), and --dry-run shows
+ * open), scoped to the chosen import family only (never a genuine advance), and --dry-run shows
  * the full plan without writing. Take a db-snapshot before the real run anyway.
  */
 class PaymentsApplyImportedCredits extends Command
@@ -33,9 +39,10 @@ class PaymentsApplyImportedCredits extends Command
     protected $signature = 'payments:apply-imported-credits
         {--company= : Company slug or id (required)}
         {--customer= : Limit to one customer (AFM or id)}
+        {--source=eps : Import family: eps (Epsilon EPS:…) | firebird (legacy Έκδοση, legacy_id)}
         {--dry-run : Show what would be linked, write nothing}';
 
-    protected $description = 'Link imported «έναντι» (EPS:) on-account credits to open invoices FIFO (net-zero cleanup)';
+    protected $description = 'Link imported «έναντι» on-account credits (Epsilon / legacy Έκδοση) to open invoices FIFO (net-zero cleanup)';
 
     public function handle(PaymentAllocator $allocator): int
     {
@@ -58,17 +65,27 @@ class PaymentsApplyImportedCredits extends Command
             return self::FAILURE;
         }
 
-        $dryRun = (bool) $this->option('dry-run');
-        $txPrefix = 'EPS:';
+        $sourceOpt = trim((string) $this->option('source'));
+        $pool = ImportedCreditPool::fromSource($sourceOpt);
+        if ($pool === null) {
+            $this->error("Άγνωστο --source «{$sourceOpt}» (eps | firebird).");
 
-        $customers = $this->resolveCustomers($company, trim((string) $this->option('customer')), $txPrefix);
+            return self::FAILURE;
+        }
+
+        $dryRun = (bool) $this->option('dry-run');
+
+        $customers = $this->resolveCustomers($company, trim((string) $this->option('customer')), $pool);
         if ($customers->isEmpty()) {
             $this->info('Καμία εγγραφή προς αντιστοίχιση (καμία εισαγόμενη «έναντι» πίστωση).');
+            if ($pool->key === 'eps' && $this->resolveCustomers($company, '', ImportedCreditPool::firebird())->isNotEmpty()) {
+                $this->warn('Υπάρχει όμως εισαγόμενη πίστωση από την παλιά Έκδοση — ξανατρέξε με --source=firebird.');
+            }
 
             return self::SUCCESS;
         }
 
-        $this->line(($dryRun ? '[DRY-RUN] ' : '').'Εταιρεία: '.$company->slug.' — '
+        $this->line(($dryRun ? '[DRY-RUN] ' : '').'Εταιρεία: '.$company->slug.' — πηγή '.$pool->key.' — '
             .$customers->count().' πελάτης/ες με εισαγόμενη πίστωση');
 
         $rows = [];
@@ -81,8 +98,8 @@ class PaymentsApplyImportedCredits extends Command
             // atomically) is reported and the rest still run. A re-run is idempotent.
             try {
                 $result = $dryRun
-                    ? $allocator->simulateImportedCreditsFifo($customer, $txPrefix)
-                    : $allocator->applyImportedCreditsFifo($customer, $txPrefix);
+                    ? $allocator->simulateImportedCreditsFifo($customer, $pool)
+                    : $allocator->applyImportedCreditsFifo($customer, $pool);
             } catch (\Throwable $e) {
                 $failed++;
                 $this->error("Σφάλμα στον πελάτη «{$customer->name}»: ".$e->getMessage().' — παραλείφθηκε.');
@@ -134,14 +151,14 @@ class PaymentsApplyImportedCredits extends Command
      *
      * @return Collection<int, Customer>
      */
-    private function resolveCustomers(Company $company, string $customerOpt, string $txPrefix): Collection
+    private function resolveCustomers(Company $company, string $customerOpt, ImportedCreditPool $pool): Collection
     {
-        $customerIds = Payment::query()
+        $query = Payment::query()
             ->withoutGlobalScope(CompanyScope::class)
             ->where('company_id', $company->id)
             ->whereNull('invoice_id')
-            ->where('kind', 'payment')
-            ->where('transaction_id', 'like', $txPrefix.'%')
+            ->where('kind', 'payment');
+        $customerIds = $pool->scope($query)
             ->distinct()
             ->pluck('customer_id')
             ->filter()
