@@ -141,7 +141,11 @@ class WhmcsInvoiceMapper
         $explicit = array_key_exists('ekdosi_amount_includes_tax', $linePayload)
             ? (bool) $linePayload['ekdosi_amount_includes_tax']
             : null;
-        $detected = $this->detectAmountIncludesTax($linePayload);
+        // Detect on the WHOLE invoice: `tax`/`subtotal`/`total` are invoice-level,
+        // so a per-party split subset's lines would never match them (the tax-ratio
+        // check needs every taxed line). Promo lines stay in as negatives there, so
+        // the taxed base is the same discounted base WHMCS computed `tax` on.
+        $detected = $this->detectAmountIncludesTax($payload);
         $amountIncludesTax = $explicit
             ?? $detected
             ?? (bool) ($tenant->whmcs_amount_includes_tax ?? true);
@@ -238,6 +242,11 @@ class WhmcsInvoiceMapper
                 // would be wrong — even in tax-inclusive mode where the gross
                 // still reconciles. The filing guard compares the two.
                 'whmcs_taxrate' => (float) ($payload['taxrate'] ?? 0.0),
+                // The VAT amount WHMCS charged. Unlike `total` it is NOT reduced by
+                // applied credit, so the filing guard can reconcile the VAT even
+                // when the invoice was paid from credit (total 0).
+                'whmcs_tax' => (float) ($payload['tax'] ?? 0.0) + (float) ($payload['tax2'] ?? 0.0),
+                'whmcs_subtotal' => (float) ($payload['subtotal'] ?? 0.0),
             ],
         ];
     }
@@ -418,11 +427,36 @@ class WhmcsInvoiceMapper
     {
         $taxRate = (float) ($payload['taxrate'] ?? 0);
         $tax = (float) ($payload['tax'] ?? 0);
+
+        // No VAT on this invoice → can't tell (and nothing to split).
+        if ($taxRate <= 0.0 || $tax <= 0.005) {
+            return null;
+        }
+
+        // PRIMARY: the tax-to-base ratio. WHMCS computes `tax` on the TAXED line
+        // amounts: net amounts → tax = base × r/100; gross → tax = base × r/(100+r).
+        // This needs neither `total` nor `subtotal`, so it survives a credit-applied
+        // invoice — WHMCS then reports total = subtotal + tax − credit (0 when fully
+        // paid from credit) and the plugin feed carries no `credit` field, which made
+        // the total-based checks below fall through to the tenant toggle and file
+        // net amounts as gross (WHMCS #32488: 2 × 134 net filed as 216,12 + 51,87).
+        // A second tax level (tax2) breaks the single-rate ratio → skip to fallback.
+        $taxedBase = $this->taxedLineBase($payload);
+        if ($taxedBase !== null && (float) ($payload['tax2'] ?? 0) <= 0.005) {
+            $tolerance = 0.02 + 0.01 * $taxedBase['lines'];
+            $netGap = abs($taxedBase['sum'] * $taxRate / 100 - $tax);
+            $grossGap = abs($taxedBase['sum'] * $taxRate / (100 + $taxRate) - $tax);
+            // On a tiny base (≲ €1.7) BOTH formulas fall inside the tolerance — pick
+            // the CLOSER one instead of whichever is checked first (a €0.50 gross line
+            // with tax 0.10 is gross, not net); a dead heat defers to the fallback.
+            if (min($netGap, $grossGap) <= $tolerance && abs($netGap - $grossGap) > 0.0001) {
+                return $grossGap < $netGap;
+            }
+        }
+
         $subtotal = isset($payload['subtotal']) ? (float) $payload['subtotal'] : null;
         $total = isset($payload['total']) ? (float) $payload['total'] : null;
-
-        // No VAT on this invoice, or breakdown missing → can't tell.
-        if ($taxRate <= 0.0 || $tax <= 0.005 || $subtotal === null || $total === null) {
+        if ($subtotal === null || $total === null) {
             return null;
         }
 
@@ -442,6 +476,34 @@ class WhmcsInvoiceMapper
 
         // Inconsistent / unrecognised shape → defer to the tenant toggle.
         return null;
+    }
+
+    /**
+     * Σ of the TAXED line amounts (WHMCS `taxed` ≠ 0, absent = taxed) + how many, or null when
+     * the payload has no taxed line — the base WHMCS computed `tax` on.
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{sum: float, lines: int}|null
+     */
+    private function taxedLineBase(array $payload): ?array
+    {
+        $items = $payload['items']['item'] ?? [];
+        if (! empty($items) && ! array_is_list($items)) {
+            $items = [$items];
+        }
+
+        $sum = 0.0;
+        $lines = 0;
+        foreach ((array) $items as $item) {
+            // Same `taxed` reading as buildLines / foldPromoDiscounts: absent = taxed.
+            if (! is_array($item) || ((int) ($item['taxed'] ?? 1)) === 0) {
+                continue;
+            }
+            $sum += (float) ($item['amount'] ?? 0);
+            $lines++;
+        }
+
+        return $lines > 0 && $sum > 0.005 ? ['sum' => $sum, 'lines' => $lines] : null;
     }
 
     /**

@@ -93,20 +93,57 @@ final class WhmcsFilingGuard
      * taxrate) — filing it would put a MARK on a different amount than the
      * customer's WHMCS invoice. WHOLE-invoice only.
      *
-     * Skipped when the WHMCS total is absent/zero (nothing to compare against).
+     * The VAT is reconciled against WHMCS `tax` always; the gross against `total`
+     * only when it is present and non-zero (a credit-applied invoice reports a
+     * reduced/zero total, so it can't be compared there).
      *
      * @param  array<string, mixed>  $mapped
      */
     public static function assertTotalsReconcile(array $mapped, PendingWhmcsInvoice $pending): void
     {
+        $lineCount = count($mapped['lines'] ?? []);
+        $tolerance = self::TOTALS_BASE_TOLERANCE + self::TOTALS_PER_LINE_TOLERANCE * $lineCount;
+
+        // The VAT WHMCS charged must match the VAT we file. Checked FIRST and
+        // regardless of `total`: a credit-applied WHMCS invoice reports total =
+        // subtotal + tax − credit (0 when paid fully from credit), which made the
+        // gross check below skip — and a net/gross mix-up then filed to AADE with
+        // no guard (WHMCS #32488: VAT 51,87 filed vs 64,32 charged). `tax` is never
+        // reduced by credit, so this catches the wrong split in every case.
+        $whmcsTax = (float) ($mapped['source']['whmcs_tax'] ?? 0.0);
+        $vat = (float) ($mapped['totals']['vat_total'] ?? 0.0);
+        if ($whmcsTax > 0.005 && abs($vat - $whmcsTax) > $tolerance) {
+            throw new LogicException(sprintf(
+                'Το WHMCS #%d δεν συμφωνεί στον ΦΠΑ: το ekdosi υπολόγισε ΦΠΑ %s € αλλά το WHMCS '
+                .'χρέωσε %s € (διαφορά %s €). Πιθανή αιτία: σύγχυση καθαρών/μικτών ποσών ή '
+                .'διαφορετικός συντελεστής. Η γραμμή κρατείται — έλεγξέ το και εξέδωσέ το '
+                .'χειροκίνητα.',
+                $pending->whmcs_invoice_id,
+                number_format($vat, 2, ',', '.'),
+                number_format($whmcsTax, 2, ',', '.'),
+                number_format(abs($vat - $whmcsTax), 2, ',', '.'),
+            ));
+        }
+
         $whmcsTotal = (float) ($mapped['source']['whmcs_total'] ?? 0.0);
         if ($whmcsTotal <= 0.005) {
-            return;   // no usable WHMCS total to reconcile against
+            return;   // no usable WHMCS total to reconcile against (e.g. paid from credit)
         }
 
         $gross = (float) ($mapped['totals']['gross_total'] ?? 0.0);
-        $lineCount = count($mapped['lines'] ?? []);
-        $tolerance = self::TOTALS_BASE_TOLERANCE + self::TOTALS_PER_LINE_TOLERANCE * $lineCount;
+
+        // Partially credit-applied: WHMCS total = subtotal + tax − credit, and the
+        // feed has no `credit`. The document value is then subtotal + tax (net
+        // amounts) or subtotal (gross amounts) — accept those too. A net/gross
+        // mix-up can't slip through here: the VAT check above already caught it.
+        $whmcsSubtotal = (float) ($mapped['source']['whmcs_subtotal'] ?? 0.0);
+        if ($whmcsSubtotal > 0.005) {
+            foreach ([$whmcsSubtotal + $whmcsTax, $whmcsSubtotal] as $documentValue) {
+                if (abs($gross - $documentValue) <= $tolerance) {
+                    return;
+                }
+            }
+        }
 
         if (abs($gross - $whmcsTotal) > $tolerance) {
             throw new LogicException(sprintf(
