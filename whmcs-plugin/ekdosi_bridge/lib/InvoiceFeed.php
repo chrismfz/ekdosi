@@ -94,6 +94,7 @@ class InvoiceFeed
         $invoices = $q->offset($offset)->limit($limit)->get([
             'id', 'userid', 'date', 'duedate', 'datepaid', 'subtotal',
             'tax', 'taxrate', 'total', 'status', 'invoiced', 'paymentmethod',
+            'credit', 'tax2',
         ]);
 
         $payloads = self::buildPayloads($invoices, $withRouting);
@@ -120,9 +121,32 @@ class InvoiceFeed
             ->get([
                 'id', 'userid', 'date', 'duedate', 'datepaid', 'subtotal',
                 'tax', 'taxrate', 'total', 'status', 'invoiced', 'paymentmethod',
+                'credit', 'tax2',
             ]);
 
         return self::buildPayloads($invoices, $withRouting)[0] ?? null;
+    }
+
+    /**
+     * WHMCS's global tax mode — 'Inclusive' | 'Exclusive', or '' when tax is
+     * disabled or the setting is unreadable (ekdosi then falls back to detecting
+     * it from the amounts). Read once per feed page. Never throws.
+     */
+    private static function taxType(): string
+    {
+        try {
+            $rows = Capsule::table('tblconfiguration')
+                ->whereIn('setting', ['TaxEnabled', 'TaxType'])
+                ->pluck('value', 'setting');
+            if (strtolower((string) ($rows['TaxEnabled'] ?? '')) !== 'on') {
+                return '';
+            }
+            $type = (string) ($rows['TaxType'] ?? '');
+
+            return in_array($type, ['Inclusive', 'Exclusive'], true) ? $type : '';
+        } catch (\Throwable $e) {
+            return '';
+        }
     }
 
     /**
@@ -154,6 +178,7 @@ class InvoiceFeed
             ])->keyBy('id');
         $customFieldsByClient = self::customFieldsByClient($userIds);
         $currencyCodes = self::currencyCodes($clients);
+        $taxType = self::taxType();
 
         $payloads = [];
         foreach ($invoices as $inv) {
@@ -174,6 +199,16 @@ class InvoiceFeed
                 'tax' => (string) ($inv->tax ?? '0'),
                 'taxrate' => (string) ($inv->taxrate ?? '0'),
                 'total' => (string) ($inv->total ?? '0'),
+                // Account credit applied to this invoice: WHMCS reports
+                // total = subtotal + tax − credit, so without it a credit-paid
+                // invoice (total 0) looks inconsistent to ekdosi's checks.
+                'credit' => (string) ($inv->credit ?? '0'),
+                'tax2' => (string) ($inv->tax2 ?? '0'),
+                // WHMCS «Tax Type» (Setup → Tax Configuration): Exclusive = line
+                // amounts are NET (VAT added on top), Inclusive = they already
+                // contain VAT. '' when tax is disabled/unknown. Lets ekdosi stop
+                // guessing via its per-tenant toggle.
+                'taxtype' => $taxType,
                 'status' => (string) ($inv->status ?? ''),
                 'invoiced' => (int) ($inv->invoiced ?? 0),
                 // Payment gateway system name (banktransfer / stripe / paypal …) —

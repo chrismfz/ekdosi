@@ -413,6 +413,30 @@ class WhmcsInvoiceFilerTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
     }
 
+    public function test_unattended_file_holds_any_invoice_whmcs_reports_with_zero_vat(): void
+    {
+        // Belt-and-braces: WHMCS REPORTED tax 0 on a charging invoice. Even if the
+        // mapping and every other check agreed, the unattended path must not file it.
+        $pending = $this->makePending([
+            ['description' => 'Server (exempt client)', 'amount' => '6.80', 'taxed' => '1'],
+        ], total: '6.80');
+        $pending->payload = array_merge($pending->payload, ['subtotal' => '6.80', 'tax' => '0.00', 'taxrate' => '0.000']);
+        $pending->save();
+
+        try {
+            app(WhmcsInvoiceFiler::class)->file(
+                $this->tenant, $pending, $this->customer, $this->invoiceType,
+                unattended: true,
+            );
+            $this->fail('the unattended path must HOLD an invoice WHMCS charged no VAT on');
+        } catch (LogicException $e) {
+            $this->assertStringContainsString('δεν χρέωσε ΦΠΑ', $e->getMessage());
+        }
+
+        $this->assertSame(0, Invoice::query()->count());
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
+    }
+
     public function _unused_test_file_logs_would_be_whmcs_writeback_for_stage_b3(): void
     {
         Log::spy();

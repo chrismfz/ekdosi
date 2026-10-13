@@ -261,6 +261,84 @@ class WhmcsFilingGuardTest extends TestCase
         $this->assertHeldWith($pending, 'δεν συμφωνεί στον ΦΠΑ');
     }
 
+    public function test_known_credit_reconciles_exactly_against_total_plus_credit(): void
+    {
+        // Feed ≥ 0.54.0: total 0 + credit 332,32 = the document value → files.
+        $pending = $this->makePending(
+            [
+                ['description' => 'Hosting A', 'amount' => '134.00', 'taxed' => 1],
+                ['description' => 'Hosting B', 'amount' => '134.00', 'taxed' => 1],
+            ],
+            total: '0.00',
+            payloadExtra: ['subtotal' => '268.00', 'tax' => '64.32', 'taxrate' => '24.000', 'credit' => '332.32', 'taxtype' => 'Exclusive'],
+        );
+
+        $this->file($pending);
+        $this->assertSame('332.32', (string) Invoice::sole()->gross_total);
+    }
+
+    public function test_known_credit_that_does_not_add_up_is_held(): void
+    {
+        // With the credit known the check is strict: 0 + 300 ≠ 332,32.
+        $pending = $this->makePending(
+            [['description' => 'Hosting', 'amount' => '268.00', 'taxed' => 1]],
+            total: '0.00',
+            payloadExtra: ['subtotal' => '268.00', 'tax' => '64.32', 'taxrate' => '24.000', 'credit' => '300.00'],
+        );
+
+        $this->assertHeldWith($pending, 'δεν συμφωνεί στα σύνολα');
+    }
+
+    public function test_tax_type_conflict_is_held_on_the_unattended_path(): void
+    {
+        // The invoice's VAT says NET (100 × 24% = 24) but WHMCS declares Inclusive.
+        $pending = $this->makePending(
+            [['description' => 'Hosting', 'amount' => '100.00', 'taxed' => 1]],
+            total: '124.00',
+            payloadExtra: ['subtotal' => '100.00', 'tax' => '24.00', 'taxrate' => '24.000', 'credit' => '0.00', 'taxtype' => 'Inclusive'],
+        );
+
+        $this->assertHeldWith($pending, 'δηλώνει ΦΠΑ «Inclusive»');
+    }
+
+    /** @return array<int, array<string, mixed>> the real tax-exempt shape: tax 0, taxrate 0, items still taxed=1 */
+    private function exemptItems(): array
+    {
+        return [
+            ['description' => 'Server A', 'amount' => '4.00', 'taxed' => 1],
+            ['description' => 'Server B', 'amount' => '2.80', 'taxed' => 1],
+        ];
+    }
+
+    public function test_zero_vat_exempt_client_is_held_on_an_old_plugin_payload(): void
+    {
+        // No `credit` / `taxtype` (plugin < 0.54.0): the gross toggle would back 24%
+        // out of 6,80 and file VAT the client was never charged. Must HOLD.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+        $pending = $this->makePending($this->exemptItems(), total: '0.86',
+            payloadExtra: ['subtotal' => '6.80', 'tax' => '0.00', 'taxrate' => '0.000']);
+
+        $this->assertHeldWith($pending, 'δεν χρέωσε ΦΠΑ');
+    }
+
+    public function test_zero_vat_exempt_client_is_held_on_a_native_api_payload(): void
+    {
+        // Native GetInvoice carries `credit` (strict 0,86 + 5,94 = 6,80 would pass).
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+        $pending = $this->makePending($this->exemptItems(), total: '0.86',
+            payloadExtra: ['subtotal' => '6.80', 'tax' => '0.00', 'tax2' => '0.00', 'taxrate' => '0.000', 'credit' => '5.94']);
+
+        $this->assertHeldWith($pending, 'δεν χρέωσε ΦΠΑ');
+    }
+
+    public function test_zero_vat_exempt_client_is_held_with_a_declared_tax_type(): void
+    {
+        $pending = $this->makePending($this->exemptItems(), total: '0.86',
+            payloadExtra: ['subtotal' => '6.80', 'tax' => '0.00', 'tax2' => '0.00', 'taxrate' => '0.000', 'credit' => '5.94', 'taxtype' => 'Exclusive']);
+
+        $this->assertHeldWith($pending, 'δεν χρέωσε ΦΠΑ');
+    }
+
     public function test_cent_level_rounding_is_within_tolerance(): void
     {
         // A €0.01 back-computation residue must NOT block (WH-5 tolerance).

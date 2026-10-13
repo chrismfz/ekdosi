@@ -365,8 +365,9 @@ WHMCS-side plugin. Full feature list `FEATURES.md §11`; third-party design
 - **Plugin-API is THE path.** ekdosi → WHMCS via the plugin's `resolve.php` (HMAC, logged to «Bridge
   logs»); native `WhmcsClient` only for plugin-less tenants. `GetInvoices` paginates via
   `limitstart/limitnum` (NOT limit/offset — THE bug that froze the inbox at 16).
-- **VAT net-vs-gross is DETECTED** from the payload, not guessed; `whmcs_amount_includes_tax` is only
-  the no-breakdown fallback. **Doc-type is PER PARTY** (`WhmcsInvoiceSplitter`), not per WHMCS-invoice.
+- **VAT net-vs-gross is DETECTED** from the payload, not guessed: the invoice's tax-to-base ratio → WHMCS's declared
+  `taxtype` (plugin ≥ 0.54.0) → subtotal/total(+`credit`); `whmcs_amount_includes_tax` is only the last-resort
+  fallback, and ratio ≠ declared → held. **Doc-type is PER PARTY** (`WhmcsInvoiceSplitter`), not per WHMCS-invoice.
 - **UI term «Άμεση τιμολόγηση»** (ex-«γκρινιάρης»). The role key `griniaris` is RETAINED (tenant
   field-map contract) — rename only operator-facing strings, never the role key or its columns.
 

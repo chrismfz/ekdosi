@@ -21,7 +21,7 @@ final readonly class FilePreview
      * @param  array<string, mixed>  $header
      * @param  array<int, array<string, mixed>>  $lines
      * @param  array{net_total: float, vat_total: float, gross_total: float, vat_breakdown: array}  $totals
-     * @param  array{whmcs_invoice_id: int, whmcs_userid: int, whmcs_date: string, whmcs_total: float}  $source
+     * @param  array<string, mixed>  $source  WhmcsInvoiceMapper::map()['source'] (whmcs_total / _subtotal / _tax / _credit / _taxtype …)
      */
     public function __construct(
         public array $header,

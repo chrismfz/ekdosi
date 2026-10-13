@@ -90,16 +90,65 @@
             </div>
         </div>
 
-        {{-- Source row footer --}}
-        <div class="text-xs text-gray-500">
-            Από WHMCS παραστατικό #{{ $preview->source['whmcs_invoice_id'] }},
-            ημερομηνία {{ $preview->source['whmcs_date'] }},
-            σύνολο WHMCS: {{ $fmt($preview->source['whmcs_total']) }}.
-            @if (abs($preview->source['whmcs_total'] - $preview->totals['gross_total']) > 0.01)
-                <span class="text-warning-600 font-semibold">
-                    ⚠️ Διαφορά από το ekdosi σύνολο ({{ $fmt(abs($preview->source['whmcs_total'] - $preview->totals['gross_total'])) }}) —
+        {{-- Source row footer — reconciles against the WHMCS DOCUMENT value. A
+             credit-paid WHMCS invoice reports total = subtotal + tax − credit (0 when
+             paid fully from credit), so comparing against `total` alone flagged a
+             false ⚠ on every one of them; the VAT is compared too (the field that
+             exposes a net/gross mix-up). Mirrors WhmcsFilingGuard::assertTotalsReconcile. --}}
+        @php
+            $src = $preview->source;
+            $wTotal = (float) ($src['whmcs_total'] ?? 0);
+            $wCredit = isset($src['whmcs_credit']) ? (float) $src['whmcs_credit'] : null;
+            $wSubtotal = (float) ($src['whmcs_subtotal'] ?? 0);
+            $wTax = (float) ($src['whmcs_tax'] ?? 0);
+            $tol = 0.02 + 0.01 * count($preview->lines);
+            $gross = (float) $preview->totals['gross_total'];
+            $documentValue = $wCredit !== null ? $wTotal + $wCredit : $wTotal;
+            $candidates = array_filter(
+                $wCredit !== null
+                    ? [$documentValue]
+                    : [$wTotal, $wSubtotal > 0.005 ? $wSubtotal + $wTax : null, $wSubtotal > 0.005 ? $wSubtotal : null],
+                fn ($v) => $v !== null && $v > 0.005,
+            );
+            $grossMismatch = $candidates !== [] && collect($candidates)->every(fn ($v) => abs($v - $gross) > $tol);
+            $vat = (float) $preview->totals['vat_total'];
+            // Also when WHMCS reported 0 VAT (exempt client) but we'd file some.
+            // Same thresholds as WhmcsFilingGuard: WHMCS reported 0 VAT but we'd file
+            // any → warn (the auto path holds at > 0.005); otherwise beyond tolerance.
+            $vatMismatch = ! empty($src['whmcs_tax_reported']) && $wTax <= 0.005
+                ? $vat > 0.005
+                : $wTax > 0.005 && abs($wTax - $vat) > $tol;
+        @endphp
+        <div class="text-xs text-gray-500 space-y-1">
+            <div>
+                Από WHMCS παραστατικό #{{ $src['whmcs_invoice_id'] }},
+                ημερομηνία {{ $src['whmcs_date'] }},
+                αξία WHMCS: {{ $fmt($documentValue) }}@if ($wTax > 0.005) (ΦΠΑ {{ $fmt($wTax) }})@endif
+                @if ($wCredit !== null && $wCredit > 0.005)
+                    — εξοφλήθηκε {{ $fmt($wCredit) }} από πίστωση, υπόλοιπο {{ $fmt($wTotal) }}
+                @endif.
+            </div>
+            @if (! empty($preview->totals['taxtype_conflict']))
+                <div class="text-warning-600 font-semibold">
+                    ⚠️ Το WHMCS δηλώνει ΦΠΑ «{{ $src['whmcs_taxtype'] ?? '' }}» αλλά τα ποσά αυτού του τιμολογίου
+                    αντιστοιχούν στο αντίθετο (καθαρά/μικτά) — έλεγξε τα ποσά πριν την έκδοση.
+                </div>
+            @endif
+            @if ($vatMismatch)
+                <div class="text-warning-600 font-semibold">
+                    ⚠️ ΦΠΑ ekdosi {{ $fmt($vat) }} ≠ ΦΠΑ WHMCS {{ $fmt($wTax) }} —
+                    @if ($wTax <= 0.005)
+                        το WHMCS δεν χρέωσε ΦΠΑ (απαλλαγμένος πελάτης;): βάλε 0% με αιτία απαλλαγής.
+                    @else
+                        πιθανή σύγχυση καθαρών/μικτών ή άλλος συντελεστής.
+                    @endif
+                </div>
+            @endif
+            @if ($grossMismatch)
+                <div class="text-warning-600 font-semibold">
+                    ⚠️ Διαφορά από το ekdosi σύνολο ({{ $fmt(abs($documentValue - $gross)) }}) —
                     έλεγξε τους υπολογισμούς ΦΠΑ.
-                </span>
+                </div>
             @endif
         </div>
     </div>

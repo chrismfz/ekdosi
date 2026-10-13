@@ -328,6 +328,22 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(0.62, $totals['gross_total']);
     }
 
+    public function test_ambiguous_tiny_ratio_defers_to_the_declared_tax_type(): void
+    {
+        // €0.10 net + 0.02 VAT: the ratio alone would pick gross (closer), but the
+        // gap is within tolerance → WHMCS's declared Exclusive decides: net, no conflict.
+        $pending = $this->makePending([
+            'invoiceid' => 31482, 'subtotal' => '0.10', 'tax' => '0.02', 'taxrate' => '24.000', 'total' => '0.12',
+            'credit' => '0.00', 'taxtype' => 'Exclusive',
+            'items' => ['item' => [['description' => 'Tiny', 'amount' => '0.10', 'taxed' => 1]]],
+        ]);
+
+        $result = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $this->assertSame(0.12, $result['totals']['gross_total']);
+        $this->assertFalse($result['totals']['taxtype_conflict']);
+    }
+
     public function test_tax_ratio_ignores_untaxed_lines(): void
     {
         // Mixed invoice: VAT is on the taxed line only (100 × 24% = 24); the
@@ -346,6 +362,75 @@ class WhmcsInvoiceMapperTest extends TestCase
 
         $this->assertSame(150.0, $totals['net_total']);
         $this->assertSame(24.0, $totals['vat_total']);
+    }
+
+    public function test_declared_exclusive_tax_type_decides_when_the_ratio_cannot(): void
+    {
+        // A second tax level (tax2) makes the single-rate ratio unusable; WHMCS's
+        // declared Exclusive mode (feed ≥ 0.54.0) decides — not the gross toggle.
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31490, 'subtotal' => '100.00', 'tax' => '24.00', 'tax2' => '1.00', 'taxrate' => '24.000',
+            'total' => '125.00', 'credit' => '0.00', 'taxtype' => 'Exclusive',
+            'items' => ['item' => [['description' => 'Hosting', 'amount' => '100.00', 'taxed' => 1]]],
+        ]);
+
+        $result = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $this->assertSame(100.0, $result['lines'][0]['net_price']);
+        $this->assertFalse($result['totals']['taxtype_conflict']);
+        $this->assertSame('Exclusive', $result['source']['whmcs_taxtype']);
+        $this->assertSame(0.0, $result['source']['whmcs_credit']);
+    }
+
+    public function test_declared_inclusive_tax_type_decides_when_the_ratio_cannot(): void
+    {
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => false])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31491, 'subtotal' => '124.00', 'tax' => '24.00', 'tax2' => '1.00', 'taxrate' => '24.000',
+            'total' => '124.00', 'taxtype' => 'Inclusive',
+            'items' => ['item' => [['description' => 'Hosting', 'amount' => '124.00', 'taxed' => 1]]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame(100.0, $line['net_price']);
+    }
+
+    public function test_ratio_contradicting_the_declared_tax_type_is_flagged_and_the_ratio_wins(): void
+    {
+        // tax = 100 × 24% → this invoice's amounts are NET, but WHMCS now declares
+        // Inclusive (setting changed / hand-edited invoice): map by the document's
+        // own evidence AND flag the conflict for the filer/preview.
+        $pending = $this->makePending([
+            'invoiceid' => 31492, 'subtotal' => '100.00', 'tax' => '24.00', 'taxrate' => '24.000', 'total' => '124.00',
+            'taxtype' => 'Inclusive',
+            'items' => ['item' => [['description' => 'Hosting', 'amount' => '100.00', 'taxed' => 1]]],
+        ]);
+
+        $result = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $this->assertSame(100.0, $result['lines'][0]['net_price']);
+        $this->assertTrue($result['totals']['taxtype_conflict']);
+    }
+
+    public function test_totals_shape_adds_back_the_credit(): void
+    {
+        // Ratio unusable (tax2) and no declared mode: the subtotal/total shape decides,
+        // with the applied credit added back (total 0 + credit 125 = 100 + 24 + 1).
+        $this->tenant->forceFill(['whmcs_amount_includes_tax' => true])->save();
+
+        $pending = $this->makePending([
+            'invoiceid' => 31493, 'subtotal' => '100.00', 'tax' => '24.00', 'tax2' => '1.00', 'taxrate' => '24.000',
+            'total' => '0.00', 'credit' => '125.00',
+            'items' => ['item' => [['description' => 'Hosting', 'amount' => '100.00', 'taxed' => 1]]],
+        ]);
+
+        $line = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType)['lines'][0];
+
+        $this->assertSame(100.0, $line['net_price'], 'net, despite the gross toggle');
     }
 
     public function test_no_payload_breakdown_falls_back_to_toggle(): void

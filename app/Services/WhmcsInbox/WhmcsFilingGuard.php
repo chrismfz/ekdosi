@@ -23,8 +23,8 @@ use LogicException;
  *   - assertTotalsReconcile(): the recomputed gross must match the WHMCS
  *     invoice total (WH-2 wrong VAT rate, WH-5 accumulated rounding). This is
  *     a WHOLE-invoice check — a split group is deliberately a SUBSET of the
- *     total, so only the whole-invoice paths (file / createDraft) call it, and
- *     the split path does not.
+ *     total, and createDraft is the operator's review path — so ONLY file()
+ *     (i.e. the unattended whmcs:auto-issue) calls it.
  *
  * Throws LogicException with an operator-facing Greek message; the Filament
  * inbox action and whmcs:auto-issue both catch Throwable and surface it (the
@@ -112,6 +112,22 @@ final class WhmcsFilingGuard
         // reduced by credit, so this catches the wrong split in every case.
         $whmcsTax = (float) ($mapped['source']['whmcs_tax'] ?? 0.0);
         $vat = (float) ($mapped['totals']['vat_total'] ?? 0.0);
+
+        // WHMCS REPORTED zero VAT (a tax-exempt / foreign client: tax 0 even on
+        // taxed=1 lines) but the mapping would file VAT — either backed out of the
+        // amount (gross toggle → the customer is invoiced VAT they were never
+        // charged) or added on top (a total WHMCS never billed). Both are wrong; the
+        // right document is 0% with an exemption reason, an operator call. Every
+        // other check is skipped at tax 0 / taxrate 0, so this was the hole.
+        if (! empty($mapped['source']['whmcs_tax_reported']) && $whmcsTax <= 0.005 && $vat > 0.005) {
+            throw new LogicException(sprintf(
+                'Το WHMCS #%d δεν χρέωσε ΦΠΑ (πιθανώς απαλλαγμένος πελάτης / εξωτερικού), αλλά το '
+                .'ekdosi θα εξέδιδε ΦΠΑ %s €. Η γραμμή κρατείται — εξέδωσέ το χειροκίνητα με 0%% και '
+                .'την κατάλληλη αιτία απαλλαγής (ή διόρθωσε τον ΦΠΑ στο WHMCS).',
+                $pending->whmcs_invoice_id,
+                number_format($vat, 2, ',', '.'),
+            ));
+        }
         if ($whmcsTax > 0.005 && abs($vat - $whmcsTax) > $tolerance) {
             throw new LogicException(sprintf(
                 'Το WHMCS #%d δεν συμφωνεί στον ΦΠΑ: το ekdosi υπολόγισε ΦΠΑ %s € αλλά το WHMCS '
@@ -126,11 +142,23 @@ final class WhmcsFilingGuard
         }
 
         $whmcsTotal = (float) ($mapped['source']['whmcs_total'] ?? 0.0);
+        $gross = (float) ($mapped['totals']['gross_total'] ?? 0.0);
+
+        // The applied credit is known (feed ≥ 0.54.0 / native GetInvoice): the
+        // document value is EXACTLY total + credit — reconcile strictly against it.
+        $credit = $mapped['source']['whmcs_credit'] ?? null;
+        if ($credit !== null) {
+            $documentTotal = $whmcsTotal + (float) $credit;
+            if ($documentTotal > 0.005 && abs($gross - $documentTotal) > $tolerance) {
+                self::throwTotalsMismatch($pending, $gross, $documentTotal);
+            }
+
+            return;
+        }
+
         if ($whmcsTotal <= 0.005) {
             return;   // no usable WHMCS total to reconcile against (e.g. paid from credit)
         }
-
-        $gross = (float) ($mapped['totals']['gross_total'] ?? 0.0);
 
         // Partially credit-applied: WHMCS total = subtotal + tax − credit, and the
         // feed has no `credit`. The document value is then subtotal + tax (net
@@ -146,17 +174,45 @@ final class WhmcsFilingGuard
         }
 
         if (abs($gross - $whmcsTotal) > $tolerance) {
-            throw new LogicException(sprintf(
-                'Το WHMCS #%d δεν συμφωνεί στα σύνολα: το ekdosi υπολόγισε μικτό %s € αλλά το WHMCS '
-                .'σύνολο είναι %s € (διαφορά %s €). Πιθανή αιτία: ο συντελεστής ΦΠΑ του WHMCS '
-                .'διαφέρει από τον προεπιλεγμένο ΦΠΑ του πελάτη/τύπου. Η γραμμή κρατείται — '
-                .'έλεγξε τον συντελεστή ΦΠΑ και εξέδωσέ το χειροκίνητα.',
-                $pending->whmcs_invoice_id,
-                number_format($gross, 2, ',', '.'),
-                number_format($whmcsTotal, 2, ',', '.'),
-                number_format(abs($gross - $whmcsTotal), 2, ',', '.'),
-            ));
+            self::throwTotalsMismatch($pending, $gross, $whmcsTotal);
         }
+    }
+
+    private static function throwTotalsMismatch(PendingWhmcsInvoice $pending, float $gross, float $whmcsTotal): never
+    {
+        throw new LogicException(sprintf(
+            'Το WHMCS #%d δεν συμφωνεί στα σύνολα: το ekdosi υπολόγισε μικτό %s € αλλά το WHMCS '
+            .'σύνολο είναι %s € (διαφορά %s €). Πιθανή αιτία: ο συντελεστής ΦΠΑ του WHMCS '
+            .'διαφέρει από τον προεπιλεγμένο ΦΠΑ του πελάτη/τύπου. Η γραμμή κρατείται — '
+            .'έλεγξε τον συντελεστή ΦΠΑ και εξέδωσέ το χειροκίνητα.',
+            $pending->whmcs_invoice_id,
+            number_format($gross, 2, ',', '.'),
+            number_format($whmcsTotal, 2, ',', '.'),
+            number_format(abs($gross - $whmcsTotal), 2, ',', '.'),
+        ));
+    }
+
+    /**
+     * The invoice's own tax ratio contradicts the tax mode WHMCS declares
+     * (`taxtype`, ekdosi_bridge ≥ 0.54.0) — the WHMCS setting changed since, or the
+     * invoice was hand-edited. Filing unattended would bet on one of the two; HOLD
+     * it for the operator instead. WHOLE-invoice, unattended path.
+     *
+     * @param  array<string, mixed>  $mapped
+     */
+    public static function assertTaxTypeConsistent(array $mapped, PendingWhmcsInvoice $pending): void
+    {
+        if (empty($mapped['totals']['taxtype_conflict'])) {
+            return;
+        }
+
+        throw new LogicException(sprintf(
+            'Το WHMCS #%d δηλώνει ΦΠΑ «%s» αλλά τα ποσά του τιμολογίου αντιστοιχούν στο αντίθετο '
+            .'(καθαρά/μικτά). Πιθανή αιτία: άλλαξε η ρύθμιση ΦΠΑ του WHMCS ή το τιμολόγιο '
+            .'διορθώθηκε χειροκίνητα. Η γραμμή κρατείται — έλεγξέ το και εξέδωσέ το χειροκίνητα.',
+            $pending->whmcs_invoice_id,
+            (string) ($mapped['source']['whmcs_taxtype'] ?? ''),
+        ));
     }
 
     /**
@@ -223,6 +279,22 @@ final class WhmcsFilingGuard
      */
     public static function assertNoUntaxedForUnattendedIssue(array $mapped, PendingWhmcsInvoice $pending): void
     {
+        // Belt-and-braces, independent of how the lines were mapped: WHMCS itself
+        // REPORTED zero VAT on an invoice that charges something (a tax-exempt /
+        // foreign client, or a product left untaxed). Whatever ekdosi would file —
+        // 0% (legal only with the right exemption) or 24% (VAT the client was never
+        // charged) — a human decides; never auto-file it. Waits in the inbox.
+        $chargesSomething = (float) ($mapped['totals']['gross_total'] ?? 0.0) > 0.005;
+        if (! empty($mapped['source']['whmcs_tax_reported'])
+            && (float) ($mapped['source']['whmcs_tax'] ?? 0.0) <= 0.005
+            && $chargesSomething) {
+            throw new LogicException(
+                'Το WHMCS #'.$pending->whmcs_invoice_id.' δεν χρέωσε ΦΠΑ. Η άμεση τιμολόγηση ΔΕΝ εκδίδει '
+                .'αυτόματα τιμολόγιο χωρίς ΦΠΑ (μπορεί να χρειάζεται 24% ή απαλλαγή με αιτία). Η γραμμή '
+                .'κρατείται στα εισερχόμενα — έλεγξέ το και έκδωσέ το χειροκίνητα.'
+            );
+        }
+
         $zero = $mapped['totals']['zero_vat_lines'] ?? [];
         if ($zero === []) {
             return;

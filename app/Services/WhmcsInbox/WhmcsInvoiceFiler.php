@@ -126,6 +126,7 @@ class WhmcsInvoiceFiler
         // tax-inclusive case the gross-check alone misses). Whole-invoice.
         WhmcsFilingGuard::assertTotalsReconcile($mapped, $pending);
         WhmcsFilingGuard::assertVatRateReconciles($mapped, $pending);
+        WhmcsFilingGuard::assertTaxTypeConsistent($mapped, $pending);
 
         // Phase 1: transactional persist with lockForUpdate on the
         // pending row + atomic invoice_id linking.

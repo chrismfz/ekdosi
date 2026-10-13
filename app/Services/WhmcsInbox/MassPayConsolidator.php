@@ -312,6 +312,10 @@ class MassPayConsolidator
         $payload['tax'] = number_format(round($gross - $net, 2), 2, '.', '');
         // The child's own `taxrate` is preserved (do NOT overwrite from the container).
         $payload['total'] = number_format($gross, 2, '.', '');
+        // `total` is the full reconstructed value → no credit/second tax on top
+        // (a carried-over `credit` would make the guard read total + credit).
+        $payload['credit'] = '0.00';
+        $payload['tax2'] = '0.00';
         $payload['status'] = 'Paid';
         // Synthetic, net-by-construction — same explicit declaration as the
         // consolidated payload (see buildConsolidatedPayload) so a tax-inclusive
@@ -335,7 +339,7 @@ class MassPayConsolidator
         // (which can report 0%). Take the MAX child rate, not sameParty[0]: if the
         // container's FIRST referenced child is fully-exempt (rate 0) but a later
         // child is taxed, stamping the first child's 0 would (a) file the taxed
-        // lines at 0% and (b) drive the mapper's detectAmountIncludesTax to bail on
+        // lines at 0% and (b) drive the mapper's net/gross detection to bail on
         // rate<=0 and fall back to the tenant's tax-inclusive flag — under-declaring
         // the taxed net+VAT on a real tenant (myip). Same-party children share the
         // rate; a reduced-rate mix flattens to the max (documented P2 — the mapper is
@@ -367,6 +371,10 @@ class MassPayConsolidator
         $merged['tax'] = number_format(round($gross - $net, 2), 2, '.', '');
         $merged['taxrate'] = number_format($rate, 3, '.', '');
         $merged['total'] = number_format($gross, 2, '.', '');
+        // Full reconstructed value: drop the container's applied credit / tax2
+        // (the guard reads the document value as total + credit).
+        $merged['credit'] = '0.00';
+        $merged['tax2'] = '0.00';
         $merged['status'] = 'Paid';
         // This is a SYNTHETIC payload we fully control — the line `amount`s ARE net
         // (Σ items == subtotal by construction). Declare it explicitly so the mapper
