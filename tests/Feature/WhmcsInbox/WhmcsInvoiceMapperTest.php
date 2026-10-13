@@ -328,6 +328,22 @@ class WhmcsInvoiceMapperTest extends TestCase
         $this->assertSame(0.62, $totals['gross_total']);
     }
 
+    public function test_ambiguous_tiny_ratio_defers_to_the_declared_tax_type(): void
+    {
+        // €0.10 net + 0.02 VAT: the ratio alone would pick gross (closer), but the
+        // gap is within tolerance → WHMCS's declared Exclusive decides: net, no conflict.
+        $pending = $this->makePending([
+            'invoiceid' => 31482, 'subtotal' => '0.10', 'tax' => '0.02', 'taxrate' => '24.000', 'total' => '0.12',
+            'credit' => '0.00', 'taxtype' => 'Exclusive',
+            'items' => ['item' => [['description' => 'Tiny', 'amount' => '0.10', 'taxed' => 1]]],
+        ]);
+
+        $result = app(WhmcsInvoiceMapper::class)->map($this->tenant, $pending, $this->customer, $this->invoiceType);
+
+        $this->assertSame(0.12, $result['totals']['gross_total']);
+        $this->assertFalse($result['totals']['taxtype_conflict']);
+    }
+
     public function test_tax_ratio_ignores_untaxed_lines(): void
     {
         // Mixed invoice: VAT is on the taxed line only (100 × 24% = 24); the

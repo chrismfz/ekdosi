@@ -157,8 +157,8 @@ class WhmcsInvoiceMapper
         // A ratio that CONTRADICTS the declared mode (WHMCS setting changed since,
         // or a hand-edited invoice) is surfaced as `taxtype_conflict`: the
         // unattended filer holds it and the preview warns.
-        $byRatio = $this->detectByTaxRatio($payload);
         $declared = $this->declaredAmountIncludesTax($payload);
+        $byRatio = $this->detectByTaxRatio($payload, $declared);
         $amountIncludesTax = $explicit
             ?? $byRatio
             ?? $declared
@@ -265,6 +265,10 @@ class WhmcsInvoiceMapper
                 // applied credit, so the filing guard can reconcile the VAT even
                 // when the invoice was paid from credit (total 0).
                 'whmcs_tax' => (float) ($payload['tax'] ?? 0.0) + (float) ($payload['tax2'] ?? 0.0),
+                // Whether WHMCS REPORTED a tax figure at all (every real GetInvoice /
+                // feed payload does). Lets the guard tell «WHMCS charged 0 VAT» (a
+                // tax-exempt client) from «no breakdown in this payload».
+                'whmcs_tax_reported' => array_key_exists('tax', $payload),
                 'whmcs_subtotal' => (float) ($payload['subtotal'] ?? 0.0),
                 // Applied account credit (feed ≥ 0.54.0 / native GetInvoice): the
                 // document value is total + credit. Null = not reported.
@@ -440,7 +444,7 @@ class WhmcsInvoiceMapper
      *
      * @param  array<string, mixed>  $payload
      */
-    private function detectByTaxRatio(array $payload): ?bool
+    private function detectByTaxRatio(array $payload, ?bool $declared = null): ?bool
     {
         $taxRate = (float) ($payload['taxrate'] ?? 0);
         $tax = (float) ($payload['tax'] ?? 0);
@@ -456,10 +460,18 @@ class WhmcsInvoiceMapper
         $tolerance = 0.02 + 0.01 * $taxedBase['lines'];
         $netGap = abs($taxedBase['sum'] * $taxRate / 100 - $tax);
         $grossGap = abs($taxedBase['sum'] * $taxRate / (100 + $taxRate) - $tax);
-        // On a tiny base (≲ €1.7) BOTH formulas fall inside the tolerance — pick
-        // the CLOSER one instead of whichever is checked first (a €0.50 gross line
-        // with tax 0.10 is gross, not net); a dead heat defers to the next rule.
-        if (min($netGap, $grossGap) <= $tolerance && abs($netGap - $grossGap) > 0.0001) {
+        if (min($netGap, $grossGap) > $tolerance) {
+            return null;
+        }
+        // On a tiny base (≲ €1.7) BOTH formulas fall inside the tolerance, so the
+        // ratio can't really tell: defer to WHMCS's declared mode when there is one
+        // (a €0.10 net line with tax 0.02 on an Exclusive WHMCS is net); otherwise
+        // pick the CLOSER formula (a €0.50 gross line with tax 0.10 is gross); a
+        // dead heat defers to the next rule.
+        if (abs($netGap - $grossGap) <= $tolerance && $declared !== null) {
+            return $declared;
+        }
+        if (abs($netGap - $grossGap) > 0.0001) {
             return $grossGap < $netGap;
         }
 

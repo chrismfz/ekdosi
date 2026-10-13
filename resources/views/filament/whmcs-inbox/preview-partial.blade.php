@@ -104,11 +104,16 @@
             $tol = 0.02 + 0.01 * count($preview->lines);
             $gross = (float) $preview->totals['gross_total'];
             $documentValue = $wCredit !== null ? $wTotal + $wCredit : $wTotal;
-            $candidates = $wCredit !== null
-                ? [$documentValue]
-                : array_filter([$wTotal, $wSubtotal > 0.005 ? $wSubtotal + $wTax : null, $wSubtotal > 0.005 ? $wSubtotal : null], fn ($v) => $v !== null && $v > 0.005);
+            $candidates = array_filter(
+                $wCredit !== null
+                    ? [$documentValue]
+                    : [$wTotal, $wSubtotal > 0.005 ? $wSubtotal + $wTax : null, $wSubtotal > 0.005 ? $wSubtotal : null],
+                fn ($v) => $v !== null && $v > 0.005,
+            );
             $grossMismatch = $candidates !== [] && collect($candidates)->every(fn ($v) => abs($v - $gross) > $tol);
-            $vatMismatch = $wTax > 0.005 && abs($wTax - (float) $preview->totals['vat_total']) > $tol;
+            $vat = (float) $preview->totals['vat_total'];
+            // Also when WHMCS reported 0 VAT (exempt client) but we'd file some.
+            $vatMismatch = ($wTax > 0.005 || ! empty($src['whmcs_tax_reported'])) && abs($wTax - $vat) > $tol;
         @endphp
         <div class="text-xs text-gray-500 space-y-1">
             <div>
@@ -127,8 +132,12 @@
             @endif
             @if ($vatMismatch)
                 <div class="text-warning-600 font-semibold">
-                    ⚠️ ΦΠΑ ekdosi {{ $fmt($preview->totals['vat_total']) }} ≠ ΦΠΑ WHMCS {{ $fmt($wTax) }} —
-                    πιθανή σύγχυση καθαρών/μικτών ή άλλος συντελεστής.
+                    ⚠️ ΦΠΑ ekdosi {{ $fmt($vat) }} ≠ ΦΠΑ WHMCS {{ $fmt($wTax) }} —
+                    @if ($wTax <= 0.005)
+                        το WHMCS δεν χρέωσε ΦΠΑ (απαλλαγμένος πελάτης;): βάλε 0% με αιτία απαλλαγής.
+                    @else
+                        πιθανή σύγχυση καθαρών/μικτών ή άλλος συντελεστής.
+                    @endif
                 </div>
             @endif
             @if ($grossMismatch)

@@ -128,16 +128,6 @@ class InvoiceFeed
     }
 
     /**
-     * Build the normalized payloads for a set of tblinvoices rows (invoice
-     * fields + merged client identity + customfields + line items + optional
-     * third-party routing). Shared by the paginated feed (fetch) and the
-     * single-invoice lookup (fetchOne) so BOTH emit an identical shape — the one
-     * the ekdosi ingestor consumes unchanged.
-     *
-     * @param  Collection  $invoices
-     * @return array<int, array<string, mixed>>
-     */
-    /**
      * WHMCS's global tax mode — 'Inclusive' | 'Exclusive', or '' when tax is
      * disabled or the setting is unreadable (ekdosi then falls back to detecting
      * it from the amounts). Read once per feed page. Never throws.
@@ -159,6 +149,16 @@ class InvoiceFeed
         }
     }
 
+    /**
+     * Build the normalized payloads for a set of tblinvoices rows (invoice
+     * fields + merged client identity + customfields + line items + optional
+     * third-party routing). Shared by the paginated feed (fetch) and the
+     * single-invoice lookup (fetchOne) so BOTH emit an identical shape — the one
+     * the ekdosi ingestor consumes unchanged.
+     *
+     * @param  Collection  $invoices
+     * @return array<int, array<string, mixed>>
+     */
     private static function buildPayloads($invoices, bool $withRouting): array
     {
         if ($invoices->isEmpty()) {

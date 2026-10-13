@@ -112,6 +112,22 @@ final class WhmcsFilingGuard
         // reduced by credit, so this catches the wrong split in every case.
         $whmcsTax = (float) ($mapped['source']['whmcs_tax'] ?? 0.0);
         $vat = (float) ($mapped['totals']['vat_total'] ?? 0.0);
+
+        // WHMCS REPORTED zero VAT (a tax-exempt / foreign client: tax 0 even on
+        // taxed=1 lines) but the mapping would file VAT — either backed out of the
+        // amount (gross toggle → the customer is invoiced VAT they were never
+        // charged) or added on top (a total WHMCS never billed). Both are wrong; the
+        // right document is 0% with an exemption reason, an operator call. Every
+        // other check is skipped at tax 0 / taxrate 0, so this was the hole.
+        if (! empty($mapped['source']['whmcs_tax_reported']) && $whmcsTax <= 0.005 && $vat > 0.005) {
+            throw new LogicException(sprintf(
+                'Το WHMCS #%d δεν χρέωσε ΦΠΑ (πιθανώς απαλλαγμένος πελάτης / εξωτερικού), αλλά το '
+                .'ekdosi θα εξέδιδε ΦΠΑ %s €. Η γραμμή κρατείται — εξέδωσέ το χειροκίνητα με 0%% και '
+                .'την κατάλληλη αιτία απαλλαγής (ή διόρθωσε τον ΦΠΑ στο WHMCS).',
+                $pending->whmcs_invoice_id,
+                number_format($vat, 2, ',', '.'),
+            ));
+        }
         if ($whmcsTax > 0.005 && abs($vat - $whmcsTax) > $tolerance) {
             throw new LogicException(sprintf(
                 'Το WHMCS #%d δεν συμφωνεί στον ΦΠΑ: το ekdosi υπολόγισε ΦΠΑ %s € αλλά το WHMCS '
