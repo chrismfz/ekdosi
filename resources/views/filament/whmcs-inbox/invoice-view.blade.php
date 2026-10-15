@@ -10,6 +10,10 @@
     $p = $r->payload ?? [];
     $cur = (string) ($p['currencycode'] ?? '');
     $money = fn ($v) => number_format((float) $v, 2, ',', '.').($cur ? ' '.$cur : '');
+    // Document value = total + applied credit (WHMCS's `total` is the balance
+    // after credit — «0,00» on a credit-paid invoice). See documentTotalOf().
+    $documentTotal = \App\Models\PendingWhmcsInvoice::documentTotalOf($p);
+    $credit = round((float) ($p['credit'] ?? 0), 2);
 
     // Line items: WHMCS returns items.item as a list, or a single object when
     // there's exactly one line (same quirk handled across the bridge).
@@ -47,7 +51,10 @@
         </div>
         <div>
             <div class="text-gray-500 dark:text-gray-400">Σύνολο</div>
-            <div class="font-semibold">{{ $money($p['total'] ?? 0) }}</div>
+            <div class="font-semibold">{{ $money($documentTotal) }}</div>
+            @if ($credit > 0.005)
+                <div class="text-xs text-gray-500 dark:text-gray-400">από πίστωση {{ $money($credit) }}</div>
+            @endif
         </div>
         <div>
             <div class="text-gray-500 dark:text-gray-400">Ημ. πληρωμής</div>
@@ -108,7 +115,11 @@
                     @if (isset($p['tax']) && (float) $p['tax'] != 0.0)
                         <tr><td class="py-1 pr-4 text-right text-gray-500 dark:text-gray-400">ΦΠΑ</td><td class="py-1 text-right">{{ $money($p['tax']) }}</td></tr>
                     @endif
-                    <tr class="border-t border-gray-200 dark:border-white/10"><td class="py-1 pr-4 text-right">Σύνολο</td><td class="py-1 text-right">{{ $money($p['total'] ?? 0) }}</td></tr>
+                    <tr class="border-t border-gray-200 dark:border-white/10"><td class="py-1 pr-4 text-right">Σύνολο</td><td class="py-1 text-right">{{ $money($documentTotal) }}</td></tr>
+                    @if ($credit > 0.005)
+                        <tr><td class="py-1 pr-4 text-right text-gray-500 dark:text-gray-400">Εξοφλήθηκε από πίστωση</td><td class="py-1 text-right">− {{ $money($credit) }}</td></tr>
+                        <tr><td class="py-1 pr-4 text-right text-gray-500 dark:text-gray-400">Υπόλοιπο WHMCS</td><td class="py-1 text-right">{{ $money($p['total'] ?? 0) }}</td></tr>
+                    @endif
                 </tfoot>
             </table>
         </div>

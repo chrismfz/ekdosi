@@ -111,7 +111,9 @@ class WhmcsInboxTable
                 TextColumn::make('payload.total')
                     ->label('Ποσό')
                     ->state(function (PendingWhmcsInvoice $r): string {
-                        $total = (float) ($r->payload['total'] ?? 0);
+                        // Document value (total + applied credit) — a credit-paid
+                        // invoice is not a «0,00» one.
+                        $total = $r->whmcsDocumentTotal();
                         $cur = (string) ($r->payload['currencycode'] ?? '');
 
                         return number_format($total, 2, ',', '.').' '.$cur;

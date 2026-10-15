@@ -7,6 +7,7 @@ use App\Exceptions\Whmcs\WhmcsAuthenticationFailed;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
+use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClient;
 use App\Services\Whmcs\WhmcsClientFactory;
@@ -389,7 +390,7 @@ class WhmcsFetchPending extends Command
                 $whmcsClientId,
                 ($inv['companyname'] ?? '')
                     ?: trim(($inv['firstname'] ?? '').' '.($inv['lastname'] ?? '')),
-                number_format((float) ($inv['total'] ?? 0), 2, ',', '.').' '.($inv['currencycode'] ?? ''),
+                number_format(PendingWhmcsInvoice::documentTotalOf($inv), 2, ',', '.').' '.($inv['currencycode'] ?? ''),
                 $match->isMatched() ? "#{$match->customer->id} ({$match->customer->name})" : '—',
                 $match->confidenceLabel(),
             ];
