@@ -424,6 +424,32 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
+     * The WHMCS invoice's DOCUMENT value. WHMCS reports `total` = subtotal + tax −
+     * applied credit (0 when paid fully from account credit), so displaying `total`
+     * showed «0,00» on a credit-paid invoice that is really worth 20,46. The feed
+     * (ekdosi_bridge ≥ 0.54.0) and native GetInvoice carry `credit` → add it back.
+     * A payload without `credit` (older plugin) shows `total` as before.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function documentTotalOf(array $payload): float
+    {
+        return round((float) ($payload['total'] ?? 0) + (float) ($payload['credit'] ?? 0), 2);
+    }
+
+    /** {@see documentTotalOf} for this row. */
+    public function whmcsDocumentTotal(): float
+    {
+        return self::documentTotalOf(is_array($this->payload) ? $this->payload : []);
+    }
+
+    /** Account credit WHMCS applied to this invoice (0 when none / not reported). */
+    public function whmcsCreditApplied(): float
+    {
+        return round((float) ((is_array($this->payload) ? $this->payload : [])['credit'] ?? 0), 2);
+    }
+
+    /**
      * Is the source WHMCS invoice UNPAID? True only for the explicit 'Unpaid'
      * status (the «θέλει πρώτα τιμολόγιο, μετά πληρώνει» public-sector / Α.Ε.
      * case). Paid/Cancelled/Refunded/unknown → false (those are either settled
