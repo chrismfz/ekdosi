@@ -83,4 +83,35 @@ class WhmcsInboxDocumentTotalTest extends TestCase
         $this->assertStringContainsString('από πίστωση 20,46 EUR', $html);
         $this->assertStringContainsString('Εξοφλήθηκε από πίστωση', $html);
     }
+
+    public function test_partial_credit_labels_the_rest_as_paid_or_owed_by_status(): void
+    {
+        $row = $this->creditPaidRow();
+        $row->payload = array_merge($row->payload, ['total' => '13.64', 'credit' => '18.60', 'status' => 'Paid']);
+        $row->save();
+
+        $paid = view('filament.whmcs-inbox.invoice-view', ['r' => $row->fresh()])->render();
+        $this->assertStringContainsString('32,24 EUR', $paid);
+        $this->assertStringContainsString('Πληρώθηκε (εκτός πίστωσης)', $paid);
+        $this->assertStringNotContainsString('Υπόλοιπο προς πληρωμή', $paid);
+
+        $row->payload = array_merge($row->payload, ['status' => 'Unpaid']);
+        $row->save();
+        $unpaid = view('filament.whmcs-inbox.invoice-view', ['r' => $row->fresh()])->render();
+        $this->assertStringContainsString('Υπόλοιπο προς πληρωμή', $unpaid);
+    }
+
+    public function test_old_plugin_payload_without_credit_renders_as_before(): void
+    {
+        $row = $this->creditPaidRow();
+        $payload = $row->payload;
+        unset($payload['credit']);
+        $payload['total'] = '20.46';
+        $row->payload = $payload;
+        $row->save();
+
+        $html = view('filament.whmcs-inbox.invoice-view', ['r' => $row->fresh()])->render();
+        $this->assertStringContainsString('20,46 EUR', $html);
+        $this->assertStringNotContainsString('πίστωση', $html);
+    }
 }

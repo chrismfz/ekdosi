@@ -424,12 +424,6 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
-     * Is the source WHMCS invoice UNPAID? True only for the explicit 'Unpaid'
-     * status (the «θέλει πρώτα τιμολόγιο, μετά πληρώνει» public-sector / Α.Ε.
-     * case). Paid/Cancelled/Refunded/unknown → false (those are either settled
-     * or shouldn't be issued anyway).
-     */
-    /**
      * The WHMCS invoice's DOCUMENT value. WHMCS reports `total` = subtotal + tax −
      * applied credit (0 when paid fully from account credit), so displaying `total`
      * showed «0,00» on a credit-paid invoice that is really worth 20,46. The feed
@@ -455,6 +449,12 @@ class PendingWhmcsInvoice extends Model
         return round((float) ((is_array($this->payload) ? $this->payload : [])['credit'] ?? 0), 2);
     }
 
+    /**
+     * Is the source WHMCS invoice UNPAID? True only for the explicit 'Unpaid'
+     * status (the «θέλει πρώτα τιμολόγιο, μετά πληρώνει» public-sector / Α.Ε.
+     * case). Paid/Cancelled/Refunded/unknown → false (those are either settled
+     * or shouldn't be issued anyway).
+     */
     public function whmcsIsUnpaid(): bool
     {
         return strcasecmp((string) $this->whmcsStatus(), 'Unpaid') === 0;
