@@ -5,7 +5,7 @@
          (RequestVatInfo, refreshed by the scheduler), surfaced here too. --}}
     @if ($vatQuarter)
         <x-filament::section>
-            <x-slot name="heading">ΦΠΑ τριμήνου (από myDATA)</x-slot>
+            <x-slot name="heading">ΦΠΑ τρέχοντος τριμήνου (από myDATA)</x-slot>
             <x-slot name="description">
                 Εκροών {{ $money($vatQuarter['outputVat']) }} − εισροών {{ $money($vatQuarter['inputVat']) }}
                 @if ($vatQuarter['fetchedAt']) · ενημερώθηκε {{ $vatQuarter['fetchedAt'] }} @endif
@@ -30,7 +30,7 @@
                 Αθροιστικά στοιχεία Ε3 (ανά τύπο/κατηγορία χαρακτηρισμού) όπως τα τηρεί το myDATA για το ΑΦΜ μας.
                 Read-only — η σελίδα δεν τροποποιεί τίποτα.
             </x-slot>
-            <p class="text-sm text-gray-500 dark:text-gray-400">Πατήστε «Λήψη Ε3 από myDATA» για ένα διάστημα.</p>
+            <p class="text-sm text-gray-500 dark:text-gray-400">Πατήστε «Ανανέωση όλων» ή «Μόνο Ε3» για ένα διάστημα, ή «Προηγ. τρίμηνο».</p>
         </x-filament::section>
     @endif
 
@@ -43,7 +43,7 @@
     @if ($ran && $result)
         @if ($fetchedAtHuman)
             <div class="text-xs text-gray-400 dark:text-gray-500">
-                Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — πατήστε ξανά «Λήψη Ε3 από myDATA» για ανανέωση.
+                Αποθηκευμένο αποτέλεσμα · τελευταία ενημέρωση {{ $fetchedAtHuman }} — πατήστε «Ανανέωση όλων» ή «Μόνο Ε3» για ανανέωση, ή τα βέλη για άλλο τρίμηνο.
             </div>
         @endif
 

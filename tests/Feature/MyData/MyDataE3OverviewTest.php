@@ -116,6 +116,42 @@ class MyDataE3OverviewTest extends TestCase
         }
     }
 
+    public function test_quarter_arrows_step_the_shown_window_and_next_stops_at_the_running_quarter(): void
+    {
+        $this->travelTo('2026-10-16 12:00:00');
+        $tenant = $this->bootTenantUser();
+        $tenant->update(['mydata_aade_id_sandbox' => 'x', 'mydata_subscription_key_sandbox' => 'y']);
+
+        $empty = fn () => new Response(200, [], '<?xml version="1.0" encoding="utf-8"?><RequestedE3Info xmlns="http://www.aade.gr/myDATA/invoice/v1.0"/>');
+        MyDataE3Overview::$testHandler = new MockHandler([$empty(), $empty(), $empty(), $empty()]);
+
+        try {
+            Livewire::test(MyDataE3Overview::class)
+                ->set('ran', true)
+                ->set('result', $this->fakeResult())                 // 01/04/2026 → Q2
+                ->callAction('prevQuarter')
+                ->assertSet('result.from', '01/01/2026')
+                ->assertSet('result.to', '31/03/2026')
+                ->callAction('nextQuarter')
+                ->assertSet('result.from', '01/04/2026')
+                ->assertSet('result.to', '30/06/2026')
+                ->set('result.from', '01/01/2025')                   // a whole-year view steps OUT of it:
+                ->set('result.to', '31/12/2025')
+                ->callAction('nextQuarter')                           // › after its end
+                ->assertSet('result.from', '01/01/2026')
+                ->assertSet('result.to', '31/03/2026')
+                ->set('result.from', '01/10/2026')                   // running quarter → no «next»
+                ->set('result.to', '16/10/2026')
+                ->assertActionHidden('nextQuarter');
+        } finally {
+            MyDataE3Overview::$testHandler = null;
+        }
+
+        // The running quarter is capped at today, a past one is whole.
+        $this->assertSame(['2026-10-01', '2026-10-16'], MyDataE3Overview::quarterWindow(now(), 0));
+        $this->assertSame(['2025-10-01', '2025-12-31'], MyDataE3Overview::quarterWindow(now(), -4));
+    }
+
     public function test_e3_overview_splits_income_and_expense_with_separate_subtotals(): void
     {
         $this->bootTenantUser();

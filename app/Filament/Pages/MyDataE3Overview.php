@@ -138,6 +138,22 @@ class MyDataE3Overview extends Page
             // Primary: one click refreshes ALL console tabs + the ΦΠΑ box.
             $this->refreshAllAction(),
 
+            // ‹ › step the shown window a calendar quarter back/forward (the
+            // scheduler seeds the CURRENT quarter, which is near-empty early on).
+            Action::make('prevQuarter')
+                ->label('Προηγ. τρίμηνο')
+                ->icon('heroicon-o-chevron-left')
+                ->color('gray')
+                ->action(fn () => $this->runReport(...self::quarterWindow($this->shownWindow()[0], -1))),
+
+            Action::make('nextQuarter')
+                ->label('Επόμ. τρίμηνο')
+                ->icon('heroicon-o-chevron-right')
+                ->iconPosition('after')
+                ->color('gray')
+                ->visible(fn (): bool => $this->shownWindow()[1]->startOfQuarter()->lt(now()->startOfQuarter()))
+                ->action(fn () => $this->runReport(...self::quarterWindow($this->shownWindow()[1], 1))),
+
             // Secondary: just THIS tab (Ε3 only).
             Action::make('fetch')
                 ->label('Μόνο Ε3')
@@ -150,14 +166,49 @@ class MyDataE3Overview extends Page
                     DatePicker::make('from')
                         ->label('Από')
                         ->required()
-                        ->default(now()->startOfQuarter()),
+                        ->default(fn () => $this->shownWindow()[0]->toDateString()),
                     DatePicker::make('to')
                         ->label('Έως')
                         ->required()
-                        ->default(now()),
+                        ->default(fn () => $this->shownWindow()[1]->toDateString()),
                 ])
                 ->action(fn (array $data) => $this->runReport($data['from'], $data['to'])),
         ];
+    }
+
+    /**
+     * The window currently on screen as [from, to]; the running quarter (up to
+     * today) when nothing is loaded. ‹ steps before its START and › after its
+     * END, so a whole-year view steps to the adjacent quarters, not into itself.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function shownWindow(): array
+    {
+        $parse = fn ($v): ?Carbon => is_string($v) && preg_match('#^\d{2}/\d{2}/\d{4}$#', $v)
+            ? Carbon::createFromFormat('d/m/Y', $v)->startOfDay()
+            : null;
+
+        $from = $parse($this->result['from'] ?? null);
+        $to = $parse($this->result['to'] ?? null);
+
+        return $from && $to
+            ? [$from, $to]
+            : [now()->startOfQuarter(), now()->startOfDay()];
+    }
+
+    /**
+     * The full calendar quarter $step quarters away from $anchor's, as [from, to]
+     * (Y-m-d); the running quarter is capped at today.
+     *
+     * @return array{0: string, 1: string}
+     */
+    public static function quarterWindow(Carbon $anchor, int $step): array
+    {
+        $start = $anchor->copy()->startOfQuarter()->addQuarters($step);
+        $end = $start->copy()->endOfQuarter()->min(now());
+
+        return [$start->toDateString(), $end->toDateString()];
     }
 
     protected function runReport(string $from, string $to): void
