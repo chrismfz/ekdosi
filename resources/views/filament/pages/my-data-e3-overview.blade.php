@@ -5,7 +5,7 @@
          (RequestVatInfo, refreshed by the scheduler), surfaced here too. --}}
     @if ($vatQuarter)
         <x-filament::section>
-            <x-slot name="heading">ΦΠΑ τριμήνου (από myDATA)</x-slot>
+            <x-slot name="heading">ΦΠΑ τρέχοντος τριμήνου (από myDATA)</x-slot>
             <x-slot name="description">
                 Εκροών {{ $money($vatQuarter['outputVat']) }} − εισροών {{ $money($vatQuarter['inputVat']) }}
                 @if ($vatQuarter['fetchedAt']) · ενημερώθηκε {{ $vatQuarter['fetchedAt'] }} @endif

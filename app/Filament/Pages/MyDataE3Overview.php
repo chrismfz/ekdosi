@@ -138,6 +138,22 @@ class MyDataE3Overview extends Page
             // Primary: one click refreshes ALL console tabs + the ΦΠΑ box.
             $this->refreshAllAction(),
 
+            // ‹ › step the shown window a calendar quarter back/forward (the
+            // scheduler seeds the CURRENT quarter, which is near-empty early on).
+            Action::make('prevQuarter')
+                ->label('Προηγ. τρίμηνο')
+                ->icon('heroicon-o-chevron-left')
+                ->color('gray')
+                ->action(fn () => $this->runReport(...self::quarterWindow($this->windowAnchor(), -1))),
+
+            Action::make('nextQuarter')
+                ->label('Επόμ. τρίμηνο')
+                ->icon('heroicon-o-chevron-right')
+                ->iconPosition('after')
+                ->color('gray')
+                ->visible(fn (): bool => $this->windowAnchor()->startOfQuarter()->lt(now()->startOfQuarter()))
+                ->action(fn () => $this->runReport(...self::quarterWindow($this->windowAnchor(), 1))),
+
             // Secondary: just THIS tab (Ε3 only).
             Action::make('fetch')
                 ->label('Μόνο Ε3')
@@ -150,14 +166,38 @@ class MyDataE3Overview extends Page
                     DatePicker::make('from')
                         ->label('Από')
                         ->required()
-                        ->default(now()->startOfQuarter()),
+                        ->default(fn () => $this->windowAnchor()->startOfQuarter()->toDateString()),
                     DatePicker::make('to')
                         ->label('Έως')
                         ->required()
-                        ->default(now()),
+                        ->default(fn () => self::quarterWindow($this->windowAnchor(), 0)[1]),
                 ])
                 ->action(fn (array $data) => $this->runReport($data['from'], $data['to'])),
         ];
+    }
+
+    /** Start of the window currently on screen (today when nothing is loaded). */
+    private function windowAnchor(): Carbon
+    {
+        $from = $this->result['from'] ?? null;
+
+        return is_string($from) && preg_match('#^\d{2}/\d{2}/\d{4}$#', $from)
+            ? Carbon::createFromFormat('d/m/Y', $from)->startOfDay()
+            : now()->startOfDay();
+    }
+
+    /**
+     * The full calendar quarter $step quarters away from $anchor's, as [from, to]
+     * (Y-m-d); the running quarter is capped at today.
+     *
+     * @return array{0: string, 1: string}
+     */
+    public static function quarterWindow(Carbon $anchor, int $step): array
+    {
+        $start = $anchor->copy()->startOfQuarter()->addQuarters($step);
+        $end = $start->copy()->endOfQuarter()->min(now());
+
+        return [$start->toDateString(), $end->toDateString()];
     }
 
     protected function runReport(string $from, string $to): void

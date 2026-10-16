@@ -59,7 +59,9 @@ class WhmcsInboxListTool implements AssistantTool
             .'με ίδιο whmcs id / εγγραφή στο legacy log / παραστατικό ίδιου πελάτη+ποσού) και πρόταση file/archive/'
             .'check. `status`: open (προεπιλογή), pending_review, held, archived (αρχειοθετημένα), filed, drafted, '
             .'resolved, split, all. `status="archived"` δείχνει και «mis_archived» = αρχειοθετημένα που μάλλον '
-            .'έπρεπε να κοπούν. Για cut-over cleanup χωρίς διπλοτιμολόγηση. Read-only, δεν καλεί το WHMCS.';
+            .'έπρεπε να κοπούν. ΠΛΗΘΟΣ: το `total` είναι ο ΠΛΗΡΗΣ αριθμός εγγραφών της κατάστασης (ανεξάρτητα από `limit` ΚΑΙ `duplicates_only` — δεν είναι πλήθος διπλοτύπων)· '
+            .'το `count` είναι μόνο όσες επιστράφηκαν — για «πόσα είναι τα αρχειοθετημένα» απάντα με το `total` (αρκεί `limit`=1). '
+            .'Για cut-over cleanup χωρίς διπλοτιμολόγηση. Read-only, δεν καλεί το WHMCS.';
     }
 
     public function inputSchema(): array
@@ -70,7 +72,7 @@ class WhmcsInboxListTool implements AssistantTool
                 'status' => ['type' => 'string', 'description' => 'open (προεπιλογή) / pending_review / held / archived / filed / drafted / resolved / split / all.'],
                 'whmcs_invoice_id' => ['type' => 'integer', 'description' => 'Εστίαση σε ένα συγκεκριμένο WHMCS invoice id.'],
                 'duplicates_only' => ['type' => 'boolean', 'description' => 'Μόνο γραμμές με σήμα διπλότυπου (υπάρχον παραστατικό / legacy log / ίδιο ποσό).'],
-                'limit' => ['type' => 'integer', 'description' => 'Πόσες γραμμές (1–100, προεπιλογή 25).'],
+                'limit' => ['type' => 'integer', 'description' => 'Πόσες γραμμές να ΕΠΙΣΤΡΑΦΟΥΝ (1–100, προεπιλογή 25). Δεν περιορίζει το `total` (πλήρες πλήθος).'],
             ],
         ];
     }
