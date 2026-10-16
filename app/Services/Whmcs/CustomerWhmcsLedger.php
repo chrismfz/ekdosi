@@ -138,7 +138,9 @@ class CustomerWhmcsLedger
                 'whmcs_id'      => $whmcsId,
                 'date'          => (string) ($row['date'] ?? ''),
                 'datepaid'      => $this->normaliseEmptyDate($row['datepaid'] ?? null),
-                'total'         => (string) ($row['total'] ?? '0.00'),
+                // Document value (total + applied credit) — a credit-paid invoice
+                // is not a «0.00» one (native GetInvoices carries `credit`).
+                'total'         => number_format(PendingWhmcsInvoice::documentTotalOf($row), 2, '.', ''),
                 'currency'      => (string) ($row['currencycode'] ?? ''),
                 'status'        => (string) ($row['status'] ?? ''),
                 'invoiced_flag' => array_key_exists('invoiced', $row) ? (int) $row['invoiced'] : null,

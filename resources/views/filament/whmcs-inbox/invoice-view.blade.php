@@ -10,6 +10,10 @@
     $p = $r->payload ?? [];
     $cur = (string) ($p['currencycode'] ?? '');
     $money = fn ($v) => number_format((float) $v, 2, ',', '.').($cur ? ' '.$cur : '');
+    // Document value = total + applied credit (WHMCS's `total` is the balance
+    // after credit — «0,00» on a credit-paid invoice). See documentTotalOf().
+    $documentTotal = $r->whmcsDocumentTotal();
+    $credit = $r->whmcsCreditApplied();
 
     // Line items: WHMCS returns items.item as a list, or a single object when
     // there's exactly one line (same quirk handled across the bridge).
@@ -47,7 +51,10 @@
         </div>
         <div>
             <div class="text-gray-500 dark:text-gray-400">Σύνολο</div>
-            <div class="font-semibold">{{ $money($p['total'] ?? 0) }}</div>
+            <div class="font-semibold">{{ $money($documentTotal) }}</div>
+            @if ($credit > 0.005)
+                <div class="text-xs text-gray-500 dark:text-gray-400">από πίστωση {{ $money($credit) }}</div>
+            @endif
         </div>
         <div>
             <div class="text-gray-500 dark:text-gray-400">Ημ. πληρωμής</div>
@@ -108,7 +115,15 @@
                     @if (isset($p['tax']) && (float) $p['tax'] != 0.0)
                         <tr><td class="py-1 pr-4 text-right text-gray-500 dark:text-gray-400">ΦΠΑ</td><td class="py-1 text-right">{{ $money($p['tax']) }}</td></tr>
                     @endif
-                    <tr class="border-t border-gray-200 dark:border-white/10"><td class="py-1 pr-4 text-right">Σύνολο</td><td class="py-1 text-right">{{ $money($p['total'] ?? 0) }}</td></tr>
+                    <tr class="border-t border-gray-200 dark:border-white/10"><td class="py-1 pr-4 text-right">Σύνολο</td><td class="py-1 text-right">{{ $money($documentTotal) }}</td></tr>
+                    @if ($credit > 0.005)
+                        <tr><td class="py-1 pr-4 text-right text-gray-500 dark:text-gray-400">Εξοφλήθηκε από πίστωση</td><td class="py-1 text-right">− {{ $money($credit) }}</td></tr>
+                        @if ((float) ($p['total'] ?? 0) > 0.005)
+                            {{-- What's left after the credit: still OWED on an unpaid invoice,
+                                 already paid through the gateway on a paid one. --}}
+                            <tr><td class="py-1 pr-4 text-right text-gray-500 dark:text-gray-400">{{ $r->whmcsIsUnpaid() ? 'Υπόλοιπο προς πληρωμή' : 'Πληρώθηκε (εκτός πίστωσης)' }}</td><td class="py-1 text-right">{{ $money($p['total'] ?? 0) }}</td></tr>
+                        @endif
+                    @endif
                 </tfoot>
             </table>
         </div>

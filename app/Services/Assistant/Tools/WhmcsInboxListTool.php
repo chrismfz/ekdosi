@@ -165,7 +165,9 @@ class WhmcsInboxListTool implements AssistantTool
         $cappedAtLimit = false;
         foreach ($rows as $i => $row) {
             $payload = is_array($row->payload) ? $row->payload : [];
-            $amount = round((float) ($payload['total'] ?? 0), 2);
+            // Document value (total + applied credit): a credit-paid invoice reports
+            // total 0, which also silently disabled the same-amount duplicate check.
+            $amount = PendingWhmcsInvoice::documentTotalOf($payload);
             // whmcsDatePaid() is the canonical guard: null when unset/'0000-00-00'
             // (whmcs:fetch-unpaid or admin-marked-paid), so those don't read as a
             // real pre-cut-over date and mis-suggest check_legacy.
