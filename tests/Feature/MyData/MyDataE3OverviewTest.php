@@ -123,7 +123,7 @@ class MyDataE3OverviewTest extends TestCase
         $tenant->update(['mydata_aade_id_sandbox' => 'x', 'mydata_subscription_key_sandbox' => 'y']);
 
         $empty = fn () => new Response(200, [], '<?xml version="1.0" encoding="utf-8"?><RequestedE3Info xmlns="http://www.aade.gr/myDATA/invoice/v1.0"/>');
-        MyDataE3Overview::$testHandler = new MockHandler([$empty(), $empty(), $empty()]);
+        MyDataE3Overview::$testHandler = new MockHandler([$empty(), $empty(), $empty(), $empty()]);
 
         try {
             Livewire::test(MyDataE3Overview::class)
@@ -135,7 +135,13 @@ class MyDataE3OverviewTest extends TestCase
                 ->callAction('nextQuarter')
                 ->assertSet('result.from', '01/04/2026')
                 ->assertSet('result.to', '30/06/2026')
+                ->set('result.from', '01/01/2025')                   // a whole-year view steps OUT of it:
+                ->set('result.to', '31/12/2025')
+                ->callAction('nextQuarter')                           // › after its end
+                ->assertSet('result.from', '01/01/2026')
+                ->assertSet('result.to', '31/03/2026')
                 ->set('result.from', '01/10/2026')                   // running quarter → no «next»
+                ->set('result.to', '16/10/2026')
                 ->assertActionHidden('nextQuarter');
         } finally {
             MyDataE3Overview::$testHandler = null;

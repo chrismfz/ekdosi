@@ -144,15 +144,15 @@ class MyDataE3Overview extends Page
                 ->label('Προηγ. τρίμηνο')
                 ->icon('heroicon-o-chevron-left')
                 ->color('gray')
-                ->action(fn () => $this->runReport(...self::quarterWindow($this->windowAnchor(), -1))),
+                ->action(fn () => $this->runReport(...self::quarterWindow($this->shownWindow()[0], -1))),
 
             Action::make('nextQuarter')
                 ->label('Επόμ. τρίμηνο')
                 ->icon('heroicon-o-chevron-right')
                 ->iconPosition('after')
                 ->color('gray')
-                ->visible(fn (): bool => $this->windowAnchor()->startOfQuarter()->lt(now()->startOfQuarter()))
-                ->action(fn () => $this->runReport(...self::quarterWindow($this->windowAnchor(), 1))),
+                ->visible(fn (): bool => $this->shownWindow()[1]->startOfQuarter()->lt(now()->startOfQuarter()))
+                ->action(fn () => $this->runReport(...self::quarterWindow($this->shownWindow()[1], 1))),
 
             // Secondary: just THIS tab (Ε3 only).
             Action::make('fetch')
@@ -166,24 +166,35 @@ class MyDataE3Overview extends Page
                     DatePicker::make('from')
                         ->label('Από')
                         ->required()
-                        ->default(fn () => $this->windowAnchor()->startOfQuarter()->toDateString()),
+                        ->default(fn () => $this->shownWindow()[0]->toDateString()),
                     DatePicker::make('to')
                         ->label('Έως')
                         ->required()
-                        ->default(fn () => self::quarterWindow($this->windowAnchor(), 0)[1]),
+                        ->default(fn () => $this->shownWindow()[1]->toDateString()),
                 ])
                 ->action(fn (array $data) => $this->runReport($data['from'], $data['to'])),
         ];
     }
 
-    /** Start of the window currently on screen (today when nothing is loaded). */
-    private function windowAnchor(): Carbon
+    /**
+     * The window currently on screen as [from, to]; the running quarter (up to
+     * today) when nothing is loaded. ‹ steps before its START and › after its
+     * END, so a whole-year view steps to the adjacent quarters, not into itself.
+     *
+     * @return array{0: Carbon, 1: Carbon}
+     */
+    private function shownWindow(): array
     {
-        $from = $this->result['from'] ?? null;
+        $parse = fn ($v): ?Carbon => is_string($v) && preg_match('#^\d{2}/\d{2}/\d{4}$#', $v)
+            ? Carbon::createFromFormat('d/m/Y', $v)->startOfDay()
+            : null;
 
-        return is_string($from) && preg_match('#^\d{2}/\d{2}/\d{4}$#', $from)
-            ? Carbon::createFromFormat('d/m/Y', $from)->startOfDay()
-            : now()->startOfDay();
+        $from = $parse($this->result['from'] ?? null);
+        $to = $parse($this->result['to'] ?? null);
+
+        return $from && $to
+            ? [$from, $to]
+            : [now()->startOfQuarter(), now()->startOfDay()];
     }
 
     /**
