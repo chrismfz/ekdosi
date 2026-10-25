@@ -232,6 +232,15 @@ class MycsBridgeTest extends TestCase
         $ingest($payload);
         $this->assertSame(PendingWhmcsInvoice::STATUS_HELD, $row->fresh()->status);
         $this->assertStringContainsString('χωρίς τιμολόγηση', (string) $row->fresh()->notes);
+        // Released to review by the operator: never filed unattended, even for a γκρινιάρης.
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'ΔΟΚΙΜΗ ΑΕ', 'afm' => '099999999', 'needs_immediate_invoice' => true]);
+        VatCategory::create(['company_id' => $tenant->id, 'name' => '24%', 'rate' => 24.00, 'is_default' => true]);
+        $pm = PaymentMethod::create(['company_id' => $tenant->id, 'name' => 'Cash', 'due_days' => 0, 'is_active' => true]);
+        $type = InvoiceType::create(['company_id' => $tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1, 'payment_method_id' => $pm->id]);
+        $tenant->update(['whmcs_auto_issue_immediate' => true, 'whmcs_default_invoice_type_id' => $type->id]);
+        $row->fresh()->update(['status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW, 'customer_id' => $customer->id]);
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->fresh()->status);
     }
 
     /** Final review: a WHMCS mass-pay filed after the cut-over sends nothing to MyCS (one MARK per invoice there). */

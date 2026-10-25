@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\Billing\MycsPayload;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceType;
@@ -390,6 +391,10 @@ class WhmcsAutoIssue extends Command
             // afm is needed by ownLinesAreReceipt() (no ΑΦΜ → απόδειξη).
             ->with(['customer:id,company_id,name,afm,needs_immediate_invoice'])
             ->orderBy('id')
-            ->get();
+            ->get()
+            // «Ignore invoicing» in MyCS: released to review is for a human to look at, never to be filed unattended.
+            ->reject(fn (PendingWhmcsInvoice $row) => MycsPayload::is(is_array($row->payload) ? $row->payload : null)
+                && MycsPayload::ignored($row->payload))
+            ->values();
     }
 }

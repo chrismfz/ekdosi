@@ -268,7 +268,8 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'Στο WHMCS',
                         PendingWhmcsInvoice::WRITEBACK_FAILED => 'Απέτυχε',
                         PendingWhmcsInvoice::WRITEBACK_PENDING => 'Εκκρεμεί',
-                        PendingWhmcsInvoice::WRITEBACK_SKIPPED => 'Χωρίς γέφυρα',
+                        // Not sent on purpose (MyCS: another client's number, a WHMCS mass-pay) vs no bridge at all.
+                        PendingWhmcsInvoice::WRITEBACK_SKIPPED => filled($r->whmcs_writeback_error) ? 'Δεν επιστρέφεται' : 'Χωρίς γέφυρα',
                         PendingWhmcsInvoice::WRITEBACK_CHANGED => 'Άλλαξε στη MyCS',
                         default => null,
                     })
@@ -1000,6 +1001,13 @@ class WhmcsInboxTable
                         Notification::make()
                             ->title('Το ΜΑΡΚ επιστράφηκε στο WHMCS')
                             ->success()
+                            ->send();
+                    } elseif ($state === PendingWhmcsInvoice::WRITEBACK_SKIPPED) {
+                        // Resolved, not failed: the MARK doesn't go back for this row (the note says why).
+                        Notification::make()
+                            ->title('Ο ΜΑΡΚ δεν επιστρέφεται για αυτό το τιμολόγιο')
+                            ->body($record->fresh()->whmcs_writeback_error)
+                            ->info()
                             ->send();
                     } else {
                         Notification::make()
