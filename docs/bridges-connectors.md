@@ -329,8 +329,9 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
   them, so a late WHMCS push would land on an id MyCS uses.
 
 Because the ids are the same, a row staged from WHMCS before the cut-over is the same row MyCS refreshes after it
-(its `source` becomes `mycs`). Its MARK goes to MyCS: for a mass-pay container, only its children's (MyCS has no
-containers).
+(its `source` becomes `mycs`). Its MARK goes to MyCS. A WHMCS mass-pay container is the exception: one document for N invoices, while MyCS keeps
+one MARK per invoice. Its MARK is not sent (`skipped`, with a note); its invoices were paid before the cut-over, so
+MyCS never offers them again.
 
 **Decided is decided.** As with WHMCS:
 - an archived (rejected) or issued row is frozen: MyCS sending the invoice again only touches it;

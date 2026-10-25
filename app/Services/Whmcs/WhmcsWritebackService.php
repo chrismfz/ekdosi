@@ -342,6 +342,18 @@ class WhmcsWritebackService
             return;
         }
 
+        // A WHMCS mass-pay (staged before the cut-over): one document for N invoices, and MyCS keeps one MARK per invoice.
+        // Its invoices were paid before the cut-over, so MyCS never offers them again: nothing goes back (final review).
+        if ((bool) $tenant->mycs_enabled && $this->consolidatedChildIds($pending) !== []) {
+            $pending->update([
+                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
+                'whmcs_writeback_error' => 'Ενοποιημένη πληρωμή του WHMCS: ένα παραστατικό για πολλά τιμολόγια, ενώ η MyCS κρατά έναν ΜΑΡΚ '
+                    .'ανά τιμολόγιο — ο ΜΑΡΚ δεν επιστρέφεται εκεί. Το παραστατικό ισχύει όπως εκδόθηκε.',
+            ]);
+
+            return;
+        }
+
         // The official παραστατικό PDF lives on ekdosi; hand the bridge a signed
         // public URL so it can link it (no file copy). Best-effort — a URL build
         // failure must not block the MARK write-back.
@@ -354,10 +366,7 @@ class WhmcsWritebackService
 
         try {
             $children = $this->consolidatedChildIds($pending);
-            // A WHMCS mass-pay container (staged before the cut-over) is not an invoice MyCS has: only its children are.
-            if (! ((bool) $tenant->mycs_enabled && $children !== [])) {
-                $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
-            }
+            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
 
             // 1→N (mass-pay CONSOLIDATION): one ekdosi παραστατικό covers N WHMCS
             // child invoices. Push the SAME MARK to each child id too, so every

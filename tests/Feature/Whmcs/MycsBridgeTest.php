@@ -218,6 +218,36 @@ class MycsBridgeTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_HELD, PendingWhmcsInvoice::where('whmcs_invoice_id', 2)->sole()->status, 'two recipients: held for the split');
     }
 
+    /** Final review: a client set to «ignore invoicing» after its invoice was staged is held, never auto-issued. */
+    public function test_an_ignored_client_is_held_when_it_reaches_the_inbox(): void
+    {
+        $tenant = $this->tenant();
+        $payload = collect($this->feed()['invoices'])->firstWhere('id', 1);
+        $ingest = fn (array $p) => app(WhmcsInvoiceIngestor::class)->ingest($tenant, $p);
+        $ingest($payload);
+        $row = PendingWhmcsInvoice::where('whmcs_invoice_id', 1)->sole();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
+
+        $payload['mycs']['ignore_invoicing'] = true;
+        $ingest($payload);
+        $this->assertSame(PendingWhmcsInvoice::STATUS_HELD, $row->fresh()->status);
+        $this->assertStringContainsString('χωρίς τιμολόγηση', (string) $row->fresh()->notes);
+    }
+
+    /** Final review: a WHMCS mass-pay filed after the cut-over sends nothing to MyCS (one MARK per invoice there). */
+    public function test_a_whmcs_mass_pay_sends_no_mark_to_mycs(): void
+    {
+        $tenant = $this->tenant();
+        $pending = PendingWhmcsInvoice::create(['company_id' => $tenant->id, 'whmcs_invoice_id' => 900, 'match_reason' => 'test',
+            'status' => PendingWhmcsInvoice::STATUS_FILED, 'payload' => ['invoiceid' => 900, 'ekdosi_consolidated_children' => [901, 902]]]);
+        Http::fake();
+
+        app(WhmcsWritebackService::class)->pushMark($tenant, $pending, $this->invoiceFor($tenant, $pending), '400001234567890');
+
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_SKIPPED, $pending->fresh()->whmcs_writeback_state);
+        Http::assertNothingSent();
+    }
+
     public function test_notes_hold_a_row_once_not_on_every_fetch(): void
     {
         $tenant = $this->tenant();

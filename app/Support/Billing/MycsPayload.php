@@ -73,6 +73,17 @@ final class MycsPayload
     }
 
     /**
+     * The account's «Ignore invoicing»: MyCS's feed leaves such clients out, but an invoice read by id (or staged before
+     * the flag was set) carries it, and it is never issued unattended.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function ignored(array $payload): bool
+    {
+        return (bool) ($payload['mycs']['ignore_invoicing'] ?? false);
+    }
+
+    /**
      * MyCS's credit/debit notes on the invoice (its total counts them, its lines don't), in euros; 0 when none.
      *
      * @param  array<string, mixed>  $payload

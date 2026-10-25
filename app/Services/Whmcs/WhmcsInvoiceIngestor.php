@@ -104,6 +104,13 @@ class WhmcsInvoiceIngestor
         $adjustmentNote = $adjustments == 0.0 ? null : 'Η MyCS έχει πιστωτικό/χρεωστικό σημείωμα '
             .number_format($adjustments, 2, ',', '.').' € σε αυτό το τιμολόγιο: το σύνολο διαφέρει από τις γραμμές — '
             .'έλεγξε το ποσό πριν την έκδοση.';
+        // «Ignore invoicing» in MyCS: held, never issued unattended (the feed leaves such clients out; this is for an
+        // invoice read by id, or staged before the flag was set). Held when it is new, as the notes (final review of #701).
+        $ignored = MycsPayload::is($whmcsInvoicePayload) && MycsPayload::ignored($whmcsInvoicePayload);
+        if ($ignored) {
+            $adjustmentNote = trim('Ο πελάτης είναι «χωρίς τιμολόγηση» στη MyCS: δεν εκδίδεται, εκτός αν το αποφασίσεις. '
+                .($adjustmentNote ?? ''));
+        }
 
         // A WHMCS "mass payment" / consolidated invoice (every line references
         // another invoice, no VAT of its own) is a payment-grouping artefact,
@@ -121,7 +128,7 @@ class WhmcsInvoiceIngestor
         // lockForUpdate SELECT finds it and we take the clean existing-row path.
         // Belt (retry) + suspenders (inline unique-violation catch).
         $result = DB::transaction(function () use (
-            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote
+            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored
         ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
@@ -278,7 +285,8 @@ class WhmcsInvoiceIngestor
             } elseif ($tp['hold']) {
                 $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
                 $update['notes'] = trim(($tp['note'] ?? '').' '.($adjustmentNote ?? ''));
-            } elseif ($adjustmentNote !== null && MycsPayload::adjustments(is_array($existing->payload) ? $existing->payload : []) != $adjustments) {
+            } elseif ($adjustmentNote !== null && (MycsPayload::adjustments(is_array($existing->payload) ? $existing->payload : []) != $adjustments
+                || ($ignored && ! MycsPayload::ignored(is_array($existing->payload) ? $existing->payload : [])))) {
                 // New notes, or another amount, since the operator last saw it.
                 $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
                 $update['notes'] = $adjustmentNote;

@@ -152,8 +152,8 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 - **SPLIT write-back στη MyCS (K2)** — η MyCS δέχεται πολλούς ΜΑΡΚ ανά τιμολόγιο, αλλά μια split γραμμή δεν επιστρέφει
   κανέναν. Με τη MyCS το split είναι **συνηθισμένο** (στέλνει πάντα τον αποδέκτη ανά γραμμή), και χωρίς ΜΑΡΚ το
   τιμολόγιο μένει στο feed της, ενώ οι προστασίες της (όχι merge/split/αλλαγή γραμμών σε τιμολόγιο με παραστατικό) **δεν
-  ισχύουν**: το staff μπορεί να αλλάξει πώληση που έχει ήδη παραστατικό. Ένα `op=mark` ανά παραστατικό του split, με
-  το fingerprint της ανάγνωσης (`docs/bridges-connectors.md` §12).
+  ισχύουν**: το staff μπορεί να αλλάξει πώληση που έχει ήδη παραστατικό. Ένα `op=mark` ανά παραστατικό του split
+  (`docs/bridges-connectors.md` §12).
 
 ### 🌐 Domains (Πυλώνας A — `docs/domains/README.md`)
 - **A4 — grEPP** (.gr/.ελ direct EPP· 2ετία min, no privacy/lock) — **το κύριο κομμάτι: ~75% του portfolio**

@@ -285,6 +285,8 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::WRITEBACK_FAILED => $r->whmcs_writeback_error ?: 'Η επιστροφή του ΜΑΡΚ στο WHMCS απέτυχε. Το AADE είναι εντάξει· πάτα «Επανάληψη επιστροφής ΜΑΡΚ».',
                         // Not retryable (the same 409): the document is cancelled here and the invoice read again.
                         PendingWhmcsInvoice::WRITEBACK_CHANGED => $r->whmcs_writeback_error,
+                        // Why it was not sent (MyCS: a number of another client, a WHMCS mass-pay).
+                        PendingWhmcsInvoice::WRITEBACK_SKIPPED => $r->whmcs_writeback_error ?: null,
                         default => null,
                     })
                     ->toggleable(isToggledHiddenByDefault: true),
