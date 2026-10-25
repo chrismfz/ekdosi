@@ -160,6 +160,7 @@ $trackSchedule(
             Company::query()
                 ->whereNotNull('whmcs_api_url')
                 ->where('whmcs_api_url', '!=', '')
+                ->where('mycs_enabled', false)   // WHMCS is frozen for them (docs/bridges-connectors.md §12)
                 ->get(),
             'whmcs:fetch-unpaid',
             fn () => null,   // report($e) already logs an uncaught throw; no separate health key for this opt-in fetch

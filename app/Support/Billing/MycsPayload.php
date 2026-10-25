@@ -33,7 +33,11 @@ final class MycsPayload
                 false => '',
                 null => null,
             },
-            'griniaris' => self::immediate($payload) ? 'on' : '',
+            'griniaris' => match (self::immediate($payload)) {
+                true => 'on',
+                false => '',
+                null => null,
+            },
             default => null,
         };
         $value = is_scalar($value) ? trim((string) $value) : '';
@@ -55,10 +59,29 @@ final class MycsPayload
         };
     }
 
-    /** @param  array<string, mixed>  $payload */
-    public static function immediate(array $payload): bool
+    /**
+     * The account's «Άμεση τιμολόγηση»; null when MyCS did not say (unknown leaves the customer's flag alone, as an
+     * unreadable WHMCS field does).
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function immediate(array $payload): ?bool
     {
-        return (bool) ($payload['mycs']['immediate_invoicing'] ?? false);
+        $value = $payload['mycs']['immediate_invoicing'] ?? null;
+
+        return is_bool($value) ? $value : null;
+    }
+
+    /**
+     * MyCS's credit/debit notes on the invoice (its total counts them, its lines don't), in euros; 0 when none.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function adjustments(array $payload): float
+    {
+        $value = $payload['mycs']['adjustments'] ?? 0;
+
+        return is_numeric($value) ? round((float) $value, 2) : 0.0;
     }
 
     /**

@@ -116,6 +116,13 @@ class PendingWhmcsInvoice extends Model
     public const WRITEBACK_SKIPPED = 'skipped';
 
     /**
+     * MyCS refused the MARK (409 invoice_changed): the invoice there is no longer the one this document was built from
+     * (merged, split, a line or note changed). Not retryable — the same fingerprint gets the same 409. The operator
+     * cancels the document here and reads the invoice again (docs/bridges-connectors.md §12).
+     */
+    public const WRITEBACK_CHANGED = 'changed';
+
+    /**
      * T-1b: third-party-invoicing resolution state. `null` = not evaluated
      * (kill-switch off, or resolution unavailable). Set by the ingestor from
      * the bridge's resolve.php.

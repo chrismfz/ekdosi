@@ -338,6 +338,10 @@ class Company extends Model
     public function mycsBridgeUrl(): ?string
     {
         $url = rtrim((string) preg_replace('/[?#].*$/', '', trim((string) ($this->mycs_url ?? ''))), '/');
+        // Pasted with the endpoint already on it: the address is what is before it.
+        if (str_ends_with(strtolower($url), self::MYCS_BRIDGE_PATH)) {
+            $url = rtrim(substr($url, 0, -strlen(self::MYCS_BRIDGE_PATH)), '/');
+        }
         if ($url === '' || ! preg_match('#^https://[^/\s]+#i', $url)) {
             return null;
         }

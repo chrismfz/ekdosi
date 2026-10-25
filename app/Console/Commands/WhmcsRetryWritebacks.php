@@ -117,7 +117,7 @@ class WhmcsRetryWritebacks extends Command
 
     /**
      * Resolve the target tenants. Returns null on an unknown --tenant slug
-     * (caller maps that to exit 2). hasWhmcsIntegration() checks encrypted
+     * (caller maps that to exit 2). hasBillingSource() checks encrypted
      * columns, so the all-tenants case filters in PHP.
      *
      * @return Collection<int, Company>|null
@@ -131,8 +131,8 @@ class WhmcsRetryWritebacks extends Command
 
                 return null;
             }
-            if (! $tenant->hasWhmcsIntegration()) {
-                $this->warn("Tenant '{$slug}' has no WHMCS integration configured. Nothing to do.");
+            if (! $tenant->hasBillingSource()) {
+                $this->warn("Tenant '{$slug}' has no WHMCS or MyCS source configured. Nothing to do.");
 
                 return collect();
             }
@@ -142,7 +142,7 @@ class WhmcsRetryWritebacks extends Command
 
         return Company::query()
             ->get()
-            ->filter(fn (Company $c) => $c->hasWhmcsIntegration())
+            ->filter(fn (Company $c) => $c->hasBillingSource())
             ->values();
     }
 }

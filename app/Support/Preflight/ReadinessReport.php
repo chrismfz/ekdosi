@@ -68,7 +68,7 @@ class ReadinessReport
                 $this->lookupsSection($company),
                 $this->productsSection($company),
             ];
-            if ($company->hasWhmcsIntegration()) {
+            if ($company->hasBillingSource()) {
                 $sections[] = $this->whmcsSection($company);
             }
 

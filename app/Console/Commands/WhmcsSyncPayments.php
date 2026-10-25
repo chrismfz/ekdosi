@@ -91,12 +91,12 @@ class WhmcsSyncPayments extends Command
                 return null;
             }
 
-            return collect($tenant->hasWhmcsIntegration() ? [$tenant] : []);
+            return collect($tenant->hasBillingSource() ? [$tenant] : []);
         }
 
         return Company::query()
             ->get()
-            ->filter(fn (Company $c) => $c->hasWhmcsIntegration())
+            ->filter(fn (Company $c) => $c->hasBillingSource())
             ->values();
     }
 }

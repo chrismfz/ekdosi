@@ -2,6 +2,7 @@
 
 namespace App\Services\Whmcs;
 
+use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Models\Company;
 use App\Models\Invoice;
@@ -339,14 +340,17 @@ class WhmcsWritebackService
         try {
             // MyCS takes a new document only for the invoice as ekdosi read it: the fingerprint of the staged payload.
             $fingerprint = (bool) $tenant->mycs_enabled ? $pending->mycsFingerprint() : null;
-            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl, $fingerprint);
+            $children = $this->consolidatedChildIds($pending);
+            // A WHMCS mass-pay container (staged before the cut-over) is not an invoice MyCS has: only its children are.
+            if (! ((bool) $tenant->mycs_enabled && $children !== [])) {
+                $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl, $fingerprint);
+            }
 
             // 1→N (mass-pay CONSOLIDATION): one ekdosi παραστατικό covers N WHMCS
             // child invoices. Push the SAME MARK to each child id too, so every
             // rolled-up WHMCS invoice shows the consolidated MARK — not just the
             // mass-pay «container». setInvoiced is idempotent on an identical mark
             // (inbound.php only refuses a DIFFERENT one), so a retry re-pushes safely.
-            $children = $this->consolidatedChildIds($pending);
             foreach ($children as $childId) {
                 $client->setInvoiced($childId, $mark, $invoice->invcode, $state, $pdfUrl);
             }
@@ -363,25 +367,46 @@ class WhmcsWritebackService
                 'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED,
                 'whmcs_writeback_error' => null,
             ]);
+        } catch (WhmcsApiException $e) {
+            // MyCS: the invoice changed since it was read. A retry would send the same fingerprint and get the same 409.
+            if ((bool) $tenant->mycs_enabled && str_contains($e->getMessage(), 'invoice_changed')) {
+                Log::warning('MyCS refused the MARK: the invoice changed there since it was read', [
+                    'pending_id' => $pending->id, 'whmcs_invoice_id' => $pending->whmcs_invoice_id, 'mydata_mark' => $mark, 'error' => $e->getMessage(),
+                ]);
+                $pending->update([
+                    'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_CHANGED,
+                    'whmcs_writeback_error' => 'Το τιμολόγιο άλλαξε στη MyCS μετά την ανάγνωσή του (συγχώνευση, διαχωρισμός ή αλλαγή γραμμής): '
+                        .'το παραστατικό '.$invoice->invcode.' δεν αντιστοιχεί πια. Ακύρωσέ το (πιστωτικό) και ξαναδιάβασε το τιμολόγιο από τη MyCS. — '
+                        .$e->getMessage(),
+                ]);
+
+                return;
+            }
+            $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
         } catch (Throwable $e) {
-            Log::error('WHMCS write-back failed (AADE filing already complete)', [
-                'pending_id' => $pending->id,
-                'whmcs_invoice_id' => $pending->whmcs_invoice_id,
-                'mydata_mark' => $mark,
-                'ekdosi_invoice' => $invoice->invcode,
-                'error' => $e->getMessage(),
-                'next_step' => 'Retry from ekdosi: the WHMCS inbox row for invoice '
-                    .$pending->whmcs_invoice_id.' now shows «Επιστροφή ΜΑΡΚ: Απέτυχε» — '
-                    .'use its «Επανάληψη επιστροφής ΜΑΡΚ» action, or run '
-                    .'`php artisan whmcs:retry-writebacks --tenant='.($tenant->slug ?? '?').'`. '
-                    .'The bridge stores the MARK in mod_ekdosi_invoice_marks (never the legacy '
-                    .'tblinvoices.invoiced flag).',
-            ]);
-            $pending->update([
-                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
-                'whmcs_writeback_error' => $e->getMessage(),
-            ]);
+            $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
         }
+    }
+
+    private function recordFailure(Company $tenant, PendingWhmcsInvoice $pending, Invoice $invoice, string $mark, Throwable $e): void
+    {
+        Log::error('WHMCS write-back failed (AADE filing already complete)', [
+            'pending_id' => $pending->id,
+            'whmcs_invoice_id' => $pending->whmcs_invoice_id,
+            'mydata_mark' => $mark,
+            'ekdosi_invoice' => $invoice->invcode,
+            'error' => $e->getMessage(),
+            'next_step' => 'Retry from ekdosi: the WHMCS inbox row for invoice '
+                .$pending->whmcs_invoice_id.' now shows «Επιστροφή ΜΑΡΚ: Απέτυχε» — '
+                .'use its «Επανάληψη επιστροφής ΜΑΡΚ» action, or run '
+                .'`php artisan whmcs:retry-writebacks --tenant='.($tenant->slug ?? '?').'`. '
+                .'The bridge stores the MARK in mod_ekdosi_invoice_marks (never the legacy '
+                .'tblinvoices.invoiced flag).',
+        ]);
+        $pending->update([
+            'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
+            'whmcs_writeback_error' => $e->getMessage(),
+        ]);
     }
 
     /**

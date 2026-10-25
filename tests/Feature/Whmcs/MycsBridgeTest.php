@@ -9,8 +9,10 @@ use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
+use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\Whmcs\WhmcsPaymentPusherFactory;
 use App\Services\Whmcs\WhmcsWritebackService;
+use App\Support\Billing\MycsPayload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Http\Client\Request;
 use Illuminate\Support\Facades\Http;
@@ -139,8 +141,103 @@ class MycsBridgeTest extends TestCase
         app(WhmcsWritebackService::class)->pushMark($tenant, $pending, $this->invoiceFor($tenant, $pending), '400001234567890');
 
         $pending->refresh();
-        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_FAILED, $pending->whmcs_writeback_state);
+        // Not a retryable failure: the same fingerprint would get the same 409 (review of #701).
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_CHANGED, $pending->whmcs_writeback_state);
+        $this->assertStringContainsString('Ακύρωσέ το', (string) $pending->whmcs_writeback_error);
         $this->assertStringContainsString('invoice_changed (Merged into invoice 7', (string) $pending->whmcs_writeback_error);
+        $this->expectException(\RuntimeException::class);
+        app(WhmcsWritebackService::class)->retryWriteback($pending);
+    }
+
+    public function test_the_whmcs_unpaid_fetch_never_runs_for_a_mycs_company(): void
+    {
+        $tenant = $this->tenant(['whmcs_api_identifier' => 'id', 'whmcs_api_secret' => 'secret']);
+        Customer::create(['company_id' => $tenant->id, 'name' => 'Επί πιστώσει', 'afm' => '099999999', 'whmcs_client_id' => 100001,
+            'needs_invoice_before_payment' => true]);
+        Http::fake(['*' => Http::response(['result' => 'success', 'invoices' => ['invoice' => []]])]);
+
+        $this->artisan('whmcs:fetch-unpaid', ['--tenant' => $tenant->slug])->assertExitCode(3);
+        Http::assertNothingSent();
+    }
+
+    public function test_a_whmcs_payload_never_replaces_a_row_mycs_staged(): void
+    {
+        $tenant = $this->tenant();
+        $this->fakeMycs();
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])->assertSuccessful();
+        $whmcs = collect($this->feed()['invoices'])->firstWhere('id', 1);
+        unset($whmcs['mycs'], $whmcs['third_party']);
+        $whmcs['status'] = 'Unpaid';
+
+        app(WhmcsInvoiceIngestor::class)->ingest($tenant, $whmcs);
+
+        $row = PendingWhmcsInvoice::where('whmcs_invoice_id', 1)->sole();
+        $this->assertSame(['mycs', 'Paid'], [$row->source, $row->payload['status']]);
+        $this->assertNotNull($row->mycsFingerprint());
+    }
+
+    public function test_a_row_staged_from_whmcs_is_refreshed_by_mycs_unless_it_is_another_clients(): void
+    {
+        $tenant = $this->tenant();
+        $mycs = collect($this->feed()['invoices'])->keyBy('id');
+        $whmcs = $mycs[1];
+        unset($whmcs['mycs'], $whmcs['third_party']);
+        app(WhmcsInvoiceIngestor::class)->ingest($tenant, $whmcs);
+        $other = $mycs[2];
+        unset($other['mycs'], $other['third_party']);
+        $other['userid'] = 555; // WHMCS issued #2 to another client after the last import
+        app(WhmcsInvoiceIngestor::class)->ingest($tenant, $other);
+        $this->assertSame('whmcs', PendingWhmcsInvoice::where('whmcs_invoice_id', 1)->sole()->source);
+
+        $this->fakeMycs();
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])->assertSuccessful();
+
+        $same = PendingWhmcsInvoice::where('whmcs_invoice_id', 1)->sole();
+        $this->assertSame(['mycs', '5c72d95ef728b708a65bf6e99e2f1339'], [$same->source, $same->mycsFingerprint()]);
+        $collision = PendingWhmcsInvoice::where('whmcs_invoice_id', 2)->sole();
+        $this->assertSame([PendingWhmcsInvoice::STATUS_HELD, 'whmcs', 555], [$collision->status, $collision->source, (int) $collision->whmcs_userid]);
+        $this->assertStringContainsString('για άλλον πελάτη', (string) $collision->hold_reason);
+    }
+
+    public function test_an_invoice_with_credit_or_debit_notes_in_mycs_is_held(): void
+    {
+        $tenant = $this->tenant();
+        $payload = collect($this->feed()['invoices'])->firstWhere('id', 1);
+        $payload['mycs']['adjustments'] = '-24.00';
+
+        app(WhmcsInvoiceIngestor::class)->ingest($tenant, $payload);
+
+        $row = PendingWhmcsInvoice::where('whmcs_invoice_id', 1)->sole();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_HELD, $row->status);
+        $this->assertStringContainsString('-24,00 €', (string) $row->notes);
+    }
+
+    public function test_the_payload_readers_keep_unknown_as_unknown(): void
+    {
+        $payload = collect($this->feed()['invoices'])->firstWhere('id', 1);
+        unset($payload['mycs']['immediate_invoicing']);
+        $payload['mycs']['recipient']['document_type'] = null;
+        $this->assertNull(MycsPayload::immediate($payload));
+        $this->assertNull(MycsPayload::wantsInvoice($payload));
+        $this->assertNull(MycsPayload::role($payload, 'griniaris'));
+        $payload['mycs']['recipient']['document_type'] = 'receipt';
+        $this->assertFalse(MycsPayload::wantsInvoice($payload));
+    }
+
+    public function test_the_address_may_be_pasted_with_the_endpoint_on_it(): void
+    {
+        $this->assertSame(self::ENDPOINT, $this->tenant(['mycs_url' => 'https://my.example.test/api/ekdosi/'])->mycsBridgeUrl());
+    }
+
+    public function test_a_mycs_only_company_is_a_billing_source_for_its_jobs(): void
+    {
+        $tenant = $this->tenant(['whmcs_api_url' => null, 'whmcs_webhook_secret' => null, 'whmcs_fetch_via_bridge' => false]);
+
+        $this->assertTrue($tenant->hasBillingSource());
+        $this->assertFalse($tenant->hasWhmcsIntegration());
+        $this->artisan('whmcs:retry-writebacks', ['--tenant' => $tenant->slug])
+            ->doesntExpectOutputToContain('Nothing to do')
+            ->assertSuccessful();
     }
 
     public function test_on_but_not_usable_it_never_falls_back_to_whmcs(): void

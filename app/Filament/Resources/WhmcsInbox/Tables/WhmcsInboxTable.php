@@ -269,20 +269,24 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::WRITEBACK_FAILED => 'Απέτυχε',
                         PendingWhmcsInvoice::WRITEBACK_PENDING => 'Εκκρεμεί',
                         PendingWhmcsInvoice::WRITEBACK_SKIPPED => 'Χωρίς γέφυρα',
+                        PendingWhmcsInvoice::WRITEBACK_CHANGED => 'Άλλαξε στη MyCS',
                         default => null,
                     })
                     ->color(fn (PendingWhmcsInvoice $r): string => match ($r->whmcs_writeback_state) {
                         PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'success',
-                        PendingWhmcsInvoice::WRITEBACK_FAILED => 'danger',
+                        PendingWhmcsInvoice::WRITEBACK_FAILED, PendingWhmcsInvoice::WRITEBACK_CHANGED => 'danger',
                         PendingWhmcsInvoice::WRITEBACK_PENDING => 'warning',
                         default => 'gray',
                     })
-                    ->icon(fn (PendingWhmcsInvoice $r): ?string => $r->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_FAILED
+                    ->icon(fn (PendingWhmcsInvoice $r): ?string => in_array($r->whmcs_writeback_state, [PendingWhmcsInvoice::WRITEBACK_FAILED, PendingWhmcsInvoice::WRITEBACK_CHANGED], true)
                         ? 'heroicon-o-exclamation-triangle'
                         : null)
-                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => $r->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_FAILED
-                        ? ($r->whmcs_writeback_error ?: 'Η επιστροφή του ΜΑΡΚ στο WHMCS απέτυχε. Το AADE είναι εντάξει· πάτα «Επανάληψη επιστροφής ΜΑΡΚ».')
-                        : null)
+                    ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match ($r->whmcs_writeback_state) {
+                        PendingWhmcsInvoice::WRITEBACK_FAILED => $r->whmcs_writeback_error ?: 'Η επιστροφή του ΜΑΡΚ στο WHMCS απέτυχε. Το AADE είναι εντάξει· πάτα «Επανάληψη επιστροφής ΜΑΡΚ».',
+                        // Not retryable (the same 409): the document is cancelled here and the invoice read again.
+                        PendingWhmcsInvoice::WRITEBACK_CHANGED => $r->whmcs_writeback_error,
+                        default => null,
+                    })
                     ->toggleable(isToggledHiddenByDefault: true),
 
                 TextColumn::make('created_at')
@@ -347,6 +351,7 @@ class WhmcsInboxTable
                     ->label('Επιστροφή ΜΑΡΚ')
                     ->options([
                         PendingWhmcsInvoice::WRITEBACK_FAILED => 'Απέτυχε',
+                        PendingWhmcsInvoice::WRITEBACK_CHANGED => 'Άλλαξε στη MyCS',
                         PendingWhmcsInvoice::WRITEBACK_PENDING => 'Εκκρεμεί',
                         PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'Στο WHMCS',
                     ]),
@@ -885,7 +890,7 @@ class WhmcsInboxTable
             ScheduleTiming::enabled('whmcs_auto_issue_enabled')
                 ? null : 'ο γενικός διακόπτης στον Χρονοπρογραμματιστή είναι κλειστός',
             $typeExists($tenant->whmcs_default_invoice_type_id) ? null : 'δεν έχει οριστεί προεπιλεγμένος τύπος τιμολογίου',
-            $tenant->hasWhmcsIntegration() ? null : 'λείπει η σύνδεση WHMCS (URL/κλειδιά)',
+            $tenant->hasBillingSource() ? null : 'λείπει η σύνδεση WHMCS ή MyCS',
         ]));
 
         if ($missing !== []) {

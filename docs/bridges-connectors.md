@@ -317,8 +317,11 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 | ΑΦΜ / ΔΟΥ / activity / invoice-or-receipt / γκρινιάρης | client custom fields via `whmcs_custom_field_map` | `payload.mycs.recipient` + `payload.mycs.immediate_invoicing` (`App\Support\Billing\MycsPayload`) |
 | VAT | Tax Type / toggle | `taxtype` = `Exclusive` always; each line has net, VAT and total |
 | Recipient per line | `mod_ekdosi_routing` (opt-in) | always embedded (`third_party`), from MyCS's contacts |
-| MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, fingerprint, …}`. 409 `invoice_changed` when the invoice is no longer the one read (merged, split, a line or note changed): the write-back then fails visibly, retryable |
+| MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, fingerprint, …}`. 409 `invoice_changed` when the invoice is no longer the one read (merged, split, a line or note changed): write-back state **`changed`** («Άλλαξε στη MyCS»), **not retryable** (the same fingerprint gets the same 409): the operator cancels the document (credit note) and reads the invoice again |
+| Payments billing → ekdosi | `whmcs:sync-payments` / reconcile read the invoice's status | the same, through `op=invoice` on MyCS (same ids, same shape): a credit-term invoice paid in MyCS closes its receivable here |
 | Payments ekdosi → billing | `add_payment` | not yet (MyCS E3); `WhmcsPaymentPusherFactory` returns null for MyCS |
+| Unpaid feed («τιμολόγιο πριν την πληρωμή») | `whmcs:fetch-unpaid` (native API) | **off**: WHMCS is frozen at the cut-over, its «Unpaid» would overwrite what MyCS has seen paid; MyCS has no unpaid feed yet |
+| Credit/debit notes | — | `mycs.adjustments` ≠ 0 → the row is held («το σύνολο διαφέρει από τις γραμμές»): a document built from the lines would be for the wrong amount |
 
 **One source per company.** `mycs_enabled` wins:
 - `whmcs:fetch-pending` reads MyCS, whatever the WHMCS flags (`--native`/`--preview` ignored);
@@ -326,20 +329,34 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
   them, so a late WHMCS push would land on an id MyCS uses.
 
 Because the ids are the same, a row staged from WHMCS before the cut-over is the same row MyCS refreshes after it
-(its `source` becomes `mycs`). Its MARK goes to MyCS.
+(its `source` becomes `mycs`). Its MARK goes to MyCS: for a mass-pay container, only its children's (MyCS has no
+containers).
+
+The ingestor guards the shared id space at the root:
+- a WHMCS payload never replaces a row MyCS staged;
+- a row refreshed from the other source for **another client** (WHMCS issued past the last import) is held with a
+  note, its payload untouched;
+- on a decided row the same collision is logged, since it can't be re-staged.
 
 **Kept on WHMCS's side:** `WhmcsBridgeClientFactory::for()` stays the WHMCS plugin's, for its legacy ops (resellers,
 legacy links, custom fields). Only `forSource()` (fetch, single invoice, routing fallback, write-back) follows the
 company's source.
 
 **Shared with the WHMCS tab:** the cut-over date (`whmcs_invoice_min_date`, sent as `since`), auto-issue for
-γκρινιάρηδες and the default document types. `whmcs:auto-issue` runs for any company with a source
-(`Company::hasBillingSource()`).
+γκρινιάρηδες and the default document types. These run for any company with a source (`Company::hasBillingSource()`):
+- `whmcs:auto-issue`, and its banner in the inbox;
+- payment sync and reconcile;
+- `whmcs:retry-writebacks`;
+- OperatorHealth's fetch health;
+- the readiness report.
+
+A missing `immediate_invoicing` in a MyCS payload is «unknown»: it leaves the customer's flag alone.
 
 **Not yet (K2):**
-- payments: syncing what MyCS records as paid on credit-term invoices, and `add_payment` once MyCS has it (its E3);
-- writing back each document of a split inbox row (MyCS takes several MARKs per invoice; today a split row is not
-  written back, as with WHMCS).
+- `add_payment` to MyCS, once MyCS has it (its E3);
+- an unpaid feed for «τιμολόγιο πριν την πληρωμή»;
+- writing back each document of a split inbox row. MyCS takes several MARKs per invoice; today a split row is not
+  written back, as with WHMCS. This matters more with MyCS (see `docs/BACKLOG.md`).
 
 **Files:**
 - `database/migrations/2026_10_25_100000_add_mycs_bridge_to_companies.php`

@@ -111,7 +111,7 @@ class ListWhmcsInbox extends BaseListRecords
                 ->icon('heroicon-o-arrow-down-on-square-stack')
                 ->color('gray')
                 ->visible(fn () => ($t = Filament::getTenant()) instanceof Company
-                    && ($t->hasWhmcsIntegration() || $t->whmcs_fetch_via_bridge))
+                    && ($t->hasBillingSource() || $t->whmcs_fetch_via_bridge))
                 // Money-write: this closes receivables tenant-wide, so it needs the
                 // same permission as the inbox's mutating per-record actions
                 // (Update:PendingWhmcsInvoice) — read-only inbox access must NOT

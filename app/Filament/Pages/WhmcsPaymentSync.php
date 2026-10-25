@@ -84,7 +84,7 @@ class WhmcsPaymentSync extends Page implements HasTable
         $tenant = Filament::getTenant();
 
         return $tenant instanceof Company
-            && ($tenant->hasWhmcsIntegration() || $tenant->whmcs_fetch_via_bridge)
+            && ($tenant->hasBillingSource() || $tenant->whmcs_fetch_via_bridge)
             // Reuse the inbox permission — whoever may see the WHMCS inbox may
             // see (and act on) this worklist. No new permission to provision.
             && (bool) auth()->user()?->can('ViewAny:PendingWhmcsInvoice');
