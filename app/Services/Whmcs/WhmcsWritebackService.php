@@ -185,11 +185,8 @@ class WhmcsWritebackService
                 return;   // never filed at AADE → nothing to flag cancelled
             }
 
-            // MyCS never took this MARK (the invoice changed there): nothing to cancel there. The row opens again and
-            // the next fetch reads the invoice as it is now (docs/bridges-connectors.md §12).
+            // MyCS never took this MARK (its invoice was merged or split there): nothing to cancel there.
             if ($pending->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_CHANGED) {
-                $this->reopen($tenant, $pending, $invoice);
-
                 return;
             }
 
@@ -293,11 +290,10 @@ class WhmcsWritebackService
             }
         }
 
-        // The latest: a row reopened after a MyCS change has its cancelled document, then the new one.
         return Invoice::query()
             ->where('company_id', $pending->company_id)
             ->where('whmcs_pending_id', $pending->id)
-            ->orderByDesc('id')
+            ->orderBy('id')
             ->first();
     }
 
@@ -357,12 +353,10 @@ class WhmcsWritebackService
         }
 
         try {
-            // MyCS takes a new document only for the invoice as ekdosi read it: the fingerprint of the staged payload.
-            $fingerprint = (bool) $tenant->mycs_enabled ? $pending->mycsFingerprint() : null;
             $children = $this->consolidatedChildIds($pending);
             // A WHMCS mass-pay container (staged before the cut-over) is not an invoice MyCS has: only its children are.
             if (! ((bool) $tenant->mycs_enabled && $children !== [])) {
-                $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl, $fingerprint);
+                $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
             }
 
             // 1→N (mass-pay CONSOLIDATION): one ekdosi παραστατικό covers N WHMCS
@@ -387,53 +381,24 @@ class WhmcsWritebackService
                 'whmcs_writeback_error' => null,
             ]);
         } catch (WhmcsApiException $e) {
-            // MyCS: the invoice changed since it was read. A retry would send the same fingerprint and get the same 409.
+            // MyCS: the invoice was merged into another or split there after it was read. The document stands as issued
+            // (an issued document is final; a credit note if ever needed). Shown, not retried: it would get the same 409.
             if ((bool) $tenant->mycs_enabled && str_contains($e->getMessage(), 'invoice_changed')) {
-                Log::warning('MyCS refused the MARK: the invoice changed there since it was read', [
+                Log::warning('MyCS refused the MARK: the invoice was merged or split there after it was read', [
                     'pending_id' => $pending->id, 'whmcs_invoice_id' => $pending->whmcs_invoice_id, 'mydata_mark' => $mark, 'error' => $e->getMessage(),
                 ]);
                 $pending->update([
                     'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_CHANGED,
-                    'whmcs_writeback_error' => 'Το τιμολόγιο άλλαξε στη MyCS μετά την ανάγνωσή του (συγχώνευση, διαχωρισμός ή αλλαγή γραμμής): '
-                        .'το παραστατικό '.$invoice->invcode.' δεν αντιστοιχεί πια. Ακύρωσέ το στην ΑΑΔΕ: η γραμμή ξανανοίγει και '
-                        .'το τιμολόγιο ξαναδιαβάζεται από τη MyCS όπως είναι τώρα, για νέο παραστατικό. — '
+                    'whmcs_writeback_error' => 'Το τιμολόγιο συγχωνεύτηκε ή διαχωρίστηκε στη MyCS μετά την ανάγνωσή του, οπότε η MyCS '
+                        .'δεν κράτησε τον ΜΑΡΚ. Το παραστατικό '.$invoice->invcode.' ισχύει όπως εκδόθηκε· αν χρειάζεται, πιστωτικό. — '
                         .$e->getMessage(),
                 ]);
-                // This push was the document's cancellation itself (its first write-back had failed): already cancelled,
-                // so the row reopens now (round 3 of #701).
-                if ($state === 'cancelled' || $invoice->mydata_state === 'CANCELLED') {
-                    $this->reopen($tenant, $pending->fresh(), $invoice);
-                }
 
                 return;
             }
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
         } catch (Throwable $e) {
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
-        }
-    }
-
-    /**
-     * A «changed» row whose document was cancelled at AADE: it reopens and is read again from MyCS at once (best
-     * effort: the scheduled fetch does it otherwise; until then it can't be issued, WhmcsFilingGuard). A consolidated
-     * row stays with the operator: some children may hold the MARK in MyCS (round 3 of #701).
-     */
-    private function reopen(Company $tenant, PendingWhmcsInvoice $pending, Invoice $cancelled): void
-    {
-        if (($pending->payload['ekdosi_consolidated_children'] ?? []) !== []) {
-            $pending->update(['whmcs_writeback_error' => 'Ενοποιημένο τιμολόγιο: το παραστατικό ακυρώθηκε, αλλά κάποια από τα '
-                .'τιμολόγια της MyCS ίσως έχουν ακόμα τον ΜΑΡΚ του — έλεγξέ τα στη MyCS και έκδωσε χειροκίνητα.']);
-
-            return;
-        }
-        $pending->reopenAfterMycsChange($cancelled);
-        try {
-            $fresh = $this->bridgeFactory->forSource($tenant)->fetchInvoice((int) $pending->whmcs_invoice_id, true);
-            if (is_array($fresh)) {
-                app(WhmcsInvoiceIngestor::class)->ingest($tenant, $fresh);
-            }
-        } catch (Throwable $e) {
-            Log::info('MyCS re-read after reopen deferred to the scheduled fetch', ['pending_id' => $pending->id, 'error' => $e->getMessage()]);
         }
     }
 

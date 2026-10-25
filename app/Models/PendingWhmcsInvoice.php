@@ -116,9 +116,8 @@ class PendingWhmcsInvoice extends Model
     public const WRITEBACK_SKIPPED = 'skipped';
 
     /**
-     * MyCS refused the MARK (409 invoice_changed): the invoice there is no longer the one this document was built from
-     * (merged, split, a line or note changed). Not retryable — the same fingerprint gets the same 409. The operator
-     * cancels the document here and reads the invoice again (docs/bridges-connectors.md §12).
+     * MyCS refused the MARK (409 invoice_changed): the invoice was merged into another or split there after it was
+     * read. The document stands as issued; not retried (it would get the same 409). docs/bridges-connectors.md §12.
      */
     public const WRITEBACK_CHANGED = 'changed';
 
@@ -151,12 +150,6 @@ class PendingWhmcsInvoice extends Model
     public function isFromMycs(): bool
     {
         return MycsPayload::is(is_array($this->payload) ? $this->payload : null);
-    }
-
-    /** The fingerprint MyCS gave of the invoice as staged (sent back with the MARK), or null. */
-    public function mycsFingerprint(): ?string
-    {
-        return MycsPayload::fingerprint(is_array($this->payload) ? $this->payload : null);
     }
 
     protected $fillable = [
@@ -196,7 +189,6 @@ class PendingWhmcsInvoice extends Model
             'whmcs_userid' => 'integer',
             'legacy_invoiced' => 'integer',
             'masspay_parent_id' => 'integer',
-            'reopen_history' => 'array',
             'source_conflict' => 'boolean',
         ];
     }
@@ -811,56 +803,6 @@ class PendingWhmcsInvoice extends Model
      * separately by PendingWhmcsInvoiceObserver on status=filed rows
      * only.
      */
-    /**
-     * MyCS refused this row's MARK (WRITEBACK_CHANGED: the invoice changed there after it was read) and its document
-     * has been cancelled at AADE: the row opens again for review, and the next fetch reads the invoice as it is now
-     * (docs/bridges-connectors.md §12). The filed snapshot goes to reopen_history; the cancelled document stays.
-     * The one transition out of «filed» the audit lock allows (PendingWhmcsInvoiceObserver).
-     */
-    public function reopenAfterMycsChange(Invoice $cancelled): void
-    {
-        if ($this->status !== self::STATUS_FILED || $this->whmcs_writeback_state !== self::WRITEBACK_CHANGED) {
-            return;
-        }
-        $history = is_array($this->reopen_history) ? $this->reopen_history : [];
-        $history[] = [
-            'reopened_at' => now()->toIso8601String(),
-            'mydata_mark' => $this->mydata_mark,
-            'invoice_id' => $cancelled->id,
-            'invcode' => $cancelled->invcode,
-            'filed_at' => $this->filed_at?->toIso8601String(),
-            'payload' => $this->payload,
-        ];
-        $note = 'Το παραστατικό '.$cancelled->invcode.' ακυρώθηκε, γιατί το τιμολόγιο άλλαξε στη MyCS: ξαναδιαβάζεται '
-            .'όπως είναι τώρα στην επόμενη λήψη — έλεγξέ το και έκδωσε νέο.';
-        $this->forceFill([
-            'status' => self::STATUS_PENDING_REVIEW,
-            'invoice_id' => null,
-            'mydata_mark' => null,
-            'filed_at' => null,
-            'filed_by_user_id' => null,
-            'whmcs_writeback_state' => null,
-            'whmcs_writeback_error' => null,
-            'notes' => $note,
-            'reopen_history' => $history,
-        ])->save();
-    }
-
-    /**
-     * Reopened after a MyCS change and not yet read again: its payload is still the one MyCS refused, so it can't be
-     * issued (WhmcsFilingGuard) until a fetch brings the invoice as it is now (round 3 of #701).
-     */
-    public function awaitsMycsReread(): bool
-    {
-        $history = is_array($this->reopen_history) ? $this->reopen_history : [];
-        if ($history === []) {
-            return false;
-        }
-        $last = end($history);
-
-        return $this->mycsFingerprint() === MycsPayload::fingerprint(is_array($last['payload'] ?? null) ? $last['payload'] : null);
-    }
-
     public function isAuditFrozen(): bool
     {
         return $this->status !== self::STATUS_PENDING_REVIEW;

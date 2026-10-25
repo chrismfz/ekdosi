@@ -50,8 +50,8 @@ class WhmcsBridgeClient
 
     /**
      * $mycs: the other end is MyCS (docs/bridges-connectors.md §12), not the WHMCS plugin. Same HMAC, same feed shape;
-     * one endpoint for every op (no inbound.php/resolve.php pair), and the MARK goes back as `op=mark` with the
-     * invoice's fingerprint, so MyCS takes it only for the invoice as it was read.
+     * one endpoint for every op (no inbound.php/resolve.php pair), and the MARK goes back as `op=mark`. No fingerprint:
+     * an issued document is final, whatever changed in MyCS since (only a merge or split there is refused, 409).
      */
     public function __construct(
         private readonly HttpFactory $http,
@@ -104,12 +104,11 @@ class WhmcsBridgeClient
      * message if they need to distinguish (the filer currently
      * treats it as a non-fatal log).
      */
-    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null, ?string $pdfUrl = null, ?string $fingerprint = null): void
+    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null, ?string $pdfUrl = null): void
     {
-        // MyCS: the same write-back as an op on its one endpoint, with the fingerprint of the invoice as it was read
-        // (a 409 invoice_changed when it changed since: merged, split, a line or note changed).
+        // MyCS: the same write-back as an op on its one endpoint.
         $bodyData = $this->mycs
-            ? array_filter(['op' => 'mark', 'invoice_id' => $whmcsInvoiceId, 'mark' => $mark, 'fingerprint' => $fingerprint], fn ($v) => $v !== null && $v !== '')
+            ? ['op' => 'mark', 'invoice_id' => $whmcsInvoiceId, 'mark' => $mark]
             : [
                 'whmcs_invoice_id' => $whmcsInvoiceId,
                 'mark' => $mark,

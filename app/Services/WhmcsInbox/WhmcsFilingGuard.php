@@ -47,13 +47,6 @@ final class WhmcsFilingGuard
      */
     public static function assertPayloadFilable(array $mapped, PendingWhmcsInvoice $pending): void
     {
-        // Reopened after a MyCS change, not read again yet: this is the content MyCS refused (docs/bridges-connectors.md §12).
-        if ($pending->awaitsMycsReread()) {
-            throw new LogicException(
-                'Το MyCS #'.$pending->whmcs_invoice_id.' ξανάνοιξε επειδή άλλαξε στη MyCS και δεν έχει ξαναδιαβαστεί ακόμα — '
-                .'περίμενε την επόμενη λήψη (ή «Fetch now» στην εταιρεία) πριν την έκδοση.'
-            );
-        }
         $currency = (string) ($mapped['source']['whmcs_currency'] ?? '');
         if ($currency !== '' && $currency !== 'EUR') {
             throw new LogicException(

@@ -317,7 +317,7 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 | ΑΦΜ / ΔΟΥ / activity / invoice-or-receipt / γκρινιάρης | client custom fields via `whmcs_custom_field_map` | `payload.mycs.recipient` + `payload.mycs.immediate_invoicing` (`App\Support\Billing\MycsPayload`) |
 | VAT | Tax Type / toggle | `taxtype` = `Exclusive` always; each line has net, VAT and total |
 | Recipient per line | `mod_ekdosi_routing` (opt-in) | always embedded (`third_party`), from MyCS's contacts |
-| MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, fingerprint, …}`. 409 `invoice_changed` when the invoice is no longer the one read (merged, split, a line or note changed): write-back state **`changed`** («Άλλαξε στη MyCS»), **not retryable** (the same fingerprint gets the same 409). The operator cancels the document at AADE; that cancellation doesn't go to MyCS (it never took the MARK). Instead the row **reopens** (`PendingWhmcsInvoice::reopenAfterMycsChange`, the one way out of «filed» the audit lock allows; the filed snapshot is kept in `reopen_history`) and the next fetch reads the invoice as it is now, for a new document. It is read again at once when MyCS answers; until then the row can't be issued (`awaitsMycsReread`, `WhmcsFilingGuard`). The receipt recorded on the cancelled document is **moved** to the new one, never recorded twice. A cancellation that itself gets the 409 reopens the same way. A consolidated row stays with the operator |
+| MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, …}`, **no fingerprint**: what ekdosi issued is final, whatever changed in MyCS since (owner, 2026-10-25: «αν κόπηκε, πάει κόπηκε»; a credit note if ever needed). MyCS refuses only an invoice merged or split there after it was read (409 `invoice_changed`): write-back state **`changed`** («Άλλαξε στη MyCS»), shown with that note, never retried. The row stays filed. A cancellation is never sent to MyCS for a MARK it didn't take |
 | Payments billing → ekdosi | `whmcs:sync-payments` / reconcile read the invoice's status | the same, through `op=invoice` on MyCS (same ids, same shape): a credit-term invoice paid in MyCS closes its receivable here |
 | Payments ekdosi → billing | `add_payment` | not yet (MyCS E3); `WhmcsPaymentPusherFactory` returns null for MyCS |
 | Unpaid feed («τιμολόγιο πριν την πληρωμή») | `whmcs:fetch-unpaid` (native API) | **off**: WHMCS is frozen at the cut-over, its «Unpaid» would overwrite what MyCS has seen paid; MyCS has no unpaid feed yet |
@@ -331,6 +331,13 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 Because the ids are the same, a row staged from WHMCS before the cut-over is the same row MyCS refreshes after it
 (its `source` becomes `mycs`). Its MARK goes to MyCS: for a mass-pay container, only its children's (MyCS has no
 containers).
+
+**Decided is decided.** As with WHMCS:
+- an archived (rejected) or issued row is frozen: MyCS sending the invoice again only touches it;
+- an issued row's MARK takes the invoice out of MyCS's feed.
+
+The WHMCS filing guards apply unchanged: 0% VAT held for a human, totals and VAT rate reconcile, no negative lines,
+EUR only. MyCS removes the inclusive/exclusive ambiguity at the source, since every line is net with its rate and VAT.
 
 The ingestor guards the shared id space at the root:
 - a WHMCS payload never replaces a row MyCS staged;
@@ -364,6 +371,9 @@ A missing `immediate_invoicing` in a MyCS payload is «unknown»: it leaves the 
   - `CustomerWhmcsLedger`, «link WHMCS client»: read-only.
 - The outbound payment worklist is empty on MyCS (nothing is pushed yet).
 
+**Live test before the cut-over** (owner, 2026-10-25): real invoices on `ekdosi.myip.gr` (provider with DEV
+credentials) against MyCS, with Chrome. The checklist is in MyCS's `docs/ekdosi-bridge.md` → «Live δοκιμή».
+
 **Not yet (K2):**
 - `add_payment` to MyCS, once MyCS has it (its E3);
 - an unpaid feed for «τιμολόγιο πριν την πληρωμή»;
@@ -374,7 +384,7 @@ A missing `immediate_invoicing` in a MyCS payload is «unknown»: it leaves the 
 - `database/migrations/2026_10_25_100000_add_mycs_bridge_to_companies.php`
 - `app/Support/Billing/MycsPayload.php`
 - `app/Services/Billing/Sources/MycsBillingSource.php`
-- `WhmcsBridgeClient` (`$mycs` mode, `ping()`, `setInvoiced(…, $fingerprint)`)
+- `WhmcsBridgeClient` (`$mycs` mode, `ping()`, `op=mark`)
 - `WhmcsBridgeClientFactory::forSource()`
 - `tests/Feature/Whmcs/MycsBridgeTest.php`, with its fixture `tests/Fixtures/mycs/feed-invoices.json`, made by
   MyCS's own code from test data.

@@ -5,7 +5,7 @@ namespace App\Support\Billing;
 /**
  * Reads what a MyCS feed payload says outright (docs/bridges-connectors.md §12), where a WHMCS one carries client
  * custom fields resolved through the company's whmcs_custom_field_map: the `mycs` block, with the account's
- * recipient (ΑΦΜ, ΔΟΥ, activity, the document it wants) and its «γκρινιάρης» flag. Nothing to map.
+ * recipient (ΑΦΜ, ΔΟΥ, activity, the document it wants), its «γκρινιάρης» flag and its credit/debit notes. Nothing to map.
  */
 final class MycsPayload
 {
@@ -82,17 +82,5 @@ final class MycsPayload
         $value = $payload['mycs']['adjustments'] ?? 0;
 
         return is_numeric($value) ? round((float) $value, 2) : 0.0;
-    }
-
-    /**
-     * What MyCS gave of the invoice as read; sent back with the MARK.
-     *
-     * @param  array<string, mixed>|null  $payload
-     */
-    public static function fingerprint(?array $payload): ?string
-    {
-        $value = $payload['mycs']['fingerprint'] ?? null;
-
-        return is_string($value) && $value !== '' ? $value : null;
     }
 }

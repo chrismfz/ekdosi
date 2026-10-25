@@ -8,11 +8,11 @@
             "userid": 100001,
             "date": "2026-10-25",
             "duedate": "",
-            "datepaid": "2026-10-25 16:05:43",
+            "datepaid": "2026-10-25 18:17:24",
             "subtotal": "15.00",
-            "tax": "0.00",
-            "taxrate": "0",
-            "total": "15.00",
+            "tax": "3.60",
+            "taxrate": "24.0000",
+            "total": "18.60",
             "credit": "0.00",
             "tax2": "0.00",
             "taxtype": "Exclusive",
@@ -45,9 +45,9 @@
                         "whmcs_group_id": 0,
                         "quantity": 1,
                         "unit_price": "10.00",
-                        "tax_rate": "0.0000",
-                        "tax_amount": "0.00",
-                        "total": "10.00",
+                        "tax_rate": "24.0000",
+                        "tax_amount": "2.40",
+                        "total": "12.40",
                         "period_start": null,
                         "period_end": null
                     },
@@ -62,9 +62,9 @@
                         "whmcs_group_id": 0,
                         "quantity": 1,
                         "unit_price": "5.00",
-                        "tax_rate": "0.0000",
-                        "tax_amount": "0.00",
-                        "total": "5.00",
+                        "tax_rate": "24.0000",
+                        "tax_amount": "1.20",
+                        "total": "6.20",
                         "period_start": null,
                         "period_end": null
                     }
@@ -74,8 +74,8 @@
                 {
                     "transid": "TX-2",
                     "gateway": "banktransfer",
-                    "date": "2026-10-25 16:05:43",
-                    "amount": "15.00",
+                    "date": "2026-10-25 18:17:24",
+                    "amount": "18.60",
                     "refunded": "0.00"
                 }
             ],
@@ -134,7 +134,7 @@
             },
             "mycs": {
                 "source": "mycs",
-                "fingerprint": "ece16264ccc8d4e95d844f526bf4c289",
+                "fingerprint": "299096f708712789da44d2f675424d2a",
                 "ignore_invoicing": false,
                 "immediate_invoicing": true,
                 "adjustments": "0.00",
@@ -168,11 +168,11 @@
             "userid": 100001,
             "date": "2026-10-25",
             "duedate": "",
-            "datepaid": "2026-10-25 16:05:43",
+            "datepaid": "2026-10-25 18:17:24",
             "subtotal": "100.00",
-            "tax": "0.00",
-            "taxrate": "0",
-            "total": "100.00",
+            "tax": "24.00",
+            "taxrate": "24.0000",
+            "total": "124.00",
             "credit": "0.00",
             "tax2": "0.00",
             "taxtype": "Exclusive",
@@ -205,9 +205,9 @@
                         "whmcs_group_id": 0,
                         "quantity": 1,
                         "unit_price": "100.00",
-                        "tax_rate": "0.0000",
-                        "tax_amount": "0.00",
-                        "total": "100.00",
+                        "tax_rate": "24.0000",
+                        "tax_amount": "24.00",
+                        "total": "124.00",
                         "period_start": null,
                         "period_end": null
                     }
@@ -217,8 +217,8 @@
                 {
                     "transid": "TX-1",
                     "gateway": "banktransfer",
-                    "date": "2026-10-25 16:05:43",
-                    "amount": "100.00",
+                    "date": "2026-10-25 18:17:24",
+                    "amount": "124.00",
                     "refunded": "0.00"
                 }
             ],
@@ -248,7 +248,7 @@
             },
             "mycs": {
                 "source": "mycs",
-                "fingerprint": "5c72d95ef728b708a65bf6e99e2f1339",
+                "fingerprint": "7ddd2f666029ea67a74677fced2cd659",
                 "ignore_invoicing": false,
                 "immediate_invoicing": true,
                 "adjustments": "0.00",
