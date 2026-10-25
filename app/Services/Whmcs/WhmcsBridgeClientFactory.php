@@ -25,8 +25,28 @@ use Illuminate\Http\Client\Factory as HttpFactory;
  */
 class WhmcsBridgeClientFactory
 {
-    public function __construct(private readonly HttpFactory $http)
+    public function __construct(private readonly HttpFactory $http) {}
+
+    /**
+     * The client for the company's billing source: MyCS when «MyCS Bridge» is on (docs/bridges-connectors.md §12),
+     * else the WHMCS plugin (for()). Used where the inbox reads and writes back (fetch, single invoice, MARK); never
+     * falls back to WHMCS when MyCS is on but not usable (that would read the old system's invoices again).
+     */
+    public function forSource(Company $tenant): WhmcsBridgeClient
     {
+        if (! (bool) $tenant->mycs_enabled) {
+            return $this->for($tenant);
+        }
+        $url = $tenant->mycsBridgeUrl();
+        if ($url === null) {
+            throw new WhmcsNotConfigured("Tenant {$tenant->name} has MyCS Bridge on but no https MyCS address (Company → MyCS Bridge).");
+        }
+        $secret = (string) ($tenant->mycs_secret ?? '');
+        if ($secret === '') {
+            throw new WhmcsNotConfigured("Tenant {$tenant->name} has MyCS Bridge on but no shared secret (Company → MyCS Bridge).");
+        }
+
+        return new WhmcsBridgeClient(http: $this->http, bridgeUrl: $url, webhookSecret: $secret, mycs: true);
     }
 
     public function for(Company $tenant): WhmcsBridgeClient

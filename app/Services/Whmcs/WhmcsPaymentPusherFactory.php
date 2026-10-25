@@ -26,6 +26,10 @@ class WhmcsPaymentPusherFactory
      */
     public function for(Company $tenant): ?callable
     {
+        // MyCS takes no payments from ekdosi yet (its E3): nothing is pushed, rather than to the old WHMCS.
+        if ((bool) $tenant->mycs_enabled) {
+            return null;
+        }
         try {
             if ((bool) $tenant->whmcs_fetch_via_bridge) {
                 $client = $this->bridgeFactory->for($tenant);

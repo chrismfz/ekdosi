@@ -40,6 +40,9 @@ class Company extends Model
 
     public const WHMCS_BRIDGE_PATH = '/modules/addons/ekdosi_bridge/inbound.php';
 
+    /** MyCS's bridge endpoint, under its address (MyCS docs/ekdosi-bridge.md). */
+    public const MYCS_BRIDGE_PATH = '/api/ekdosi';
+
     /**
      * Deleting a tenant is all-or-nothing, and must work on MariaDB.
      *
@@ -213,6 +216,10 @@ class Company extends Model
         'whmcs_amount_includes_tax',
         // Slice 2: fetch the inbox feed from the bridge plugin (not the native API)
         'whmcs_fetch_via_bridge',
+        // «MyCS Bridge»: the billing source is MyCS (docs/bridges-connectors.md §12)
+        'mycs_enabled',
+        'mycs_url',
+        'mycs_secret',
         // Phase 2 (outbound): push an ekdosi settlement back to WHMCS as Paid (opt-in)
         'whmcs_push_payments',
         // G8 phase 2: άμεση-τιμολόγηση auto-issue knob + its default invoice/receipt types
@@ -238,6 +245,7 @@ class Company extends Model
         'mail_smtp_password',
         'whmcs_api_secret',
         'whmcs_webhook_secret',
+        'mycs_secret',
         'ai_api_key',
         // ΕΡΓΑΝΗ e-ΕΦΚΑ password.
         'ergani_password',
@@ -273,6 +281,8 @@ class Company extends Model
             'ai_monthly_token_cap' => 'integer',
             'ai_api_key' => MaybeEncrypted::class,
             'whmcs_webhook_secret' => MaybeEncrypted::class,
+            'mycs_enabled' => 'boolean',
+            'mycs_secret' => MaybeEncrypted::class,
             'whmcs_custom_field_map' => 'array',
             'income_tax_profile' => 'array',
             'whmcs_invoice_min_date' => 'date',
@@ -312,6 +322,37 @@ class Company extends Model
         return ! empty($this->whmcs_api_url)
             && ! empty($this->whmcs_api_identifier)
             && ! empty($this->whmcs_api_secret);
+    }
+
+    /**
+     * «MyCS Bridge» (docs/bridges-connectors.md §12): the inbox reads MyCS instead of WHMCS and the MARKs go back to it.
+     * Switched on by the operator; usesMycs() also needs its address and secret. On, it wins over WHMCS for the inbox
+     * (one source per company, or the same invoice would come twice).
+     */
+    public function usesMycs(): bool
+    {
+        return (bool) $this->mycs_enabled && $this->mycsBridgeUrl() !== null && filled($this->mycs_secret);
+    }
+
+    /** MyCS's bridge endpoint (`{mycs_url}/api/ekdosi`), or null without a usable https address. */
+    public function mycsBridgeUrl(): ?string
+    {
+        $url = rtrim((string) preg_replace('/[?#].*$/', '', trim((string) ($this->mycs_url ?? ''))), '/');
+        // Pasted with the endpoint already on it: the address is what is before it.
+        if (str_ends_with(strtolower($url), self::MYCS_BRIDGE_PATH)) {
+            $url = rtrim(substr($url, 0, -strlen(self::MYCS_BRIDGE_PATH)), '/');
+        }
+        if ($url === '' || ! preg_match('#^https://[^/\s]+#i', $url)) {
+            return null;
+        }
+
+        return $url.self::MYCS_BRIDGE_PATH;
+    }
+
+    /** A company the inbox pipeline reads from: WHMCS configured, or MyCS. */
+    public function hasBillingSource(): bool
+    {
+        return $this->hasWhmcsIntegration() || $this->usesMycs();
     }
 
     /**

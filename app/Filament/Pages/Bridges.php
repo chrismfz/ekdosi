@@ -90,6 +90,17 @@ class Bridges extends Page
             ];
         }
 
+        if ($key === 'mycs') {
+            // On and usable = the inbox reads it; on but missing its address or secret = says so.
+            [$status, $label, $color] = match (true) {
+                $tenant->usesMycs() => ['active', 'Ενεργό (πηγή των Εισερχομένων)', 'success'],
+                (bool) $tenant->mycs_enabled => ['misconfigured', 'Ενεργό αλλά χωρίς διεύθυνση ή secret', 'danger'],
+                default => ['unconfigured', 'Ανενεργό', 'gray'],
+            };
+
+            return [$status, $label, $color, $canConfigure ? CompanyResource::getUrl('edit', ['record' => $tenant]) : null];
+        }
+
         // A registered-but-unwired future source: show it, don't pretend it works.
         return ['planned', 'Διαθέσιμο (Phase 1)', 'warning', null];
     }

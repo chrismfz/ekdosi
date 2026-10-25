@@ -25,7 +25,7 @@ class WhmcsPaymentSyncStats extends StatsOverviewWidget
         $tenant = Filament::getTenant();
 
         return $tenant instanceof Company
-            && ($tenant->hasWhmcsIntegration() || $tenant->whmcs_fetch_via_bridge)
+            && ($tenant->hasBillingSource() || $tenant->whmcs_fetch_via_bridge)
             && (bool) auth()->user()?->can('ViewAny:PendingWhmcsInvoice')
             && (count(WhmcsPaymentSyncCache::inboundIds($tenant)) > 0
                 || ($tenant->whmcs_push_payments && count(WhmcsPaymentSyncCache::outboundIds($tenant)) > 0));

@@ -1143,6 +1143,100 @@ class CompanyForm
                                             ->dehydrateStateUsing(fn (string $state) => $state),
                                     ]),
                             ]),
+                        // «MyCS Bridge» (docs/bridges-connectors.md §12): MyCS instead of WHMCS as the inbox's source. Three
+                        // fields: MyCS says the rest outright (ΑΦΜ/ΔΟΥ/είδος, γκρινιάρης, αποδέκτης ανά γραμμή, καθαρά ποσά).
+                        Tab::make('MyCS Bridge')
+                            ->schema([
+                                Section::make('MyCS')
+                                    ->description('Η MyCS (το billing που διαδέχεται το WHMCS) ως πηγή των «Εισερχομένων». Ενεργό: τα πληρωμένα τιμολόγια έρχονται από τη MyCS και ο ΜΑΡΚ επιστρέφει εκεί· το WHMCS δεν διαβάζεται πια για αυτή την εταιρεία (μία πηγή, αλλιώς το ίδιο τιμολόγιο έρχεται δύο φορές). Δεν χρειάζεται χάρτης custom fields, «ποσά με ΦΠΑ» ή διακόπτης τρίτων: η MyCS τα δίνει έτοιμα. Κοινά με την καρτέλα «WHMCS bridge»: η ημερομηνία cut-over, η αυτόματη έκδοση και οι προεπιλεγμένοι τύποι παραστατικών.')
+                                    ->schema([
+                                        Toggle::make('mycs_enabled')
+                                            ->label('Πηγή των Εισερχομένων: MyCS')
+                                            ->helperText('Ανάβει την ημέρα του cut-over, όταν σταματά το WHMCS. Στη MyCS: Settings → Ekdosi, με το ίδιο secret.'),
+                                        TextInput::make('mycs_url')
+                                            ->label('Διεύθυνση MyCS')
+                                            ->url()
+                                            ->rule('starts_with:https://')
+                                            ->maxLength(255)
+                                            ->placeholder('https://my.example.gr')
+                                            ->helperText('Η αρχική διεύθυνση της MyCS· η γέφυρα είναι στο /api/ekdosi.')
+                                            ->requiredIf('mycs_enabled', true),
+                                        TextInput::make('mycs_secret')
+                                            ->label('Κοινό secret')
+                                            ->password()
+                                            ->revealable()
+                                            ->minLength(32)
+                                            ->maxLength(255)
+                                            ->helperText('Ίδιο με της MyCS (Settings → Ekdosi), τουλάχιστον 32 χαρακτήρες. Κρυπτογραφείται. Κενό: μένει το αποθηκευμένο.')
+                                            ->dehydrated(fn (?string $state) => filled($state))
+                                            ->dehydrateStateUsing(fn (string $state) => $state),
+                                        FormAction::make('test_mycs_connection')
+                                            ->label('Test connection')
+                                            ->icon('heroicon-o-signal')
+                                            ->color('gray')
+                                            ->authorize(fn (?Company $record) => $record === null
+                                                ? false
+                                                : (auth()->user()?->can('update', $record) ?? false))
+                                            ->action(function (?Company $record) {
+                                                if (! $record) {
+                                                    Notification::make()->title('Save the company first, then test.')->warning()->send();
+
+                                                    return;
+                                                }
+                                                if (! (bool) $record->mycs_enabled) {
+                                                    Notification::make()->title('Ενεργοποίησε και αποθήκευσε πρώτα το MyCS Bridge.')->warning()->send();
+
+                                                    return;
+                                                }
+                                                try {
+                                                    $answer = app(WhmcsBridgeClientFactory::class)->forSource($record)->ping();
+                                                    Notification::make()
+                                                        ->title('Συνδέθηκε με τη MyCS')
+                                                        ->body('Η γέφυρα απαντά και δέχεται την υπογραφή μας ('.implode(', ', (array) ($answer['ops'] ?? [])).').')
+                                                        ->success()->send();
+                                                } catch (WhmcsNotConfigured $e) {
+                                                    Notification::make()->title('MyCS: λείπουν ρυθμίσεις')->body($e->getMessage())->warning()->send();
+                                                } catch (WhmcsUnreachable $e) {
+                                                    Notification::make()->title('MyCS: δεν απαντά')->body($e->getMessage())->danger()->persistent()->send();
+                                                } catch (WhmcsApiException $e) {
+                                                    // 404 = off in MyCS, 401 = another secret, 422 = no secret there.
+                                                    Notification::make()->title('MyCS: αρνήθηκε')->body($e->getMessage().' — 404: η γέφυρα είναι κλειστή στη MyCS· invalid_signature: άλλο secret.')->danger()->persistent()->send();
+                                                }
+                                            }),
+                                        FormAction::make('fetch_pending_mycs')
+                                            ->label('Fetch now')
+                                            ->icon('heroicon-o-arrow-down-tray')
+                                            ->color('primary')
+                                            ->requiresConfirmation()
+                                            ->modalHeading('Λήψη από τη MyCS;')
+                                            ->modalDescription('Φέρνει τα πληρωμένα τιμολόγια της MyCS που δεν έχουν παραστατικό στα «Εισερχόμενα», για έλεγχο. Ασφαλές να ξανατρέξει. Δεν εκδίδει τίποτα στην ΑΑΔΕ.')
+                                            ->modalSubmitActionLabel('Fetch now')
+                                            ->visible(fn (?Company $record) => (bool) $record?->mycs_enabled)
+                                            ->authorize(fn (?Company $record) => $record === null
+                                                ? false
+                                                : (auth()->user()?->can('update', $record) ?? false))
+                                            ->action(function (?Company $record) {
+                                                if (! $record) {
+                                                    return;
+                                                }
+                                                // The same command as the scheduler: it reads MyCS when the bridge is on.
+                                                try {
+                                                    $exit = Artisan::call('whmcs:fetch-pending', ['--tenant' => $record->slug]);
+                                                } catch (\Throwable $e) {
+                                                    Notification::make()->title('Fetch failed')->body($e->getMessage())->danger()->persistent()->send();
+
+                                                    return;
+                                                }
+                                                $summary = collect(preg_split('/\r?\n/', trim(Artisan::output())))
+                                                    ->first(fn ($l) => str_contains((string) $l, 'Summary')) ?: 'Done.';
+                                                Notification::make()
+                                                    ->title($exit === 0 ? "Fetched into inbox: {$record->name}" : 'Fetched with issues (exit '.$exit.')')
+                                                    ->body((string) $summary)
+                                                    ->{$exit === 0 ? 'success' : 'warning'}()
+                                                    ->persistent()->send();
+                                            }),
+                                    ]),
+                            ]),
                         Tab::make('AI Βοηθός')
                             ->schema([
                                 Toggle::make('ai_assistant_enabled')

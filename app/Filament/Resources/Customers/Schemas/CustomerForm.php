@@ -66,7 +66,9 @@ class CustomerForm
                                     // not dehydrated ⇒ the mirrored value is never touched by a save.)
                                     ->disabled(fn (?Customer $record): bool => self::immediateInvoiceGovernedByWhmcs($record))
                                     ->hintIcon(fn (?Customer $record): ?string => self::immediateInvoiceGovernedByWhmcs($record) ? 'heroicon-m-lock-closed' : null)
-                                    ->hint(fn (?Customer $record): ?string => self::immediateInvoiceGovernedByWhmcs($record) ? 'Ελέγχεται από το WHMCS («γκρινιάρης»)' : null),
+                                    ->hint(fn (?Customer $record): ?string => self::immediateInvoiceGovernedByWhmcs($record)
+                                        ? ((bool) Filament::getTenant()?->mycs_enabled ? 'Ελέγχεται από τη MyCS («Άμεση τιμολόγηση» του πελάτη)' : 'Ελέγχεται από το WHMCS («γκρινιάρης»)')
+                                        : null),
 
                                 Toggle::make('needs_invoice_before_payment')
                                     ->label('Τιμολόγιο πριν την πληρωμή')
@@ -609,6 +611,9 @@ class CustomerForm
             return false;
         }
 
-        return Filament::getTenant()?->whmcsCustomFieldId('griniaris') !== null;
+        // On «MyCS Bridge» MyCS owns it (clients.immediate_invoicing), mirrored on every ingest too.
+        $tenant = Filament::getTenant();
+
+        return $tenant?->whmcsCustomFieldId('griniaris') !== null || (bool) $tenant?->mycs_enabled;
     }
 }

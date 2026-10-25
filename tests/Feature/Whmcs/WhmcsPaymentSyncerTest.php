@@ -87,6 +87,28 @@ class WhmcsPaymentSyncerTest extends TestCase
         $this->assertEqualsWithDelta(0.0, app(InvoiceBalance::class)->for($invoice->fresh())->balance, 0.001);
     }
 
+    /** MyCS Bridge review: WHMCS and MyCS share the id space; «Paid» for another client is not this receivable's. */
+    public function test_does_not_record_a_paid_invoice_of_another_client(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 5001, 'whmcs_userid' => 77, 'invoice_id' => $invoice->id,
+            'payload' => ['status' => 'Paid'], 'match_reason' => PendingWhmcsInvoice::REASON_LINKED,
+            'status' => PendingWhmcsInvoice::STATUS_FILED,
+        ]);
+
+        $result = $this->syncer()->syncTenant(
+            $this->tenant,
+            fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-05-22 09:00:00', 'userid' => 88],
+        );
+
+        $this->assertSame(0, $result->recorded);
+        $this->assertSame(0, Payment::where('company_id', $this->tenant->id)->count());
+
+        $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-05-22 09:00:00', 'userid' => 77]);
+        $this->assertSame(1, Payment::where('company_id', $this->tenant->id)->count());
+    }
+
     public function test_does_not_record_when_whmcs_still_unpaid(): void
     {
         $invoice = $this->openInvoice(124.0);

@@ -383,8 +383,9 @@ class OperatorHealthReport
         $enabled = $this->scheduleEnabled('whmcs_fetch_enabled');
 
         return $this->safeValue(fn () => Company::query()
-            ->whereNotNull('whmcs_api_url')
-            ->where('whmcs_api_url', '!=', '')
+            // Its inbox fetch: from WHMCS, or from MyCS on «MyCS Bridge» (docs/bridges-connectors.md §12).
+            ->where(fn ($q) => $q->where(fn ($w) => $w->whereNotNull('whmcs_api_url')->where('whmcs_api_url', '!=', ''))
+                ->orWhere('mycs_enabled', true))
             ->orderBy('slug')
             ->get()
             ->map(function (Company $tenant) use ($enabled): array {

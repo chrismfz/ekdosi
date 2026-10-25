@@ -2,6 +2,7 @@
 
 namespace App\Console\Commands;
 
+use App\Support\Billing\MycsPayload;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceType;
@@ -127,7 +128,7 @@ class WhmcsAutoIssue extends Command
 
                 return null;
             }
-            if (! $tenant->hasWhmcsIntegration() || ! $tenant->whmcs_auto_issue_immediate) {
+            if (! $tenant->hasBillingSource() || ! $tenant->whmcs_auto_issue_immediate) {
                 $this->warn("Tenant '{$slug}' has not armed άμεση τιμολόγηση auto-issue (or WHMCS isn't configured). Nothing to do.");
 
                 return collect();
@@ -143,7 +144,7 @@ class WhmcsAutoIssue extends Command
         return Company::query()
             ->where('whmcs_auto_issue_immediate', true)
             ->get()
-            ->filter(fn (Company $c) => $c->hasWhmcsIntegration())
+            ->filter(fn (Company $c) => $c->hasBillingSource())
             ->values();
     }
 
@@ -390,6 +391,10 @@ class WhmcsAutoIssue extends Command
             // afm is needed by ownLinesAreReceipt() (no ΑΦΜ → απόδειξη).
             ->with(['customer:id,company_id,name,afm,needs_immediate_invoice'])
             ->orderBy('id')
-            ->get();
+            ->get()
+            // «Ignore invoicing» in MyCS: released to review is for a human to look at, never to be filed unattended.
+            ->reject(fn (PendingWhmcsInvoice $row) => MycsPayload::is(is_array($row->payload) ? $row->payload : null)
+                && MycsPayload::ignored($row->payload))
+            ->values();
     }
 }

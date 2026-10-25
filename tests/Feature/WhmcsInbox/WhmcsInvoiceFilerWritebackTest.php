@@ -285,7 +285,7 @@ class WhmcsInvoiceFilerWritebackTest extends TestCase
         $bridgeClient = \Mockery::mock(\App\Services\Whmcs\WhmcsBridgeClient::class);
         $bridgeClient->shouldReceive('setInvoiced')
             ->andThrow(new \RuntimeException('totally unexpected'));
-        $bridgeFactory->shouldReceive('for')->andReturn($bridgeClient);
+        $bridgeFactory->shouldReceive('for', 'forSource')->andReturn($bridgeClient);
         $this->app->instance(\App\Services\Whmcs\WhmcsBridgeClientFactory::class, $bridgeFactory);
 
         $pending = $this->makePending();

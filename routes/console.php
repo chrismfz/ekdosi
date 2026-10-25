@@ -133,9 +133,10 @@ $trackSchedule(
 $trackSchedule(
     Schedule::call(function () use ($sweepTenants) {
         $sweepTenants(
+            // WHMCS-configured, or on «MyCS Bridge» (the command reads MyCS then).
             Company::query()
-                ->whereNotNull('whmcs_api_url')
-                ->where('whmcs_api_url', '!=', '')
+                ->where(fn ($q) => $q->where(fn ($w) => $w->whereNotNull('whmcs_api_url')->where('whmcs_api_url', '!=', ''))
+                    ->orWhere('mycs_enabled', true))
                 ->get(),
             'whmcs:fetch-pending',
             fn (Company $c) => app(HealthRecorder::class)->recordWhmcsFetch($c, 1),
@@ -159,6 +160,7 @@ $trackSchedule(
             Company::query()
                 ->whereNotNull('whmcs_api_url')
                 ->where('whmcs_api_url', '!=', '')
+                ->where('mycs_enabled', false)   // WHMCS is frozen for them (docs/bridges-connectors.md §12)
                 ->get(),
             'whmcs:fetch-unpaid',
             fn () => null,   // report($e) already logs an uncaught throw; no separate health key for this opt-in fetch

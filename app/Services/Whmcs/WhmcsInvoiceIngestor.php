@@ -2,6 +2,7 @@
 
 namespace App\Services\Whmcs;
 
+use App\Support\Billing\MycsPayload;
 use App\Exceptions\Whmcs\WhmcsApiException;
 use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
@@ -11,6 +12,7 @@ use App\Models\PendingWhmcsInvoice;
 use App\Support\Hr\ErganiStaff;
 use Filament\Notifications\Notification;
 use Illuminate\Database\QueryException;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use InvalidArgumentException;
@@ -94,6 +96,22 @@ class WhmcsInvoiceIngestor
         unset($whmcsInvoicePayload['third_party']);
         $tp = $this->thirdPartyDecision($tenant, $invoiceId, $embeddedRouting);
 
+        // MyCS's credit/debit notes change its total, not its lines: a document built from the lines would be for the
+        // wrong amount. Held for the operator, on every path (docs/bridges-connectors.md §12).
+        // Held when first seen, or when the amount changed: once the operator checked it and sent it back to review, the
+        // same notes don't hold it again on every fetch (review of #701).
+        $adjustments = MycsPayload::is($whmcsInvoicePayload) ? MycsPayload::adjustments($whmcsInvoicePayload) : 0.0;
+        $adjustmentNote = $adjustments == 0.0 ? null : 'Η MyCS έχει πιστωτικό/χρεωστικό σημείωμα '
+            .number_format($adjustments, 2, ',', '.').' € σε αυτό το τιμολόγιο: το σύνολο διαφέρει από τις γραμμές — '
+            .'έλεγξε το ποσό πριν την έκδοση.';
+        // «Ignore invoicing» in MyCS: held, never issued unattended (the feed leaves such clients out; this is for an
+        // invoice read by id, or staged before the flag was set). Held when it is new, as the notes (final review of #701).
+        $ignored = MycsPayload::is($whmcsInvoicePayload) && MycsPayload::ignored($whmcsInvoicePayload);
+        if ($ignored) {
+            $adjustmentNote = trim('Ο πελάτης είναι «χωρίς τιμολόγηση» στη MyCS: δεν εκδίδεται, εκτός αν το αποφασίσεις. '
+                .($adjustmentNote ?? ''));
+        }
+
         // A WHMCS "mass payment" / consolidated invoice (every line references
         // another invoice, no VAT of its own) is a payment-grouping artefact,
         // not a sale — park it HELD so neither the operator nor άμεση
@@ -110,7 +128,7 @@ class WhmcsInvoiceIngestor
         // lockForUpdate SELECT finds it and we take the clean existing-row path.
         // Belt (retry) + suspenders (inline unique-violation catch).
         $result = DB::transaction(function () use (
-            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs
+            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored
         ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
@@ -129,7 +147,7 @@ class WhmcsInvoiceIngestor
             $consolidatedReason = $isConsolidated
                 ? PendingWhmcsInvoice::consolidatedPaymentReason($consolidatedRefs)
                 : null;
-            $createStatus = ($isConsolidated || $tp['hold'])
+            $createStatus = ($isConsolidated || $tp['hold'] || $adjustmentNote !== null)
                 ? PendingWhmcsInvoice::STATUS_HELD
                 : PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
 
@@ -137,7 +155,7 @@ class WhmcsInvoiceIngestor
                 try {
                     $row = PendingWhmcsInvoice::create([
                         'company_id' => $tenant->id,
-                        'source' => PendingWhmcsInvoice::SOURCE_WHMCS,
+                        'source' => PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload),
                         'whmcs_invoice_id' => $invoiceId,
                         'whmcs_userid' => $whmcsUserId ?: null,
                         'customer_id' => $customerId,
@@ -146,8 +164,8 @@ class WhmcsInvoiceIngestor
                         'third_party_state' => $tp['state'],
                         'third_party_resolution' => $tp['resolution'],
                         'status' => $createStatus,
-                        'notes' => $consolidatedReason ?? $tp['note'],
-                        'hold_reason' => $consolidatedReason,
+                        'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '')) ?: null),
+                        'hold_reason' => $consolidatedReason ?? $adjustmentNote,
                     ]);
 
                     return new IngestionResult(row: $row, created: true, auditPreserved: false);
@@ -180,6 +198,15 @@ class WhmcsInvoiceIngestor
                 }
             }
 
+            // A decided row can't be re-staged; but another system's invoice under its number must not pass unseen.
+            if (($existing->isAuditFrozen() || $existing->hasBeenConsolidated())
+                && $existing->source !== PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload)
+                && $existing->whmcs_userid !== null && (int) $existing->whmcs_userid !== $whmcsUserId
+                && Cache::add('inbox-source-collision:'.$existing->id, true, now()->addDay())) {   // once a day, not every fetch
+                Log::error('Inbox: a decided row\'s invoice id came from the other source for another client — not staged', [
+                    'pending_id' => $existing->id, 'whmcs_invoice_id' => $invoiceId, 'stored_userid' => $existing->whmcs_userid, 'incoming_userid' => $whmcsUserId,
+                ]);
+            }
             if ($existing->isAuditFrozen() || $existing->hasBeenConsolidated()) {
                 // Freeze the payload/customer/status against this re-ingest; touch
                 // updated_at so the inbox can show "WHMCS pinged us again about this
@@ -204,6 +231,35 @@ class WhmcsInvoiceIngestor
                 return new IngestionResult(row: $existing, created: false, auditPreserved: true);
             }
 
+            // Two sources, one id space (MyCS keeps WHMCS's invoice ids; docs/bridges-connectors.md §12). A WHMCS payload
+            // never replaces a row MyCS staged: WHMCS is frozen at the cut-over, its «Unpaid» or old lines are stale.
+            $incoming = PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload);
+            if ($existing->source === PendingWhmcsInvoice::SOURCE_MYCS && $incoming === PendingWhmcsInvoice::SOURCE_WHMCS) {
+                $existing->touch();
+
+                return new IngestionResult(row: $existing, created: false, auditPreserved: true);
+            }
+            // The same number from the other system for another customer: not the same invoice (WHMCS issued past the
+            // last import). Kept for the operator, the staged payload untouched.
+            // A stored row with no client is unknown, not «the same» (round 3 of #701).
+            if ($existing->source !== $incoming && ($existing->whmcs_userid === null || (int) $existing->whmcs_userid !== $whmcsUserId)) {
+                // Released by the operator once: not held again on every fetch. Either way the incoming payload is not
+                // this row's, so nothing of it is mirrored onto a customer (auditPreserved) (review of #701).
+                if ($existing->source_conflict) {
+                    $existing->touch();
+
+                    return new IngestionResult(row: $existing, created: false, auditPreserved: true);
+                }
+                $note = 'Ο ίδιος αριθμός '.$invoiceId.' ήρθε από το WHMCS και από τη MyCS για άλλον πελάτη ('
+                    .$existing->whmcs_userid.' / '.$whmcsUserId.'): έλεγξε ποιο τιμολόγιο είναι, πριν την έκδοση.';
+                Log::warning('Inbox: the same invoice id from WHMCS and MyCS for different clients', [
+                    'pending_id' => $existing->id, 'whmcs_invoice_id' => $invoiceId, 'stored_userid' => $existing->whmcs_userid, 'incoming_userid' => $whmcsUserId,
+                ]);
+                $existing->update(['status' => PendingWhmcsInvoice::STATUS_HELD, 'notes' => $note, 'hold_reason' => $note, 'source_conflict' => true]);
+
+                return new IngestionResult(row: $existing, created: false, auditPreserved: true);
+            }
+
             // Pre-filing (status=pending_review) row: refresh the
             // snapshot from the latest WHMCS payload, re-run the
             // matcher (a customer might have been linked since the
@@ -213,6 +269,8 @@ class WhmcsInvoiceIngestor
             // unresolvable so a newly-mixed invoice can't slip through to
             // filing.
             $update = [
+                // A row staged from WHMCS before the cut-over and read again from MyCS is MyCS's now.
+                'source' => PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload),
                 'whmcs_userid' => $whmcsUserId ?: null,
                 'customer_id' => $customerId,
                 'payload' => $whmcsInvoicePayload,
@@ -226,7 +284,13 @@ class WhmcsInvoiceIngestor
                 $update['hold_reason'] = $consolidatedReason;
             } elseif ($tp['hold']) {
                 $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
-                $update['notes'] = $tp['note'];
+                $update['notes'] = trim(($tp['note'] ?? '').' '.($adjustmentNote ?? ''));
+            } elseif ($adjustmentNote !== null && (MycsPayload::adjustments(is_array($existing->payload) ? $existing->payload : []) != $adjustments
+                || ($ignored && ! MycsPayload::ignored(is_array($existing->payload) ? $existing->payload : [])))) {
+                // New notes, or another amount, since the operator last saw it.
+                $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
+                $update['notes'] = $adjustmentNote;
+                $update['hold_reason'] = $adjustmentNote;
             }
             $existing->update($update);
 
@@ -401,7 +465,8 @@ class WhmcsInvoiceIngestor
     {
         $noop = ['state' => null, 'customer_id' => null, 'resolution' => null, 'hold' => false, 'note' => null];
 
-        if (! $tenant->whmcs_third_party_enabled) {
+        // MyCS always sends each line's recipient (its contacts are the routing): no kill-switch to arm.
+        if (! $tenant->whmcs_third_party_enabled && ! $tenant->usesMycs()) {
             return $noop;
         }
 
@@ -411,7 +476,7 @@ class WhmcsInvoiceIngestor
             $resolution = ThirdPartyResolution::fromBridgeResponse($embeddedRouting);
         } else {
             try {
-                $resolution = $this->bridgeFactory->for($tenant)->resolveThirdParty($invoiceId);
+                $resolution = $this->bridgeFactory->forSource($tenant)->resolveThirdParty($invoiceId);
             } catch (WhmcsNotConfigured|WhmcsUnreachable|WhmcsApiException $e) {
                 // Bridge not configured / resolve.php not deployed / unreachable.
                 // Non-fatal: fall back to today's behaviour.

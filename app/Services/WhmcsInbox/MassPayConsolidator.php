@@ -198,7 +198,8 @@ class MassPayConsolidator
                 PendingWhmcsInvoice::updateOrCreate(
                     ['company_id' => $tenant->id, 'whmcs_invoice_id' => $child->whmcsInvoiceId],
                     [
-                        'source' => PendingWhmcsInvoice::SOURCE_WHMCS,
+                        // The children are read from the company's source (MyCS after the cut-over).
+                        'source' => (bool) $tenant->mycs_enabled ? PendingWhmcsInvoice::SOURCE_MYCS : PendingWhmcsInvoice::SOURCE_WHMCS,
                         'whmcs_userid' => $child->whmcsUserId,
                         'customer_id' => $massPay->customer_id,
                         'masspay_parent_id' => $massPay->id,

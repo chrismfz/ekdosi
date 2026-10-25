@@ -88,6 +88,16 @@ class WhmcsInvoicePaidController
             ], Response::HTTP_UNAUTHORIZED);
         }
 
+        // On «MyCS Bridge» the company's invoices come from MyCS, which keeps WHMCS's ids and goes on from them: a late
+        // WHMCS push would stage another system's invoice under an id MyCS uses (docs/bridges-connectors.md §12).
+        if ((bool) $tenant->mycs_enabled) {
+            $this->logRejection($request, $slug, 'source_is_mycs');
+            return $this->json([
+                'error'   => 'source_is_mycs',
+                'message' => 'This company reads its invoices from MyCS now; WHMCS pushes are not taken.',
+            ], Response::HTTP_CONFLICT);
+        }
+
         $body = $request->json()->all();
         $whmcsInvoiceId = (int) ($body['whmcs_invoice_id'] ?? 0);
         if ($whmcsInvoiceId <= 0) {

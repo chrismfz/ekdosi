@@ -5,6 +5,7 @@ namespace App\Models;
 use App\Models\Concerns\BelongsToCompany;
 use App\Models\Observers\PendingWhmcsInvoiceObserver;
 use App\Support\Afm;
+use App\Support\Billing\MycsPayload;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -115,6 +116,12 @@ class PendingWhmcsInvoice extends Model
     public const WRITEBACK_SKIPPED = 'skipped';
 
     /**
+     * MyCS refused the MARK (409 invoice_changed): the invoice was merged into another or split there after it was
+     * read. The document stands as issued; not retried (it would get the same 409). docs/bridges-connectors.md §12.
+     */
+    public const WRITEBACK_CHANGED = 'changed';
+
+    /**
      * T-1b: third-party-invoicing resolution state. `null` = not evaluated
      * (kill-switch off, or resolution unavailable). Set by the ingestor from
      * the bridge's resolve.php.
@@ -131,9 +138,24 @@ class PendingWhmcsInvoice extends Model
     // docs/bridges-connectors.md.
     public const SOURCE_WHMCS = 'whmcs';
 
+    /** «MyCS Bridge» (docs/bridges-connectors.md §12): the payload carries a `mycs` block. */
+    public const SOURCE_MYCS = 'mycs';
+
+    /** @param  array<string, mixed>  $payload */
+    public static function sourceOf(array $payload): string
+    {
+        return MycsPayload::is($payload) ? self::SOURCE_MYCS : self::SOURCE_WHMCS;
+    }
+
+    public function isFromMycs(): bool
+    {
+        return MycsPayload::is(is_array($this->payload) ? $this->payload : null);
+    }
+
     protected $fillable = [
         'company_id',
         'source',
+        'source_conflict',
         'whmcs_invoice_id',
         'whmcs_userid',
         'customer_id',
@@ -167,6 +189,7 @@ class PendingWhmcsInvoice extends Model
             'whmcs_userid' => 'integer',
             'legacy_invoiced' => 'integer',
             'masspay_parent_id' => 'integer',
+            'source_conflict' => 'boolean',
         ];
     }
 
@@ -286,6 +309,10 @@ class PendingWhmcsInvoice extends Model
 
     private function resolveWhmcsCustomField(string $role): ?string
     {
+        // MyCS says it outright: no field map (docs/bridges-connectors.md §12).
+        if ($this->isFromMycs()) {
+            return MycsPayload::role($this->payload, $role);
+        }
         $fieldId = $this->company?->whmcsCustomFieldId($role);
         if ($fieldId === null) {
             return null;
@@ -325,6 +352,9 @@ class PendingWhmcsInvoice extends Model
      */
     public function wantsInvoice(): ?bool
     {
+        if ($this->isFromMycs()) {
+            return MycsPayload::wantsInvoice($this->payload);
+        }
         if ($this->company?->whmcsCustomFieldId('wantsinvoice') === null) {
             return null;
         }
@@ -350,6 +380,10 @@ class PendingWhmcsInvoice extends Model
      */
     public function wantsImmediateInvoice(): ?bool
     {
+        // MyCS always says (clients.immediate_invoicing): its answer is the truth, as a mapped WHMCS field's.
+        if ($this->isFromMycs()) {
+            return MycsPayload::immediate($this->payload);
+        }
         if ($this->company?->whmcsCustomFieldId('griniaris') === null) {
             return null;
         }

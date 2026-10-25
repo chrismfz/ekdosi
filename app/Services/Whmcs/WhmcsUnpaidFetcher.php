@@ -46,6 +46,11 @@ class WhmcsUnpaidFetcher
      */
     public function fetch(Company $tenant): UnpaidFetchSummary
     {
+        // On «MyCS Bridge» WHMCS is frozen at the cut-over: its «Unpaid» would overwrite invoices MyCS has since seen
+        // paid (docs/bridges-connectors.md §12). MyCS has no unpaid feed yet: nothing is read.
+        if ((bool) $tenant->mycs_enabled) {
+            throw new WhmcsNotConfigured("Tenant {$tenant->name} reads its invoices from MyCS: the WHMCS unpaid fetch is off for it.");
+        }
         $client = $this->factory->for($tenant);
         $minDate = $tenant->whmcs_invoice_min_date?->format('Y-m-d');
 

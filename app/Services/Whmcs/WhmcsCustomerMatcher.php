@@ -5,6 +5,7 @@ namespace App\Services\Whmcs;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Support\Afm;
+use App\Support\Billing\MycsPayload;
 
 /**
  * Match a WHMCS client (or pending-invoice row carrying client fields)
@@ -123,6 +124,10 @@ class WhmcsCustomerMatcher
      */
     private function extractCustomField(array $whmcsClient, Company $tenant, string $role): ?string
     {
+        // A MyCS payload says it outright (docs/bridges-connectors.md §12).
+        if (MycsPayload::is($whmcsClient)) {
+            return MycsPayload::role($whmcsClient, $role);
+        }
         $fieldId = $tenant->whmcsCustomFieldId($role);
         if ($fieldId === null) {
             return null;
