@@ -87,6 +87,15 @@ class WhmcsFetchPending extends Command
         // matching/staging is identical; only the source changes. Chosen by the
         // explicit --via-bridge flag OR the per-tenant whmcs_fetch_via_bridge
         // toggle; --native forces the native path. (--preview is native-only.)
+        // «MyCS Bridge» on: MyCS is the source, always through its bridge (docs/bridges-connectors.md §12); WHMCS is
+        // not read for this company any more, whatever the flags say (one source, or the same invoice comes twice).
+        if ((bool) $tenant->mycs_enabled) {
+            if ((bool) $this->option('native') || (bool) $this->option('preview')) {
+                $this->warn('MyCS Bridge is on for this company: --native/--preview (WHMCS) are ignored.');
+            }
+
+            return $this->recordHealthAndReturn($tenant, $this->ingestViaBridge($tenant, $ingestor));
+        }
         $useBridge = ! (bool) $this->option('native')
             && ((bool) $this->option('via-bridge') || (bool) $tenant->whmcs_fetch_via_bridge);
         if ($useBridge && (bool) $this->option('preview')) {
@@ -274,14 +283,14 @@ class WhmcsFetchPending extends Command
     private function ingestViaBridge(Company $tenant, WhmcsInvoiceIngestor $ingestor): int
     {
         try {
-            $bridge = app(WhmcsBridgeClientFactory::class)->for($tenant);
+            $bridge = app(WhmcsBridgeClientFactory::class)->forSource($tenant);
         } catch (WhmcsNotConfigured $e) {
             $this->error($e->getMessage());
 
             return 3;
         }
 
-        $this->info('Source: ekdosi_bridge plugin (resolve.php op=invoices).');
+        $this->info($bridge->isMycs() ? 'Source: MyCS (op=invoices).' : 'Source: ekdosi_bridge plugin (resolve.php op=invoices).');
         $minDate = $tenant->whmcs_invoice_min_date?->format('Y-m-d');
         $limit = max(1, (int) $this->option('limit'));
         $offset = max(0, (int) $this->option('offset'));
@@ -298,7 +307,7 @@ class WhmcsFetchPending extends Command
                 // tenant has it enabled — non-third-party tenants pay nothing,
                 // and the ingestor then needs no separate resolve call.
                 $payloads = $bridge->fetchPendingInvoices(
-                    $offset, $limit, $minDate, 'paid_unfiled', (bool) $tenant->whmcs_third_party_enabled,
+                    $offset, $limit, $minDate, 'paid_unfiled', $bridge->isMycs() || (bool) $tenant->whmcs_third_party_enabled,
                 );
             } catch (WhmcsUnreachable $e) {
                 $this->error("Bridge unreachable: {$e->getMessage()}");

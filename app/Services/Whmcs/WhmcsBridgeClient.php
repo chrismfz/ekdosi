@@ -48,11 +48,33 @@ class WhmcsBridgeClient
 
     private const HTTP_CONNECT_TIMEOUT_SECONDS = 5;
 
+    /**
+     * $mycs: the other end is MyCS (docs/bridges-connectors.md §12), not the WHMCS plugin. Same HMAC, same feed shape;
+     * one endpoint for every op (no inbound.php/resolve.php pair), and the MARK goes back as `op=mark` with the
+     * invoice's fingerprint, so MyCS takes it only for the invoice as it was read.
+     */
     public function __construct(
         private readonly HttpFactory $http,
         private readonly string $bridgeUrl,
         private readonly string $webhookSecret,
+        private readonly bool $mycs = false,
     ) {}
+
+    public function isMycs(): bool
+    {
+        return $this->mycs;
+    }
+
+    /**
+     * MyCS only: is the bridge there, on, and signing with our secret? Returns its answer
+     * (`{status: ok, source: mycs, ops: […]}`); throws as every op does.
+     *
+     * @return array<string, mixed>
+     */
+    public function ping(): array
+    {
+        return $this->postResolve(['op' => 'ping']);
+    }
 
     /**
      * Push the MARK value into the bridge's mod_ekdosi_invoice_marks
@@ -69,8 +91,8 @@ class WhmcsBridgeClient
      *                        VARCHAR column, so there are no
      *                        column-width concerns.
      * @param  string|null  $invcode  The ekdosi ΤΠΥ (e.g. ΑΠΥ423) shown next to
-     *                                 the MARK on the WHMCS admin badges. Optional
-     *                                 — omitted from the body when null.
+     *                                the MARK on the WHMCS admin badges. Optional
+     *                                — omitted from the body when null.
      *
      * Throws:
      *  - WhmcsUnreachable if the WHMCS server is unreachable / TLS handshake fails
@@ -82,12 +104,16 @@ class WhmcsBridgeClient
      * message if they need to distinguish (the filer currently
      * treats it as a non-fatal log).
      */
-    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null, ?string $pdfUrl = null): void
+    public function setInvoiced(int $whmcsInvoiceId, string $mark, ?string $invcode = null, ?string $state = null, ?string $pdfUrl = null, ?string $fingerprint = null): void
     {
-        $bodyData = [
-            'whmcs_invoice_id' => $whmcsInvoiceId,
-            'mark' => $mark,
-        ];
+        // MyCS: the same write-back as an op on its one endpoint, with the fingerprint of the invoice as it was read
+        // (a 409 invoice_changed when it changed since: merged, split, a line or note changed).
+        $bodyData = $this->mycs
+            ? array_filter(['op' => 'mark', 'invoice_id' => $whmcsInvoiceId, 'mark' => $mark, 'fingerprint' => $fingerprint], fn ($v) => $v !== null && $v !== '')
+            : [
+                'whmcs_invoice_id' => $whmcsInvoiceId,
+                'mark' => $mark,
+            ];
         if ($invcode !== null && $invcode !== '') {
             $bodyData['invcode'] = $invcode;
         }
@@ -119,7 +145,7 @@ class WhmcsBridgeClient
                 ->post($this->bridgeUrl);
         } catch (ConnectionException $e) {
             throw new WhmcsUnreachable(
-                'ekdosi_bridge plugin unreachable: '.$e->getMessage(),
+                $this->label().' unreachable: '.$e->getMessage(),
                 0,
                 $e,
             );
@@ -131,10 +157,10 @@ class WhmcsBridgeClient
             // key (per the plugin's response shape).
             $payload = $response->json();
             $message = is_array($payload) && isset($payload['error'])
-                ? (string) $payload['error']
-                : ('ekdosi_bridge HTTP '.$response->status());
+                ? (string) $payload['error'].(isset($payload['message']) ? ' ('.$payload['message'].')' : '')
+                : ($this->label().' HTTP '.$response->status());
             throw new WhmcsApiException(
-                'ekdosi_bridge set_invoiced failed: '.$message,
+                $this->label().' set_invoiced failed: '.$message,
             );
         }
     }
@@ -198,7 +224,7 @@ class WhmcsBridgeClient
      *
      * Throws WhmcsUnreachable / WhmcsApiException like resolveThirdParty.
      *
-     * @return array<int, array<string, mixed>>  the page's payloads (empty = end)
+     * @return array<int, array<string, mixed>> the page's payloads (empty = end)
      */
     public function fetchPendingInvoices(int $offset, int $limit = 100, ?string $since = null, string $status = 'paid_unfiled', bool $withRouting = false): array
     {
@@ -368,7 +394,7 @@ class WhmcsBridgeClient
                 ->post($this->resolveUrl());
         } catch (ConnectionException $e) {
             throw new WhmcsUnreachable(
-                'ekdosi_bridge plugin unreachable: '.$e->getMessage(),
+                $this->label().' unreachable: '.$e->getMessage(),
                 0,
                 $e,
             );
@@ -378,8 +404,8 @@ class WhmcsBridgeClient
             $errPayload = $response->json();
             $message = is_array($errPayload) && isset($errPayload['error'])
                 ? (string) $errPayload['error']
-                : ('ekdosi_bridge HTTP '.$response->status());
-            throw new WhmcsApiException('ekdosi_bridge resolve failed: '.$message);
+                : ($this->label().' HTTP '.$response->status());
+            throw new WhmcsApiException(($this->mycs ? 'MyCS bridge '.((string) ($payload['op'] ?? '')) : 'ekdosi_bridge resolve').' failed: '.$message);
         }
 
         $data = $response->json();
@@ -399,6 +425,16 @@ class WhmcsBridgeClient
      */
     private function resolveUrl(): string
     {
+        if ($this->mycs) {
+            return $this->bridgeUrl; // one endpoint for every op
+        }
+
         return (string) preg_replace('#/inbound\.php$#', '/resolve.php', $this->bridgeUrl);
+    }
+
+    /** Who is at the other end, for the errors the operator reads. */
+    private function label(): string
+    {
+        return $this->mycs ? 'MyCS bridge' : 'ekdosi_bridge';
     }
 }

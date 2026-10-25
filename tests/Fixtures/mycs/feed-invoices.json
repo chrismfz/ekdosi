@@ -1,0 +1,281 @@
+{
+    "status": "ok",
+    "invoices": [
+        {
+            "invoiceid": 2,
+            "id": 2,
+            "invoicenum": "2",
+            "userid": 100001,
+            "date": "2026-10-25",
+            "duedate": "",
+            "datepaid": "2026-10-25 16:05:43",
+            "subtotal": "15.00",
+            "tax": "0.00",
+            "taxrate": "0",
+            "total": "15.00",
+            "credit": "0.00",
+            "tax2": "0.00",
+            "taxtype": "Exclusive",
+            "status": "Paid",
+            "invoiced": 0,
+            "paymentmethod": "banktransfer",
+            "currencycode": "EUR",
+            "companyname": "ΔΟΚΙΜΗ ΑΕ",
+            "firstname": "Δοκιμή",
+            "lastname": "Πελάτης",
+            "email": "test@example.test",
+            "address1": "Οδός 1",
+            "address2": "",
+            "city": "Αθήνα",
+            "state": "",
+            "postcode": "10000",
+            "country": "GR",
+            "phonenumber": "",
+            "customfields": [],
+            "items": {
+                "item": [
+                    {
+                        "id": 2,
+                        "type": "Hosting",
+                        "relid": 1,
+                        "description": "Hosting τρίτου",
+                        "amount": "10.00",
+                        "taxed": 1,
+                        "whmcs_product_id": 0,
+                        "whmcs_group_id": 0,
+                        "quantity": 1,
+                        "unit_price": "10.00",
+                        "tax_rate": "0.0000",
+                        "tax_amount": "0.00",
+                        "total": "10.00",
+                        "period_start": null,
+                        "period_end": null
+                    },
+                    {
+                        "id": 3,
+                        "type": "",
+                        "relid": 0,
+                        "description": "Δικό του",
+                        "amount": "5.00",
+                        "taxed": 1,
+                        "whmcs_product_id": 0,
+                        "whmcs_group_id": 0,
+                        "quantity": 1,
+                        "unit_price": "5.00",
+                        "tax_rate": "0.0000",
+                        "tax_amount": "0.00",
+                        "total": "5.00",
+                        "period_start": null,
+                        "period_end": null
+                    }
+                ]
+            },
+            "transactions": [
+                {
+                    "transid": "TX-2",
+                    "gateway": "banktransfer",
+                    "date": "2026-10-25 16:05:43",
+                    "amount": "15.00",
+                    "refunded": "0.00"
+                }
+            ],
+            "third_party": {
+                "whmcs_invoice_id": 2,
+                "userid": 100001,
+                "timologia_present": true,
+                "lines": [
+                    {
+                        "item_id": 2,
+                        "relid": 1,
+                        "type": "Hosting",
+                        "service_type": "hosting",
+                        "description": "Hosting τρίτου",
+                        "routed": true,
+                        "is_receipt": false,
+                        "contact": {
+                            "id": 2,
+                            "type": "business",
+                            "company_name": "ΤΡΙΤΟΣ ΟΕ",
+                            "first_name": "",
+                            "last_name": "",
+                            "gr_vatno": "088888888",
+                            "vies_vatno": "",
+                            "tax_office": "Β΄ ΠΕΙΡΑΙΑ",
+                            "description": "",
+                            "address1": "",
+                            "address2": "",
+                            "city": "",
+                            "state": "",
+                            "postal_code": "",
+                            "country": "GR",
+                            "email": "",
+                            "telephone": "",
+                            "document_type": "invoice"
+                        }
+                    },
+                    {
+                        "item_id": 3,
+                        "relid": 0,
+                        "type": "",
+                        "service_type": null,
+                        "description": "Δικό του",
+                        "routed": false,
+                        "is_receipt": false,
+                        "contact": null
+                    }
+                ],
+                "summary": {
+                    "line_count": 2,
+                    "routed_lines": 1,
+                    "unrouted_lines": 1,
+                    "distinct_parties": 2,
+                    "multi_party": true
+                }
+            },
+            "mycs": {
+                "source": "mycs",
+                "fingerprint": "ece16264ccc8d4e95d844f526bf4c289",
+                "ignore_invoicing": false,
+                "immediate_invoicing": true,
+                "adjustments": "0.00",
+                "recipient": {
+                    "id": 1,
+                    "type": "business",
+                    "company_name": "ΔΟΚΙΜΗ ΑΕ",
+                    "first_name": "Δοκιμή",
+                    "last_name": "Πελάτης",
+                    "gr_vatno": "099999999",
+                    "vies_vatno": "",
+                    "tax_office": "Α΄ ΑΘΗΝΩΝ",
+                    "description": "Υπηρεσίες",
+                    "address1": "Οδός 1",
+                    "address2": "",
+                    "city": "Αθήνα",
+                    "state": "",
+                    "postal_code": "10000",
+                    "country": "GR",
+                    "email": "test@example.test",
+                    "telephone": "",
+                    "document_type": "invoice"
+                },
+                "documents": []
+            }
+        },
+        {
+            "invoiceid": 1,
+            "id": 1,
+            "invoicenum": "1",
+            "userid": 100001,
+            "date": "2026-10-25",
+            "duedate": "",
+            "datepaid": "2026-10-25 16:05:43",
+            "subtotal": "100.00",
+            "tax": "0.00",
+            "taxrate": "0",
+            "total": "100.00",
+            "credit": "0.00",
+            "tax2": "0.00",
+            "taxtype": "Exclusive",
+            "status": "Paid",
+            "invoiced": 0,
+            "paymentmethod": "banktransfer",
+            "currencycode": "EUR",
+            "companyname": "ΔΟΚΙΜΗ ΑΕ",
+            "firstname": "Δοκιμή",
+            "lastname": "Πελάτης",
+            "email": "test@example.test",
+            "address1": "Οδός 1",
+            "address2": "",
+            "city": "Αθήνα",
+            "state": "",
+            "postcode": "10000",
+            "country": "GR",
+            "phonenumber": "",
+            "customfields": [],
+            "items": {
+                "item": [
+                    {
+                        "id": 1,
+                        "type": "Domain",
+                        "relid": 1,
+                        "description": "Web hosting",
+                        "amount": "100.00",
+                        "taxed": 1,
+                        "whmcs_product_id": 0,
+                        "whmcs_group_id": 0,
+                        "quantity": 1,
+                        "unit_price": "100.00",
+                        "tax_rate": "0.0000",
+                        "tax_amount": "0.00",
+                        "total": "100.00",
+                        "period_start": null,
+                        "period_end": null
+                    }
+                ]
+            },
+            "transactions": [
+                {
+                    "transid": "TX-1",
+                    "gateway": "banktransfer",
+                    "date": "2026-10-25 16:05:43",
+                    "amount": "100.00",
+                    "refunded": "0.00"
+                }
+            ],
+            "third_party": {
+                "whmcs_invoice_id": 1,
+                "userid": 100001,
+                "timologia_present": true,
+                "lines": [
+                    {
+                        "item_id": 1,
+                        "relid": 1,
+                        "type": "Domain",
+                        "service_type": "domain",
+                        "description": "Web hosting",
+                        "routed": false,
+                        "is_receipt": false,
+                        "contact": null
+                    }
+                ],
+                "summary": {
+                    "line_count": 1,
+                    "routed_lines": 0,
+                    "unrouted_lines": 1,
+                    "distinct_parties": 1,
+                    "multi_party": false
+                }
+            },
+            "mycs": {
+                "source": "mycs",
+                "fingerprint": "5c72d95ef728b708a65bf6e99e2f1339",
+                "ignore_invoicing": false,
+                "immediate_invoicing": true,
+                "adjustments": "0.00",
+                "recipient": {
+                    "id": 1,
+                    "type": "business",
+                    "company_name": "ΔΟΚΙΜΗ ΑΕ",
+                    "first_name": "Δοκιμή",
+                    "last_name": "Πελάτης",
+                    "gr_vatno": "099999999",
+                    "vies_vatno": "",
+                    "tax_office": "Α΄ ΑΘΗΝΩΝ",
+                    "description": "Υπηρεσίες",
+                    "address1": "Οδός 1",
+                    "address2": "",
+                    "city": "Αθήνα",
+                    "state": "",
+                    "postal_code": "10000",
+                    "country": "GR",
+                    "email": "test@example.test",
+                    "telephone": "",
+                    "document_type": "invoice"
+                },
+                "documents": []
+            }
+        }
+    ],
+    "offset": 0,
+    "count": 2
+}

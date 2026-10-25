@@ -1,0 +1,75 @@
+<?php
+
+namespace App\Support\Billing;
+
+/**
+ * Reads what a MyCS feed payload says outright (docs/bridges-connectors.md §12), where a WHMCS one carries client
+ * custom fields resolved through the company's whmcs_custom_field_map: the `mycs` block, with the account's
+ * recipient (ΑΦΜ, ΔΟΥ, activity, the document it wants) and its «γκρινιάρης» flag. Nothing to map.
+ */
+final class MycsPayload
+{
+    /** @param  array<string, mixed>|null  $payload */
+    public static function is(?array $payload): bool
+    {
+        return is_array($payload['mycs'] ?? null);
+    }
+
+    /**
+     * The value of a custom-field role (vatno, taxoffice, occupation, wantsinvoice, griniaris), as a WHMCS checkbox
+     * or text would read; null when MyCS has none.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function role(array $payload, string $role): ?string
+    {
+        $recipient = is_array($payload['mycs']['recipient'] ?? null) ? $payload['mycs']['recipient'] : [];
+        $value = match ($role) {
+            'vatno' => $recipient['gr_vatno'] ?? null,
+            'taxoffice' => $recipient['tax_office'] ?? null,
+            'occupation' => $recipient['description'] ?? null,
+            'wantsinvoice' => match (self::wantsInvoice($payload)) {
+                true => 'on',
+                false => '',
+                null => null,
+            },
+            'griniaris' => self::immediate($payload) ? 'on' : '',
+            default => null,
+        };
+        $value = is_scalar($value) ? trim((string) $value) : '';
+
+        return $value === '' ? null : $value;
+    }
+
+    /**
+     * The account's choice (contacts.document_type): invoice → true, receipt or none → false, not chosen → null.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function wantsInvoice(array $payload): ?bool
+    {
+        return match ($payload['mycs']['recipient']['document_type'] ?? null) {
+            'invoice' => true,
+            'receipt', 'none' => false,
+            default => null,
+        };
+    }
+
+    /** @param  array<string, mixed>  $payload */
+    public static function immediate(array $payload): bool
+    {
+        return (bool) ($payload['mycs']['immediate_invoicing'] ?? false);
+    }
+
+    /**
+     * What MyCS gave of the invoice as read; sent back with the MARK.
+     *
+     * @param  array<string, mixed>|null  $payload
+     */
+    public static function fingerprint(?array $payload): ?string
+    {
+        $value = $payload['mycs']['fingerprint'] ?? null;
+
+        return is_string($value) && $value !== '' ? $value : null;
+    }
+}

@@ -4,6 +4,7 @@ use App\Services\Backup\Destinations\FtpBackupDestination;
 use App\Services\Backup\Destinations\LocalBackupDestination;
 use App\Services\Backup\Destinations\S3BackupDestination;
 use App\Services\Backup\Destinations\SftpBackupDestination;
+use App\Services\Billing\Sources\MycsBillingSource;
 use App\Services\Billing\Sources\WhmcsBillingSource;
 use App\Services\Domains\Registrars\OpenproviderRegistrar;
 use App\Services\EInvoice\Transports\InvoSignTransport;
@@ -389,6 +390,7 @@ return [
     'billing' => [
         'sources' => [
             'whmcs' => WhmcsBillingSource::class,
+            'mycs' => MycsBillingSource::class,   // «MyCS Bridge» (docs/bridges-connectors.md §12)
             // 'woocommerce' => App\Services\Billing\Sources\WooCommerceBillingSource::class,  // Phase 1+
             // 'blesta'      => App\Services\Billing\Sources\BlestaBillingSource::class,        // Phase 1+
         ],

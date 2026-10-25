@@ -609,6 +609,9 @@ class CustomerForm
             return false;
         }
 
-        return Filament::getTenant()?->whmcsCustomFieldId('griniaris') !== null;
+        // On «MyCS Bridge» MyCS owns it (clients.immediate_invoicing), mirrored on every ingest too.
+        $tenant = Filament::getTenant();
+
+        return $tenant?->whmcsCustomFieldId('griniaris') !== null || (bool) $tenant?->mycs_enabled;
     }
 }

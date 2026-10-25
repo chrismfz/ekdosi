@@ -137,7 +137,7 @@ class WhmcsInvoiceIngestor
                 try {
                     $row = PendingWhmcsInvoice::create([
                         'company_id' => $tenant->id,
-                        'source' => PendingWhmcsInvoice::SOURCE_WHMCS,
+                        'source' => PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload),
                         'whmcs_invoice_id' => $invoiceId,
                         'whmcs_userid' => $whmcsUserId ?: null,
                         'customer_id' => $customerId,
@@ -213,6 +213,8 @@ class WhmcsInvoiceIngestor
             // unresolvable so a newly-mixed invoice can't slip through to
             // filing.
             $update = [
+                // A row staged from WHMCS before the cut-over and read again from MyCS is MyCS's now.
+                'source' => PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload),
                 'whmcs_userid' => $whmcsUserId ?: null,
                 'customer_id' => $customerId,
                 'payload' => $whmcsInvoicePayload,
@@ -401,7 +403,8 @@ class WhmcsInvoiceIngestor
     {
         $noop = ['state' => null, 'customer_id' => null, 'resolution' => null, 'hold' => false, 'note' => null];
 
-        if (! $tenant->whmcs_third_party_enabled) {
+        // MyCS always sends each line's recipient (its contacts are the routing): no kill-switch to arm.
+        if (! $tenant->whmcs_third_party_enabled && ! $tenant->usesMycs()) {
             return $noop;
         }
 
@@ -411,7 +414,7 @@ class WhmcsInvoiceIngestor
             $resolution = ThirdPartyResolution::fromBridgeResponse($embeddedRouting);
         } else {
             try {
-                $resolution = $this->bridgeFactory->for($tenant)->resolveThirdParty($invoiceId);
+                $resolution = $this->bridgeFactory->forSource($tenant)->resolveThirdParty($invoiceId);
             } catch (WhmcsNotConfigured|WhmcsUnreachable|WhmcsApiException $e) {
                 // Bridge not configured / resolve.php not deployed / unreachable.
                 // Non-fatal: fall back to today's behaviour.

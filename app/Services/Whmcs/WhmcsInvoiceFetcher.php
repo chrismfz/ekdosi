@@ -28,8 +28,9 @@ class WhmcsInvoiceFetcher
     public function for(Company $tenant): ?callable
     {
         try {
-            if ((bool) $tenant->whmcs_fetch_via_bridge) {
-                $client = $this->bridgeFactory->for($tenant);
+            // MyCS serves `op=invoice` in the same shape (docs/bridges-connectors.md §12).
+            if ((bool) $tenant->mycs_enabled || (bool) $tenant->whmcs_fetch_via_bridge) {
+                $client = $this->bridgeFactory->forSource($tenant);
 
                 return fn (int $id): ?array => $this->safe(fn () => $client->fetchInvoice($id));
             }

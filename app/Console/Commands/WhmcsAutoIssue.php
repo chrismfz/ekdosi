@@ -127,7 +127,7 @@ class WhmcsAutoIssue extends Command
 
                 return null;
             }
-            if (! $tenant->hasWhmcsIntegration() || ! $tenant->whmcs_auto_issue_immediate) {
+            if (! $tenant->hasBillingSource() || ! $tenant->whmcs_auto_issue_immediate) {
                 $this->warn("Tenant '{$slug}' has not armed άμεση τιμολόγηση auto-issue (or WHMCS isn't configured). Nothing to do.");
 
                 return collect();
@@ -143,7 +143,7 @@ class WhmcsAutoIssue extends Command
         return Company::query()
             ->where('whmcs_auto_issue_immediate', true)
             ->get()
-            ->filter(fn (Company $c) => $c->hasWhmcsIntegration())
+            ->filter(fn (Company $c) => $c->hasBillingSource())
             ->values();
     }
 

@@ -58,7 +58,7 @@ class MassPayWritebackTest extends TestCase
             $calls[] = $id;
         });
         $factory = Mockery::mock(WhmcsBridgeClientFactory::class);
-        $factory->shouldReceive('for')->andReturn($client);
+        $factory->shouldReceive('for', 'forSource')->andReturn($client);
         $this->app->instance(WhmcsBridgeClientFactory::class, $factory);
 
         app(WhmcsWritebackService::class)->pushMark($tenant, $pending, $invoice, '400001234567890');
@@ -78,7 +78,7 @@ class MassPayWritebackTest extends TestCase
             $calls[] = $id;
         });
         $factory = Mockery::mock(WhmcsBridgeClientFactory::class);
-        $factory->shouldReceive('for')->andReturn($client);
+        $factory->shouldReceive('for', 'forSource')->andReturn($client);
         $this->app->instance(WhmcsBridgeClientFactory::class, $factory);
 
         app(WhmcsWritebackService::class)->pushMark($tenant, $pending, $invoice, '400001234567890');

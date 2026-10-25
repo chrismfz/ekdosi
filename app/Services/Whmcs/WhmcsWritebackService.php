@@ -253,7 +253,7 @@ class WhmcsWritebackService
         // SKIPPED, and neither retry surface targets SKIPPED — the MARK would be
         // stranded once the bridge came back. Fix the bridge first, then retry.
         try {
-            $this->bridgeFactory->for($tenant);
+            $this->bridgeFactory->forSource($tenant);
         } catch (WhmcsNotConfigured $e) {
             throw new RuntimeException(
                 'Η γέφυρα WHMCS δεν είναι ρυθμισμένη για το #'.$pending->whmcs_invoice_id.' '
@@ -308,7 +308,9 @@ class WhmcsWritebackService
         string $state = 'active',
     ): void {
         try {
-            $client = $this->bridgeFactory->for($tenant);
+            // The company's source: MyCS on «MyCS Bridge» (a row staged from WHMCS before the cut-over goes there too:
+            // MyCS keeps WHMCS's invoice ids), else the WHMCS plugin.
+            $client = $this->bridgeFactory->forSource($tenant);
         } catch (WhmcsNotConfigured $e) {
             Log::info('WHMCS write-back skipped: bridge plugin not configured', [
                 'pending_id' => $pending->id,
@@ -335,7 +337,9 @@ class WhmcsWritebackService
         }
 
         try {
-            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
+            // MyCS takes a new document only for the invoice as ekdosi read it: the fingerprint of the staged payload.
+            $fingerprint = (bool) $tenant->mycs_enabled ? $pending->mycsFingerprint() : null;
+            $client->setInvoiced($pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl, $fingerprint);
 
             // 1→N (mass-pay CONSOLIDATION): one ekdosi παραστατικό covers N WHMCS
             // child invoices. Push the SAME MARK to each child id too, so every

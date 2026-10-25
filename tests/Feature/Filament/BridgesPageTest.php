@@ -99,8 +99,9 @@ class BridgesPageTest extends TestCase
         $page = Livewire::test(Bridges::class)->assertSuccessful();
         $bridges = $page->get('bridges');
 
-        $this->assertCount(1, $bridges); // only WHMCS registered today
+        $this->assertCount(2, $bridges); // WHMCS, and MyCS (docs/bridges-connectors.md §12)
         $this->assertSame('whmcs', $bridges[0]['key']);
+        $this->assertSame(['mycs', 'unconfigured'], [$bridges[1]['key'], $bridges[1]['status']]);
         $this->assertSame('WHMCS', $bridges[0]['label']);
         $this->assertSame('configured', $bridges[0]['status']);
         $this->assertNotNull($bridges[0]['settings_url'], 'an updater gets a configure link');

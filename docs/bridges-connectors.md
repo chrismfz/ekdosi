@@ -300,3 +300,53 @@ plugin hardcodes the old path (`Company::WHMCS_BRIDGE_PATH`).
 | `database/migrations/*_add_source_to_pending_whmcs_invoices.php` | per-doc source |
 | `database/migrations/*_seed_whmcs_billing_connections.php` | seed existing tenants |
 | `config/ekdosi.php → billing.sources` | the source map |
+
+## 12. MyCS Bridge (the second real source, 2026-10-25)
+
+MyCS (`chrismfz/mycs`, the billing system that follows WHMCS for myip) is the second source. It was built to serve
+**the WHMCS plugin's feed shape** (`InvoiceFeed`, `op=resolve`), so it rides the existing bridge path instead of a
+new `ExternalDocument` contract. The Phase 1 data contract (§5) stays open: MyCS is WHMCS-shaped on purpose, so it
+doesn't count as the second *shape* that contract needs. The MyCS side is documented in its `docs/ekdosi-bridge.md`.
+
+**What differs from the WHMCS bridge, and where:**
+
+| | WHMCS bridge | MyCS bridge |
+|---|---|---|
+| Settings | API url/identifier/secret, webhook secret, custom field map, «amounts include VAT», third-party switch, via-bridge switch | `mycs_enabled`, `mycs_url`, `mycs_secret` (Company → «MyCS Bridge») |
+| Endpoint | `…/ekdosi_bridge/resolve.php` + `inbound.php` | one: `{mycs_url}/api/ekdosi`, every op (`ping`, `invoices`, `invoice`, `resolve`, `mark`) |
+| ΑΦΜ / ΔΟΥ / activity / invoice-or-receipt / γκρινιάρης | client custom fields via `whmcs_custom_field_map` | `payload.mycs.recipient` + `payload.mycs.immediate_invoicing` (`App\Support\Billing\MycsPayload`) |
+| VAT | Tax Type / toggle | `taxtype` = `Exclusive` always; each line has net, VAT and total |
+| Recipient per line | `mod_ekdosi_routing` (opt-in) | always embedded (`third_party`), from MyCS's contacts |
+| MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, fingerprint, …}`. 409 `invoice_changed` when the invoice is no longer the one read (merged, split, a line or note changed): the write-back then fails visibly, retryable |
+| Payments ekdosi → billing | `add_payment` | not yet (MyCS E3); `WhmcsPaymentPusherFactory` returns null for MyCS |
+
+**One source per company.** `mycs_enabled` wins:
+- `whmcs:fetch-pending` reads MyCS, whatever the WHMCS flags (`--native`/`--preview` ignored);
+- a WHMCS paid-webhook push is refused with 409 `source_is_mycs`. MyCS keeps WHMCS's invoice ids and continues from
+  them, so a late WHMCS push would land on an id MyCS uses.
+
+Because the ids are the same, a row staged from WHMCS before the cut-over is the same row MyCS refreshes after it
+(its `source` becomes `mycs`). Its MARK goes to MyCS.
+
+**Kept on WHMCS's side:** `WhmcsBridgeClientFactory::for()` stays the WHMCS plugin's, for its legacy ops (resellers,
+legacy links, custom fields). Only `forSource()` (fetch, single invoice, routing fallback, write-back) follows the
+company's source.
+
+**Shared with the WHMCS tab:** the cut-over date (`whmcs_invoice_min_date`, sent as `since`), auto-issue for
+γκρινιάρηδες and the default document types. `whmcs:auto-issue` runs for any company with a source
+(`Company::hasBillingSource()`).
+
+**Not yet (K2):**
+- payments: syncing what MyCS records as paid on credit-term invoices, and `add_payment` once MyCS has it (its E3);
+- writing back each document of a split inbox row (MyCS takes several MARKs per invoice; today a split row is not
+  written back, as with WHMCS).
+
+**Files:**
+- `database/migrations/2026_10_25_100000_add_mycs_bridge_to_companies.php`
+- `app/Support/Billing/MycsPayload.php`
+- `app/Services/Billing/Sources/MycsBillingSource.php`
+- `WhmcsBridgeClient` (`$mycs` mode, `ping()`, `setInvoiced(…, $fingerprint)`)
+- `WhmcsBridgeClientFactory::forSource()`
+- `tests/Feature/Whmcs/MycsBridgeTest.php`, with its fixture `tests/Fixtures/mycs/feed-invoices.json`, made by
+  MyCS's own code from test data.
+
