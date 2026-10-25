@@ -87,10 +87,30 @@ class WhmcsReceiptRecorder
         // credit-term invoice paid at issue that is later refunded (see BACKLOG).
         $txnId = $ref ?? WhmcsPaidReceipt::transactionKey($whmcsInvoiceId);
 
-        return DB::transaction(function () use ($invoice, $payload, $txnId, $gateway, $whmcsInvoiceId): float {
+        // A row reopened after a MyCS change (docs/bridges-connectors.md §12): the money was recorded on the document it
+        // cancelled. It is MOVED to this one, never recorded twice (round 3 of #701).
+        $cancelledIds = collect(is_array($pending->reopen_history) ? $pending->reopen_history : [])
+            ->pluck('invoice_id')->filter()->map(fn ($id) => (int) $id)->all();
+
+        return DB::transaction(function () use ($invoice, $payload, $txnId, $gateway, $whmcsInvoiceId, $cancelledIds): float {
             $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();
             if ($locked === null) {
                 return 0.0;
+            }
+            if ($cancelledIds !== []) {
+                $earlier = Payment::query()->whereIn('invoice_id', $cancelledIds)->lockForUpdate()->get();
+                if ($earlier->isNotEmpty()) {
+                    $same = $earlier->where('transaction_id', $txnId);
+                    foreach ($same as $payment) {
+                        $payment->update([
+                            'invoice_id' => $locked->id,
+                            'notes' => trim(($payment->notes ?? '').' Μεταφέρθηκε από το ακυρωμένο παραστατικό (άλλαξε στη MyCS).'),
+                        ]);
+                    }
+
+                    // Money on the cancelled document that is not this payment: staff decide, nothing added.
+                    return round((float) $same->sum('amount'), 2);
+                }
             }
 
             // Dedup, re-checked under the lock — two independent guards:

@@ -234,7 +234,8 @@ class WhmcsInvoiceIngestor
             }
             // The same number from the other system for another customer: not the same invoice (WHMCS issued past the
             // last import). Kept for the operator, the staged payload untouched.
-            if ($existing->source !== $incoming && $existing->whmcs_userid !== null && (int) $existing->whmcs_userid !== $whmcsUserId) {
+            // A stored row with no client is unknown, not «the same» (round 3 of #701).
+            if ($existing->source !== $incoming && ($existing->whmcs_userid === null || (int) $existing->whmcs_userid !== $whmcsUserId)) {
                 // Released by the operator once: not held again on every fetch. Either way the incoming payload is not
                 // this row's, so nothing of it is mirrored onto a customer (auditPreserved) (review of #701).
                 if ($existing->source_conflict) {

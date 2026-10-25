@@ -7,6 +7,8 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\Payment;
+use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
@@ -184,6 +186,88 @@ class MycsBridgeTest extends TestCase
         $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])->assertSuccessful();
         $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
         $this->assertNotNull($pending->fresh()->mycsFingerprint());
+    }
+
+    /**
+     * Round 3 of #701: reopen → read again → reissue records the customer's payment ONCE. The receipt recorded on the
+     * cancelled document moves to the new one; and until the invoice is read again, it can't be issued.
+     */
+    public function test_a_reissue_after_a_mycs_change_moves_the_payment_and_waits_for_the_new_read(): void
+    {
+        $tenant = $this->tenant();
+        $feed = $this->feed();
+        $one = collect($feed['invoices'])->firstWhere('id', 1);
+        $changed = $one;
+        $changed['mycs']['fingerprint'] = 'ffffffffffffffffffffffffffffffff';
+        $changed['items']['item'][0]['description'] = 'Web hosting (changed in MyCS)';
+        $state = ['read' => $one, 'mark' => 409];
+        Http::fake([self::ENDPOINT => function (Request $request) use (&$state) {
+            $body = json_decode($request->body(), true);
+
+            return match ($body['op'] ?? '') {
+                'invoices' => Http::response(['status' => 'ok', 'invoices' => (int) ($body['offset'] ?? 0) === 0 ? [$state['read']] : [], 'offset' => 0, 'count' => 1]),
+                'invoice' => Http::response(['status' => 'unavailable'], 503),
+                'mark' => $state['mark'] === 409
+                    ? Http::response(['error' => 'invoice_changed', 'message' => 'Its lines changed since it was read.'], 409)
+                    : Http::response(['status' => 'ok', 'created' => true]),
+                default => Http::response(['error' => 'unknown_op'], 400),
+            };
+        }]);
+        $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'ΔΟΚΙΜΗ ΑΕ', 'afm' => '099999999']);
+        $cash = PaymentMethod::create(['company_id' => $tenant->id, 'description' => 'Μετρητά', 'due_days' => 0]);
+        $type = InvoiceType::create(['company_id' => $tenant->id, 'code' => 'TPY', 'name' => 'ΤΠΥ', 'invcount' => 5]);
+        $issue = function (int $code, PendingWhmcsInvoice $pending) use ($tenant, $customer, $cash, $type): Invoice {
+            $pending->update(['status' => PendingWhmcsInvoice::STATUS_DRAFTED]);
+            $invoice = Invoice::create([
+                'company_id' => $tenant->id, 'invoice_type_id' => $type->id, 'code' => $code, 'invcode' => 'TPY'.$code,
+                'issued_at' => now(), 'local_status' => 'active', 'whmcs_pending_id' => $pending->id, 'customer_id' => $customer->id,
+                'payment_method_id' => $cash->id, 'net_total' => 100, 'gross_total' => 100,
+            ]);
+            app(WhmcsWritebackService::class)->syncFiledFromLifecycle($invoice, '40000123456789'.$code);
+
+            return $invoice;
+        };
+
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])->assertSuccessful();
+        $pending = PendingWhmcsInvoice::where('whmcs_invoice_id', 1)->sole();
+        $first = $issue(5, $pending);
+        $this->assertSame(1, Payment::where('company_id', $tenant->id)->count(), 'the receipt of the paid MyCS invoice');
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_CHANGED, $pending->fresh()->whmcs_writeback_state);
+
+        $first->forceFill(['mydata_mark' => '400001234567895', 'mydata_state' => 'CANCELLED'])->save();
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($first);
+        $pending->refresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->status);
+        // MyCS didn't answer the immediate re-read: not issuable on the content MyCS refused.
+        $this->assertTrue($pending->awaitsMycsReread());
+
+        $state['read'] = $changed;
+        $state['mark'] = 200;
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])->assertSuccessful();
+        $pending->refresh();
+        $this->assertFalse($pending->awaitsMycsReread());
+        $second = $issue(6, $pending);
+
+        $payments = Payment::where('company_id', $tenant->id)->get();
+        $this->assertCount(1, $payments, 'the customer paid once');
+        $this->assertSame($second->id, (int) $payments->sole()->invoice_id);
+        $this->assertSame(PendingWhmcsInvoice::WRITEBACK_SUCCEEDED, $pending->fresh()->whmcs_writeback_state);
+    }
+
+    public function test_a_cancellation_that_itself_gets_the_409_reopens_the_row(): void
+    {
+        $tenant = $this->tenant();
+        $this->fakeMycs(fn () => Http::response(['error' => 'invoice_changed', 'message' => 'Merged.'], 409));
+        $this->artisan('whmcs:fetch-pending', ['--tenant' => $tenant->slug])->assertSuccessful();
+        $pending = PendingWhmcsInvoice::where('whmcs_invoice_id', 1)->sole();
+        $invoice = $this->invoiceFor($tenant, $pending);
+        $pending->update(['status' => PendingWhmcsInvoice::STATUS_FILED, 'mydata_mark' => '400001234567890',
+            'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED]); // its first write-back failed (MyCS down)
+        $invoice->forceFill(['mydata_mark' => '400001234567890', 'mydata_state' => 'CANCELLED'])->save();
+
+        app(WhmcsWritebackService::class)->syncCancelledFromLifecycle($invoice);
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $pending->fresh()->status);
     }
 
     public function test_notes_hold_a_row_once_not_on_every_fetch(): void

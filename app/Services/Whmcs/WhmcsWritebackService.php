@@ -188,7 +188,7 @@ class WhmcsWritebackService
             // MyCS never took this MARK (the invoice changed there): nothing to cancel there. The row opens again and
             // the next fetch reads the invoice as it is now (docs/bridges-connectors.md §12).
             if ($pending->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_CHANGED) {
-                $pending->reopenAfterMycsChange($invoice);
+                $this->reopen($tenant, $pending, $invoice);
 
                 return;
             }
@@ -399,12 +399,41 @@ class WhmcsWritebackService
                         .'το τιμολόγιο ξαναδιαβάζεται από τη MyCS όπως είναι τώρα, για νέο παραστατικό. — '
                         .$e->getMessage(),
                 ]);
+                // This push was the document's cancellation itself (its first write-back had failed): already cancelled,
+                // so the row reopens now (round 3 of #701).
+                if ($state === 'cancelled' || $invoice->mydata_state === 'CANCELLED') {
+                    $this->reopen($tenant, $pending->fresh(), $invoice);
+                }
 
                 return;
             }
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
         } catch (Throwable $e) {
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
+        }
+    }
+
+    /**
+     * A «changed» row whose document was cancelled at AADE: it reopens and is read again from MyCS at once (best
+     * effort: the scheduled fetch does it otherwise; until then it can't be issued, WhmcsFilingGuard). A consolidated
+     * row stays with the operator: some children may hold the MARK in MyCS (round 3 of #701).
+     */
+    private function reopen(Company $tenant, PendingWhmcsInvoice $pending, Invoice $cancelled): void
+    {
+        if (($pending->payload['ekdosi_consolidated_children'] ?? []) !== []) {
+            $pending->update(['whmcs_writeback_error' => 'Ενοποιημένο τιμολόγιο: το παραστατικό ακυρώθηκε, αλλά κάποια από τα '
+                .'τιμολόγια της MyCS ίσως έχουν ακόμα τον ΜΑΡΚ του — έλεγξέ τα στη MyCS και έκδωσε χειροκίνητα.']);
+
+            return;
+        }
+        $pending->reopenAfterMycsChange($cancelled);
+        try {
+            $fresh = $this->bridgeFactory->forSource($tenant)->fetchInvoice((int) $pending->whmcs_invoice_id, true);
+            if (is_array($fresh)) {
+                app(WhmcsInvoiceIngestor::class)->ingest($tenant, $fresh);
+            }
+        } catch (Throwable $e) {
+            Log::info('MyCS re-read after reopen deferred to the scheduled fetch', ['pending_id' => $pending->id, 'error' => $e->getMessage()]);
         }
     }
 

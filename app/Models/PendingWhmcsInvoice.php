@@ -846,6 +846,21 @@ class PendingWhmcsInvoice extends Model
         ])->save();
     }
 
+    /**
+     * Reopened after a MyCS change and not yet read again: its payload is still the one MyCS refused, so it can't be
+     * issued (WhmcsFilingGuard) until a fetch brings the invoice as it is now (round 3 of #701).
+     */
+    public function awaitsMycsReread(): bool
+    {
+        $history = is_array($this->reopen_history) ? $this->reopen_history : [];
+        if ($history === []) {
+            return false;
+        }
+        $last = end($history);
+
+        return $this->mycsFingerprint() === MycsPayload::fingerprint(is_array($last['payload'] ?? null) ? $last['payload'] : null);
+    }
+
     public function isAuditFrozen(): bool
     {
         return $this->status !== self::STATUS_PENDING_REVIEW;
