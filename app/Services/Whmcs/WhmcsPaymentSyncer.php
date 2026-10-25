@@ -148,6 +148,10 @@ class WhmcsPaymentSyncer
         if (! WhmcsPaidReceipt::isPaid($payload)) {
             return 0.0;
         }
+        // The same number for another client (WHMCS and MyCS share the id space): not this receivable's payment.
+        if ($row->whmcs_userid !== null && (int) ($payload['userid'] ?? 0) !== (int) $row->whmcs_userid) {
+            return 0.0;
+        }
 
         return DB::transaction(function () use ($tenant, $invoice, $txnId, $payload, $row): float {
             $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();

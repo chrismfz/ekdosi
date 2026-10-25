@@ -62,6 +62,18 @@ class PendingWhmcsInvoiceObserver
         // a future retry-sweep command can re-run a failed write-back
         // and flip the state without touching the frozen audit
         // snapshot.
+        // The one way out of «filed» (docs/bridges-connectors.md §12): MyCS refused the MARK (the invoice changed
+        // there) and the document was cancelled at AADE — PendingWhmcsInvoice::reopenAfterMycsChange(), which keeps
+        // the filed snapshot in reopen_history. The cancelled invoice and its mydata_marks stay the legal record.
+        if ($row->getOriginal('whmcs_writeback_state') === PendingWhmcsInvoice::WRITEBACK_CHANGED
+            && $row->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW
+            && $row->isDirty('reopen_history')
+            && array_diff(array_keys($row->getDirty()), [
+                'status', 'invoice_id', 'mydata_mark', 'filed_at', 'filed_by_user_id', 'whmcs_writeback_state',
+                'whmcs_writeback_error', 'notes', 'reopen_history', 'updated_at',
+            ]) === []) {
+            return;
+        }
         $dirty = $row->getDirty();
         unset(
             $dirty['updated_at'],

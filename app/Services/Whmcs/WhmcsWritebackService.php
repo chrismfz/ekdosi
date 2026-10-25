@@ -185,6 +185,14 @@ class WhmcsWritebackService
                 return;   // never filed at AADE → nothing to flag cancelled
             }
 
+            // MyCS never took this MARK (the invoice changed there): nothing to cancel there. The row opens again and
+            // the next fetch reads the invoice as it is now (docs/bridges-connectors.md §12).
+            if ($pending->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_CHANGED) {
+                $pending->reopenAfterMycsChange($invoice);
+
+                return;
+            }
+
             $this->pushMark($tenant, $pending, $invoice, $mark, 'cancelled');
         } catch (Throwable $e) {
             Log::error('WHMCS cancel write-back failed (AADE cancellation already complete)', [
@@ -285,10 +293,11 @@ class WhmcsWritebackService
             }
         }
 
+        // The latest: a row reopened after a MyCS change has its cancelled document, then the new one.
         return Invoice::query()
             ->where('company_id', $pending->company_id)
             ->where('whmcs_pending_id', $pending->id)
-            ->orderBy('id')
+            ->orderByDesc('id')
             ->first();
     }
 
@@ -322,6 +331,16 @@ class WhmcsWritebackService
             $pending->update([
                 'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
                 'whmcs_writeback_error' => null,
+            ]);
+
+            return;
+        }
+
+        // The same number came from WHMCS and MyCS for another client: its MARK would document MyCS's other invoice.
+        if ((bool) $tenant->mycs_enabled && $pending->source_conflict) {
+            $pending->update([
+                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
+                'whmcs_writeback_error' => 'Ο αριθμός '.$pending->whmcs_invoice_id.' είναι άλλου πελάτη στη MyCS: ο ΜΑΡΚ δεν επιστρέφεται εκεί.',
             ]);
 
             return;
@@ -376,7 +395,8 @@ class WhmcsWritebackService
                 $pending->update([
                     'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_CHANGED,
                     'whmcs_writeback_error' => 'Το τιμολόγιο άλλαξε στη MyCS μετά την ανάγνωσή του (συγχώνευση, διαχωρισμός ή αλλαγή γραμμής): '
-                        .'το παραστατικό '.$invoice->invcode.' δεν αντιστοιχεί πια. Ακύρωσέ το (πιστωτικό) και ξαναδιάβασε το τιμολόγιο από τη MyCS. — '
+                        .'το παραστατικό '.$invoice->invcode.' δεν αντιστοιχεί πια. Ακύρωσέ το στην ΑΑΔΕ: η γραμμή ξανανοίγει και '
+                        .'το τιμολόγιο ξαναδιαβάζεται από τη MyCS όπως είναι τώρα, για νέο παραστατικό. — '
                         .$e->getMessage(),
                 ]);
 

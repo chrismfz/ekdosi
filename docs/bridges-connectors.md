@@ -317,11 +317,11 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 | ΑΦΜ / ΔΟΥ / activity / invoice-or-receipt / γκρινιάρης | client custom fields via `whmcs_custom_field_map` | `payload.mycs.recipient` + `payload.mycs.immediate_invoicing` (`App\Support\Billing\MycsPayload`) |
 | VAT | Tax Type / toggle | `taxtype` = `Exclusive` always; each line has net, VAT and total |
 | Recipient per line | `mod_ekdosi_routing` (opt-in) | always embedded (`third_party`), from MyCS's contacts |
-| MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, fingerprint, …}`. 409 `invoice_changed` when the invoice is no longer the one read (merged, split, a line or note changed): write-back state **`changed`** («Άλλαξε στη MyCS»), **not retryable** (the same fingerprint gets the same 409): the operator cancels the document (credit note) and reads the invoice again |
+| MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, fingerprint, …}`. 409 `invoice_changed` when the invoice is no longer the one read (merged, split, a line or note changed): write-back state **`changed`** («Άλλαξε στη MyCS»), **not retryable** (the same fingerprint gets the same 409). The operator cancels the document at AADE; that cancellation doesn't go to MyCS (it never took the MARK). Instead the row **reopens** (`PendingWhmcsInvoice::reopenAfterMycsChange`, the one way out of «filed» the audit lock allows; the filed snapshot is kept in `reopen_history`) and the next fetch reads the invoice as it is now, for a new document |
 | Payments billing → ekdosi | `whmcs:sync-payments` / reconcile read the invoice's status | the same, through `op=invoice` on MyCS (same ids, same shape): a credit-term invoice paid in MyCS closes its receivable here |
 | Payments ekdosi → billing | `add_payment` | not yet (MyCS E3); `WhmcsPaymentPusherFactory` returns null for MyCS |
 | Unpaid feed («τιμολόγιο πριν την πληρωμή») | `whmcs:fetch-unpaid` (native API) | **off**: WHMCS is frozen at the cut-over, its «Unpaid» would overwrite what MyCS has seen paid; MyCS has no unpaid feed yet |
-| Credit/debit notes | — | `mycs.adjustments` ≠ 0 → the row is held («το σύνολο διαφέρει από τις γραμμές»): a document built from the lines would be for the wrong amount |
+| Credit/debit notes | — | `mycs.adjustments` ≠ 0 → the row is held («το σύνολο διαφέρει από τις γραμμές»), because a document built from the lines would be for the wrong amount. It is held when first seen, or when the amount changes; once the operator has sent it back to review, the same notes don't hold it again |
 
 **One source per company.** `mycs_enabled` wins:
 - `whmcs:fetch-pending` reads MyCS, whatever the WHMCS flags (`--native`/`--preview` ignored);
@@ -334,9 +334,12 @@ containers).
 
 The ingestor guards the shared id space at the root:
 - a WHMCS payload never replaces a row MyCS staged;
-- a row refreshed from the other source for **another client** (WHMCS issued past the last import) is held with a
-  note, its payload untouched;
-- on a decided row the same collision is logged, since it can't be re-staged.
+- a row refreshed from the other source for **another client** (WHMCS issued past the last import) is held once with
+  a note, its payload untouched, and flagged `source_conflict`. Once the operator releases it, it is not held again,
+  nothing of the other payload is mirrored onto a customer, and its MARK never goes to MyCS (`skipped`: it would
+  document the other client's invoice);
+- payment sync and reconcile take «Paid» only for the row's own client (`userid`);
+- on a decided row the same collision is logged once a day, since it can't be re-staged.
 
 **Kept on WHMCS's side:** `WhmcsBridgeClientFactory::for()` stays the WHMCS plugin's, for its legacy ops (resellers,
 legacy links, custom fields). Only `forSource()` (fetch, single invoice, routing fallback, write-back) follows the
@@ -351,6 +354,15 @@ company's source.
 - the readiness report.
 
 A missing `immediate_invoicing` in a MyCS payload is «unknown»: it leaves the customer's flag alone.
+
+**Known limits:**
+- MyCS allows 120 requests a minute per address. Payment sync and reconcile make one `op=invoice` per open
+  credit-term receivable, so beyond ~120 of them some are checked only on a later run.
+- These are still WHMCS's for a MyCS company:
+  - the gateway and income mapping pages (`WhmcsPaymentMapping`, `WhmcsIncomeMapping`): they list WHMCS's gateways
+    and products, and the MyCS gateway names (`cardlink`, `paypal_ipn`, `mollie` …) are mapped at the cut-over;
+  - `CustomerWhmcsLedger`, «link WHMCS client»: read-only.
+- The outbound payment worklist is empty on MyCS (nothing is pushed yet).
 
 **Not yet (K2):**
 - `add_payment` to MyCS, once MyCS has it (its E3);

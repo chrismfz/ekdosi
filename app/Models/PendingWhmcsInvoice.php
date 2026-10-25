@@ -162,6 +162,7 @@ class PendingWhmcsInvoice extends Model
     protected $fillable = [
         'company_id',
         'source',
+        'source_conflict',
         'whmcs_invoice_id',
         'whmcs_userid',
         'customer_id',
@@ -195,6 +196,8 @@ class PendingWhmcsInvoice extends Model
             'whmcs_userid' => 'integer',
             'legacy_invoiced' => 'integer',
             'masspay_parent_id' => 'integer',
+            'reopen_history' => 'array',
+            'source_conflict' => 'boolean',
         ];
     }
 
@@ -808,6 +811,41 @@ class PendingWhmcsInvoice extends Model
      * separately by PendingWhmcsInvoiceObserver on status=filed rows
      * only.
      */
+    /**
+     * MyCS refused this row's MARK (WRITEBACK_CHANGED: the invoice changed there after it was read) and its document
+     * has been cancelled at AADE: the row opens again for review, and the next fetch reads the invoice as it is now
+     * (docs/bridges-connectors.md §12). The filed snapshot goes to reopen_history; the cancelled document stays.
+     * The one transition out of «filed» the audit lock allows (PendingWhmcsInvoiceObserver).
+     */
+    public function reopenAfterMycsChange(Invoice $cancelled): void
+    {
+        if ($this->status !== self::STATUS_FILED || $this->whmcs_writeback_state !== self::WRITEBACK_CHANGED) {
+            return;
+        }
+        $history = is_array($this->reopen_history) ? $this->reopen_history : [];
+        $history[] = [
+            'reopened_at' => now()->toIso8601String(),
+            'mydata_mark' => $this->mydata_mark,
+            'invoice_id' => $cancelled->id,
+            'invcode' => $cancelled->invcode,
+            'filed_at' => $this->filed_at?->toIso8601String(),
+            'payload' => $this->payload,
+        ];
+        $note = 'Το παραστατικό '.$cancelled->invcode.' ακυρώθηκε, γιατί το τιμολόγιο άλλαξε στη MyCS: ξαναδιαβάζεται '
+            .'όπως είναι τώρα στην επόμενη λήψη — έλεγξέ το και έκδωσε νέο.';
+        $this->forceFill([
+            'status' => self::STATUS_PENDING_REVIEW,
+            'invoice_id' => null,
+            'mydata_mark' => null,
+            'filed_at' => null,
+            'filed_by_user_id' => null,
+            'whmcs_writeback_state' => null,
+            'whmcs_writeback_error' => null,
+            'notes' => $note,
+            'reopen_history' => $history,
+        ])->save();
+    }
+
     public function isAuditFrozen(): bool
     {
         return $this->status !== self::STATUS_PENDING_REVIEW;

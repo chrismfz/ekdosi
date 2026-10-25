@@ -104,7 +104,9 @@ class WhmcsPaymentReconciler
 
         $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
 
-        return is_array($payload) && strcasecmp((string) ($payload['status'] ?? ''), 'Paid') === 0;
+        // …and of this row's client: the same number for another one (WHMCS and MyCS share the id space) is not it.
+        return is_array($payload) && strcasecmp((string) ($payload['status'] ?? ''), 'Paid') === 0
+            && ($row->whmcs_userid === null || (int) ($payload['userid'] ?? 0) === (int) $row->whmcs_userid);
     }
 
     /**
@@ -115,6 +117,10 @@ class WhmcsPaymentReconciler
      */
     private function isOutboundCandidate(PendingWhmcsInvoice $row): bool
     {
+        // Nothing is pushed to MyCS yet (its E3): no worklist the operator can't act on.
+        if ((bool) $row->company?->mycs_enabled) {
+            return false;
+        }
         $invoice = $row->invoice;
         if ($invoice === null
             || ! $this->isLiveOpen($invoice)
