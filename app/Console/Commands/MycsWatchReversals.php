@@ -23,8 +23,14 @@ class MycsWatchReversals extends Command
             ->when($slug !== '', fn ($q) => $q->where('slug', $slug))
             ->get()->filter(fn (Company $c) => $c->usesMycs());
         foreach ($tenants as $tenant) {
-            $result = $watcher->run($tenant, max(1, (int) $this->option('limit')));
-            $this->line("{$tenant->slug}: checked {$result['checked']}, flagged {$result['flagged']}");
+            // One company's failure never stops the others (review of #702).
+            try {
+                $result = $watcher->run($tenant, max(1, (int) $this->option('limit')));
+                $this->line("{$tenant->slug}: checked {$result['checked']}, flagged {$result['flagged']}");
+            } catch (\Throwable $e) {
+                report($e);
+                $this->error("{$tenant->slug}: {$e->getMessage()}");
+            }
         }
 
         return self::SUCCESS;

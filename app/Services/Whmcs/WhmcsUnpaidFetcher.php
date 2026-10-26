@@ -177,6 +177,8 @@ class WhmcsUnpaidFetcher
             for ($offset = 0; ; $offset += 200) {
                 try {
                     $payloads = $bridge->fetchPendingInvoices($offset, 200, $minDate, 'Unpaid', true, $ids->values()->all());
+                } catch (WhmcsUnreachable $e) {
+                    throw $e; // MyCS down: the command's «unreachable» exit, as WHMCS's (review of #702)
                 } catch (WhmcsApiException $e) {
                     // The whole call failed (not one customer): counted and stopped, the next run tries again.
                     $failed++;
@@ -188,7 +190,8 @@ class WhmcsUnpaidFetcher
                     break;
                 }
                 foreach ($payloads as $payload) {
-                    if (strcasecmp((string) ($payload['status'] ?? ''), 'Unpaid') !== 0) {
+                    // Unpaid, and of a customer asked for (never another's, whatever MyCS sends; review of #702).
+                    if (strcasecmp((string) ($payload['status'] ?? ''), 'Unpaid') !== 0 || ! $ids->contains((int) ($payload['userid'] ?? 0))) {
                         continue;
                     }
                     $unpaidSeen++;

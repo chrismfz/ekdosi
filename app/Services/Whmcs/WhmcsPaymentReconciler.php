@@ -117,6 +117,10 @@ class WhmcsPaymentReconciler
      */
     private function isOutboundCandidate(PendingWhmcsInvoice $row): bool
     {
+        // Another client's number (review of #702): never on the outbound list.
+        if ($row->source_conflict) {
+            return false;
+        }
         $invoice = $row->invoice;
         if ($invoice === null
             || ! $this->isLiveOpen($invoice)

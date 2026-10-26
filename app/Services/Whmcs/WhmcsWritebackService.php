@@ -228,6 +228,10 @@ class WhmcsWritebackService
      */
     public function retryWriteback(PendingWhmcsInvoice $pending): string
     {
+        // MyCS: a split row's documents are pushed again, each in its state (review of #702).
+        if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT && (bool) $pending->company?->mycs_enabled) {
+            return $this->retrySplit($pending);
+        }
         if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
             throw new RuntimeException(
                 'Το WHMCS #'.$pending->whmcs_invoice_id.' διαχωρίστηκε σε πολλά παραστατικά — '
@@ -421,6 +425,28 @@ class WhmcsWritebackService
         } catch (Throwable $e) {
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
         }
+    }
+
+    /**
+     * Retry of a MyCS split row (review of #702): every document of the row with a MARK goes back again in its state
+     * (cancelled at AADE → cancelled), and the row's state is what came of all of them.
+     */
+    private function retrySplit(PendingWhmcsInvoice $pending): string
+    {
+        $tenant = $pending->company;
+        $documents = Invoice::query()->where('company_id', $pending->company_id)->where('whmcs_pending_id', $pending->id)
+            ->whereNotNull('mydata_mark')->orderBy('id')->get();
+        $pending->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_PENDING, 'whmcs_writeback_error' => null]);
+        foreach ($documents as $invoice) {
+            $this->pushSplitMark($tenant, $pending->fresh(), $invoice, (string) $invoice->mydata_mark,
+                $invoice->mydata_state === 'CANCELLED' ? 'cancelled' : 'active');
+        }
+        $fresh = $pending->fresh();
+        if ($fresh->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_PENDING) {
+            $fresh->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED]);
+        }
+
+        return (string) $pending->fresh()->whmcs_writeback_state;
     }
 
     /**

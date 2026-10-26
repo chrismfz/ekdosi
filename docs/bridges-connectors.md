@@ -313,7 +313,7 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 | | WHMCS bridge | MyCS bridge |
 |---|---|---|
 | Settings | API url/identifier/secret, webhook secret, custom field map, «amounts include VAT», third-party switch, via-bridge switch | `mycs_enabled`, `mycs_url`, `mycs_secret` (Company → «MyCS Bridge») |
-| Endpoint | `…/ekdosi_bridge/resolve.php` + `inbound.php` | one: `{mycs_url}/api/ekdosi`, every op (`ping`, `invoices`, `invoice`, `resolve`, `mark`) |
+| Endpoint | `…/ekdosi_bridge/resolve.php` + `inbound.php` | one: `{mycs_url}/api/ekdosi`, every op (`ping`, `invoices`, `invoice`, `resolve`, `mark`, `add_payment`) |
 | ΑΦΜ / ΔΟΥ / activity / invoice-or-receipt / γκρινιάρης | client custom fields via `whmcs_custom_field_map` | `payload.mycs.recipient` + `payload.mycs.immediate_invoicing` (`App\Support\Billing\MycsPayload`) |
 | VAT | Tax Type / toggle | `taxtype` = `Exclusive` always; each line has net, VAT and total |
 | Recipient per line | `mod_ekdosi_routing` (opt-in) | always embedded (`third_party`), from MyCS's contacts |
@@ -321,7 +321,7 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 | Payments billing → ekdosi | `whmcs:sync-payments` / reconcile read the invoice's status | the same, through `op=invoice` on MyCS (same ids, same shape): a credit-term invoice paid in MyCS closes its receivable here |
 | Payments ekdosi → billing | `add_payment` | the same `op=add_payment` (MyCS E3, K2): once per transid, cut to what is left (never credit), `already_settled` on an invoice already paid there |
 | Unpaid feed («τιμολόγιο πριν την πληρωμή») | `whmcs:fetch-unpaid` (native API, one call per customer) | `whmcs:fetch-unpaid` reads MyCS (K2): one `op=invoices status=Unpaid userids=[…]` a page for all the flagged customers; never the frozen WHMCS |
-| Split rows | not written back (one MARK per WHMCS invoice) | each document of the split goes back on its own MARK (K2), and so does its cancellation |
+| Split rows | not written back (one MARK per WHMCS invoice) | each document of the split goes back on its own MARK (K2), and so does its cancellation; a failure is retried (row action, `whmcs:retry-writebacks`) by pushing every document again in its state |
 | Sale reversed in the billing system | — | `mycs:watch-reversals` (K2, every 15′, read only): a few issued rows a run, in turn (`op=invoice` each, within MyCS's 120/min); refunded, cancelled or unpaid again → the staff bell «Χρειάζεται πιστωτικό (MyCS)», once each |
 | Credit/debit notes | — | `mycs.adjustments` ≠ 0 → the row is held («το σύνολο διαφέρει από τις γραμμές»), because a document built from the lines would be for the wrong amount. It is held when first seen, or when the amount changes; once the operator has sent it back to review, the same notes don't hold it again |
 
@@ -372,7 +372,10 @@ A missing `immediate_invoicing` in a MyCS payload is «unknown»: it leaves the 
   - the gateway and income mapping pages (`WhmcsPaymentMapping`, `WhmcsIncomeMapping`): they list WHMCS's gateways
     and products, and the MyCS gateway names (`cardlink`, `paypal_ipn`, `mollie` …) are mapped at the cut-over;
   - `CustomerWhmcsLedger`, «link WHMCS client»: read-only.
-- The outbound payment worklist is empty on MyCS (nothing is pushed yet).
+- Payments go to MyCS under the same switch as WHMCS's («Σήμανση Paid», `whmcs_push_payments`, on the WHMCS tab). Never
+  for a `source_conflict` row or another client's invoice, nor to a cancelled, refunded or draft one in MyCS (skipped).
+  A permanent 409 shows as a failed push in the outbound list.
+- `mycs:watch-reversals` makes a full round of a few thousand issued rows in about a day; a refund is belled within it.
 
 **Live test before the cut-over** (owner, 2026-10-25): real invoices on `ekdosi.myip.gr` (provider with DEV
 credentials) against MyCS, with Chrome. The checklist is in MyCS's `docs/ekdosi-bridge.md` → «Live δοκιμή».
