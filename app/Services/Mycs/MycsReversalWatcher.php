@@ -45,6 +45,7 @@ final class MycsReversalWatcher
         }
         $checked = 0;
         $flagged = 0;
+        $read = 0;
         foreach ($rows as $row) {
             $checked++;
             try {
@@ -54,6 +55,7 @@ final class MycsReversalWatcher
 
                 continue;
             }
+            $read++;
             // The same number for another client (WHMCS and MyCS share the id space): not this document's sale.
             if (! is_array($payload) || (int) ($payload['userid'] ?? 0) !== (int) $row->whmcs_userid) {
                 continue;
@@ -67,7 +69,8 @@ final class MycsReversalWatcher
                 $flagged++;
             }
         }
-        if ($rows->isNotEmpty()) {
+        // MyCS down for the whole run (nothing read): the same rows next run, not a round later (review of #702).
+        if ($rows->isNotEmpty() && $read > 0) {
             Cache::forever($cursorKey, (int) $rows->last()->id);
         }
 

@@ -434,9 +434,17 @@ class WhmcsWritebackService
     private function retrySplit(PendingWhmcsInvoice $pending): string
     {
         $tenant = $pending->company;
+        // Another client's number: nothing goes back, said so (never a «success» with nothing sent).
+        if ($pending->source_conflict) {
+            $pending->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
+                'whmcs_writeback_error' => 'Ο αριθμός '.$pending->whmcs_invoice_id.' είναι άλλου πελάτη στη MyCS: ο ΜΑΡΚ δεν επιστρέφεται εκεί.']);
+
+            return PendingWhmcsInvoice::WRITEBACK_SKIPPED;
+        }
+        // Reset first, then read: a document issued meanwhile writes its own outcome after this, never wiped.
+        $pending->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_PENDING, 'whmcs_writeback_error' => null]);
         $documents = Invoice::query()->where('company_id', $pending->company_id)->where('whmcs_pending_id', $pending->id)
             ->whereNotNull('mydata_mark')->orderBy('id')->get();
-        $pending->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_PENDING, 'whmcs_writeback_error' => null]);
         foreach ($documents as $invoice) {
             $this->pushSplitMark($tenant, $pending->fresh(), $invoice, (string) $invoice->mydata_mark,
                 $invoice->mydata_state === 'CANCELLED' ? 'cancelled' : 'active');
@@ -467,6 +475,15 @@ class WhmcsWritebackService
             $this->bridgeFactory->forSource($tenant)->setInvoiced((int) $pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
             Log::info('MyCS write-back of a split document succeeded', ['pending_id' => $pending->id, 'ekdosi_invoice' => $invoice->invcode, 'mydata_mark' => $mark, 'state' => $state]);
         } catch (Throwable $e) {
+            // Merged or split in MyCS after the read: shown as «Άλλαξε στη MyCS», as a single row's (never retried).
+            if (str_contains($e->getMessage(), 'invoice_changed')) {
+                $pending->update([
+                    'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_CHANGED,
+                    'whmcs_writeback_error' => $invoice->invcode.': το τιμολόγιο συγχωνεύτηκε ή διαχωρίστηκε στη MyCS· το παραστατικό ισχύει όπως εκδόθηκε.',
+                ]);
+
+                return;
+            }
             Log::error('MyCS write-back of a split document failed (AADE filing already complete)', [
                 'pending_id' => $pending->id, 'ekdosi_invoice' => $invoice->invcode, 'mydata_mark' => $mark, 'error' => $e->getMessage(),
             ]);
