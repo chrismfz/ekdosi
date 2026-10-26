@@ -19,6 +19,10 @@ from `[Unreleased]`; `--major` explicit for milestones).
 ## [Unreleased]
 
 ### Added
+- **MyCS Bridge, K2** — «τιμολόγιο πριν την πληρωμή» από τη MyCS (`whmcs:fetch-unpaid`, μία κλήση ανά σελίδα για όλους
+  τους πελάτες)· πληρωμές του ekdosi προς τη MyCS (`op=add_payment`)· κάθε παραστατικό ενός split στέλνει τον ΜΑΡΚ του·
+  `mycs:watch-reversals`: καμπανάκι «Χρειάζεται πιστωτικό (MyCS)» όταν μια εκδομένη πώληση έγινε refund, ακυρώθηκε ή
+  ξαναέγινε απλήρωτη στη MyCS· ετικέτες «MyCS» αντί για «WHMCS» στις γραμμές της MyCS.
 - **MyCS Bridge** — η MyCS ως πηγή των «Εισερχομένων» αντί για το WHMCS (Company → «MyCS Bridge»: ενεργό,
   διεύθυνση, secret). ΑΦΜ/ΔΟΥ/είδος παραστατικού/γκρινιάρης από τη MyCS χωρίς χάρτη custom fields, αποδέκτης ανά
   γραμμή πάντα, ΜΑΡΚ πίσω χωρίς όρους: ό,τι κόπηκε είναι οριστικό (merge/split στη MyCS μετά → «Άλλαξε στη MyCS»,

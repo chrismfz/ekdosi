@@ -158,9 +158,8 @@ $trackSchedule(
     Schedule::call(function () use ($sweepTenants) {
         $sweepTenants(
             Company::query()
-                ->whereNotNull('whmcs_api_url')
-                ->where('whmcs_api_url', '!=', '')
-                ->where('mycs_enabled', false)   // WHMCS is frozen for them (docs/bridges-connectors.md §12)
+                ->where(fn ($q) => $q->where(fn ($w) => $w->whereNotNull('whmcs_api_url')->where('whmcs_api_url', '!=', ''))
+                    ->orWhere('mycs_enabled', true))   // on MyCS the command reads MyCS (docs/bridges-connectors.md §12)
                 ->get(),
             'whmcs:fetch-unpaid',
             fn () => null,   // report($e) already logs an uncaught throw; no separate health key for this opt-in fetch
@@ -225,6 +224,16 @@ $trackSchedule(
         ->when(fn () => $scheduleEnabled('whmcs_payment_sync_enabled'))
         ->withoutOverlapping(30),
     'whmcs_payment_sync'
+);
+
+// mycs:watch-reversals — MyCS Bridge (K2): read only, bells staff when an issued sale was reversed in MyCS.
+$trackSchedule(
+    Schedule::command('mycs:watch-reversals')
+        ->cron($scheduleCron('mycs_reversals_cron', '*/15 * * * *'))
+        ->name('mycs-watch-reversals-all')
+        ->when(fn () => $scheduleEnabled('mycs_reversals_enabled'))
+        ->withoutOverlapping(30),
+    'mycs_reversals'
 );
 
 // whmcs:reconcile-payments — READ-ONLY detector feeding the dashboard widget +

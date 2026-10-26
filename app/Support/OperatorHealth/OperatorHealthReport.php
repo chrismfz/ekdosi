@@ -31,6 +31,7 @@ class OperatorHealthReport
         'whmcs_auto_issue' => 'WHMCS auto-issue',
         'whmcs_payment_sync' => 'WHMCS payment sync',
         'whmcs_payment_reconcile' => 'WHMCS payment reconcile',
+        'mycs_reversals' => 'MyCS reversals',
         'mydata_reconcile' => 'myDATA reconcile',
         'mydata_vat_picture' => 'VAT picture refresh',
         'mydata_fetch_expenses' => 'myDATA expenses refresh',

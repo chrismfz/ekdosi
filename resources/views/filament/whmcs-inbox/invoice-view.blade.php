@@ -8,6 +8,7 @@
 --}}
 @php
     $p = $r->payload ?? [];
+    $src = $r->sourceLabel(); // «MyCS» or «WHMCS» (K2)
     $cur = (string) ($p['currencycode'] ?? '');
     $money = fn ($v) => number_format((float) $v, 2, ',', '.').($cur ? ' '.$cur : '');
     // Document value = total + applied credit (WHMCS's `total` is the balance
@@ -38,7 +39,7 @@
     {{-- Header --}}
     <div class="grid grid-cols-2 gap-3 md:grid-cols-5">
         <div>
-            <div class="text-gray-500 dark:text-gray-400">WHMCS #</div>
+            <div class="text-gray-500 dark:text-gray-400">{{ $src }} #</div>
             <div class="font-semibold">{{ ($p['invoicenum'] ?? '') ?: ('#'.$r->whmcs_invoice_id) }}</div>
         </div>
         <div>
@@ -46,7 +47,7 @@
             <div class="font-semibold">{{ $p['date'] ?? '—' }}</div>
         </div>
         <div>
-            <div class="text-gray-500 dark:text-gray-400">Κατάσταση WHMCS</div>
+            <div class="text-gray-500 dark:text-gray-400">Κατάσταση {{ $src }}</div>
             <div class="font-semibold">{{ $p['status'] ?? '—' }}</div>
         </div>
         <div>
@@ -64,7 +65,7 @@
 
     {{-- Client + intent --}}
     <div class="rounded-lg border border-gray-200 p-3 dark:border-white/10">
-        <div class="mb-1 font-medium">Πελάτης (WHMCS)</div>
+        <div class="mb-1 font-medium">Πελάτης ({{ $src }})</div>
         <div>{{ $r->whmcsClientName() ?? '—' }}
             @if ($email = ($p['email'] ?? null))
                 <span class="text-gray-500 dark:text-gray-400">· {{ $email }}</span>

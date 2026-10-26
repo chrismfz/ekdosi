@@ -65,7 +65,8 @@ class WhmcsRetryWritebacks extends Command
             $rows = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
                 ->where('whmcs_writeback_state', PendingWhmcsInvoice::WRITEBACK_FAILED)
-                ->where('status', '!=', PendingWhmcsInvoice::STATUS_SPLIT)
+                // A split row only on MyCS (each document has its own MARK there; review of #702).
+                ->when(! (bool) $tenant->mycs_enabled, fn ($q) => $q->where('status', '!=', PendingWhmcsInvoice::STATUS_SPLIT))
                 ->orderBy('id')
                 ->get();
 

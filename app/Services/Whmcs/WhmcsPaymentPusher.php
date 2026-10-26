@@ -62,6 +62,14 @@ class WhmcsPaymentPusher
         if ($status === '') {
             return PaymentPushResult::Skipped;
         }
+        // The billing system's invoice must be this row's client's (review of #702: a number collision would pay another
+        // client's invoice), and payable there: a cancelled, refunded or draft one is for a human, not a push.
+        if ($row->whmcs_userid !== null && (int) ($payload['userid'] ?? 0) !== (int) $row->whmcs_userid) {
+            return PaymentPushResult::Skipped;
+        }
+        if ((bool) $tenant->mycs_enabled && in_array(strtolower($status), ['cancelled', 'refunded', 'draft'], true)) {
+            return PaymentPushResult::Skipped;
+        }
 
         $amount = $this->pushAmount($invoice, $payload);
         if (strcasecmp($status, 'Paid') === 0 || $amount <= 0.005) {
@@ -107,6 +115,8 @@ class WhmcsPaymentPusher
             ->where('status', PendingWhmcsInvoice::STATUS_FILED)
             ->whereNotNull('whmcs_invoice_id')
             ->whereNull('whmcs_payment_pushed_at')
+            // The same number for another client (WHMCS and MyCS share the id space): its money is not this one's.
+            ->where('source_conflict', false)
             ->first();
     }
 

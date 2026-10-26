@@ -26,11 +26,16 @@ class WhmcsPaymentPusherFactory
      */
     public function for(Company $tenant): ?callable
     {
-        // MyCS takes no payments from ekdosi yet (its E3): nothing is pushed, rather than to the old WHMCS.
-        if ((bool) $tenant->mycs_enabled) {
-            return null;
-        }
         try {
+            // MyCS (its E3): the same `op=add_payment`, through the company's source — never to the old WHMCS. MyCS
+            // caps it at what is left and answers already_settled / already_recorded as the plugin does.
+            if ((bool) $tenant->mycs_enabled) {
+                $client = $this->bridgeFactory->forSource($tenant);
+
+                return function (int $id, float $amount, string $transId) use ($client): void {
+                    $client->addInvoicePayment($id, $amount, $transId);
+                };
+            }
             if ((bool) $tenant->whmcs_fetch_via_bridge) {
                 $client = $this->bridgeFactory->for($tenant);
 

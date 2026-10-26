@@ -82,6 +82,12 @@ class WhmcsWritebackService
             // write-back needs its own design (tracked follow-up). Filed/other
             // states: nothing to do.
             if ($pending->status !== PendingWhmcsInvoice::STATUS_DRAFTED) {
+                // MyCS keeps several MARKs per invoice (K2): each document of the split goes back on its own.
+                if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT && (bool) $tenant->mycs_enabled) {
+                    $this->pushSplitMark($tenant, $pending, $invoice, $mark, 'active');
+
+                    return;
+                }
                 if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
                     Log::info('WHMCS write-back skipped: split row (one WHMCS invoice → many MARKs is a separate design)', [
                         'pending_id' => $pending->id,
@@ -177,7 +183,13 @@ class WhmcsWritebackService
                 return;
             }
             if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
-                return;   // one WHMCS invoice → many MARKs: separate design
+                // MyCS: this document's cancellation goes back on its own MARK (K2); WHMCS: one MARK per invoice.
+                $mark = (string) ($invoice->mydata_mark ?? '');
+                if ((bool) $tenant->mycs_enabled && $mark !== '') {
+                    $this->pushSplitMark($tenant, $pending, $invoice, $mark, 'cancelled');
+                }
+
+                return;
             }
 
             $mark = (string) ($invoice->mydata_mark ?? $pending->mydata_mark ?? '');
@@ -216,6 +228,10 @@ class WhmcsWritebackService
      */
     public function retryWriteback(PendingWhmcsInvoice $pending): string
     {
+        // MyCS: a split row's documents are pushed again, each in its state (review of #702).
+        if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT && (bool) $pending->company?->mycs_enabled) {
+            return $this->retrySplit($pending);
+        }
         if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
             throw new RuntimeException(
                 'Το WHMCS #'.$pending->whmcs_invoice_id.' διαχωρίστηκε σε πολλά παραστατικά — '
@@ -408,6 +424,74 @@ class WhmcsWritebackService
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
         } catch (Throwable $e) {
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
+        }
+    }
+
+    /**
+     * Retry of a MyCS split row (review of #702): every document of the row with a MARK goes back again in its state
+     * (cancelled at AADE → cancelled), and the row's state is what came of all of them.
+     */
+    private function retrySplit(PendingWhmcsInvoice $pending): string
+    {
+        $tenant = $pending->company;
+        // Another client's number: nothing goes back, said so (never a «success» with nothing sent).
+        if ($pending->source_conflict) {
+            $pending->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SKIPPED,
+                'whmcs_writeback_error' => 'Ο αριθμός '.$pending->whmcs_invoice_id.' είναι άλλου πελάτη στη MyCS: ο ΜΑΡΚ δεν επιστρέφεται εκεί.']);
+
+            return PendingWhmcsInvoice::WRITEBACK_SKIPPED;
+        }
+        // Reset first, then read: a document issued meanwhile writes its own outcome after this, never wiped.
+        $pending->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_PENDING, 'whmcs_writeback_error' => null]);
+        $documents = Invoice::query()->where('company_id', $pending->company_id)->where('whmcs_pending_id', $pending->id)
+            ->whereNotNull('mydata_mark')->orderBy('id')->get();
+        foreach ($documents as $invoice) {
+            $this->pushSplitMark($tenant, $pending->fresh(), $invoice, (string) $invoice->mydata_mark,
+                $invoice->mydata_state === 'CANCELLED' ? 'cancelled' : 'active');
+        }
+        $fresh = $pending->fresh();
+        if ($fresh->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_PENDING) {
+            $fresh->update(['whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_SUCCEEDED]);
+        }
+
+        return (string) $pending->fresh()->whmcs_writeback_state;
+    }
+
+    /**
+     * One document of a split row, to MyCS (K2): its own MARK, code, state and PDF; no row state of its own (the row
+     * has many documents). A failure is written on the row with the document's code, for staff; never thrown.
+     */
+    private function pushSplitMark(Company $tenant, PendingWhmcsInvoice $pending, Invoice $invoice, string $mark, string $state): void
+    {
+        if ($pending->source_conflict) {
+            return;
+        }
+        try {
+            $pdfUrl = null;
+            try {
+                $pdfUrl = $invoice->publicPdfUrl();
+            } catch (Throwable) {
+            }
+            $this->bridgeFactory->forSource($tenant)->setInvoiced((int) $pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
+            Log::info('MyCS write-back of a split document succeeded', ['pending_id' => $pending->id, 'ekdosi_invoice' => $invoice->invcode, 'mydata_mark' => $mark, 'state' => $state]);
+        } catch (Throwable $e) {
+            // Merged or split in MyCS after the read: shown as «Άλλαξε στη MyCS», as a single row's (never retried).
+            if (str_contains($e->getMessage(), 'invoice_changed')) {
+                $pending->update([
+                    'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_CHANGED,
+                    'whmcs_writeback_error' => $invoice->invcode.': το τιμολόγιο συγχωνεύτηκε ή διαχωρίστηκε στη MyCS· το παραστατικό ισχύει όπως εκδόθηκε.',
+                ]);
+
+                return;
+            }
+            Log::error('MyCS write-back of a split document failed (AADE filing already complete)', [
+                'pending_id' => $pending->id, 'ekdosi_invoice' => $invoice->invcode, 'mydata_mark' => $mark, 'error' => $e->getMessage(),
+            ]);
+            $pending->update([
+                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
+                'whmcs_writeback_error' => trim(($pending->whmcs_writeback_error ? $pending->whmcs_writeback_error.' · ' : '')
+                    .$invoice->invcode.': '.$e->getMessage()),
+            ]);
         }
     }
 
