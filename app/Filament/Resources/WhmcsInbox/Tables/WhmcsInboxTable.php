@@ -80,8 +80,10 @@ class WhmcsInboxTable
                 // «Πηγή» + «WHMCS #» + «Ημ/νία τιμολ.» into one column. The external-id
                 // label still comes from the billing source's capabilities (Phase 0).
                 TextColumn::make('whmcs_invoice_id')
-                    ->label(app(BillingSourceRegistry::class)
-                        ->for(PendingWhmcsInvoice::SOURCE_WHMCS)?->capabilities()->externalIdLabel ?? 'WHMCS #')
+                    // The company's source: «MyCS #» on MyCS Bridge (K2), else WHMCS's.
+                    ->label(fn (): string => app(BillingSourceRegistry::class)
+                        ->for((bool) Filament::getTenant()?->mycs_enabled ? PendingWhmcsInvoice::SOURCE_MYCS : PendingWhmcsInvoice::SOURCE_WHMCS)
+                        ?->capabilities()->externalIdLabel ?? 'WHMCS #')
                     ->sortable()
                     ->searchable()
                     ->prefix('#')
@@ -92,12 +94,12 @@ class WhmcsInboxTable
 
                         return $date ? $src.' · '.$date : $src;
                     })
-                    ->tooltip('Προβολή ολόκληρου του WHMCS τιμολογίου')
+                    ->tooltip(fn (PendingWhmcsInvoice $r): string => 'Προβολή ολόκληρου του '.$r->sourceLabel().' τιμολογίου')
                     // E: click the # → full invoice view, rendered from the
                     // staged payload (no live API call).
                     ->action(
                         Action::make('view_whmcs')
-                            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'WHMCS τιμολόγιο #'.$r->whmcs_invoice_id)
+                            ->modalHeading(fn (PendingWhmcsInvoice $r) => $r->sourceLabel().' τιμολόγιο #'.$r->whmcs_invoice_id)
                             ->modalContent(fn (PendingWhmcsInvoice $r) => view('filament.whmcs-inbox.invoice-view', ['r' => $r]))
                             ->modalSubmitAction(false)
                             ->modalCancelActionLabel('Κλείσιμο')
@@ -132,7 +134,7 @@ class WhmcsInboxTable
                 // even for unmatched rows, so the operator has the full picture
                 // (#xxxx from WHMCS client "X") and knows who to link/import.
                 TextColumn::make('whmcs_client')
-                    ->label('Πελάτης (WHMCS)')
+                    ->label(fn (): string => 'Πελάτης ('.((bool) Filament::getTenant()?->mycs_enabled ? 'MyCS' : 'WHMCS').')')
                     ->state(fn (PendingWhmcsInvoice $r): string => $r->whmcsClientName() ?? '—')
                     ->description(fn (PendingWhmcsInvoice $r): ?string => $r->whmcsAfm()
                         ? 'ΑΦΜ '.$r->whmcsAfm()

@@ -147,6 +147,12 @@ class PendingWhmcsInvoice extends Model
         return MycsPayload::is($payload) ? self::SOURCE_MYCS : self::SOURCE_WHMCS;
     }
 
+    /** Who sent it, for the operator's labels: «MyCS» or «WHMCS». */
+    public function sourceLabel(): string
+    {
+        return $this->isFromMycs() ? 'MyCS' : 'WHMCS';
+    }
+
     public function isFromMycs(): bool
     {
         return MycsPayload::is(is_array($this->payload) ? $this->payload : null);

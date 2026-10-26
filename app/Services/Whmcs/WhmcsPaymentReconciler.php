@@ -117,10 +117,6 @@ class WhmcsPaymentReconciler
      */
     private function isOutboundCandidate(PendingWhmcsInvoice $row): bool
     {
-        // Nothing is pushed to MyCS yet (its E3): no worklist the operator can't act on.
-        if ((bool) $row->company?->mycs_enabled) {
-            return false;
-        }
         $invoice = $row->invoice;
         if ($invoice === null
             || ! $this->isLiveOpen($invoice)

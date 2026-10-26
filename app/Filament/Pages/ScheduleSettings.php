@@ -65,6 +65,7 @@ class ScheduleSettings extends Page implements HasForms
         'whmcs_fetch_enabled' => ['WHMCS — άντληση εκκρεμών', 'Φέρνει πληρωμένα/αδήλωτα WHMCS τιμολόγια στο inbox (μόνο staging, ΔΕΝ δηλώνει στην ΑΑΔΕ).', false],
         'whmcs_fetch_unpaid_enabled' => ['WHMCS — άντληση ΑΠΛΗΡΩΤΩΝ', 'Φέρνει ΑΠΛΗΡΩΤΑ WHMCS τιμολόγια πελατών «invoice-before-pay» (επί πιστώσει) στο inbox — μόνο staging.', false],
         'whmcs_auto_issue_enabled' => ['WHMCS — αυτόματη έκδοση', 'Δηλώνει ΑΥΤΟΜΑΤΑ στην ΑΑΔΕ για πελάτες άμεσης τιμολόγησης σε οπλισμένους tenants. Διπλό κλειδί: ισχύει ΚΑΙ ανά εταιρεία → «Εταιρείες» → πεδίο «άμεση τιμολόγηση».', true],
+        'mycs_reversals_enabled' => ['MyCS — αντιστροφές πωλήσεων', 'Ειδοποιεί όταν ένα τιμολόγιο της MyCS που έχει ήδη παραστατικό έγινε refund, ακυρώθηκε ή ξαναέγινε απλήρωτο: χρειάζεται πιστωτικό. Μόνο ανάγνωση· μόνο για εταιρείες με MyCS Bridge.', true],
         'whmcs_payment_sync_enabled' => ['WHMCS — συγχρονισμός πληρωμών', 'Όταν ένα επί-πιστώσει WHMCS τιμολόγιο πληρωθεί στο WHMCS, καταγράφει την πληρωμή στο ekdosi και κλείνει την οφειλή. Γράφει ΜΟΝΟ στο ekdosi (ποτέ στο WHMCS)· καταγράφει μόνο ανοιχτά υπόλοιπα.', false],
         'whmcs_payment_reconcile_enabled' => ['WHMCS — εντοπισμός πληρωμών (read-only)', 'Εντοπίζει ποια ανοιχτά επί-πιστώσει τιμολόγια πληρώθηκαν στο WHMCS και τα δείχνει στο dashboard + στη σελίδα «Συγχρονισμός πληρωμών» με ειδοποίηση. ΔΕΝ γράφει χρήμα — ο χειριστής τα κλείνει με ένα κλικ.', false],
         // myDATA
@@ -109,7 +110,7 @@ class ScheduleSettings extends Page implements HasForms
      */
     private const SECTIONS = [
         'Email & ουρά εργασιών' => ['mail_sweep_enabled', 'queue_heartbeat_enabled', 'resend_failed_emails_enabled'],
-        'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_fetch_unpaid_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled'],
+        'WHMCS' => ['whmcs_fetch_enabled', 'whmcs_fetch_unpaid_enabled', 'whmcs_auto_issue_enabled', 'whmcs_payment_sync_enabled', 'whmcs_payment_reconcile_enabled', 'mycs_reversals_enabled'],
         'myDATA' => ['mydata_reconcile_enabled', 'mydata_vat_picture_enabled', 'mydata_fetch_expenses_enabled', 'mydata_sync_expenses_enabled', 'mydata_console_refresh_enabled'],
         'Ψηφιακή Διακίνηση (ΔΑ)' => ['delivery_fetch_inbound_enabled', 'delivery_refresh_status_enabled'],
         'myDATA — μητρώα (προμηθευτές/πελάτες)' => ['suppliers_sync_enabled', 'customers_sync_enabled', 'aade_status_refresh_enabled'],

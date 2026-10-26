@@ -72,6 +72,7 @@ class MycsBridgeTest extends TestCase
                 'ping' => Http::response(['status' => 'ok', 'source' => 'mycs', 'ops' => ['ping', 'invoices', 'invoice', 'resolve', 'mark']]),
                 'invoices' => Http::response((int) ($body['offset'] ?? 0) === 0 ? $feed : ['status' => 'ok', 'invoices' => [], 'offset' => $body['offset'], 'count' => 0]),
                 'mark' => $mark !== null ? $mark($body) : Http::response(['status' => 'ok', 'created' => true]),
+                'add_payment' => Http::response(['status' => 'ok', 'amount' => $body['amount']]),
                 default => Http::response(['error' => 'unknown_op'], 400),
             };
         }, '*' => Http::response(['error' => 'not WHMCS'], 500)]);
@@ -304,15 +305,17 @@ class MycsBridgeTest extends TestCase
         Http::assertNothingSent();
     }
 
-    public function test_the_whmcs_unpaid_fetch_never_runs_for_a_mycs_company(): void
+    /** K2: the unpaid fetch reads MyCS for a MyCS company, never the frozen WHMCS. */
+    public function test_the_unpaid_fetch_reads_mycs_never_whmcs(): void
     {
         $tenant = $this->tenant(['whmcs_api_identifier' => 'id', 'whmcs_api_secret' => 'secret']);
         Customer::create(['company_id' => $tenant->id, 'name' => 'Επί πιστώσει', 'afm' => '099999999', 'whmcs_client_id' => 100001,
             'needs_invoice_before_payment' => true]);
-        Http::fake(['*' => Http::response(['result' => 'success', 'invoices' => ['invoice' => []]])]);
+        $this->fakeMycs();
 
-        $this->artisan('whmcs:fetch-unpaid', ['--tenant' => $tenant->slug])->assertExitCode(3);
-        Http::assertNothingSent();
+        $this->artisan('whmcs:fetch-unpaid', ['--tenant' => $tenant->slug])->assertSuccessful();
+        Http::assertSent(fn (Request $r) => $r->url() === self::ENDPOINT && $r['status'] === 'Unpaid');
+        Http::assertNotSent(fn (Request $r) => str_contains($r->url(), 'whmcs.example.test'));
     }
 
     public function test_a_whmcs_payload_never_replaces_a_row_mycs_staged(): void
@@ -403,14 +406,19 @@ class MycsBridgeTest extends TestCase
         app(WhmcsBridgeClientFactory::class)->forSource($tenant);
     }
 
-    public function test_ping_and_what_mycs_does_not_take_yet(): void
+    public function test_ping_and_payments_go_to_mycs(): void
     {
         $tenant = $this->tenant();
         $this->fakeMycs();
 
         $this->assertSame('mycs', app(WhmcsBridgeClientFactory::class)->forSource($tenant)->ping()['source']);
-        // No payment goes to MyCS (its E3), nor to the old WHMCS.
-        $this->assertNull(app(WhmcsPaymentPusherFactory::class)->for($tenant));
+        // K2: a payment ekdosi received goes to MyCS (its E3 op=add_payment), never to the old WHMCS.
+        $push = app(WhmcsPaymentPusherFactory::class)->for($tenant);
+        $this->assertNotNull($push);
+        $push(1, 124.0, 'ekdosi-pay-7');
+        Http::assertSent(fn (Request $r) => $r->url() === self::ENDPOINT && $r['op'] === 'add_payment' && $r['invoice_id'] === 1
+            && $r['amount'] === '124.00' && $r['transid'] === 'ekdosi-pay-7');
+        Http::assertNotSent(fn (Request $r) => str_contains($r->url(), 'whmcs.example.test'));
         // WHMCS's own plugin client is still WHMCS's (its legacy ops).
         $this->assertFalse(app(WhmcsBridgeClientFactory::class)->for($tenant)->isMycs());
     }

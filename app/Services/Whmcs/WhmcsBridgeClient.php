@@ -225,9 +225,13 @@ class WhmcsBridgeClient
      *
      * @return array<int, array<string, mixed>> the page's payloads (empty = end)
      */
-    public function fetchPendingInvoices(int $offset, int $limit = 100, ?string $since = null, string $status = 'paid_unfiled', bool $withRouting = false): array
+    /** @param  list<int>|null  $userIds  MyCS only: these accounts only (K2, the unpaid feed) */
+    public function fetchPendingInvoices(int $offset, int $limit = 100, ?string $since = null, string $status = 'paid_unfiled', bool $withRouting = false, ?array $userIds = null): array
     {
         $body = ['op' => 'invoices', 'status' => $status, 'offset' => $offset, 'limit' => $limit];
+        if ($userIds !== null) {
+            $body['userids'] = array_values($userIds);
+        }
         if ($since !== null && $since !== '') {
             $body['since'] = $since;
         }

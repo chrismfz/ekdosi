@@ -38,6 +38,7 @@ class WhmcsUnpaidFetcher
     public function __construct(
         private WhmcsClientFactory $factory,
         private WhmcsInvoiceIngestor $ingestor,
+        private ?WhmcsBridgeClientFactory $bridgeFactory = null,
     ) {}
 
     /**
@@ -46,10 +47,10 @@ class WhmcsUnpaidFetcher
      */
     public function fetch(Company $tenant): UnpaidFetchSummary
     {
-        // On «MyCS Bridge» WHMCS is frozen at the cut-over: its «Unpaid» would overwrite invoices MyCS has since seen
-        // paid (docs/bridges-connectors.md §12). MyCS has no unpaid feed yet: nothing is read.
+        // On «MyCS Bridge» the unpaid invoices come from MyCS, never from WHMCS (frozen at the cut-over: its «Unpaid»
+        // would overwrite invoices MyCS has since seen paid). docs/bridges-connectors.md §12.
         if ((bool) $tenant->mycs_enabled) {
-            throw new WhmcsNotConfigured("Tenant {$tenant->name} reads its invoices from MyCS: the WHMCS unpaid fetch is off for it.");
+            return $this->fetchFromMycs($tenant);
         }
         $client = $this->factory->for($tenant);
         $minDate = $tenant->whmcs_invoice_min_date?->format('Y-m-d');
@@ -132,6 +133,74 @@ class WhmcsUnpaidFetcher
                         'whmcs_invoice_id' => $invoiceId,
                         'error' => $e->getMessage(),
                     ]);
+                }
+            }
+        }
+
+        return new UnpaidFetchSummary(
+            customers: $customers->count(),
+            skippedNoLink: $skippedNoLink,
+            unpaidSeen: $unpaidSeen,
+            created: $created,
+            updated: $updated,
+            failed: $failed,
+        );
+    }
+
+    /**
+     * K2: the «τιμολόγιο πριν την πληρωμή» customers' unpaid invoices from MyCS — one `op=invoices status=Unpaid` with
+     * their ids (`userids`), page by page, instead of one call per customer. The same ingest as the WHMCS path.
+     *
+     * @throws WhmcsNotConfigured|WhmcsUnreachable
+     */
+    private function fetchFromMycs(Company $tenant): UnpaidFetchSummary
+    {
+        $bridge = ($this->bridgeFactory ?? app(WhmcsBridgeClientFactory::class))->forSource($tenant);
+        $minDate = $tenant->whmcs_invoice_min_date?->format('Y-m-d');
+        $skippedNoLink = Customer::query()
+            ->where('company_id', $tenant->id)
+            ->where('needs_invoice_before_payment', true)
+            ->whereNull('whmcs_client_id')
+            ->count();
+        $customers = Customer::query()
+            ->where('company_id', $tenant->id)
+            ->where('needs_invoice_before_payment', true)
+            ->whereNotNull('whmcs_client_id')
+            ->get(['id', 'whmcs_client_id']);
+        $created = 0;
+        $updated = 0;
+        $unpaidSeen = 0;
+        $failed = 0;
+
+        // MyCS takes up to 1000 accounts a call.
+        foreach ($customers->pluck('whmcs_client_id')->map(fn ($id) => (int) $id)->filter()->unique()->chunk(1000) as $ids) {
+            for ($offset = 0; ; $offset += 200) {
+                try {
+                    $payloads = $bridge->fetchPendingInvoices($offset, 200, $minDate, 'Unpaid', true, $ids->values()->all());
+                } catch (WhmcsApiException $e) {
+                    // The whole call failed (not one customer): counted and stopped, the next run tries again.
+                    $failed++;
+                    Log::warning('Unpaid-fetch from MyCS failed.', ['company_id' => $tenant->id, 'error' => $e->getMessage()]);
+
+                    break;
+                }
+                if ($payloads === []) {
+                    break;
+                }
+                foreach ($payloads as $payload) {
+                    if (strcasecmp((string) ($payload['status'] ?? ''), 'Unpaid') !== 0) {
+                        continue;
+                    }
+                    $unpaidSeen++;
+                    try {
+                        $result = $this->ingestor->ingest($tenant, $payload);
+                        $result->created ? $created++ : $updated++;
+                    } catch (\Throwable $e) {
+                        $failed++;
+                        Log::warning('Unpaid-fetch: staging one MyCS invoice failed (skipped).', [
+                            'company_id' => $tenant->id, 'invoice_id' => $payload['id'] ?? null, 'error' => $e->getMessage(),
+                        ]);
+                    }
                 }
             }
         }

@@ -191,6 +191,11 @@ return [
         'whmcs_payment_sync_enabled' => env('EKDOSI_SCHEDULE_WHMCS_PAYMENT_SYNC', false),
         'whmcs_payment_sync_cron' => env('EKDOSI_WHMCS_PAYMENT_SYNC_CRON', '*/30 * * * *'),
 
+        // mycs:watch-reversals — MyCS Bridge (K2): bell staff when an issued invoice was refunded, cancelled or unpaid
+        // again in MyCS (a credit note may be needed). Read only; runs only for companies on MyCS. ON by default.
+        'mycs_reversals_enabled' => env('EKDOSI_SCHEDULE_MYCS_REVERSALS', true),
+        'mycs_reversals_cron' => env('EKDOSI_MYCS_REVERSALS_CRON', '*/15 * * * *'),
+
         // tickets:poll-imap — poll each support-enabled tenant's mail-configured
         // departments (IMAP) and route inbound email into tickets (Πυλώνας E).
         // OFF by default — opt in per deploy once the mailbox config is verified

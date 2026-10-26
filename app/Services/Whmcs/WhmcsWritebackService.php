@@ -82,6 +82,12 @@ class WhmcsWritebackService
             // write-back needs its own design (tracked follow-up). Filed/other
             // states: nothing to do.
             if ($pending->status !== PendingWhmcsInvoice::STATUS_DRAFTED) {
+                // MyCS keeps several MARKs per invoice (K2): each document of the split goes back on its own.
+                if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT && (bool) $tenant->mycs_enabled) {
+                    $this->pushSplitMark($tenant, $pending, $invoice, $mark, 'active');
+
+                    return;
+                }
                 if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
                     Log::info('WHMCS write-back skipped: split row (one WHMCS invoice → many MARKs is a separate design)', [
                         'pending_id' => $pending->id,
@@ -177,7 +183,13 @@ class WhmcsWritebackService
                 return;
             }
             if ($pending->status === PendingWhmcsInvoice::STATUS_SPLIT) {
-                return;   // one WHMCS invoice → many MARKs: separate design
+                // MyCS: this document's cancellation goes back on its own MARK (K2); WHMCS: one MARK per invoice.
+                $mark = (string) ($invoice->mydata_mark ?? '');
+                if ((bool) $tenant->mycs_enabled && $mark !== '') {
+                    $this->pushSplitMark($tenant, $pending, $invoice, $mark, 'cancelled');
+                }
+
+                return;
             }
 
             $mark = (string) ($invoice->mydata_mark ?? $pending->mydata_mark ?? '');
@@ -408,6 +420,35 @@ class WhmcsWritebackService
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
         } catch (Throwable $e) {
             $this->recordFailure($tenant, $pending, $invoice, $mark, $e);
+        }
+    }
+
+    /**
+     * One document of a split row, to MyCS (K2): its own MARK, code, state and PDF; no row state of its own (the row
+     * has many documents). A failure is written on the row with the document's code, for staff; never thrown.
+     */
+    private function pushSplitMark(Company $tenant, PendingWhmcsInvoice $pending, Invoice $invoice, string $mark, string $state): void
+    {
+        if ($pending->source_conflict) {
+            return;
+        }
+        try {
+            $pdfUrl = null;
+            try {
+                $pdfUrl = $invoice->publicPdfUrl();
+            } catch (Throwable) {
+            }
+            $this->bridgeFactory->forSource($tenant)->setInvoiced((int) $pending->whmcs_invoice_id, $mark, $invoice->invcode, $state, $pdfUrl);
+            Log::info('MyCS write-back of a split document succeeded', ['pending_id' => $pending->id, 'ekdosi_invoice' => $invoice->invcode, 'mydata_mark' => $mark, 'state' => $state]);
+        } catch (Throwable $e) {
+            Log::error('MyCS write-back of a split document failed (AADE filing already complete)', [
+                'pending_id' => $pending->id, 'ekdosi_invoice' => $invoice->invcode, 'mydata_mark' => $mark, 'error' => $e->getMessage(),
+            ]);
+            $pending->update([
+                'whmcs_writeback_state' => PendingWhmcsInvoice::WRITEBACK_FAILED,
+                'whmcs_writeback_error' => trim(($pending->whmcs_writeback_error ? $pending->whmcs_writeback_error.' · ' : '')
+                    .$invoice->invcode.': '.$e->getMessage()),
+            ]);
         }
     }
 

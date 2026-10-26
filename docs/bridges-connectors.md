@@ -319,8 +319,10 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 | Recipient per line | `mod_ekdosi_routing` (opt-in) | always embedded (`third_party`), from MyCS's contacts |
 | MARK write-back | `inbound.php {whmcs_invoice_id, mark, …}` | `op=mark {invoice_id, mark, …}`, **no fingerprint**: what ekdosi issued is final, whatever changed in MyCS since (owner, 2026-10-25: «αν κόπηκε, πάει κόπηκε»; a credit note if ever needed). MyCS refuses only an invoice merged or split there after it was read (409 `invoice_changed`): write-back state **`changed`** («Άλλαξε στη MyCS»), shown with that note, never retried. The row stays filed. A cancellation is never sent to MyCS for a MARK it didn't take |
 | Payments billing → ekdosi | `whmcs:sync-payments` / reconcile read the invoice's status | the same, through `op=invoice` on MyCS (same ids, same shape): a credit-term invoice paid in MyCS closes its receivable here |
-| Payments ekdosi → billing | `add_payment` | not yet (MyCS E3); `WhmcsPaymentPusherFactory` returns null for MyCS |
-| Unpaid feed («τιμολόγιο πριν την πληρωμή») | `whmcs:fetch-unpaid` (native API) | **off**: WHMCS is frozen at the cut-over, its «Unpaid» would overwrite what MyCS has seen paid; MyCS has no unpaid feed yet |
+| Payments ekdosi → billing | `add_payment` | the same `op=add_payment` (MyCS E3, K2): once per transid, cut to what is left (never credit), `already_settled` on an invoice already paid there |
+| Unpaid feed («τιμολόγιο πριν την πληρωμή») | `whmcs:fetch-unpaid` (native API, one call per customer) | `whmcs:fetch-unpaid` reads MyCS (K2): one `op=invoices status=Unpaid userids=[…]` a page for all the flagged customers; never the frozen WHMCS |
+| Split rows | not written back (one MARK per WHMCS invoice) | each document of the split goes back on its own MARK (K2), and so does its cancellation |
+| Sale reversed in the billing system | — | `mycs:watch-reversals` (K2, every 15′, read only): a few issued rows a run, in turn (`op=invoice` each, within MyCS's 120/min); refunded, cancelled or unpaid again → the staff bell «Χρειάζεται πιστωτικό (MyCS)», once each |
 | Credit/debit notes | — | `mycs.adjustments` ≠ 0 → the row is held («το σύνολο διαφέρει από τις γραμμές»), because a document built from the lines would be for the wrong amount. It is held when first seen, or when the amount changes; once the operator has sent it back to review, the same notes don't hold it again |
 
 **One source per company.** `mycs_enabled` wins:
@@ -375,11 +377,8 @@ A missing `immediate_invoicing` in a MyCS payload is «unknown»: it leaves the 
 **Live test before the cut-over** (owner, 2026-10-25): real invoices on `ekdosi.myip.gr` (provider with DEV
 credentials) against MyCS, with Chrome. The checklist is in MyCS's `docs/ekdosi-bridge.md` → «Live δοκιμή».
 
-**Not yet (K2):**
-- `add_payment` to MyCS, once MyCS has it (its E3);
-- an unpaid feed for «τιμολόγιο πριν την πληρωμή»;
-- writing back each document of a split inbox row. MyCS takes several MARKs per invoice; today a split row is not
-  written back, as with WHMCS. This matters more with MyCS (see `docs/BACKLOG.md`).
+**Done in K2:** the unpaid feed from MyCS, payments to MyCS, split write-back, the reversal watch, and the operator's
+labels («MyCS #», «Κατάσταση MyCS», «Πελάτης (MyCS)» on MyCS rows and companies).
 
 **Files:**
 - `database/migrations/2026_10_25_100000_add_mycs_bridge_to_companies.php`
