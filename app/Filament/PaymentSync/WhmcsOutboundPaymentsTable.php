@@ -111,7 +111,7 @@ class WhmcsOutboundPaymentsTable extends TableWidget
         }
 
         match ($result) {
-            PaymentPushResult::Pushed => Notification::make()->title('Ενημερώθηκε '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->the())->success()->send(),
+            PaymentPushResult::Pushed => Notification::make()->title(($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->subject().' ενημερώθηκε')->success()->send(),
             PaymentPushResult::AlreadyPaid => Notification::make()->title('Ήταν ήδη πληρωμένο')->info()->send(),
             PaymentPushResult::Failed => Notification::make()->title('Απέτυχε — δοκιμάστε ξανά')->danger()->persistent()->send(),
             PaymentPushResult::Skipped => Notification::make()->title('Δεν έγινε σήμανση')->warning()->send(),

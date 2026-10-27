@@ -356,10 +356,13 @@ class Company extends Model
         return $this->hasWhmcsIntegration() || $this->usesMycs();
     }
 
-    /** The billing source in the operator's sentences: MyCS when it uses one, otherwise WHMCS. */
+    /**
+     * The billing source in the operator's sentences: MyCS when it is switched on (as WhmcsInvoiceFetcher routes it,
+     * also while its address or secret is missing, so «Δεν έχει ρυθμιστεί MyCS» names the right one), otherwise WHMCS.
+     */
     public function billingSourceName(): SourceName
     {
-        return SourceName::for($this->usesMycs());
+        return SourceName::for((bool) $this->mycs_enabled);
     }
 
     /**
