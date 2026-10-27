@@ -309,7 +309,8 @@ class WhmcsAutoIssue extends Command
         // which the cash-term auto-issue defaults can't express — filing it here
         // would silently record a real receivable as SETTLED. Hold it for the
         // operator, who gets the unpaid credit-term type pre-selected in the inbox.
-        if ($row->whmcsIsUnpaid()) {
+        // Payment Pending / Collections too: not paid either (adversarial R2-2 of #704).
+        if ($row->whmcsIsNotPaid()) {
             return [null, 'WHMCS ΑΠΛΗΡΩΤΟ — χρειάζεται χειριστή (έκδοση επί πιστώσει, όχι αυτόματη)'];
         }
 

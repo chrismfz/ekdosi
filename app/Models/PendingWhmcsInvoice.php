@@ -501,6 +501,16 @@ class PendingWhmcsInvoice extends Model
     }
 
     /**
+     * Owed, not paid, at the source: «Unpaid», and WHMCS «Payment Pending» and «Collections» (#704). The issue path
+     * keys on this: such an invoice is issued on credit (never settled at issue) and never unattended. MyCS sends only
+     * «Unpaid»; cancelled, refunded or draft ones are not issued; a payload without a status is not one.
+     */
+    public function whmcsIsNotPaid(): bool
+    {
+        return in_array(strtolower((string) $this->whmcsStatus()), ['unpaid', 'payment pending', 'collections'], true);
+    }
+
+    /**
      * The invoice type the «Δημιουργία Παραστατικού» draft should PRE-SELECT for
      * this row — a starting point the operator always overrides. Status- and
      * intent-aware:

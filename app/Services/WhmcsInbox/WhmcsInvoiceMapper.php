@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
 use App\Support\CustomerLanguage;
@@ -194,6 +195,13 @@ class WhmcsInvoiceMapper
             : null;
         $paymentMethodId = WhmcsPaymentMethodResolver::forCompany($tenant->id)->resolve($gateway)
             ?? $invoiceType->payment_method_id;
+        // An UNPAID invoice (issued before payment: forced from WHMCS, «Send to Ekdosi» from MyCS) must stay an open
+        // receivable. The type's default method may be cash-term (due_days 0: InvoiceBalance settles it at issue with
+        // no payment at all), so it takes the tenant's «Επί Πιστώσει» instead; without one it keeps the default and
+        // the preview says so.
+        if ($pending->whmcsIsNotPaid() && ! $this->isCreditTerm($tenant, $paymentMethodId)) {
+            $paymentMethodId = $this->creditTermMethodId($tenant) ?? $paymentMethodId;
+        }
 
         return [
             'header' => [
@@ -249,6 +257,11 @@ class WhmcsInvoiceMapper
                 'whmcs_userid' => (int) ($payload['userid'] ?? 0),
                 'whmcs_date' => (string) ($payload['date'] ?? ''),
                 'whmcs_total' => (float) ($payload['total'] ?? 0.0),
+                // Unpaid at the source: the preview says whether the method keeps it an open receivable.
+                'whmcs_unpaid' => $pending->whmcsIsNotPaid(),
+                // What was paid already on a not-paid one (account credit, part payments): not recorded at issue (owner,
+                // adversarial ADV-3/4 of #704), so the preview asks for it to be recorded by hand.
+                'whmcs_paid_before_issue' => $pending->whmcsIsNotPaid() ? self::paidBeforeIssue($payload) : 0.0,
                 // WH-1: the WHMCS invoice currency. ekdosi files in EUR only
                 // (the AADE payload hardcodes CurrencyCode::EUR); a non-EUR
                 // amount taken as EUR would file the wrong value. Surfaced so
@@ -416,6 +429,58 @@ class WhmcsInvoiceMapper
         $payload['items']['item'] = array_values($out);
 
         return $payload;
+    }
+
+    /**
+     * Account credit applied plus net incoming transactions, in both shapes: WHMCS `transactions.transaction` (one as a
+     * bare map) with amountin/amountout, MyCS a list with amount/refunded.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private static function paidBeforeIssue(array $payload): float
+    {
+        $paid = (float) ($payload['credit'] ?? 0);
+        $txns = $payload['transactions'] ?? [];
+        if (is_array($txns) && array_key_exists('transaction', $txns)) {
+            $txns = is_array($txns['transaction']) ? $txns['transaction'] : [];
+            $txns = array_is_list($txns) ? $txns : [$txns];
+        }
+        foreach (is_array($txns) ? $txns : [] as $row) {
+            if (is_array($row)) {
+                $paid += array_key_exists('amountin', $row)
+                    ? (float) $row['amountin'] - (float) ($row['amountout'] ?? 0)
+                    : (float) ($row['amount'] ?? 0) - (float) ($row['refunded'] ?? 0);
+            }
+        }
+
+        return round(max(0.0, $paid), 2);
+    }
+
+    /**
+     * Credit-term = due_days > 0: InvoiceBalance keeps it open until a payment closes it. A deleted method is not one:
+     * the invoice's belongsTo would not find it and it would read cash-term (adversarial ADV-1 of #704).
+     */
+    private function isCreditTerm(Company $tenant, ?int $paymentMethodId): bool
+    {
+        return $paymentMethodId !== null && (int) PaymentMethod::withoutGlobalScopes()
+            ->where('company_id', $tenant->id)->whereNull('deleted_at')->whereKey($paymentMethodId)->value('due_days') > 0;
+    }
+
+    /**
+     * The tenant's «Επί Πιστώσει»: myDATA payment type 5 (§8.12) with due days, so it is also credit-term here (one
+     * with due_days 0 would still be settled at issue). The lowest id when there are several; null when none.
+     */
+    private function creditTermMethodId(Company $tenant): ?int
+    {
+        $id = PaymentMethod::withoutGlobalScopes()
+            ->where('company_id', $tenant->id)
+            ->whereNull('deleted_at')
+            ->where('mydata_payment_type', 5)
+            ->where('due_days', '>', 0)
+            ->orderBy('id')
+            ->value('id');
+
+        return $id === null ? null : (int) $id;
     }
 
     private function resolveDefaultVatCategory(Company $tenant): VatCategory

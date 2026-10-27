@@ -614,6 +614,8 @@ seam** (`servers`/`server_groups` + ProvisioningModule)· dashboard MRR + upcomi
 - **Paid/unpaid-aware τιμολόγηση**: badge «Πληρωμή WHMCS» (Πληρωμένο/Απλήρωτο) στο inbox· το draft
   προ-επιλέγει τύπο βάσει κατάστασης — ΑΠΛΗΡΩΤΟ → «Προεπιλεγμένος τύπος για ΑΠΛΗΡΩΤΑ» (επί πιστώσει →
   ανοιχτή οφειλή), ΠΛΗΡΩΜΕΝΟ → cash-term (τιμολόγιο/απόδειξη κατά πρόθεση)· override πάντα.
+  Ό,τι τύπο κι αν πάρει, ένα ΑΠΛΗΡΩΤΟ με μετρητοίς τρόπο πληρωμής γίνεται «Επί Πιστώσει» (τύπος myDATA 5, με
+  ημέρες πίστωσης)· η προεπισκόπηση δείχνει τον τρόπο πληρωμής.
 - **Inbound συγχρονισμός πληρωμών** (`whmcs:sync-payments`, opt-in scheduled): όταν ένα επί-πιστώσει
   WHMCS τιμολόγιο πληρωθεί στο WHMCS, καταγράφεται Payment στο ekdosi που κλείνει την οφειλή —
   money-write μόνο στο ekdosi, only-if-open + dedup. **On-demand και από το UI**: header action

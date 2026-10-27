@@ -118,7 +118,30 @@
             $vatMismatch = ! empty($src['whmcs_tax_reported']) && $wTax <= 0.005
                 ? $vat > 0.005
                 : $wTax > 0.005 && abs($wTax - $vat) > $tol;
+            // The method the document is issued with: a cash-term one (due_days 0) is settled at issue, with no payment;
+            // a deleted one too (the invoice would not find it).
+            $method = ($preview->header['payment_method_id'] ?? null) !== null
+                ? \App\Models\PaymentMethod::withoutGlobalScopes()->whereNull('deleted_at')->find($preview->header['payment_method_id'])
+                : null;
+            $creditTerm = (int) ($method?->due_days ?? 0) > 0;
         @endphp
+        <div class="text-sm">
+            Τρόπος πληρωμής: <strong>{{ $method?->description ?? '—' }}</strong>
+            <span class="text-gray-500">({{ $creditTerm ? 'επί πιστώσει: ανοιχτή οφειλή μέχρι την πληρωμή' : 'εξοφλείται με την έκδοση' }})</span>
+            @if (! empty($src['whmcs_unpaid']) && ! $creditTerm)
+                <div class="text-danger-600 font-semibold">
+                    ⚠️ Απλήρωτο, αλλά δεν υπάρχει τρόπος πληρωμής «Επί Πιστώσει» (τύπος myDATA 5, με ημέρες πίστωσης):
+                    θα εκδοθεί εξοφλημένο. Όρισέ τον στους Τρόπους πληρωμής ή άλλαξέ τον στο προσχέδιο.
+                </div>
+            @endif
+            @if (! empty($src['whmcs_unpaid']) && (float) ($src['whmcs_paid_before_issue'] ?? 0) > 0.005)
+                <div class="text-warning-600 font-semibold">
+                    ⚠️ Έχει ήδη πληρωθεί {{ $fmt($src['whmcs_paid_before_issue']) }} στην πηγή (πίστωση ή μερική πληρωμή), που
+                    δεν καταγράφεται αυτόματα: μετά την έκδοση, καταχώρησέ το στις Πληρωμές,
+                    {{ $creditTerm ? 'αλλιώς θα φαίνεται οφειλή όλο το ποσό.' : 'ώστε το υπόλοιπο να μείνει ανοιχτή οφειλή (αλλιώς φαίνεται εξοφλημένο).' }}
+                </div>
+            @endif
+        </div>
         <div class="text-xs text-gray-500 space-y-1">
             <div>
                 Από WHMCS παραστατικό #{{ $src['whmcs_invoice_id'] }},
