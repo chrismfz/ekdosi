@@ -10,6 +10,7 @@ use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\RecomputeInvoiceTotals;
 use App\Services\Whmcs\ContactCustomerResolver;
+use App\Support\Afm;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -58,6 +59,12 @@ class WhmcsInvoiceSplitter
             return [];
         }
 
+        // The row's own customer read whole and of this tenant: a list that loaded a few of its columns (no
+        // company_id) made the mapper refuse it as another tenant's (live test of 2026-10-27); its name labels the group.
+        $own = $pending->customer_id !== null
+            ? Customer::query()->where('company_id', $tenant->getKey())->find($pending->customer_id)
+            : null;
+
         /** @var array<string, array<string,mixed>> $groups */
         $groups = [];
         foreach ($lines as $line) {
@@ -65,11 +72,14 @@ class WhmcsInvoiceSplitter
             if ($routed) {
                 $contactId = (int) ($line['contact']['id'] ?? 0);
                 $key = 'contact:'.$contactId;
-                $label = (string) ($line['contact']['company_name'] ?? ('Επαφή #'.$contactId));
+                // A contact known by its ΑΦΜ only (the rest from the registry) is named by it, never blank.
+                $afm = Afm::uniqueKey((string) ($line['contact']['gr_vatno'] ?? ''));
+                $label = trim(html_entity_decode((string) ($line['contact']['company_name'] ?? ''), ENT_QUOTES | ENT_HTML5, 'UTF-8'))
+                    ?: ($afm !== null ? 'ΑΦΜ '.$afm : 'Επαφή #'.$contactId);
                 $contact = $line['contact'];
             } else {
                 $key = 'reseller';
-                $label = (string) ($pending->customer?->name ?? 'Πελάτης '.$pending->sourceLabel());
+                $label = (string) ($own?->name ?? 'Πελάτης '.$pending->sourceLabel());
                 $contact = null;
             }
 
@@ -108,7 +118,7 @@ class WhmcsInvoiceSplitter
         foreach ($groups as $group) {
             $group['customer'] = $group['contact'] !== null
                 ? $this->contactResolver->resolve($tenant, $group['contact'])
-                : $pending->customer;
+                : $own;
             $out[] = $group;
         }
 
