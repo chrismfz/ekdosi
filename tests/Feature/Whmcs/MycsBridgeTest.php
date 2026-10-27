@@ -71,6 +71,9 @@ class MycsBridgeTest extends TestCase
             return match ($body['op'] ?? '') {
                 'ping' => Http::response(['status' => 'ok', 'source' => 'mycs', 'ops' => ['ping', 'invoices', 'invoice', 'resolve', 'mark']]),
                 'invoices' => Http::response((int) ($body['offset'] ?? 0) === 0 ? $feed : ['status' => 'ok', 'invoices' => [], 'offset' => $body['offset'], 'count' => 0]),
+                // One invoice by id, as the feed has it (K3 reads it again before issuing).
+                'invoice' => ($one = collect($feed['invoices'])->firstWhere('invoiceid', (int) ($body['invoice_id'] ?? 0))) !== null
+                    ? Http::response(['status' => 'ok', 'invoice' => $one]) : Http::response(['error' => 'invoice_not_found'], 404),
                 'mark' => $mark !== null ? $mark($body) : Http::response(['status' => 'ok', 'created' => true]),
                 'add_payment' => Http::response(['status' => 'ok', 'amount' => $body['amount']]),
                 default => Http::response(['error' => 'unknown_op'], 400),

@@ -6,6 +6,7 @@ use App\Console\Commands\WhmcsAutoIssue;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\PendingWhmcsInvoice;
+use App\Services\Mycs\MycsRowRefresher;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Support\Billing\MycsPayload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -113,5 +114,51 @@ class MycsBridgeK3Test extends TestCase
 
         $this->assertTrue(MycsPayload::requested($row->fresh()->payload));
         $this->assertFalse(collect($candidates)->contains('id', $row->id));
+    }
+
+    /** MyCS answering op=invoice with this payload (or failing). */
+    private function fakeInvoice(?array $payload, int $status = 200): void
+    {
+        Http::fake([self::ENDPOINT => Http::response($payload === null ? ['error' => 'invoice_not_found'] : ['status' => 'ok', 'invoice' => $payload],
+            $payload === null ? 404 : $status), '*' => Http::response([], 500)]);
+    }
+
+    public function test_an_unchanged_invoice_goes_on_to_its_document(): void
+    {
+        $tenant = $this->tenant();
+        $row = app(WhmcsInvoiceIngestor::class)->ingest($tenant, $this->payload(5))->row;
+        $this->fakeInvoice($this->payload(5));
+
+        $this->assertNull(app(MycsRowRefresher::class)->check($row));
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->fresh()->status);
+    }
+
+    public function test_an_invoice_changed_in_mycs_since_it_came_in_is_held_with_why(): void
+    {
+        $tenant = $this->tenant();
+        $row = app(WhmcsInvoiceIngestor::class)->ingest($tenant, $this->payload(6, 'Unpaid', '2026-10-27 10:00:00'))->row;
+        $now = $this->payload(6, 'Unpaid'); // staff withdrew it, and a line changed
+        $now['mycs']['fingerprint'] = 'another';
+        $now['total'] = '150.00';
+        $this->fakeInvoice($now);
+
+        $why = app(MycsRowRefresher::class)->check($row);
+
+        $this->assertNotNull($why);
+        $this->assertStringContainsString('αποσύρθηκε', $why);
+        $row = $row->fresh();
+        $this->assertSame(PendingWhmcsInvoice::STATUS_HELD, $row->status);
+        $this->assertSame('150.00', (string) $row->payload['total'], 'the snapshot is MyCS\'s invoice as it is now');
+        $this->assertFalse(MycsPayload::requested($row->payload));
+    }
+
+    public function test_nothing_is_issued_while_mycs_does_not_answer(): void
+    {
+        $tenant = $this->tenant();
+        $row = app(WhmcsInvoiceIngestor::class)->ingest($tenant, $this->payload(7))->row;
+        Http::fake(['*' => Http::response([], 500)]);
+
+        $this->assertNotNull(app(MycsRowRefresher::class)->check($row));
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->fresh()->status, 'left as it was, for the next try');
     }
 }

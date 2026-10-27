@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
+use App\Services\Mycs\MycsRowRefresher;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Support\Afm;
 use Illuminate\Console\Command;
@@ -229,6 +230,14 @@ class WhmcsAutoIssue extends Command
             if ($dryRun) {
                 $this->line("  · would issue {$label} as {$chosenType->code}");
                 $filed++;
+
+                continue;
+            }
+
+            // MyCS's invoice as it is now (K3): changed since it came in, or MyCS not answering, nothing is filed.
+            if (($why = app(MycsRowRefresher::class)->check($row)) !== null) {
+                $held++;
+                $this->line("  · {$label}: {$why} — left in inbox.");
 
                 continue;
             }

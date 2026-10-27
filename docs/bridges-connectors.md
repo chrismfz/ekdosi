@@ -383,6 +383,17 @@ credentials) against MyCS, with Chrome. The checklist is in MyCS's `docs/ekdosi-
 
 **Done in K3:** «Send to Ekdosi» from MyCS (`requested`), the source's name in the inbox modals and the sync action
 (and a MyCS-only company, with no WHMCS URL, can «Συγχρονισμός τώρα»).
+- **Read again before issuing** (owner 2026-10-27, «refresh»): «Δημιουργία Παραστατικού» and `whmcs:auto-issue` read a
+  MyCS row's invoice again (`op=invoice`, `MycsRowRefresher`). Changed since it came in (lines, amounts or notes — the
+  fingerprint —, status, client, the request, «ignore invoicing») → the row takes MyCS's invoice as it is now and is
+  held with why; MyCS not answering → nothing issued now. After issuing, nothing changes: an issued document is final.
+- A held row keeps its snapshot but follows the request (`requested_at`), so released it is never auto-issued on a
+  request it did not know of. A row archived here, or held only as «ignored», is brought back by a NEW request (once),
+  with the same holds as a fresh one (notes changing the total, third parties, consolidated); one archived from WHMCS
+  before the cut-over too, for the same client. The «Send to Ekdosi» note follows the request (off when withdrawn).
+- Not covered (by design): a document cancelled at AADE is reissued here («Ακύρωση & επανέκδοση»), not by sending it
+  again from MyCS (its row is filed). A document on credit issued through a split, or on a type without credit days,
+  sends no `add_payment` back (K2's rule): its payment is recorded in MyCS by hand.
 
 **Done in K2:** the unpaid feed from MyCS, payments to MyCS, split write-back, the reversal watch, and the operator's
 labels («MyCS #», «Κατάσταση MyCS», «Πελάτης (MyCS)» on MyCS rows and companies).

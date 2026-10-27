@@ -11,6 +11,7 @@ use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Billing\BillingSourceRegistry;
 use App\Services\Whmcs\WhmcsCustomerCreateResult;
+use App\Services\Mycs\MycsRowRefresher;
 use App\Services\Whmcs\WhmcsCustomerCreator;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\Whmcs\WhmcsWritebackService;
@@ -1408,6 +1409,12 @@ class WhmcsInboxTable
                         ->danger()
                         ->persistent()
                         ->send();
+
+                    return;
+                }
+                // MyCS's invoice as it is now, not the snapshot it came in with (K3): changed since, held with why.
+                if (($why = app(MycsRowRefresher::class)->check($r)) !== null) {
+                    Notification::make()->title('Δεν δημιουργήθηκε προσχέδιο')->body($why)->warning()->persistent()->send();
 
                     return;
                 }
