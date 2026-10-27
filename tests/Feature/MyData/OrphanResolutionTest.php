@@ -20,7 +20,8 @@ use App\Services\RecomputeInvoiceTotals;
 use App\Services\Reminders\ReminderPlanner;
 use Carbon\Carbon;
 use Filament\Facades\Filament;
-use Firebed\AadeMyData\Exceptions\ErrorResponseException;
+use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Gate;
@@ -385,30 +386,39 @@ class OrphanResolutionTest extends TestCase
     public function test_an_aade_error_answer_shows_aades_message_not_a_connection_failure(): void
     {
         // firebed ≥ 5.14 throws on an AADE error document: the page must show AADE's own
-        // message, not tell the operator to check credentials that are fine.
-        $error = ErrorResponseException::fromXml('<?xml version="1.0" encoding="utf-8"?><ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><response><index>1</index><statusCode>ValidationError</statusCode><errors><error><message>Invalid date range</message><code>101</code></error></errors></response></ResponseDoc>');
+        // message, not tell the operator to check credentials that are fine. The REAL reader
+        // runs (only the HTTP is mocked), so the exception reaches the page unwrapped.
+        $errorDoc = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><response><index>1</index><statusCode>ValidationError</statusCode><errors><error><message>Invalid date range</message><code>101</code></error></errors></response></ResponseDoc>';
 
-        $this->page($this->doc(), $error)
+        $this->tenant->forceFill(['mydata_aade_id_sandbox' => 'TESTUSER', 'mydata_subscription_key_sandbox' => 'TESTKEY'])->save();
+        Gate::before(fn () => true);
+        $this->actingAs(User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]));
+        Filament::setTenant($this->tenant);
+        $this->app->bind(TransmittedDocReader::class, fn ($app, array $params) => new TransmittedDocReader(
+            $params['tenant'], new MockHandler([new GuzzleResponse(200, [], $errorDoc)]),
+        ));
+
+        Livewire::withQueryParams(['mark' => '400012824290573'])->test(MyDataMarkDetail::class)
             ->assertSet('error', 'Το myDATA απάντησε με σφάλμα: 101: Invalid date range')
             ->assertDontSee('Ελέγξτε τα διαπιστευτήρια');
     }
 
-    private function page(array $doc, ?\Throwable $throw = null)
+    private function page(array $doc)
     {
         Gate::before(fn () => true);
         $this->actingAs(User::create(['name' => 'Op', 'email' => 'op-'.uniqid().'@t.local', 'password' => bcrypt('x')]));
         Filament::setTenant($this->tenant);
         // The page reads the orphan from AADE itself — the fake stands in for the network.
-        $this->app->bind(TransmittedDocReader::class, fn ($app, array $params) => new class($params['tenant'], $doc, $throw) extends TransmittedDocReader
+        $this->app->bind(TransmittedDocReader::class, fn ($app, array $params) => new class($params['tenant'], $doc) extends TransmittedDocReader
         {
-            public function __construct(Company $tenant, private array $fake, private ?\Throwable $throw)
+            public function __construct(Company $tenant, private array $fake)
             {
                 parent::__construct($tenant);
             }
 
             public function fetchDetailByMark(string $mark, Carbon $from, Carbon $to): ?array
             {
-                return $this->throw ? throw $this->throw : $this->fake;
+                return $this->fake;
             }
         });
 
