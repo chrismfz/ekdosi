@@ -97,6 +97,7 @@
              exposes a net/gross mix-up). Mirrors WhmcsFilingGuard::assertTotalsReconcile. --}}
         @php
             $src = $preview->source;
+            $srcName = $src['source_label'] ?? 'WHMCS';
             $wTotal = (float) ($src['whmcs_total'] ?? 0);
             $wCredit = isset($src['whmcs_credit']) ? (float) $src['whmcs_credit'] : null;
             $wSubtotal = (float) ($src['whmcs_subtotal'] ?? 0);
@@ -144,24 +145,24 @@
         </div>
         <div class="text-xs text-gray-500 space-y-1">
             <div>
-                Από WHMCS παραστατικό #{{ $src['whmcs_invoice_id'] }},
+                Από {{ $srcName }} παραστατικό #{{ $src['whmcs_invoice_id'] }},
                 ημερομηνία {{ $src['whmcs_date'] }},
-                αξία WHMCS: {{ $fmt($documentValue) }}@if ($wTax > 0.005) (ΦΠΑ {{ $fmt($wTax) }})@endif
+                αξία {{ $srcName }}: {{ $fmt($documentValue) }}@if ($wTax > 0.005) (ΦΠΑ {{ $fmt($wTax) }})@endif
                 @if ($wCredit !== null && $wCredit > 0.005)
                     — εξοφλήθηκε {{ $fmt($wCredit) }} από πίστωση, υπόλοιπο {{ $fmt($wTotal) }}
                 @endif.
             </div>
             @if (! empty($preview->totals['taxtype_conflict']))
                 <div class="text-warning-600 font-semibold">
-                    ⚠️ Το WHMCS δηλώνει ΦΠΑ «{{ $src['whmcs_taxtype'] ?? '' }}» αλλά τα ποσά αυτού του τιμολογίου
+                    ⚠️ {{ $srcName === 'MyCS' ? 'Η MyCS' : 'Το WHMCS' }} δηλώνει ΦΠΑ «{{ $src['whmcs_taxtype'] ?? '' }}» αλλά τα ποσά αυτού του τιμολογίου
                     αντιστοιχούν στο αντίθετο (καθαρά/μικτά) — έλεγξε τα ποσά πριν την έκδοση.
                 </div>
             @endif
             @if ($vatMismatch)
                 <div class="text-warning-600 font-semibold">
-                    ⚠️ ΦΠΑ ekdosi {{ $fmt($vat) }} ≠ ΦΠΑ WHMCS {{ $fmt($wTax) }} —
+                    ⚠️ ΦΠΑ ekdosi {{ $fmt($vat) }} ≠ ΦΠΑ {{ $srcName }} {{ $fmt($wTax) }} —
                     @if ($wTax <= 0.005)
-                        το WHMCS δεν χρέωσε ΦΠΑ (απαλλαγμένος πελάτης;): βάλε 0% με αιτία απαλλαγής.
+                        {{ $srcName === 'MyCS' ? 'η MyCS' : 'το WHMCS' }} δεν χρέωσε ΦΠΑ (απαλλαγμένος πελάτης;): βάλε 0% με αιτία απαλλαγής.
                     @else
                         πιθανή σύγχυση καθαρών/μικτών ή άλλος συντελεστής.
                     @endif

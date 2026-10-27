@@ -5,6 +5,7 @@ namespace App\Filament\Pages;
 use App\Filament\PaymentSync\WhmcsOutboundPaymentsTable;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
+use App\Support\Billing\SourceName;
 use App\Models\Invoice;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentReconciler;
@@ -54,7 +55,7 @@ class WhmcsPaymentSync extends Page implements HasTable
 
     public function getTitle(): string
     {
-        return 'Συγχρονισμός πληρωμών WHMCS';
+        return 'Συγχρονισμός πληρωμών '.(Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->label();
     }
 
     public static function getNavigationBadge(): ?string
@@ -115,7 +116,7 @@ class WhmcsPaymentSync extends Page implements HasTable
                     $fetch = app(WhmcsInvoiceFetcher::class)->for($tenant);
                     if ($fetch === null) {
                         Notification::make()
-                            ->title('Δεν έχει ρυθμιστεί WHMCS')
+                            ->title('Δεν έχει ρυθμιστεί '.$tenant->billingSourceName()->label())
                             ->warning()->send();
 
                         return;
@@ -124,8 +125,8 @@ class WhmcsPaymentSync extends Page implements HasTable
                     Notification::make()
                         ->title('Ανανεώθηκε')
                         ->body(count($inbound) > 0
-                            ? count($inbound).' τιμολόγια πληρωμένα στο WHMCS προς καταγραφή.'
-                            : 'Κανένα ανοιχτό τιμολόγιο δεν φαίνεται πληρωμένο στο WHMCS.')
+                            ? count($inbound).' τιμολόγια πληρωμένα '.$tenant->billingSourceName()->in().' προς καταγραφή.'
+                            : 'Κανένα ανοιχτό τιμολόγιο δεν φαίνεται πληρωμένο '.$tenant->billingSourceName()->in().'.')
                         ->success()->send();
                 }),
         ];
@@ -161,7 +162,7 @@ class WhmcsPaymentSync extends Page implements HasTable
                     ->url(fn (Invoice $r) => InvoiceResource::getUrl('view', ['record' => $r, 'tenant' => $r->company])),
                 TextColumn::make('customer.name')->label('Πελάτης')->limit(35)->placeholder('—'),
                 TextColumn::make('whmcs')
-                    ->label('WHMCS')
+                    ->label(fn () => (Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->label())
                     ->state(fn (Invoice $r) => ($w = $r->whmcsPending?->whmcs_invoice_id) ? '#'.$w : '—'),
                 TextColumn::make('balance')
                     ->label('Υπόλοιπο')
@@ -180,14 +181,14 @@ class WhmcsPaymentSync extends Page implements HasTable
                     // ViewAny (page access) is not enough to record a payment.
                     ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                     ->requiresConfirmation()
-                    ->modalHeading('Καταγραφή πληρωμής από το WHMCS')
-                    ->modalDescription('Επιβεβαιώνεται ζωντανά στο WHMCS και, αν είναι πληρωμένο, κλείνει το υπόλοιπο καταγράφοντας πληρωμή στο ekdosi. Καμία αλλαγή στο WHMCS του πελάτη.')
+                    ->modalHeading(fn (Invoice $record) => 'Καταγραφή πληρωμής από '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->the())
+                    ->modalDescription(fn (Invoice $record) => 'Επιβεβαιώνεται ζωντανά '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->in().' και, αν είναι πληρωμένο, κλείνει το υπόλοιπο καταγράφοντας πληρωμή στο ekdosi. Καμία αλλαγή '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->in().'.')
                     ->modalSubmitActionLabel('Καταγραφή')
                     ->action(function (Invoice $record): void {
                         $tenant = $record->company;
                         $fetch = app(WhmcsInvoiceFetcher::class)->for($tenant);
                         if ($fetch === null) {
-                            Notification::make()->title('Δεν έχει ρυθμιστεί WHMCS')->warning()->send();
+                            Notification::make()->title('Δεν έχει ρυθμιστεί '.$tenant->billingSourceName()->label())->warning()->send();
 
                             return;
                         }
@@ -203,7 +204,7 @@ class WhmcsPaymentSync extends Page implements HasTable
                         } else {
                             Notification::make()
                                 ->title('Δεν καταγράφηκε')
-                                ->body('Το WHMCS δεν το επιστρέφει πλέον ως πληρωμένο (ή έκλεισε ήδη).')
+                                ->body(($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->subject().' δεν το επιστρέφει πλέον ως πληρωμένο (ή έκλεισε ήδη).')
                                 ->info()->send();
                         }
                     }),
@@ -214,7 +215,7 @@ class WhmcsPaymentSync extends Page implements HasTable
                     ->url(fn (Invoice $r) => InvoiceResource::getUrl('view', ['record' => $r, 'tenant' => $r->company])),
             ])
             ->emptyStateHeading('Καμία εκκρεμότητα')
-            ->emptyStateDescription('Κανένα ανοιχτό (επί πιστώσει) τιμολόγιο δεν φαίνεται πληρωμένο στο WHMCS. Πάτησε «Ανανέωση τώρα» για ζωντανό έλεγχο.')
+            ->emptyStateDescription(fn () => 'Κανένα ανοιχτό (επί πιστώσει) τιμολόγιο δεν φαίνεται πληρωμένο '.(Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->in().'. Πάτησε «Ανανέωση τώρα» για ζωντανό έλεγχο.')
             ->emptyStateIcon('heroicon-o-check-circle');
     }
 }

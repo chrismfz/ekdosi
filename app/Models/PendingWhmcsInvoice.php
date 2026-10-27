@@ -6,6 +6,7 @@ use App\Models\Concerns\BelongsToCompany;
 use App\Models\Observers\PendingWhmcsInvoiceObserver;
 use App\Support\Afm;
 use App\Support\Billing\MycsPayload;
+use App\Support\Billing\SourceName;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -150,7 +151,13 @@ class PendingWhmcsInvoice extends Model
     /** Who sent it, for the operator's labels: «MyCS» or «WHMCS». */
     public function sourceLabel(): string
     {
-        return $this->isFromMycs() ? 'MyCS' : 'WHMCS';
+        return $this->sourceName()->label();
+    }
+
+    /** Who sent it, in the operator's sentences (articles, «MyCS #7»). */
+    public function sourceName(): SourceName
+    {
+        return SourceName::for($this->isFromMycs());
     }
 
     public function isFromMycs(): bool

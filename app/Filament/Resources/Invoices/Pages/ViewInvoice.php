@@ -17,6 +17,7 @@ use App\Models\InvoiceType;
 use App\Models\Payment;
 use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
+use App\Support\Billing\SourceName;
 use App\Services\Cmr\CreateCmrFromSource;
 use App\Services\Delivery\DeliveryLifecycleService;
 use App\Services\EInvoice\AadeInvoiceDocument;
@@ -570,6 +571,9 @@ class ViewInvoice extends ViewRecord
                     Notification::make()
                         ->title('Η πληρωμή καταχωρίστηκε')
                         ->success()->send();
+                    // The page holds the balance it read (balanceData() is memoised on the record): a fresh view shows it
+                    // paid, as after the other payment actions (live test of 2026-10-27).
+                    $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
                 }),
 
             // «Έχει πληρωθεί στο WHMCS;» — on-demand check for THIS invoice.
@@ -580,21 +584,21 @@ class ViewInvoice extends ViewRecord
             // safe to click repeatedly. Shown only when there is actually
             // something to check (open receivable with a live WHMCS link).
             Action::make('check_whmcs_paid')
-                ->label('Έχει πληρωθεί στο WHMCS;')
+                ->label(fn (Invoice $record) => 'Έχει πληρωθεί '.$this->sourceName($record)->in().';')
                 ->icon('heroicon-o-arrow-down-on-square')
                 ->color('gray')
                 ->visible(fn (Invoice $record) => static::hasOpenWhmcsLink($record))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
-                ->modalHeading('Έλεγχος πληρωμής στο WHMCS')
-                ->modalDescription('Ρωτά το WHMCS αν το αντίστοιχο τιμολόγιο έχει πληρωθεί. Αν ναι, καταγράφεται εδώ πληρωμή που κλείνει το υπόλοιπο. Καμία αλλαγή δεν γίνεται στο WHMCS του πελάτη.')
+                ->modalHeading(fn (Invoice $record) => 'Έλεγχος πληρωμής '.$this->sourceName($record)->in())
+                ->modalDescription(fn (Invoice $record) => 'Ρωτά '.$this->sourceName($record)->the().' αν το αντίστοιχο τιμολόγιο έχει πληρωθεί. Αν ναι, καταγράφεται εδώ πληρωμή που κλείνει το υπόλοιπο. Καμία αλλαγή δεν γίνεται '.$this->sourceName($record)->in().'.')
                 ->modalSubmitActionLabel('Έλεγχος')
                 ->action(function (Invoice $record): void {
                     $fetch = app(WhmcsInvoiceFetcher::class)->for($record->company);
                     if ($fetch === null) {
                         Notification::make()
-                            ->title('Δεν έχει ρυθμιστεί WHMCS')
-                            ->body('Ο πελάτης δεν έχει ενεργή σύνδεση WHMCS — δεν έγινε έλεγχος.')
+                            ->title('Δεν έχει ρυθμιστεί '.$record->company->billingSourceName()->label())
+                            ->body('Η εταιρεία δεν έχει ενεργή σύνδεση '.$record->company->billingSourceName()->label().': δεν έγινε έλεγχος.')
                             ->warning()->send();
 
                         return;
@@ -614,7 +618,7 @@ class ViewInvoice extends ViewRecord
                     } else {
                         Notification::make()
                             ->title('Δεν έχει πληρωθεί ακόμη')
-                            ->body('Το WHMCS δεν το επιστρέφει ως πληρωμένο — δεν καταγράφηκε πληρωμή.')
+                            ->body($this->sourceName($record)->subject().' δεν το επιστρέφει ως πληρωμένο: δεν καταγράφηκε πληρωμή.')
                             ->info()->send();
                     }
                 }),
@@ -627,20 +631,20 @@ class ViewInvoice extends ViewRecord
             // echo / live-only). Auto-push (opt-in) usually handles this; the
             // button is the manual/retry path (e.g. a WHMCS hiccup).
             Action::make('mark_paid_at_whmcs')
-                ->label('Σήμανση Paid στο WHMCS')
+                ->label(fn (Invoice $record) => 'Σήμανση Paid '.$this->sourceName($record)->in())
                 ->icon('heroicon-o-arrow-up-on-square')
                 ->color('gray')
                 ->visible(fn (Invoice $record) => static::hasUnpushedWhmcsSettlement($record))
                 ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                 ->requiresConfirmation()
-                ->modalHeading('Σήμανση πληρωμένου στο WHMCS')
-                ->modalDescription('Ενημερώνει το WHMCS του πελάτη ότι το αντίστοιχο τιμολόγιο εξοφλήθηκε (AddInvoicePayment). Γράφει στο σύστημα του πελάτη — γίνεται μία φορά (idempotent).')
+                ->modalHeading(fn (Invoice $record) => 'Σήμανση πληρωμένου '.$this->sourceName($record)->in())
+                ->modalDescription(fn (Invoice $record) => 'Ενημερώνει '.$this->sourceName($record)->the().' ότι το αντίστοιχο τιμολόγιο εξοφλήθηκε (AddInvoicePayment). Γράφει στο σύστημα του πελάτη — γίνεται μία φορά (idempotent).')
                 ->modalSubmitActionLabel('Σήμανση')
                 ->action(function (Invoice $record): void {
                     $fetch = app(WhmcsInvoiceFetcher::class)->for($record->company);
                     $push = app(WhmcsPaymentPusherFactory::class)->for($record->company);
                     if ($fetch === null || $push === null) {
-                        Notification::make()->title('Δεν έχει ρυθμιστεί WHMCS')->warning()->send();
+                        Notification::make()->title('Δεν έχει ρυθμιστεί '.$record->company->billingSourceName()->label())->warning()->send();
 
                         return;
                     }
@@ -655,20 +659,20 @@ class ViewInvoice extends ViewRecord
 
                     match ($result) {
                         PaymentPushResult::Pushed => Notification::make()
-                            ->title('Ενημερώθηκε το WHMCS')
-                            ->body('Το τιμολόγιο σημάνθηκε πληρωμένο στο WHMCS.')
+                            ->title($this->sourceName($record)->subject().' ενημερώθηκε')
+                            ->body('Το τιμολόγιο σημάνθηκε πληρωμένο '.$this->sourceName($record)->in().'.')
                             ->success()->send(),
                         PaymentPushResult::AlreadyPaid => Notification::make()
                             ->title('Ήταν ήδη πληρωμένο')
-                            ->body('Το WHMCS το είχε ήδη ως πληρωμένο — δεν χρειάστηκε αλλαγή.')
+                            ->body($this->sourceName($record)->subject().' το είχε ήδη ως πληρωμένο: δεν χρειάστηκε αλλαγή.')
                             ->info()->send(),
                         PaymentPushResult::Failed => Notification::make()
                             ->title('Απέτυχε η σήμανση')
-                            ->body('Το WHMCS απέρριψε το αίτημα — δοκιμάστε ξανά αργότερα.')
+                            ->body($this->sourceName($record)->subject().' απέρριψε το αίτημα: δοκιμάστε ξανά αργότερα.')
                             ->danger()->persistent()->send(),
                         PaymentPushResult::Skipped => Notification::make()
                             ->title('Δεν έγινε σήμανση')
-                            ->body('Δεν πληροί τις προϋποθέσεις (opt-in / εξόφληση / σύνδεση WHMCS).')
+                            ->body('Δεν πληροί τις προϋποθέσεις (opt-in / εξόφληση / σύνδεση '.$this->sourceName($record)->label().').')
                             ->warning()->send(),
                     };
                     $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
@@ -1695,6 +1699,23 @@ class ViewInvoice extends ViewRecord
      * pushed. Fully mirrors WhmcsPaymentPusher's eligibility (incl. the anti-echo
      * real-payment check) so the button shows only when a push would actually act.
      */
+    /**
+     * Where this invoice came from, for the operator's sentences: the inbox row that issued it (MyCS or WHMCS), else
+     * the company's source. A MyCS invoice never reads «WHMCS» (live test of 2026-10-27).
+     */
+    protected function sourceName(Invoice $invoice): SourceName
+    {
+        // Labels, headings and descriptions ask several times per render: once per invoice and page.
+        return $this->sourceNames[$invoice->id] ??= PendingWhmcsInvoice::query()
+            ->where('company_id', $invoice->company_id)
+            ->where('invoice_id', $invoice->id)
+            ->first(['id', 'payload'])
+            ?->sourceName() ?? $invoice->company->billingSourceName();
+    }
+
+    /** @var array<int, SourceName> */
+    private array $sourceNames = [];
+
     protected static function hasUnpushedWhmcsSettlement(Invoice $invoice): bool
     {
         if (! (bool) $invoice->company?->whmcs_push_payments

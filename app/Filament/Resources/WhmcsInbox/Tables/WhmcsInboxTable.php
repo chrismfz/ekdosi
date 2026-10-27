@@ -9,6 +9,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
+use App\Support\Billing\SourceName;
 use App\Services\Billing\BillingSourceRegistry;
 use App\Services\Whmcs\WhmcsCustomerCreateResult;
 use App\Services\Mycs\MycsRowRefresher;
@@ -268,7 +269,7 @@ class WhmcsInboxTable
                     ->badge()
                     ->placeholder('—')
                     ->state(fn (PendingWhmcsInvoice $r): ?string => match ($r->whmcs_writeback_state) {
-                        PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'Στο WHMCS',
+                        PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => mb_ucfirst($r->sourceName()->in()),
                         PendingWhmcsInvoice::WRITEBACK_FAILED => 'Απέτυχε',
                         PendingWhmcsInvoice::WRITEBACK_PENDING => 'Εκκρεμεί',
                         // Not sent on purpose (MyCS: another client's number, a WHMCS mass-pay) vs no bridge at all.
@@ -286,7 +287,7 @@ class WhmcsInboxTable
                         ? 'heroicon-o-exclamation-triangle'
                         : null)
                     ->tooltip(fn (PendingWhmcsInvoice $r): ?string => match ($r->whmcs_writeback_state) {
-                        PendingWhmcsInvoice::WRITEBACK_FAILED => $r->whmcs_writeback_error ?: 'Η επιστροφή του ΜΑΡΚ στο WHMCS απέτυχε. Το AADE είναι εντάξει· πάτα «Επανάληψη επιστροφής ΜΑΡΚ».',
+                        PendingWhmcsInvoice::WRITEBACK_FAILED => $r->whmcs_writeback_error ?: 'Η επιστροφή του ΜΑΡΚ '.$r->sourceName()->in().' απέτυχε. Το AADE είναι εντάξει· πάτα «Επανάληψη επιστροφής ΜΑΡΚ».',
                         // Not retryable (the same 409): the document is cancelled here and the invoice read again.
                         PendingWhmcsInvoice::WRITEBACK_CHANGED => $r->whmcs_writeback_error,
                         // Why it was not sent (MyCS: a number of another client, a WHMCS mass-pay).
@@ -359,7 +360,7 @@ class WhmcsInboxTable
                         PendingWhmcsInvoice::WRITEBACK_FAILED => 'Απέτυχε',
                         PendingWhmcsInvoice::WRITEBACK_CHANGED => 'Άλλαξε στη MyCS',
                         PendingWhmcsInvoice::WRITEBACK_PENDING => 'Εκκρεμεί',
-                        PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'Στο WHMCS',
+                        PendingWhmcsInvoice::WRITEBACK_SUCCEEDED => 'Επιστράφηκε στην πηγή',
                     ]),
 
                 SelectFilter::make('third_party')
@@ -525,8 +526,8 @@ class WhmcsInboxTable
             ->authorize('delete')
             ->visible(fn (PendingWhmcsInvoice $r) => self::isDeletable($r))
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Οριστική διαγραφή WHMCS #'.$r->whmcs_invoice_id.';')
-            ->modalDescription('Διαγράφεται οριστικά η εγγραφή από το inbox (όχι από το WHMCS). Χρήσιμο για δοκιμές / εσωτερικά / λάθος τιμολόγια. Αν ξανασταλεί από το WHMCS, θα ξαναεμφανιστεί.')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Οριστική διαγραφή '.$r->sourceName()->ref($r->whmcs_invoice_id).';')
+            ->modalDescription(fn (PendingWhmcsInvoice $r) => 'Διαγράφεται οριστικά η εγγραφή από το inbox (όχι από '.$r->sourceName()->the().'). Χρήσιμο για δοκιμές / εσωτερικά / λάθος τιμολόγια. Αν ξανασταλεί από '.$r->sourceName()->the().', θα ξαναεμφανιστεί.')
             ->modalSubmitActionLabel('Διαγραφή')
             ->action(function (PendingWhmcsInvoice $r) {
                 if (! self::isDeletable($r)) {
@@ -823,7 +824,7 @@ class WhmcsInboxTable
     private static function viewRoutingAction(): Action
     {
         return Action::make('view_routing')
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δρομολόγηση WHMCS #'.$r->whmcs_invoice_id)
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δρομολόγηση '.$r->sourceName()->ref($r->whmcs_invoice_id))
             ->modalContent(fn (PendingWhmcsInvoice $r) => view('filament.whmcs-inbox.third-party-routing', [
                 'rows' => self::routingRows($r),
                 'isMulti' => $r->third_party_state === PendingWhmcsInvoice::TP_MULTI,
@@ -998,15 +999,15 @@ class WhmcsInboxTable
             ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->whmcs_writeback_state === PendingWhmcsInvoice::WRITEBACK_FAILED)
             ->requiresConfirmation()
-            ->modalHeading('Επανάληψη επιστροφής ΜΑΡΚ στο WHMCS')
-            ->modalDescription('Το παραστατικό έχει ήδη υποβληθεί στην ΑΑΔΕ (το ΜΑΡΚ είναι έγκυρο) — απέτυχε μόνο η ενημέρωση του WHMCS. Ξαναστέλνει το ΜΑΡΚ στη γέφυρα. Δεν αγγίζει την ΑΑΔΕ.')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Επανάληψη επιστροφής ΜΑΡΚ '.$r->sourceName()->in())
+            ->modalDescription(fn (PendingWhmcsInvoice $r) => 'Το παραστατικό έχει ήδη υποβληθεί στην ΑΑΔΕ (το ΜΑΡΚ είναι έγκυρο) — απέτυχε μόνο η ενημέρωση '.$r->sourceName()->of().'. Ξαναστέλνει το ΜΑΡΚ στη γέφυρα. Δεν αγγίζει την ΑΑΔΕ.')
             ->modalSubmitActionLabel('Επανάληψη τώρα')
             ->action(function (PendingWhmcsInvoice $record) {
                 try {
                     $state = app(WhmcsWritebackService::class)->retryWriteback($record);
                     if ($state === PendingWhmcsInvoice::WRITEBACK_SUCCEEDED) {
                         Notification::make()
-                            ->title('Το ΜΑΡΚ επιστράφηκε στο WHMCS')
+                            ->title('Το ΜΑΡΚ επιστράφηκε '.$record->sourceName()->in())
                             ->success()
                             ->send();
                     } elseif ($state === PendingWhmcsInvoice::WRITEBACK_SKIPPED) {
@@ -1052,7 +1053,7 @@ class WhmcsInboxTable
                 && filled($r->whmcsAfm()))
             ->requiresConfirmation()
             ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δημιουργία πελάτη ekdosi (ΑΦΜ '.$r->whmcsAfm().')')
-            ->modalDescription('Δημιουργείται πελάτης με βάση το ΑΦΜ του WHMCS. Τα στοιχεία αντλούνται από την ΑΑΔΕ (GSIS) όταν το ΑΦΜ είναι έγκυρο· αλλιώς από τα στοιχεία του WHMCS. Συνδέεται αυτόματα με αυτό το τιμολόγιο.')
+            ->modalDescription(fn (PendingWhmcsInvoice $r) => 'Δημιουργείται πελάτης με βάση το ΑΦΜ '.$r->sourceName()->of().'. Τα στοιχεία αντλούνται από την ΑΑΔΕ (GSIS) όταν το ΑΦΜ είναι έγκυρο· αλλιώς από τα στοιχεία '.$r->sourceName()->of().'. Συνδέεται αυτόματα με αυτό το τιμολόγιο.')
             ->modalSubmitActionLabel('Δημιουργία')
             ->action(function (PendingWhmcsInvoice $r) {
                 $tenant = Filament::getTenant();
@@ -1067,7 +1068,7 @@ class WhmcsInboxTable
                     ]);
                 }
 
-                self::notifyCustomerCreateResult($result);
+                self::notifyCustomerCreateResult($result, $r->sourceName());
             });
     }
 
@@ -1079,7 +1080,7 @@ class WhmcsInboxTable
      * «Δημ. πελάτη (ΑΑΔΕ)» action and the inline modal «Εισαγωγή από ΑΦΜ» button
      * so the two can't drift.
      */
-    private static function notifyCustomerCreateResult(WhmcsCustomerCreateResult $result): void
+    private static function notifyCustomerCreateResult(WhmcsCustomerCreateResult $result, SourceName $source): void
     {
         if ($result->customer === null) {
             Notification::make()->title('Δεν υπάρχει/δόθηκε ΑΦΜ — δεν δημιουργήθηκε πελάτης')->danger()->send();
@@ -1100,7 +1101,7 @@ class WhmcsInboxTable
 
         $title = match ($result->source) {
             'aade' => 'Δημιουργήθηκε από ΑΑΔΕ',
-            'whmcs' => 'Δημιουργήθηκε από στοιχεία WHMCS (ΑΑΔΕ μη διαθέσιμη — έλεγξε τα στοιχεία)',
+            'whmcs' => 'Δημιουργήθηκε από στοιχεία '.$source->of().' (ΑΑΔΕ μη διαθέσιμη — έλεγξε τα στοιχεία)',
             'existing' => 'Συνδέθηκε με υπάρχοντα πελάτη',
             default => 'Δημιουργήθηκε',
         };
@@ -1110,9 +1111,9 @@ class WhmcsInboxTable
             ->send();
 
         if ($result->discrepancies !== []) {
-            $lines = ['Κρατήθηκαν τα επίσημα στοιχεία ΑΑΔΕ. Διέφεραν από όσα είχε δηλώσει ο πελάτης στο WHMCS:'];
+            $lines = ['Κρατήθηκαν τα επίσημα στοιχεία ΑΑΔΕ. Διέφεραν από όσα είχε δηλώσει ο πελάτης '.$source->in().':'];
             foreach ($result->discrepancies as $d) {
-                $lines[] = '• '.$d['field'].': WHMCS «'.$d['whmcs'].'» → ΑΑΔΕ «'.$d['aade'].'»';
+                $lines[] = '• '.$d['field'].': '.$source->label().' «'.$d['whmcs'].'» → ΑΑΔΕ «'.$d['aade'].'»';
             }
             Notification::make()
                 ->title('Διορθώθηκαν στοιχεία από την ΑΑΔΕ')
@@ -1269,7 +1270,7 @@ class WhmcsInboxTable
                     ->placeholder('ΑΦΜ')
                     ->default(fn () => $r->whmcsAfm())
                     ->helperText('Γράψε/διόρθωσε ΑΦΜ και πάτα 🔍 — αντλεί επίσημα στοιχεία από ΑΑΔΕ (GSIS), '
-                        .'συμπληρώνει email/τηλέφωνο/διεύθυνση από WHMCS, δημιουργεί & συνδέει τον πελάτη εδώ. '
+                        .'συμπληρώνει email/τηλέφωνο/διεύθυνση από '.$r->sourceName()->the().', δημιουργεί & συνδέει τον πελάτη εδώ. '
                         .'Αν κάποιο στοιχείο διαφέρει, κρατιέται το επίσημο της ΑΑΔΕ με προειδοποίηση.')
                     ->suffixActions([
                         Action::make('import_from_afm')
@@ -1299,7 +1300,7 @@ class WhmcsInboxTable
                                 if ($result->customer !== null && $result->source !== 'deleted_owner') {
                                     $set('customer_id', $result->customer->id);
                                 }
-                                self::notifyCustomerCreateResult($result);
+                                self::notifyCustomerCreateResult($result, $r->sourceName());
                             }),
                     ]),
 
@@ -1310,8 +1311,8 @@ class WhmcsInboxTable
                 Placeholder::make('whmcs_payment_status_hint')
                     ->hiddenLabel()
                     ->content(fn (): HtmlString => $r->whmcsIsUnpaid()
-                        ? new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ WHMCS: ΑΠΛΗΡΩΤΟ — έκδοσε επί πιστώσει (ανοιχτή οφειλή), όχι εξοφλημένο στην έκδοση.</span>')
-                        : new HtmlString('<span style="color:#6b7280;">WHMCS: '.(strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 ? 'Πληρωμένο (εξοφλημένο στην έκδοση)' : e((string) ($r->whmcsStatus() ?? '—'))).'</span>'))
+                        ? new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ '.$r->sourceLabel().': ΑΠΛΗΡΩΤΟ — εκδίδεται επί πιστώσει (ανοιχτή οφειλή), όχι εξοφλημένο στην έκδοση.</span>')
+                        : new HtmlString('<span style="color:#6b7280;">'.$r->sourceLabel().': '.(strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 ? 'Πληρωμένο (εξοφλημένο στην έκδοση)' : e((string) ($r->whmcsStatus() ?? '—'))).'</span>'))
                     ->visible(fn (): bool => $r->whmcsStatus() !== null),
 
                 Select::make('invoice_type_id')
@@ -1340,7 +1341,7 @@ class WhmcsInboxTable
                     ->default(fn () => ($t = Filament::getTenant()) instanceof Company
                         ? $r->suggestedInvoiceTypeId($t)
                         : null)
-                    ->helperText('Επιλέγει σειρά + ΑΑ counter + myDATA mapping. Προ-επιλογή βάσει κατάστασης WHMCS (πληρωμένο/απλήρωτο) + πρόθεσης (τιμολόγιο/απόδειξη).'),
+                    ->helperText('Επιλέγει σειρά + ΑΑ counter + myDATA mapping. Προ-επιλογή βάσει κατάστασης '.$r->sourceLabel().' (πληρωμένο/απλήρωτο) + πρόθεσης (τιμολόγιο/απόδειξη).'),
 
                 // Full preview: re-renders whenever customer / invoice
                 // type change. Calls the filer's preview() (no DB writes)
@@ -1473,8 +1474,8 @@ class WhmcsInboxTable
                     ->count();
                 if ($zeroVatCount > 0) {
                     Notification::make()
-                        ->title('Προσοχή: '.$zeroVatCount.' γραμμή/ές ΧΩΡΙΣ ΦΠΑ (ήρθε έτσι από WHMCS)')
-                        ->body('Το προϊόν έχει «Apply Tax» OFF στο WHMCS. Πριν την έκδοση: όρισε τον '
+                        ->title('Προσοχή: '.$zeroVatCount.' γραμμή/ές ΧΩΡΙΣ ΦΠΑ (ήρθε έτσι από '.$r->sourceName()->the().')')
+                        ->body(($r->isFromMycs() ? 'Η γραμμή ήρθε χωρίς ΦΠΑ από τη MyCS.' : 'Το προϊόν έχει «Apply Tax» OFF στο WHMCS.').' Πριν την έκδοση: όρισε τον '
                             .'σωστό συντελεστή — 24% αν εγχώριο (με gross-edit κράτα το ίδιο τελικό ποσό) '
                             .'— ή επιβεβαίωσε απαλλαγή/ενδοκοινοτικό (reverse-charge). Δεν εκδίδεται '
                             .'αυτόματα.')
@@ -1523,7 +1524,7 @@ class WhmcsInboxTable
             ->visible(fn (PendingWhmcsInvoice $r) => $r->isConsolidatedPayment()
                 && $r->status === PendingWhmcsInvoice::STATUS_HELD)
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Ενοποίηση συγκεντρωτικού WHMCS #'.$r->whmcs_invoice_id)
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Ενοποίηση συγκεντρωτικού '.$r->sourceName()->ref($r->whmcs_invoice_id))
             ->modalDescription('Φέρνει τις πραγματικές γραμμές των επιμέρους τιμολογίων και τις ενώνει σε ΕΝΑ '
                 .'παραστατικό (ένα κατάθεση → ένα τιμολόγιο). Μετά θα εμφανιστεί «Προς έλεγχο» για να το εκδώσεις. '
                 .'Αν κάποιο τιμολόγιο είναι τρίτου πελάτη, χρησιμοποίησε «Ανάλυση σε επιμέρους».')
@@ -1558,7 +1559,7 @@ class WhmcsInboxTable
             ->visible(fn (PendingWhmcsInvoice $r) => $r->isConsolidatedPayment()
                 && $r->status === PendingWhmcsInvoice::STATUS_HELD)
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Ανάλυση συγκεντρωτικού WHMCS #'.$r->whmcs_invoice_id.' σε επιμέρους')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Ανάλυση συγκεντρωτικού '.$r->sourceName()->ref($r->whmcs_invoice_id).' σε επιμέρους')
             ->modalDescription('Φέρνει το κάθε επιμέρους τιμολόγιο ξεχωριστά στο inbox (ένα παραστατικό ανά '
                 .'παραγγελία), και κλείνει το συγκεντρωτικό. Τα τιμολόγια τρίτων ακολουθούν κανονικά τη δική τους '
                 .'ροή. Έκδοσε το καθένα ξεχωριστά.')
@@ -1631,7 +1632,7 @@ class WhmcsInboxTable
                         return implode("\n", $rows);
                     }),
             ])
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Διαχωρισμός WHMCS #'.$r->whmcs_invoice_id.' σε προσχέδια')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Διαχωρισμός '.$r->sourceName()->ref($r->whmcs_invoice_id).' σε προσχέδια')
             ->modalDescription('Δημιουργούνται ξεχωριστά προσχέδια παραστατικά ανά δικαιούχο. Δεν υποβάλλονται στην ΑΑΔΕ — τα καταχωρείς ένα-ένα από τη λίστα παραστατικών.')
             ->modalSubmitActionLabel('Δημιουργία προσχεδίων')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
@@ -1697,7 +1698,7 @@ class WhmcsInboxTable
                     ->maxLength(200),
             ])
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αρχειοθέτηση WHMCS #'.$r->whmcs_invoice_id.';')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αρχειοθέτηση '.$r->sourceName()->ref($r->whmcs_invoice_id).';')
             ->modalDescription('Δεν θα καταχωρηθεί στην ΑΑΔΕ και φεύγει από τα «Ανοιχτά» (πάει στα «Αρχειοθετημένα»). Μπορείς να το επαναφέρεις αργότερα αν αλλάξεις γνώμη.')
             ->modalSubmitActionLabel('Αρχειοθέτηση')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
@@ -1727,7 +1728,7 @@ class WhmcsInboxTable
                     ->default(fn () => $r->needsAfm() ? 'Αναμονή για ΑΦΜ / στοιχεία τιμολόγησης' : null)
                     ->placeholder('π.χ. αναμονή για ΑΦΜ, να επιβεβαιωθεί ο πελάτης'),
             ])
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αναμονή για WHMCS #'.$r->whmcs_invoice_id)
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αναμονή για '.$r->sourceName()->ref($r->whmcs_invoice_id))
             ->modalDescription('Κρύβεται από την προεπιλεγμένη λίστα. Άρε το από κατάσταση = "Σε αναμονή" όταν είσαι έτοιμος. Ο λόγος φαίνεται στο tooltip της κατάστασης.')
             ->modalSubmitActionLabel('Σε αναμονή')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
@@ -1749,7 +1750,7 @@ class WhmcsInboxTable
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_REJECTED
                 || $r->status === PendingWhmcsInvoice::STATUS_HELD)
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Επαναφορά WHMCS #'.$r->whmcs_invoice_id)
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Επαναφορά '.$r->sourceName()->ref($r->whmcs_invoice_id))
             ->modalDescription('Επιστρέφει στην κατάσταση "Προς έλεγχο" — διαθέσιμο για καταχώρηση στην ΑΑΔΕ.')
             ->action(function (PendingWhmcsInvoice $r) {
                 $r->update([
@@ -1793,8 +1794,8 @@ class WhmcsInboxTable
                 && ! in_array($r->status, [PendingWhmcsInvoice::STATUS_FILED], true)
                 && self::routedContacts($r) !== [])
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Εισαγωγή δικαιούχων τρίτων — WHMCS #'.$r->whmcs_invoice_id)
-            ->modalDescription('Δημιουργεί (ή συνδέει) τον ekdosi πελάτη για κάθε δικαιούχο-τρίτο. Στοιχεία από ΑΑΔΕ (GSIS) όταν το ΑΦΜ είναι έγκυρο· αλλιώς από όσα δήλωσε ο πελάτης στο WHMCS. Κρατά το email του τρίτου (αν δόθηκε) και σημειώνει ποιος reseller τον έφερε. Idempotent — χωρίς διπλότυπα.')
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Εισαγωγή δικαιούχων τρίτων — '.$r->sourceName()->ref($r->whmcs_invoice_id))
+            ->modalDescription(fn (PendingWhmcsInvoice $r) => 'Δημιουργεί (ή συνδέει) τον ekdosi πελάτη για κάθε δικαιούχο-τρίτο. Στοιχεία από ΑΑΔΕ (GSIS) όταν το ΑΦΜ είναι έγκυρο· αλλιώς από όσα δήλωσε ο πελάτης '.$r->sourceName()->in().'. Κρατά το email του τρίτου (αν δόθηκε) και σημειώνει ποιος reseller τον έφερε. Idempotent — χωρίς διπλότυπα.')
             ->modalSubmitActionLabel('Εισαγωγή')
             ->action(function (PendingWhmcsInvoice $r) {
                 $tenant = Filament::getTenant();
@@ -1893,7 +1894,7 @@ class WhmcsInboxTable
             ->visible(fn (PendingWhmcsInvoice $r) => (bool) (Filament::getTenant()?->whmcs_third_party_enabled)
                 && ! in_array($r->status, [PendingWhmcsInvoice::STATUS_FILED], true))
             ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Έλεγχος δρομολόγησης τρίτων — WHMCS #'.$r->whmcs_invoice_id)
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Έλεγχος δρομολόγησης τρίτων — '.$r->sourceName()->ref($r->whmcs_invoice_id))
             ->modalDescription('Ρωτά ξανά τη γέφυρα αν το τιμολόγιο δρομολογείται σε τρίτους δικαιούχους και ενημερώνει τη στήλη «Τρίτος». Δεν αλλάζει κατάσταση ή σύνδεση.')
             ->action(function (PendingWhmcsInvoice $r) {
                 $tenant = Filament::getTenant();
