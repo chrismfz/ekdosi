@@ -70,7 +70,8 @@ class WhmcsInboxTable
             ->modifyQueryUsing(function (Builder $query) {
                 $tenant = Filament::getTenant();
                 $query->where('company_id', $tenant?->getKey() ?? 0)
-                    ->with(['customer:id,name,afm,needs_immediate_invoice', 'invoice:id,invcode', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
+                    // company_id: the split and the filer check the customer is this tenant's (a split failed without it, live test).
+                    ->with(['customer:id,company_id,name,afm,needs_immediate_invoice', 'invoice:id,invcode', 'filedByUser:id,name', 'company:id,whmcs_custom_field_map']);
             })
             ->columns([
                 // Bridges/Connectors: which billing source this row came from. One
@@ -1595,6 +1596,8 @@ class WhmcsInboxTable
                 Select::make('invoice_type_id')
                     ->label('Τύπος τιμολογίου')
                     ->options(fn () => static::splitTypeOptions())
+                    // The tenant's invoice/receipt defaults, as «Δημιουργία Παραστατικού» pre-selects them.
+                    ->default(fn () => Filament::getTenant()?->whmcs_default_invoice_type_id)
                     ->required()
                     ->searchable()
                     ->helperText('Για τους δικαιούχους που χρειάζονται τιμολόγιο.'),
@@ -1602,6 +1605,7 @@ class WhmcsInboxTable
                 Select::make('receipt_type_id')
                     ->label('Τύπος απόδειξης')
                     ->options(fn () => static::splitTypeOptions())
+                    ->default(fn () => Filament::getTenant()?->whmcs_default_receipt_type_id)
                     ->searchable()
                     ->helperText('Υποχρεωτικό μόνο αν κάποιος δικαιούχος έχει σημανθεί ως απόδειξη (βλ. λίστα παρακάτω).'),
 

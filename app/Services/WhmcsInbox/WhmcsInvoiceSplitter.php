@@ -65,7 +65,9 @@ class WhmcsInvoiceSplitter
             if ($routed) {
                 $contactId = (int) ($line['contact']['id'] ?? 0);
                 $key = 'contact:'.$contactId;
-                $label = (string) ($line['contact']['company_name'] ?? ('Επαφή #'.$contactId));
+                // A contact known by its ΑΦΜ only (the rest from the registry) is named by it, never blank.
+                $label = (string) (($line['contact']['company_name'] ?? '') ?: (! empty($line['contact']['gr_vatno'])
+                    ? 'ΑΦΜ '.$line['contact']['gr_vatno'] : 'Επαφή #'.$contactId));
                 $contact = $line['contact'];
             } else {
                 $key = 'reseller';
@@ -106,9 +108,13 @@ class WhmcsInvoiceSplitter
         // row's matched customer.
         $out = [];
         foreach ($groups as $group) {
+            // The row's own customer read whole and of this tenant: a list that loaded a few of its columns (no
+            // company_id) made the mapper refuse it as another tenant's (live test of 2026-10-27).
             $group['customer'] = $group['contact'] !== null
                 ? $this->contactResolver->resolve($tenant, $group['contact'])
-                : $pending->customer;
+                : ($pending->customer_id !== null
+                    ? Customer::query()->where('company_id', $tenant->getKey())->find($pending->customer_id)
+                    : null);
             $out[] = $group;
         }
 
