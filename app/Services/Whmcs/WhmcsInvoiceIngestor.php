@@ -100,6 +100,10 @@ class WhmcsInvoiceIngestor
         // transport metadata (kept separately in third_party_resolution), and
         // dropping it keeps the snapshot identical to the native-API shape.
         unset($whmcsInvoicePayload['third_party']);
+        // MyCS: the routing's hash stays in the snapshot, for the refresh before issuing (R2-2 of #703).
+        if (MycsPayload::is($whmcsInvoicePayload)) {
+            $whmcsInvoicePayload['mycs']['routing_hash'] = MycsPayload::routingHash($embeddedRouting);
+        }
         $tp = $this->thirdPartyDecision($tenant, $invoiceId, $embeddedRouting);
 
         // MyCS's credit/debit notes change its total, not its lines: a document built from the lines would be for the

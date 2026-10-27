@@ -238,6 +238,9 @@ class WhmcsAutoIssue extends Command
             if (($why = app(MycsRowRefresher::class)->check($row)) !== null) {
                 $held++;
                 $this->line("  · {$label}: {$why} — left in inbox.");
+                Log::info('whmcs:auto-issue did not file a MyCS row (read again)', [
+                    'company_id' => $tenant->id, 'pending_id' => $row->id, 'whmcs_invoice_id' => $row->whmcs_invoice_id, 'reason' => $why,
+                ]);
 
                 continue;
             }

@@ -95,6 +95,24 @@ final class MycsPayload
     }
 
     /**
+     * A hash of a MyCS invoice's line routing (`third_party`), which the stored snapshot does not keep (the ingestor
+     * moves it to third_party_resolution): what the refresh before issuing compares (R2-2 of #703).
+     */
+    public static function routingHash(mixed $thirdParty): string
+    {
+        $sort = function (mixed $value) use (&$sort): mixed {
+            if (! is_array($value)) {
+                return $value;
+            }
+            ksort($value);
+
+            return array_map($sort, $value);
+        };
+
+        return md5((string) json_encode($sort($thirdParty)));
+    }
+
+    /**
      * When MyCS staff asked (each «Send to Ekdosi» its own time), or null.
      *
      * @param  array<string, mixed>|null  $payload

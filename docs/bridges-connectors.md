@@ -391,6 +391,11 @@ credentials) against MyCS, with Chrome. The checklist is in MyCS's `docs/ekdosi-
   request it did not know of. A row archived here, or held only as «ignored», is brought back by a NEW request (once),
   with the same holds as a fresh one (notes changing the total, third parties, consolidated); one archived from WHMCS
   before the cut-over too, for the same client. The «Send to Ekdosi» note follows the request (off when withdrawn).
+- Read again: also before «Διαχωρισμός σε προσχέδια»; every row of a MyCS company (one staged from WHMCS before the
+  cut-over too); the whole snapshot counts (routing as `mycs.routing_hash`, the recipient, the flags), but what ekdosi
+  wrote back; a 404 is «no longer in MyCS» (held), a failure is «not answering» (nothing issued, tried again).
+- Not covered: a draft made from the inbox and issued later from «Παραστατικά» is ekdosi's own document, reviewed by
+  staff: it is not read again at submission.
 - Not covered (by design): a document cancelled at AADE is reissued here («Ακύρωση & επανέκδοση»), not by sending it
   again from MyCS (its row is filed). A document on credit issued through a split, or on a type without credit days,
   sends no `add_payment` back (K2's rule): its payment is recorded in MyCS by hand.

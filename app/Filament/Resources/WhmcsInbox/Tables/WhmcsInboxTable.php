@@ -1635,6 +1635,12 @@ class WhmcsInboxTable
             ->modalDescription('Δημιουργούνται ξεχωριστά προσχέδια παραστατικά ανά δικαιούχο. Δεν υποβάλλονται στην ΑΑΔΕ — τα καταχωρείς ένα-ένα από τη λίστα παραστατικών.')
             ->modalSubmitActionLabel('Δημιουργία προσχεδίων')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
+                // MyCS's invoice as it is now, before its drafts (K3, R2-1 of #703).
+                if (($why = app(MycsRowRefresher::class)->check($r)) !== null) {
+                    Notification::make()->title('Δεν δημιουργήθηκαν προσχέδια')->body($why)->warning()->persistent()->send();
+
+                    return;
+                }
                 $tenant = Filament::getTenant();
                 $invoiceType = InvoiceType::query()
                     ->where('company_id', $tenant->getKey())

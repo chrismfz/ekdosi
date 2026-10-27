@@ -2,6 +2,7 @@
 
 namespace App\Services\Mycs;
 
+use App\Models\Company;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
@@ -21,18 +22,26 @@ use Throwable;
  */
 final class MycsRowRefresher
 {
+    public const NOT_ANSWERING = 'Η MyCS δεν απάντησε: δεν εκδόθηκε τώρα, ξαναδοκίμασε σε λίγο.';
+
     /** @return string|null why no document is made from it now, or null */
     public function check(PendingWhmcsInvoice $row): ?string
     {
-        if (! $row->isFromMycs() || $row->company === null) {
+        // The company as stored, not as a list loaded it (its columns trimmed: R2-0 of #703). A MyCS company's every row,
+        // one staged from WHMCS before the cut-over too (R2-6).
+        $company = Company::query()->find($row->company_id);
+        if ($company === null || ! (bool) $company->mycs_enabled) {
             return null;
         }
         try {
-            $fresh = app(WhmcsBridgeClientFactory::class)->forSource($row->company)->fetchInvoice((int) $row->whmcs_invoice_id, true);
+            $fresh = app(WhmcsBridgeClientFactory::class)->forSource($company)->fetchInvoice((int) $row->whmcs_invoice_id, true);
         } catch (Throwable $e) {
-            Log::info('MyCS row not read again before issuing', ['pending_id' => $row->id, 'error' => $e->getMessage()]);
+            if (! str_contains($e->getMessage(), 'invoice_not_found')) {
+                Log::info('MyCS row not read again before issuing', ['pending_id' => $row->id, 'error' => $e->getMessage()]);
 
-            return 'Η MyCS δεν απάντησε: δεν εκδόθηκε τώρα, ξαναδοκίμασε σε λίγο.';
+                return self::NOT_ANSWERING;
+            }
+            $fresh = null; // MyCS answered: no such invoice (R2-5)
         }
         $old = is_array($row->payload) ? $row->payload : [];
         $why = $fresh === null ? 'δεν υπάρχει πια στη MyCS' : $this->why($old, $fresh);
@@ -40,7 +49,7 @@ final class MycsRowRefresher
             return null;
         }
         if ($fresh !== null) {
-            app(WhmcsInvoiceIngestor::class)->ingest($row->company, $fresh); // the snapshot as MyCS has it now
+            app(WhmcsInvoiceIngestor::class)->ingest($company, $fresh); // the snapshot (and the customer's flags) as MyCS has it now
         }
         $row->refresh();
         $note = 'Άλλαξε στη MyCS από τότε που ήρθε ('.$why.'): έλεγξέ το πριν την έκδοση.';
@@ -54,13 +63,18 @@ final class MycsRowRefresher
     }
 
     /**
-     * What changed between the snapshot and MyCS now, in words, or null.
+     * What changed between the snapshot and MyCS now, in words, or null. Everything MyCS sends counts (lines, routing to
+     * third parties, the recipient's ΑΦΜ and document type, the account's flags: R2-2..R2-4 of #703), but what Ekdosi
+     * itself wrote back (`mycs.documents`).
      *
      * @param  array<string, mixed>  $old
      * @param  array<string, mixed>  $new
      */
     private function why(array $old, array $new): ?string
     {
+        if (self::normalised($old) === self::normalised($new)) {
+            return null;
+        }
         $changes = [];
         if ((string) ($old['mycs']['fingerprint'] ?? '') !== (string) ($new['mycs']['fingerprint'] ?? '')) {
             $changes[] = 'γραμμές, ποσά ή σημειώματα';
@@ -77,7 +91,38 @@ final class MycsRowRefresher
         if (MycsPayload::ignored($old) !== MycsPayload::ignored($new)) {
             $changes[] = '«χωρίς τιμολόγηση»';
         }
+        if (($old['mycs']['immediate_invoicing'] ?? null) !== ($new['mycs']['immediate_invoicing'] ?? null)) {
+            $changes[] = 'άμεση τιμολόγηση';
+        }
+        if (($old['mycs']['recipient'] ?? null) != ($new['mycs']['recipient'] ?? null)) {
+            $changes[] = 'στοιχεία παραλήπτη (ΑΦΜ, παραστατικό)';
+        }
+        if (($old['mycs']['routing_hash'] ?? null) !== MycsPayload::routingHash($new['third_party'] ?? null)) {
+            $changes[] = 'αποδέκτες γραμμών';
+        }
 
-        return $changes === [] ? null : implode(', ', $changes);
+        return $changes === [] ? 'άλλα στοιχεία' : implode(', ', $changes);
+    }
+
+    /** @param  array<string, mixed>  $payload */
+    private static function normalised(array $payload): string
+    {
+        // As the ingestor stores it: the routing as its hash (MyCS sends it, the snapshot keeps only the hash).
+        if (array_key_exists('third_party', $payload)) {
+            $payload['mycs']['routing_hash'] = MycsPayload::routingHash($payload['third_party']);
+            unset($payload['third_party']);
+        }
+        unset($payload['mycs']['documents']);
+        $sort = function (array &$value) use (&$sort): void {
+            ksort($value);
+            foreach ($value as &$child) {
+                if (is_array($child)) {
+                    $sort($child);
+                }
+            }
+        };
+        $sort($payload);
+
+        return (string) json_encode($payload);
     }
 }
