@@ -64,6 +64,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
   σημεία κλήσης το πιάνουν ήδη· ο in-doubt έλεγχος πριν από επαναποστολή πλέον αρνείται αντί να ξαναστείλει).
   Το Filament 5.11 κρατά τις ειδοποιήσεις στο cache (όχι στο session) — θέλει λειτουργικό cache store (εμείς: `database`).
 - **Dependabot** (`.github/dependabot.yml`): εβδομαδιαία composer/npm, μηνιαία actions· το firebed πάντα σε δικό του PR.
+- **CI**: το `shivammathur/setup-php` καρφωμένο στο SHA της release **2.40.0** (ήταν μη-release commit· το Dependabot
+  πρότεινε την κορυφή του κλάδου τους, #710) — από εδώ και πέρα προτείνει μόνο releases.
 
 ### Fixed
 - `delivery:refresh-status`: δελτίο για το οποίο η ΑΑΔΕ απαντά με σφάλμα σημειώνεται ως ελεγμένο, ώστε να μη
