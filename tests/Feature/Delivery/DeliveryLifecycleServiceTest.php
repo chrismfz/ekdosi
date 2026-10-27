@@ -22,7 +22,9 @@ use App\Services\Stock\StockService;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryOutcomeType;
 use Firebed\AadeMyData\Enums\DigitalGoodsMovement\DeliveryStatus;
 use Firebed\AadeMyData\Models\InvoiceHeader;
+use GuzzleHttp\Exception\ConnectException;
 use GuzzleHttp\Handler\MockHandler;
+use GuzzleHttp\Psr7\Request;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Http;
@@ -571,6 +573,45 @@ class DeliveryLifecycleServiceTest extends TestCase
 
         $this->assertNotNull($a->fresh()->movement_checked_at);
         $this->assertNotNull($b->fresh()->movement_checked_at);                 // both polled across 2 runs
+    }
+
+    public function test_the_scheduled_refresh_stamps_an_aade_error_answer_but_not_a_transport_failure(): void
+    {
+        // firebed ≥ 5.14 throws on an AADE error document (it used to return empty). AADE
+        // did answer → stamp it, or a note AADE keeps refusing starves the rest of the queue.
+        $refused = $this->makeFiledNote(['delivery_state' => 'in_transit']);
+        $errorDoc = <<<'XML'
+        <?xml version="1.0" encoding="utf-8"?>
+        <ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0">
+          <response>
+            <index>1</index>
+            <statusCode>ValidationError</statusCode>
+            <errors><error><message>Δεν βρέθηκε</message><code>801</code></error></errors>
+          </response>
+        </ResponseDoc>
+        XML;
+
+        DeliveryRefreshStatus::$testHandler = new MockHandler([new GuzzleResponse(200, [], $errorDoc)]);
+        try {
+            $this->artisan('delivery:refresh-status', ['--tenant' => $this->tenant->slug])
+                ->expectsOutputToContain('απέτυχαν 1')
+                ->assertSuccessful();
+        } finally {
+            DeliveryRefreshStatus::$testHandler = null;
+        }
+        $this->assertNotNull($refused->fresh()->movement_checked_at);
+
+        // A transport failure is transient → left unstamped so the next run retries it first.
+        $refused->newQuery()->whereKey($refused->getKey())->update(['movement_checked_at' => null]);
+        DeliveryRefreshStatus::$testHandler = new MockHandler([
+            new ConnectException('down', new Request('GET', 'x')),
+        ]);
+        try {
+            $this->artisan('delivery:refresh-status', ['--tenant' => $this->tenant->slug])->assertSuccessful();
+        } finally {
+            DeliveryRefreshStatus::$testHandler = null;
+        }
+        $this->assertNull($refused->fresh()->movement_checked_at);
     }
 
     public function test_outcome_is_refused_when_someone_else_started_the_movement(): void

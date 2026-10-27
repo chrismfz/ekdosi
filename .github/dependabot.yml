@@ -1,0 +1,39 @@
+# Dependabot version updates. Security alerts/updates are switched on separately in
+# GitHub → Settings → Code security (Dependabot alerts + security updates).
+version: 2
+updates:
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Athens
+    open-pull-requests-limit: 5
+    groups:
+      # firebed/aade-mydata carries the whole myDATA logic → always its own PR, never grouped.
+      laravel-filament:
+        patterns: ["laravel/*", "filament/*", "livewire/*"]
+        update-types: [minor, patch]
+      composer-minor-patch:
+        patterns: ["*"]
+        exclude-patterns: ["firebed/*", "laravel/*", "filament/*", "livewire/*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Athens
+    open-pull-requests-limit: 3
+    groups:
+      npm-minor-patch:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly

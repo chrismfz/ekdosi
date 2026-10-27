@@ -10,7 +10,6 @@ use App\Models\Note;
 use App\Models\Tag;
 use App\Models\User;
 use Filament\Facades\Filament;
-use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Gate;
@@ -267,14 +266,16 @@ class CustomerNotesPageTest extends TestCase
         // Tenant boundary: with tenant A active, another tenant's customer is out
         // of reach — the ambient CompanyScope filters it out of mount()'s lookup
         // (ModelNotFoundException → 404), before any note query runs. The explicit
-        // company_id check in mount() is a second layer behind it.
+        // company_id check in mount() is a second layer behind it. (Livewire ≥ 4.4.8's
+        // test harness renders a mount() exception as its HTTP status instead of throwing.)
         $other = Company::create([
             'name' => 'B', 'slug' => 'cn-x-'.uniqid(),
             'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
         ]);
         $foreign = Customer::create(['company_id' => $other->id, 'name' => 'Ξένος']);
 
-        $this->expectException(ModelNotFoundException::class);
-        Livewire::test(CustomerNotes::class, ['record' => $foreign->id]);
+        Livewire::test(CustomerNotes::class, ['record' => $foreign->id])
+            ->assertNotFound()
+            ->assertDontSee('Ξένος');
     }
 }
