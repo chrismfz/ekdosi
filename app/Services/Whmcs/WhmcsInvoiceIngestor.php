@@ -407,7 +407,7 @@ class WhmcsInvoiceIngestor
             $body = $row->customer !== null
                 ? $row->sourceName()->ref($row->whmcs_invoice_id)." — {$row->customer->name} ζητά άμεση τιμολόγηση."
                 : $row->sourceName()->ref($row->whmcs_invoice_id).' — '.($row->whmcsClientName() ?? 'πελάτης').' ζητά άμεση τιμολόγηση,'
-                    .' αλλά δεν υπάρχει ακόμα πελάτης εδώ: «Δημ. πελάτη (ΑΑΔΕ)» στα Εισερχόμενα.';
+                    .' αλλά δεν υπάρχει ακόμα πελάτης εδώ: δημιούργησέ τον ή σύνδεσέ τον από τα Εισερχόμενα.';
             Notification::make()
                 ->title(ImmediateInvoiceBell::TITLE)
                 ->body($body)

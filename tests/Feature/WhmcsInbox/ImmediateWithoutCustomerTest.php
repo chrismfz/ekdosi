@@ -93,4 +93,28 @@ class ImmediateWithoutCustomerTest extends TestCase
         $this->assertSame('Μακαρίου 1', $invoice->address1);
         $this->assertSame('Λευκωσία', $invoice->city);
     }
+
+    /**
+     * Review of #717: a customer whose country does not go with the type, or is no country, is held before anything is
+     * saved (the AADE submit refused it later and left a provisional document no run retried).
+     */
+    public function test_a_country_that_does_not_go_with_the_type_is_held_before_anything_is_saved(): void
+    {
+        $tenant = $this->tenant();
+        InvoiceType::query()->whereKey($tenant->whmcs_default_invoice_type_id)->update(['mydata_type' => '2.1']);
+        foreach (['CY' => 51, 'ΑΘΗΝΑ' => 52] as $country => $id) {
+            $customer = Customer::create(['company_id' => $tenant->id, 'name' => 'Πελάτης '.$id, 'afm' => '11111111'.($id - 50),
+                'needs_immediate_invoice' => true, 'country' => $country]);
+            PendingWhmcsInvoice::create(['company_id' => $tenant->id, 'whmcs_invoice_id' => $id, 'customer_id' => $customer->id,
+                'payload' => ['invoiceid' => $id, 'userid' => 1, 'status' => 'Paid', 'date' => '2026-10-27', 'total' => '124.00',
+                    'items' => ['item' => [['description' => 'Hosting 1y', 'amount' => '124.00', 'taxed' => '1']]]],
+                'match_reason' => PendingWhmcsInvoice::REASON_LINKED, 'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW]);
+        }
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $this->assertSame(0, Invoice::query()->where('company_id', $tenant->id)->count(), 'nothing saved, nothing provisional');
+        $this->assertSame(2, PendingWhmcsInvoice::query()->where('company_id', $tenant->id)->whereNull('invoice_id')
+            ->where('status', PendingWhmcsInvoice::STATUS_PENDING_REVIEW)->count(), 'left in the inbox for an operator');
+    }
 }
