@@ -18,6 +18,9 @@
         </include>
     </source>
     <php>
+        <!-- The suite needs more than a stock 128M php.ini (devbox): without this `artisan test`
+             dies with «Premature end of PHP process» — its phpunit child ignores `php -d`. -->
+        <ini name="memory_limit" value="512M"/>
         <env name="APP_ENV" value="testing"/>
         <!-- Tests assert on UI strings: pin the locale CI uses (.env.example), whatever the local .env says. -->
         <env name="APP_LOCALE" value="el"/>

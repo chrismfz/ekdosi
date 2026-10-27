@@ -7,6 +7,7 @@ use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Services\Delivery\DeliveryLifecycleService;
 use Firebed\AadeMyData\Exceptions\ErrorResponseException;
+use GuzzleHttp\Exception\ServerException;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -76,8 +77,12 @@ class DeliveryRefreshStatus extends Command
                     // AADE ANSWERED with an error document (firebed ≥ 5.14 throws instead of
                     // returning empty): not transient, so still stamp the check — otherwise a
                     // note AADE keeps refusing holds the front of the least-recently-checked
-                    // queue on every run. Transport/auth failures stay unstamped and retry first.
-                    if ($e->getPrevious() instanceof ErrorResponseException) {
+                    // queue on every run. An HTTP 5xx can carry an error document too, but is an
+                    // AADE outage (its cause is Guzzle's ServerException; the exception code alone
+                    // can't tell — on HTTP 200 it is AADE's error code, e.g. 801): left unstamped
+                    // like transport/auth failures, so it retries first.
+                    $answer = $e->getPrevious();
+                    if ($answer instanceof ErrorResponseException && ! $answer->getPrevious() instanceof ServerException) {
                         DB::table($doc->getTable())->where('id', $doc->getKey())->update(['movement_checked_at' => now()]);
                     }
                     Log::warning('delivery:refresh-status failed for a document', [

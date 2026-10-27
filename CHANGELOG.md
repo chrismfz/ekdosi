@@ -65,13 +65,15 @@ from `[Unreleased]`; `--major` explicit for milestones).
   Το Filament 5.11 κρατά τις ειδοποιήσεις στο cache (όχι στο session) — θέλει λειτουργικό cache store (εμείς: `database`).
 - **Dependabot** (`.github/dependabot.yml`): εβδομαδιαία composer/npm, μηνιαία actions· το firebed πάντα σε δικό του PR.
 
-### Security
-- Filament 5.8.2 → 5.11 (GHSA-7m6h-rg42-m449, MFA χωρίς επανεπιβεβαίωση κωδικού) και Livewire 4.4.5 → 4.4.8
-  (GHSA-mhf7-xp6r-6qrc, παράκαμψη `#[Authorize]`). `composer audit` καθαρό.
-
 ### Fixed
 - `delivery:refresh-status`: δελτίο για το οποίο η ΑΑΔΕ απαντά με σφάλμα σημειώνεται ως ελεγμένο, ώστε να μη
-  μένει μόνιμα πρώτο στην ουρά και να μπλοκάρει τα υπόλοιπα (μόνο τα σφάλματα σύνδεσης ξαναδοκιμάζονται πρώτα).
+  μένει μόνιμα πρώτο στην ουρά και να μπλοκάρει τα υπόλοιπα (τα σφάλματα σύνδεσης και τα HTTP 5xx της ΑΑΔΕ
+  ξαναδοκιμάζονται πρώτα).
+- Σφάλμα που απαντά η ΑΑΔΕ (firebed 5.14) εμφανίζεται ως σφάλμα της ΑΑΔΕ, όχι ως «σύνδεση απέτυχε»: λεπτομέρειες ΜΑΡΚ,
+  «Test σύνδεσης» της εταιρείας, `mydata:set-credentials`· τα `mydata:fetch-docs` / `mydata:reconcile-sales --raw`
+  τυπώνουν ξανά το XML του σφάλματος.
+- `phpunit.xml`: `memory_limit=512M` — το `php artisan test` δεν κόβεται πια («Premature end of PHP process») σε
+  host με php.ini 128M.
 - **MyCS: καμία ετικέτα «WHMCS» σε ό,τι ήρθε από τη MyCS.** Παράθυρα και ενέργειες των Εισερχομένων («Επαναφορά MyCS #7»,
   «MyCS: ΑΠΛΗΡΩΤΟ», προεπισκόπηση, επιστροφή ΜΑΡΚ, δημιουργία πελάτη), τα κουμπιά πληρωμής στο παραστατικό («Έχει
   πληρωθεί στη MyCS;») και ο «Συγχρονισμός πληρωμών» ονομάζουν την πηγή (`SourceName`, με τα άρθρα).
@@ -285,6 +287,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
   προεπιλογές στη βάση) — ένα «Αποθήκευση επιλογών» από εκεί τις έκλεινε όλες. Τώρα δείχνουν τις πραγματικές προεπιλογές.
 
 ### Security
+- Filament 5.8.2 → 5.11 (GHSA-7m6h-rg42-m449, MFA χωρίς επανεπιβεβαίωση κωδικού) και Livewire 4.4.5 → 4.4.8
+  (GHSA-mhf7-xp6r-6qrc, παράκαμψη `#[Authorize]`). `composer audit` καθαρό.
 - **`league/commonmark` 2.10.1 → 2.10.3** (`composer audit`: GHSA-3q6v-r5mr-hxv8 high — quadratic-time DoS στο GFM Table
   block-start scan· GHSA-97jj-33gv-5xf9 medium — παράκαμψη `DisallowedRawHtml`). Πραγματική έκθεση χαμηλή: markdown
   αποδίδεται μόνο σε σημειώσεις πελάτη (`Note::renderedBody`, συγγραφείς = χειριστές πάνελ/ETL/σύστημα, `html_input=escape`

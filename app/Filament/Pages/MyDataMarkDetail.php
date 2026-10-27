@@ -28,6 +28,7 @@ use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Pages\Page;
 use Filament\Schemas\Components\Component;
+use Firebed\AadeMyData\Exceptions\ErrorResponseException;
 use Illuminate\Database\UniqueConstraintViolationException;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\HtmlString;
@@ -562,6 +563,9 @@ class MyDataMarkDetail extends Page
         } catch (RuntimeException $e) {
             // Our own guard messages (provider/mode/credentials) — safe Greek.
             $this->error = $e->getMessage();
+        } catch (ErrorResponseException $e) {
+            // AADE answered with its own error (firebed ≥ 5.14) — show it, it isn't a connection problem.
+            $this->error = 'Το myDATA απάντησε με σφάλμα: '.$e->getMessage();
         } catch (Throwable $e) {
             Log::warning('myDATA mark detail fetch failed', [
                 'company_id' => $tenant?->getKey(),
@@ -645,6 +649,10 @@ class MyDataMarkDetail extends Page
             $detail = app(TransmittedDocReader::class, ['tenant' => $tenant])->fetchDetailByMark((string) $invoice->mydata_mark, $from, $to);
         } catch (RuntimeException $e) {
             Notification::make()->title('Αποτυχία')->danger()->body($e->getMessage())->send();
+
+            return;
+        } catch (ErrorResponseException $e) {
+            Notification::make()->title('Αποτυχία')->danger()->body('Το myDATA απάντησε με σφάλμα: '.$e->getMessage())->send();
 
             return;
         } catch (Throwable $e) {
