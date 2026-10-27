@@ -6,6 +6,7 @@ use App\Models\Company;
 use App\Models\DeliveryNote;
 use App\Models\Invoice;
 use App\Services\Delivery\DeliveryLifecycleService;
+use Firebed\AadeMyData\Exceptions\ErrorResponseException;
 use GuzzleHttp\Handler\MockHandler;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
@@ -24,7 +25,8 @@ use Throwable;
  * Per myDATA-readable tenant, explicit company_id (CLAUDE.md CLI rule); least-recently-
  * CHECKED first (movement_checked_at), capped per run, a small gap between AADE calls; only the last
  * 90 days (a movement older than that won't move any more). A per-document failure
- * (usually a transient AADE hiccup) is logged and skipped — the next run retries.
+ * (usually a transient AADE hiccup) is logged and skipped — the next run retries; an
+ * error AADE itself answered is stamped as checked so it can't starve the others.
  *
  * Usage:
  *   php artisan delivery:refresh-status                 # all myDATA-readable tenants
@@ -71,6 +73,13 @@ class DeliveryRefreshStatus extends Command
                     DB::table($doc->getTable())->where('id', $doc->getKey())->update(['movement_checked_at' => now()]);
                 } catch (Throwable $e) {
                     $failed++;
+                    // AADE ANSWERED with an error document (firebed ≥ 5.14 throws instead of
+                    // returning empty): not transient, so still stamp the check — otherwise a
+                    // note AADE keeps refusing holds the front of the least-recently-checked
+                    // queue on every run. Transport/auth failures stay unstamped and retry first.
+                    if ($e->getPrevious() instanceof ErrorResponseException) {
+                        DB::table($doc->getTable())->where('id', $doc->getKey())->update(['movement_checked_at' => now()]);
+                    }
                     Log::warning('delivery:refresh-status failed for a document', [
                         'company' => $tenant->slug, 'doc' => $doc->invcode, 'error' => get_class($e).': '.$e->getMessage(),
                     ]);
