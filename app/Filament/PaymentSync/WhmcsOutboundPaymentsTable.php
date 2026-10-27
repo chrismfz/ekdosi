@@ -5,6 +5,7 @@ namespace App\Filament\PaymentSync;
 use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Models\Company;
 use App\Models\Invoice;
+use App\Support\Billing\SourceName;
 use App\Services\Whmcs\PaymentPushResult;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentPusher;
@@ -37,7 +38,7 @@ class WhmcsOutboundPaymentsTable extends TableWidget
 
     public function getTableHeading(): string
     {
-        return 'Προς ενημέρωση στο WHMCS (εξοφλήθηκαν εδώ)';
+        return 'Προς ενημέρωση '.(Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->in().' (εξοφλήθηκαν εδώ)';
     }
 
     public function table(Table $table): Table
@@ -64,21 +65,21 @@ class WhmcsOutboundPaymentsTable extends TableWidget
                     ->url(fn (Invoice $r) => InvoiceResource::getUrl('view', ['record' => $r, 'tenant' => $r->company])),
                 TextColumn::make('customer.name')->label('Πελάτης')->limit(35)->placeholder('—'),
                 TextColumn::make('whmcs')
-                    ->label('WHMCS')
+                    ->label(fn () => (Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->label())
                     ->state(fn (Invoice $r) => ($w = $r->whmcsPending?->whmcs_invoice_id) ? '#'.$w : '—'),
                 TextColumn::make('gross_total')->label('Σύνολο')->money('EUR')->alignEnd(),
             ])
             ->recordActions([
                 Action::make('mark_paid_at_whmcs')
-                    ->label('Σήμανση Paid στο WHMCS')
+                    ->label(fn (Invoice $record) => 'Σήμανση Paid '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->in())
                     ->icon('heroicon-o-arrow-up-on-square')
                     ->color('success')
                     // External money-write: same per-record gate as the invoice
                     // action — ViewAny + opt-in alone must not authorize it.
                     ->authorize(fn (Invoice $record) => auth()->user()?->can('update', $record) ?? false)
                     ->requiresConfirmation()
-                    ->modalHeading('Σήμανση πληρωμένου στο WHMCS')
-                    ->modalDescription('Ενημερώνει το WHMCS του πελάτη ότι το τιμολόγιο εξοφλήθηκε (γράφει στο σύστημα του πελάτη, μία φορά).')
+                    ->modalHeading(fn (Invoice $record) => 'Σήμανση πληρωμένου '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->in())
+                    ->modalDescription(fn (Invoice $record) => 'Ενημερώνει '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->the().' ότι το τιμολόγιο εξοφλήθηκε (γράφει στο σύστημα του πελάτη, μία φορά).')
                     ->modalSubmitActionLabel('Σήμανση')
                     ->action(fn (Invoice $record) => $this->push($record)),
                 Action::make('open')
@@ -88,7 +89,7 @@ class WhmcsOutboundPaymentsTable extends TableWidget
                     ->url(fn (Invoice $r) => InvoiceResource::getUrl('view', ['record' => $r, 'tenant' => $r->company])),
             ])
             ->emptyStateHeading('Καμία εκκρεμότητα')
-            ->emptyStateDescription('Δεν υπάρχουν τοπικά εξοφλημένα τιμολόγια που να χρειάζονται ενημέρωση στο WHMCS.')
+            ->emptyStateDescription(fn () => 'Δεν υπάρχουν τοπικά εξοφλημένα τιμολόγια που να χρειάζονται ενημέρωση '.(Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->in().'.')
             ->emptyStateIcon('heroicon-o-check-circle');
     }
 
@@ -98,7 +99,7 @@ class WhmcsOutboundPaymentsTable extends TableWidget
         $fetch = app(WhmcsInvoiceFetcher::class)->for($tenant);
         $push = app(WhmcsPaymentPusherFactory::class)->for($tenant);
         if ($fetch === null || $push === null) {
-            Notification::make()->title('Δεν έχει ρυθμιστεί WHMCS')->warning()->send();
+            Notification::make()->title('Δεν έχει ρυθμιστεί '.$tenant->billingSourceName()->label())->warning()->send();
 
             return;
         }
@@ -110,7 +111,7 @@ class WhmcsOutboundPaymentsTable extends TableWidget
         }
 
         match ($result) {
-            PaymentPushResult::Pushed => Notification::make()->title('Ενημερώθηκε το WHMCS')->success()->send(),
+            PaymentPushResult::Pushed => Notification::make()->title('Ενημερώθηκε '.($record->whmcsPending?->sourceName() ?? $record->company->billingSourceName())->the())->success()->send(),
             PaymentPushResult::AlreadyPaid => Notification::make()->title('Ήταν ήδη πληρωμένο')->info()->send(),
             PaymentPushResult::Failed => Notification::make()->title('Απέτυχε — δοκιμάστε ξανά')->danger()->persistent()->send(),
             PaymentPushResult::Skipped => Notification::make()->title('Δεν έγινε σήμανση')->warning()->send(),

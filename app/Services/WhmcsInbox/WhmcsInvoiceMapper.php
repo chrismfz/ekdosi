@@ -258,6 +258,8 @@ class WhmcsInvoiceMapper
                 'whmcs_date' => (string) ($payload['date'] ?? ''),
                 'whmcs_total' => (float) ($payload['total'] ?? 0.0),
                 // Unpaid at the source: the preview says whether the method keeps it an open receivable.
+                // «MyCS» / «WHMCS»: the preview names where it came from.
+                'source_label' => $pending->sourceLabel(),
                 'whmcs_unpaid' => $pending->whmcsIsNotPaid(),
                 // What was paid already on a not-paid one (account credit, part payments): not recorded at issue (owner,
                 // adversarial ADV-3/4 of #704), so the preview asks for it to be recorded by hand.

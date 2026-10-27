@@ -5,6 +5,7 @@ namespace App\Filament\Resources\WhmcsInbox\Pages;
 use App\Filament\BaseListRecords;
 use App\Filament\Resources\WhmcsInbox\WhmcsInboxResource;
 use App\Models\Company;
+use App\Support\Billing\SourceName;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentSyncer;
@@ -118,8 +119,8 @@ class ListWhmcsInbox extends BaseListRecords
                 // reach it (the per-invoice «Έχει πληρωθεί;» is likewise gated).
                 ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
                 ->requiresConfirmation()
-                ->modalHeading('Συγχρονισμός πληρωμών από το WHMCS')
-                ->modalDescription('Ελέγχει τα εκδοθέντα, WHMCS-συνδεδεμένα τιμολόγια που είναι ακόμη ανοιχτά (επί πιστώσει) και, όσα έχουν πληρωθεί στο WHMCS, τα εξοφλεί εδώ καταγράφοντας πληρωμή για το υπόλοιπό τους. Καμία αλλαγή δεν γίνεται στο WHMCS του πελάτη.')
+                ->modalHeading(fn () => 'Συγχρονισμός πληρωμών από '.(Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->the())
+                ->modalDescription(fn () => 'Ελέγχει τα εκδοθέντα, συνδεδεμένα τιμολόγια που είναι ακόμη ανοιχτά (επί πιστώσει) και, όσα έχουν πληρωθεί '.(Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->in().', τα εξοφλεί εδώ καταγράφοντας πληρωμή για το υπόλοιπό τους. Καμία αλλαγή δεν γίνεται '.(Filament::getTenant()?->billingSourceName() ?? SourceName::for(false))->in().'.')
                 ->modalSubmitActionLabel('Συγχρονισμός')
                 ->action(function (): void {
                     $tenant = Filament::getTenant();
@@ -130,8 +131,8 @@ class ListWhmcsInbox extends BaseListRecords
                     $fetch = app(WhmcsInvoiceFetcher::class)->for($tenant);
                     if ($fetch === null) {
                         Notification::make()
-                            ->title('Δεν έχει ρυθμιστεί WHMCS')
-                            ->body('Ο πελάτης δεν έχει ενεργή σύνδεση WHMCS — δεν έγινε συγχρονισμός.')
+                            ->title('Δεν έχει ρυθμιστεί '.$tenant->billingSourceName()->label())
+                            ->body('Η εταιρεία δεν έχει ενεργή σύνδεση '.$tenant->billingSourceName()->label().': δεν έγινε συγχρονισμός.')
                             ->warning()->send();
 
                         return;
@@ -147,7 +148,7 @@ class ListWhmcsInbox extends BaseListRecords
                     } else {
                         Notification::make()
                             ->title('Καμία νέα πληρωμή')
-                            ->body('Δεν βρέθηκε ανοιχτό τιμολόγιο που να έχει πληρωθεί στο WHMCS (ελέγχθηκαν '.$result->checked.').')
+                            ->body('Δεν βρέθηκε ανοιχτό τιμολόγιο που να έχει πληρωθεί '.$tenant->billingSourceName()->in().' (ελέγχθηκαν '.$result->checked.').')
                             ->info()->send();
                     }
                 }),

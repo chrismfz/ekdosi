@@ -8,6 +8,7 @@ use App\Models\Scopes\CompanyScope;
 use App\Observers\CompanyObserver;
 use App\Services\Portability\CompanyPurger;
 use App\Services\Products\ProductMediaService;
+use App\Support\Billing\SourceName;
 use App\Support\LegalEvidence;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
@@ -353,6 +354,12 @@ class Company extends Model
     public function hasBillingSource(): bool
     {
         return $this->hasWhmcsIntegration() || $this->usesMycs();
+    }
+
+    /** The billing source in the operator's sentences: MyCS when it uses one, otherwise WHMCS. */
+    public function billingSourceName(): SourceName
+    {
+        return SourceName::for($this->usesMycs());
     }
 
     /**
