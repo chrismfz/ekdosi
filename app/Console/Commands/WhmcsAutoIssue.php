@@ -10,6 +10,8 @@ use App\Models\PendingWhmcsInvoice;
 use App\Services\Mycs\MycsRowRefresher;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Support\Afm;
+use App\Support\IsoCountry;
+use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Log;
@@ -198,7 +200,11 @@ class WhmcsAutoIssue extends Command
         $held = 0;
 
         foreach ($candidates as $row) {
-            $customer = $row->customer;   // eager-loaded, tenant-scoped, non-trashed
+            // Read whole, of this tenant: the eager load carries only what the candidate filters need, and the mapper
+            // takes the customer's snapshot from it (its country was GR whatever it was: review of #716).
+            $customer = $row->customer_id !== null
+                ? Customer::query()->where('company_id', $tenant->id)->find($row->customer_id)
+                : null;
 
             // Defense in depth: the relation already guarantees this, but
             // assert before handing anything to the filer / AADE.
@@ -215,6 +221,11 @@ class WhmcsAutoIssue extends Command
             // default receipt type (or an ambiguous third-party) is HELD, not
             // mis-issued.
             [$chosenType, $holdReason] = $this->chooseType($row, $invoiceType, $receiptType);
+            // The customer's country for this type, before anything is saved: a submit that refused it later left a
+            // provisional document no run retries (review of #717).
+            if ($chosenType !== null && ($countryHold = self::countryHold($customer, $chosenType)) !== null) {
+                [$chosenType, $holdReason] = [null, $countryHold];
+            }
             if ($chosenType === null) {
                 $held++;
                 $this->line("  · {$label}: {$holdReason} — left in inbox.");
@@ -301,6 +312,31 @@ class WhmcsAutoIssue extends Command
      *
      * @return array{0: ?InvoiceType, 1: ?string}
      */
+    /**
+     * Why the customer's country does not go with this document type (as the AADE submit checks it, MYD-6), or null:
+     * a country that is no country («ΑΘΗΝΑ»), or one of the wrong class (a CY customer on a domestic ΤΠΥ). No country
+     * recorded is Greece, as filing reads it.
+     */
+    private static function countryHold(Customer $customer, InvoiceType $type): ?string
+    {
+        if (! filled($customer->country)) {
+            return null;
+        }
+        $iso = IsoCountry::tryNormalise((string) $customer->country);
+        if ($iso === null) {
+            return "χώρα πελάτη «{$customer->country}» άγνωστη — διόρθωσέ τη στον πελάτη";
+        }
+        $expected = Codes::counterpartCountryClass($type->mydata_type);
+        $ok = match ($expected) {
+            'GR' => $iso === 'GR',
+            'EU' => $iso !== 'GR' && Codes::isEuCountry($iso),
+            'NON_EU' => ! Codes::isEuCountry($iso),
+            default => true,
+        };
+
+        return $ok ? null : "χώρα πελάτη {$iso}, ο τύπος {$type->code} δεν είναι γι' αυτήν — χειριστής";
+    }
+
     private function chooseType(PendingWhmcsInvoice $row, InvoiceType $invoiceType, ?InvoiceType $receiptType): array
     {
         // Auto-issue is PAID-ONLY (this enforces it — the staging feed alone

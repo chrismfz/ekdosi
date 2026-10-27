@@ -229,6 +229,8 @@ class WhmcsInboxTable
                     ->description(fn (PendingWhmcsInvoice $r): ?string => match (true) {
                         $r->status === PendingWhmcsInvoice::STATUS_FILED && filled($r->invoice?->invcode) => '→ '.$r->invoice->invcode,
                         (bool) $r->customer?->needs_immediate_invoice => '⚡ Άμεσο',
+                        // Asked for, but no customer here yet: never issued unattended until staff create it.
+                        $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW && $r->immediateWithoutCustomer() => '⚡ Άμεσο: χωρίς πελάτη',
                         default => null,
                     })
                     ->url(fn (PendingWhmcsInvoice $r): ?string => $r->status === PendingWhmcsInvoice::STATUS_FILED && $r->invoice_id !== null
