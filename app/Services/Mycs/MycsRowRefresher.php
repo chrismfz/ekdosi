@@ -54,6 +54,10 @@ final class MycsRowRefresher
             }
             $fresh = null;
         }
+        // No such invoice without an error from the bridge: as a 404 (final review of #703).
+        if ($fresh === null && $row->source !== PendingWhmcsInvoice::SOURCE_MYCS) {
+            return null;
+        }
         $old = is_array($row->payload) ? $row->payload : [];
         $why = $fresh === null ? 'δεν υπάρχει πια στη MyCS' : $this->why($old, $fresh);
         if ($why === null) {
@@ -61,7 +65,14 @@ final class MycsRowRefresher
         }
         $note = 'Άλλαξε στη MyCS από τότε που ήρθε ('.$why.'): έλεγξέ το πριν την έκδοση.';
         try {
-            DB::transaction(function () use ($row, $company, $fresh, $note) {
+            $busy = DB::transaction(function () use ($row, $company, $fresh, $note): bool {
+                // The row locked, and only one no document is being made from: a filing in flight (auto-issue has set its
+                // invoice) or done keeps the snapshot it was issued from (final review of #703, P1).
+                $locked = PendingWhmcsInvoice::query()->whereKey($row->id)->lockForUpdate()->first();
+                if ($locked === null || $locked->invoice_id !== null
+                    || ! in_array($locked->status, [PendingWhmcsInvoice::STATUS_PENDING_REVIEW, PendingWhmcsInvoice::STATUS_HELD], true)) {
+                    return true;
+                }
                 if ($fresh !== null) {
                     // The snapshot (lines, routing, the customer's flags) as MyCS has it now, also of a row held here: the
                     // ingestor refreshes only a row in review, so it is put there first (R3-3: else held on every try).
@@ -74,7 +85,12 @@ final class MycsRowRefresher
                     'hold_reason' => $note,
                     'notes' => trim(((string) $row->notes).' '.$note),
                 ]);
+
+                return false;
             });
+            if ($busy) {
+                return 'Εκδίδεται ή εκδόθηκε ήδη: τίποτα νέο από αυτή τη γραμμή.';
+            }
         } catch (Throwable $e) {
             // Never a failed run: nothing issued from it now, the row as it was (R3, unproven: auto-issue's loop).
             report($e);

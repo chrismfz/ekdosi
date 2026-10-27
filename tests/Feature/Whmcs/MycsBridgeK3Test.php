@@ -161,4 +161,24 @@ class MycsBridgeK3Test extends TestCase
         $this->assertNotNull(app(MycsRowRefresher::class)->check($row));
         $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->fresh()->status, 'left as it was, for the next try');
     }
+
+    /** A row being filed (its invoice set) or filed keeps the snapshot it was issued from (final review of #703). */
+    public function test_a_row_being_filed_is_never_refreshed_under_its_document(): void
+    {
+        $tenant = $this->tenant();
+        $row = app(WhmcsInvoiceIngestor::class)->ingest($tenant, $this->payload(8))->row;
+        $type = \App\Models\InvoiceType::firstOrCreate(['company_id' => $tenant->id, 'code' => 'TPY'], ['name' => 'ΤΠΥ', 'invcount' => 1]);
+        $invoice = \App\Models\Invoice::create(['company_id' => $tenant->id, 'invoice_type_id' => $type->id, 'code' => 8, 'invcode' => 'TPY8',
+            'issued_at' => now(), 'local_status' => 'active']);
+        $row->update(['invoice_id' => $invoice->id]); // auto-issue in its AADE phase
+        $changed = $this->payload(8);
+        $changed['mycs']['fingerprint'] = 'another';
+        $this->fakeInvoice($changed);
+        $before = $row->fresh()->payload;
+
+        $this->assertNotNull(app(MycsRowRefresher::class)->check($row->fresh()));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->fresh()->status);
+        $this->assertSame($before, $row->fresh()->payload, 'the snapshot its document came from');
+    }
 }
