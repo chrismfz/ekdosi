@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Invoice;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
+use Firebed\AadeMyData\Exceptions\ErrorResponseException;
 use Firebed\AadeMyData\Http\RequestTransmittedDocs;
 use Firebed\AadeMyData\Models\ContinuationToken;
 use Firebed\AadeMyData\Models\Counterpart;
@@ -215,7 +216,16 @@ class SalesReconciler
 
         do {
             $action = new RequestTransmittedDocs;
-            $response = $action->handle('', $dateFrom, $dateTo, null, null, null, null, $nextPartitionKey, $nextRowKey);
+            try {
+                $response = $action->handle('', $dateFrom, $dateTo, null, null, null, null, $nextPartitionKey, $nextRowKey);
+            } catch (ErrorResponseException $e) {
+                // A raw dump exists to SHOW what AADE answered — keep its error document as the
+                // last page (firebed ≥ 5.14 throws where it used to return it as an empty result).
+                // An HTTP error carries no readable document: rethrow so the caller reports it.
+                $pages[] = $action->getResponseXML() ?? throw $e;
+
+                return $pages;
+            }
 
             $pages[] = $action->getResponseXML() ?? '';
 

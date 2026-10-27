@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Models\Company;
 use App\Services\MyData\FirebedCredentials;
 use Carbon\Carbon;
+use Firebed\AadeMyData\Exceptions\ErrorResponseException;
 use Firebed\AadeMyData\Http\RequestDocs;
 use Firebed\AadeMyData\Http\RequestVatInfo;
 use Illuminate\Console\Command;
@@ -58,6 +59,8 @@ class MyDataFetchDocs extends Command
             return self::FAILURE;
         }
 
+        $request = null;
+
         try {
             $this->initFirebed($tenant);
 
@@ -68,7 +71,7 @@ class MyDataFetchDocs extends Command
 
             // mark MUST be '' (non-null) per the AADE GET contract; firebed
             // mirrors the RequestTransmittedDocs signature.
-            $docs = new RequestDocs;
+            $docs = $request = new RequestDocs;
             $docs->handle('', $from, $to);
             $this->dumpResponse($docs->getResponseXML(), 'RequestDocs');
 
@@ -76,12 +79,21 @@ class MyDataFetchDocs extends Command
                 $grouped = (bool) $this->option('grouped');
                 $this->newLine();
                 $this->info('RequestVatInfo — GroupedPerDay='.($grouped ? 'true' : 'false'));
-                $vat = new RequestVatInfo;
+                $vat = $request = new RequestVatInfo;
                 $vat->handle($from, $to, null, $grouped);
                 $this->dumpResponse($vat->getResponseXML(), 'RequestVatInfo');
             }
 
             return self::SUCCESS;
+        } catch (ErrorResponseException $e) {
+            // AADE answered with its own error document (firebed ≥ 5.14 throws instead of
+            // returning it): dump it — that answer is what this diagnostic is run to see.
+            $this->error('AADE answered with an error: '.$e->getMessage());
+            if (($xml = $request?->getResponseXML()) !== null) {
+                $this->dumpResponse($xml, class_basename($request));
+            }
+
+            return self::FAILURE;
         } catch (RuntimeException $e) {
             // Our own guard messages — safe to show verbatim.
             $this->error($e->getMessage());

@@ -47,6 +47,7 @@ use Filament\Schemas\Components\Tabs\Tab;
 use Filament\Schemas\Components\Utilities\Get;
 use Filament\Schemas\Components\Utilities\Set;
 use Filament\Schemas\Schema;
+use Firebed\AadeMyData\Exceptions\ErrorResponseException;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Mail\Mailables\Address;
 use Illuminate\Support\Facades\Artisan;
@@ -1851,6 +1852,14 @@ class CompanyForm
                 }
                 try {
                     $ok = (new MyDataSubmitter($record))->testConnection($environment);
+                } catch (ErrorResponseException $e) {
+                    // AADE was reached and answered with its own error — not a network problem.
+                    Notification::make()
+                        ->title('myDATA answered with an error')
+                        ->body($e->getMessage())
+                        ->danger()->send();
+
+                    return;
                 } catch (\Throwable $e) {
                     Notification::make()
                         ->title('myDATA unreachable')

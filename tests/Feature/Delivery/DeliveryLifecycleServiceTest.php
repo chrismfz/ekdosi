@@ -612,6 +612,15 @@ class DeliveryLifecycleServiceTest extends TestCase
             DeliveryRefreshStatus::$testHandler = null;
         }
         $this->assertNull($refused->fresh()->movement_checked_at);
+
+        // An AADE outage (HTTP 5xx) can carry the same error document — still transient.
+        DeliveryRefreshStatus::$testHandler = new MockHandler([new GuzzleResponse(503, [], $errorDoc)]);
+        try {
+            $this->artisan('delivery:refresh-status', ['--tenant' => $this->tenant->slug])->assertSuccessful();
+        } finally {
+            DeliveryRefreshStatus::$testHandler = null;
+        }
+        $this->assertNull($refused->fresh()->movement_checked_at);
     }
 
     public function test_outcome_is_refused_when_someone_else_started_the_movement(): void

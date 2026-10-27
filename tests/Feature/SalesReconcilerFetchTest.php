@@ -399,4 +399,17 @@ XML;
 </RequestedDoc>
 XML;
     }
+
+    public function test_raw_dump_keeps_an_aade_error_answer_as_its_last_page(): void
+    {
+        // firebed ≥ 5.14 throws on an AADE error document; the raw dump exists to show what
+        // AADE answered, so the error document must still come back as a page.
+        $error = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><response><index>1</index><statusCode>ValidationError</statusCode><errors><error><message>Invalid date range</message><code>101</code></error></errors></response></ResponseDoc>';
+
+        $pages = (new SalesReconciler($this->tenant, new MockHandler([new Response(200, [], $error)])))
+            ->rawTransmittedDocs(now()->subDay(), now());
+
+        $this->assertCount(1, $pages);
+        $this->assertStringContainsString('<code>101</code>', $pages[0]);
+    }
 }
