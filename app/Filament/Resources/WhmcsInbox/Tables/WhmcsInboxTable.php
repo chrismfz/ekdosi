@@ -708,7 +708,7 @@ class WhmcsInboxTable
 
         $decode = static fn (string $s): string => html_entity_decode($s, ENT_QUOTES | ENT_HTML5, 'UTF-8');
         $ownReceipt = $r->ownLinesAreReceipt();
-        $ownName = $r->customer?->name ?? $r->whmcsClientName() ?? 'Πελάτης WHMCS';
+        $ownName = $r->customer?->name ?? $r->whmcsClientName() ?? 'Πελάτης '.$r->sourceLabel();
         $ownAfm = $r->customer?->afm ?? $r->whmcsAfm();
 
         // Resolve an ΑΦΜ → existing ekdosi καρτέλα URL once per distinct ΑΦΜ.
@@ -945,8 +945,11 @@ class WhmcsInboxTable
             // no-record archiveSelectedAction bulk action does.
             ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
             ->requiresConfirmation()
-            ->modalHeading('Συγχρονισμός τώρα από το WHMCS;')
-            ->modalDescription('Τραβά τα πληρωμένα/μη-εκδομένα τιμολόγια από το WHMCS και τα στάζει στο inbox (ίδιο με το προγραμματισμένο whmcs:fetch-pending). Idempotent — ασφαλές να ξανατρέξει. Μεγάλος tenant μπορεί να αργήσει λίγο.')
+            // The tenant's source (K3): MyCS once its bridge is on, else WHMCS.
+            ->modalHeading(fn () => 'Συγχρονισμός τώρα από '.(Filament::getTenant()?->usesMycs() ? 'τη MyCS' : 'το WHMCS').';')
+            ->modalDescription(fn () => Filament::getTenant()?->usesMycs()
+                ? 'Τραβά από τη MyCS τα πληρωμένα που δεν έχουν παραστατικό και όσα έστειλε το staff της («Send to Ekdosi»), και τα βάζει στα Εισερχόμενα (ίδιο με το προγραμματισμένο). Ασφαλές να ξανατρέξει.'
+                : 'Τραβά τα πληρωμένα/μη-εκδομένα τιμολόγια από το WHMCS και τα στάζει στο inbox (ίδιο με το προγραμματισμένο whmcs:fetch-pending). Idempotent — ασφαλές να ξανατρέξει. Μεγάλος tenant μπορεί να αργήσει λίγο.')
             ->modalSubmitActionLabel('Συγχρονισμός')
             ->action(function () {
                 $tenant = Filament::getTenant();
@@ -955,7 +958,8 @@ class WhmcsInboxTable
 
                     return;
                 }
-                if (empty($tenant->whmcs_api_url)) {
+                // A MyCS-only tenant has no WHMCS URL: its source is the bridge (K3).
+                if (empty($tenant->whmcs_api_url) && ! $tenant->usesMycs()) {
                     Notification::make()->title('Δεν έχει ρυθμιστεί WHMCS γι\' αυτόν τον tenant')->warning()->send();
 
                     return;
@@ -1161,12 +1165,12 @@ class WhmcsInboxTable
                 // the operator picks the right type without digging — wants
                 // invoice?, ΑΦΜ, ΔΟΥ, δραστηριότητα. Read-only hint.
                 Placeholder::make('whmcs_intent')
-                    ->label('Πρόθεση πελάτη (WHMCS)')
+                    ->label(fn (PendingWhmcsInvoice $r): string => 'Πρόθεση πελάτη ('.$r->sourceLabel().')')
                     ->content(function (PendingWhmcsInvoice $r): string {
                         $wants = $r->wantsInvoice();
                         $lines = [];
                         if ($name = $r->whmcsClientName()) {
-                            $lines[] = 'Πελάτης WHMCS: '.$name;
+                            $lines[] = 'Πελάτης '.$r->sourceLabel().': '.$name;
                         }
                         $lines[] = match ($wants) {
                             true => '📄 Ζήτησε ΤΙΜΟΛΟΓΙΟ',
@@ -1378,7 +1382,7 @@ class WhmcsInboxTable
                         }
                     }),
             ])
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δημιουργία προσχεδίου από WHMCS #'.$r->whmcs_invoice_id)
+            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Δημιουργία προσχεδίου από '.$r->sourceLabel().' #'.$r->whmcs_invoice_id)
             ->modalDescription('Επιλέγεις πελάτη και τύπο. Δημιουργείται ΠΡΟΣΧΕΔΙΟ παραστατικό στο ekdosi (δεν υποβάλλεται στην ΑΑΔΕ). Άνοιξέ το από τα Παραστατικά, διόρθωσε ό,τι χρειάζεται (π.χ. περιγραφές) και έκδωσέ το από εκεί.')
             ->modalSubmitActionLabel('Δημιουργία προσχεδίου')
             ->modalCancelActionLabel('Άκυρο')

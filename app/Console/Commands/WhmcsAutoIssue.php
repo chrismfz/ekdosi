@@ -392,9 +392,10 @@ class WhmcsAutoIssue extends Command
             ->with(['customer:id,company_id,name,afm,needs_immediate_invoice'])
             ->orderBy('id')
             ->get()
-            // «Ignore invoicing» in MyCS: released to review is for a human to look at, never to be filed unattended.
+            // «Ignore invoicing» in MyCS, or staff's «Send to Ekdosi» there (K3): for a human to look at, never to be filed
+            // unattended.
             ->reject(fn (PendingWhmcsInvoice $row) => MycsPayload::is(is_array($row->payload) ? $row->payload : null)
-                && MycsPayload::ignored($row->payload))
+                && (MycsPayload::ignored($row->payload) || MycsPayload::requested($row->payload)))
             ->values();
     }
 }

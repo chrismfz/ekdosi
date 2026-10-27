@@ -69,7 +69,7 @@ class WhmcsInvoiceSplitter
                 $contact = $line['contact'];
             } else {
                 $key = 'reseller';
-                $label = (string) ($pending->customer?->name ?? 'Πελάτης WHMCS');
+                $label = (string) ($pending->customer?->name ?? 'Πελάτης '.$pending->sourceLabel());
                 $contact = null;
             }
 

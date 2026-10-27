@@ -8,6 +8,7 @@ use App\Exceptions\Whmcs\WhmcsNotConfigured;
 use App\Exceptions\Whmcs\WhmcsUnreachable;
 use App\Models\Company;
 use App\Models\PendingWhmcsInvoice;
+use App\Services\Whmcs\WhmcsBridgeClient;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsClient;
 use App\Services\Whmcs\WhmcsClientFactory;
@@ -301,52 +302,64 @@ class WhmcsFetchPending extends Command
         $failed = 0;
         $pages = 0;
 
-        while (true) {
-            try {
-                // Ask the plugin to embed third-party routing only when the
-                // tenant has it enabled — non-third-party tenants pay nothing,
-                // and the ingestor then needs no separate resolve call.
-                $payloads = $bridge->fetchPendingInvoices(
-                    $offset, $limit, $minDate, 'paid_unfiled', $bridge->isMycs() || (bool) $tenant->whmcs_third_party_enabled,
-                );
-            } catch (WhmcsUnreachable $e) {
-                $this->error("Bridge unreachable: {$e->getMessage()}");
+        // MyCS: then what its staff sent with «Send to Ekdosi» (K3), when its bridge has it (its ping says so).
+        $statuses = ['paid_unfiled'];
+        if ($bridge->isMycs() && $this->mycsHasRequested($bridge)) {
+            $statuses[] = 'requested';
+        }
+        $startOffset = $offset;
 
-                return 5;
-            } catch (WhmcsApiException $e) {
-                $this->error("Bridge error: {$e->getMessage()}");
-
-                return Command::FAILURE;
-            }
-
-            if ($payloads === []) {
-                break;
-            }
-
-            foreach ($payloads as $payload) {
-                $invoiceId = (int) ($payload['invoiceid'] ?? $payload['id'] ?? 0);
+        foreach ($statuses as $status) {
+            $offset = $startOffset;
+            // `requested` is short and staff's: all of it, whatever the cut-over date (they asked now).
+            $since = $status === 'requested' ? null : $minDate;
+            while (true) {
                 try {
-                    $result = $ingestor->ingest($tenant, $payload);
-                    if ($result->created) {
-                        $created++;
-                        $this->line(sprintf('  staged  WHMCS#%d -> pending #%d (match: %s)', $invoiceId, $result->row->id, $result->row->match_reason));
-                    } elseif ($result->auditPreserved) {
-                        $auditPreserved++;
-                        $this->line(sprintf('  frozen  WHMCS#%d -> pending #%d (already filed)', $invoiceId, $result->row->id));
-                    } else {
-                        $updated++;
-                        $this->line(sprintf('  refresh WHMCS#%d -> pending #%d (status: %s)', $invoiceId, $result->row->id, $result->row->status));
-                    }
-                } catch (\Throwable $e) {
-                    $this->warn("WHMCS invoice #{$invoiceId}: ingest failed - {$e->getMessage()}");
-                    $failed++;
-                }
-            }
+                    // Ask the plugin to embed third-party routing only when the
+                    // tenant has it enabled — non-third-party tenants pay nothing,
+                    // and the ingestor then needs no separate resolve call.
+                    $payloads = $bridge->fetchPendingInvoices(
+                        $offset, $limit, $since, $status, $bridge->isMycs() || (bool) $tenant->whmcs_third_party_enabled,
+                    );
+                } catch (WhmcsUnreachable $e) {
+                    $this->error("Bridge unreachable: {$e->getMessage()}");
 
-            $offset += count($payloads);
-            if (++$pages > 10000) {   // safety guard against a misbehaving feed
-                $this->warn('Stopped after 10000 pages (safety guard).');
-                break;
+                    return 5;
+                } catch (WhmcsApiException $e) {
+                    $this->error("Bridge error: {$e->getMessage()}");
+
+                    return Command::FAILURE;
+                }
+
+                if ($payloads === []) {
+                    break;
+                }
+
+                foreach ($payloads as $payload) {
+                    $invoiceId = (int) ($payload['invoiceid'] ?? $payload['id'] ?? 0);
+                    try {
+                        $result = $ingestor->ingest($tenant, $payload);
+                        if ($result->created) {
+                            $created++;
+                            $this->line(sprintf('  staged  WHMCS#%d -> pending #%d (match: %s)', $invoiceId, $result->row->id, $result->row->match_reason));
+                        } elseif ($result->auditPreserved) {
+                            $auditPreserved++;
+                            $this->line(sprintf('  frozen  WHMCS#%d -> pending #%d (already filed)', $invoiceId, $result->row->id));
+                        } else {
+                            $updated++;
+                            $this->line(sprintf('  refresh WHMCS#%d -> pending #%d (status: %s)', $invoiceId, $result->row->id, $result->row->status));
+                        }
+                    } catch (\Throwable $e) {
+                        $this->warn("WHMCS invoice #{$invoiceId}: ingest failed - {$e->getMessage()}");
+                        $failed++;
+                    }
+                }
+
+                $offset += count($payloads);
+                if (++$pages > 10000) {   // safety guard against a misbehaving feed
+                    $this->warn('Stopped after 10000 pages (safety guard).');
+                    break;
+                }
             }
         }
 
@@ -354,6 +367,21 @@ class WhmcsFetchPending extends Command
         $this->info(sprintf('Summary (via bridge): %d created, %d refreshed, %d audit-frozen, %d failed.', $created, $updated, $auditPreserved, $failed));
 
         return $failed > 0 ? 7 : Command::SUCCESS;
+    }
+
+    /**
+     * Does this MyCS bridge list «Send to Ekdosi» (`statuses` in its ping, E5)? An older MyCS has no such status (a 400);
+     * a ping that fails leaves it out this run, the paid ones still read.
+     */
+    private function mycsHasRequested(WhmcsBridgeClient $bridge): bool
+    {
+        try {
+            return in_array('requested', (array) ($bridge->ping()['statuses'] ?? []), true);
+        } catch (\Throwable $e) {
+            $this->warn('MyCS ping failed, «Send to Ekdosi» not read this run: '.$e->getMessage());
+
+            return false;
+        }
     }
 
     /**

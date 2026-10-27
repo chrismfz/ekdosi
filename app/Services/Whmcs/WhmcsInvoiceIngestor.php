@@ -106,7 +106,13 @@ class WhmcsInvoiceIngestor
             .'έλεγξε το ποσό πριν την έκδοση.';
         // «Ignore invoicing» in MyCS: held, never issued unattended (the feed leaves such clients out; this is for an
         // invoice read by id, or staged before the flag was set). Held when it is new, as the notes (final review of #701).
-        $ignored = MycsPayload::is($whmcsInvoicePayload) && MycsPayload::ignored($whmcsInvoicePayload);
+        $requested = MycsPayload::is($whmcsInvoicePayload) && MycsPayload::requested($whmcsInvoicePayload);
+        // Sent by staff with «Send to Ekdosi» (K3): for a human to issue, so not held as «ignored»; never unattended.
+        $ignored = ! $requested && MycsPayload::is($whmcsInvoicePayload) && MycsPayload::ignored($whmcsInvoicePayload);
+        $requestedNote = $requested
+            ? 'Στάλθηκε από τη MyCS («Send to Ekdosi»)'.(strcasecmp((string) ($whmcsInvoicePayload['status'] ?? ''), 'Unpaid') === 0
+                ? ': απλήρωτο, εκδίδεται επί πιστώσει.' : '.').' Δεν εκδίδεται ποτέ αυτόματα.'
+            : null;
         if ($ignored) {
             $adjustmentNote = trim('Ο πελάτης είναι «χωρίς τιμολόγηση» στη MyCS: δεν εκδίδεται, εκτός αν το αποφασίσεις. '
                 .($adjustmentNote ?? ''));
@@ -128,7 +134,8 @@ class WhmcsInvoiceIngestor
         // lockForUpdate SELECT finds it and we take the clean existing-row path.
         // Belt (retry) + suspenders (inline unique-violation catch).
         $result = DB::transaction(function () use (
-            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored
+            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored,
+            $requested, $requestedNote
         ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
@@ -164,7 +171,7 @@ class WhmcsInvoiceIngestor
                         'third_party_state' => $tp['state'],
                         'third_party_resolution' => $tp['resolution'],
                         'status' => $createStatus,
-                        'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '')) ?: null),
+                        'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '').' '.($requestedNote ?? '')) ?: null),
                         'hold_reason' => $consolidatedReason ?? $adjustmentNote,
                     ]);
 
@@ -206,6 +213,25 @@ class WhmcsInvoiceIngestor
                 Log::error('Inbox: a decided row\'s invoice id came from the other source for another client — not staged', [
                     'pending_id' => $existing->id, 'whmcs_invoice_id' => $invoiceId, 'stored_userid' => $existing->whmcs_userid, 'incoming_userid' => $whmcsUserId,
                 ]);
+            }
+            // «Send to Ekdosi» (K3): a NEW request from MyCS staff (its own time) brings back a row archived here — they
+            // asked again for this document. Once per request: archived again, it stays archived until they send it again.
+            if ($requested && $existing->status === PendingWhmcsInvoice::STATUS_REJECTED
+                && $existing->source === PendingWhmcsInvoice::SOURCE_MYCS
+                && $existing->whmcs_userid !== null && (int) $existing->whmcs_userid === $whmcsUserId
+                && MycsPayload::requestedAt($whmcsInvoicePayload) !== MycsPayload::requestedAt(is_array($existing->payload) ? $existing->payload : null)) {
+                $existing->update([
+                    'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+                    'payload' => $whmcsInvoicePayload,
+                    'customer_id' => $customerId,
+                    'match_reason' => $match->reason,
+                    'third_party_state' => $tp['state'],
+                    'third_party_resolution' => $tp['resolution'],
+                    'notes' => trim(($requestedNote ?? '').' Ήταν αρχειοθετημένο: '.($existing->rejected_reason ?? '—')),
+                    'rejected_reason' => null,
+                ]);
+
+                return new IngestionResult(row: $existing, created: false, auditPreserved: false);
             }
             if ($existing->isAuditFrozen() || $existing->hasBeenConsolidated()) {
                 // Freeze the payload/customer/status against this re-ingest; touch
