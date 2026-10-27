@@ -5,6 +5,8 @@ namespace Tests\Feature\Whmcs;
 use App\Console\Commands\WhmcsAutoIssue;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Mycs\MycsRowRefresher;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
@@ -167,8 +169,8 @@ class MycsBridgeK3Test extends TestCase
     {
         $tenant = $this->tenant();
         $row = app(WhmcsInvoiceIngestor::class)->ingest($tenant, $this->payload(8))->row;
-        $type = \App\Models\InvoiceType::firstOrCreate(['company_id' => $tenant->id, 'code' => 'TPY'], ['name' => 'ΤΠΥ', 'invcount' => 1]);
-        $invoice = \App\Models\Invoice::create(['company_id' => $tenant->id, 'invoice_type_id' => $type->id, 'code' => 8, 'invcode' => 'TPY8',
+        $type = InvoiceType::firstOrCreate(['company_id' => $tenant->id, 'code' => 'TPY'], ['name' => 'ΤΠΥ', 'invcount' => 1]);
+        $invoice = Invoice::create(['company_id' => $tenant->id, 'invoice_type_id' => $type->id, 'code' => 8, 'invcode' => 'TPY8',
             'issued_at' => now(), 'local_status' => 'active']);
         $row->update(['invoice_id' => $invoice->id]); // auto-issue in its AADE phase
         $changed = $this->payload(8);
