@@ -54,6 +54,20 @@ class ContactCustomerResolver
             return $existing;
         }
 
+        // Known by its ΑΦΜ only (MyCS sends a contact entered that way: the rest is the registry's): created from the
+        // AADE registry as «Εισαγωγή δικαιούχων τρίτων» does, its own data where the registry has none (live split test
+        // of 2026-10-27: it was created as «ΑΦΜ …» with nothing else).
+        if ($this->decode((string) ($contact['company_name'] ?? '')) === '') {
+            $result = app(WhmcsCustomerCreator::class)->createFromContact($tenant, $contact);
+            if ($result->customer !== null && $result->customer->trashed()) {
+                throw new RuntimeException(
+                    'Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με ΑΦΜ '.$afm.' («'.$result->customer->name.'») — επανέφερέ τον από τη λίστα πελατών και ξαναπροσπάθησε.'
+                );
+            }
+
+            return $result->customer;
+        }
+
         try {
             return Customer::create([
                 'company_id' => $tenant->getKey(),

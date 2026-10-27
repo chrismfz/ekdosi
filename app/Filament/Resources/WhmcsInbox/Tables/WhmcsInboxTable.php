@@ -7,6 +7,7 @@ use App\Filament\Resources\Invoices\InvoiceResource;
 use App\Filament\Support\PickerOptions;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
 use App\Support\Billing\SourceName;
@@ -444,6 +445,26 @@ class WhmcsInboxTable
      *
      * @return array<int, string>
      */
+    /**
+     * The split's drafts against the source's document value (its total plus the credit applied, as the preview reads
+     * it), or null when they agree within a cent a line.
+     *
+     * @param  array<int, Invoice>  $invoices
+     */
+    public static function splitTotalGap(PendingWhmcsInvoice $r, array $invoices): ?string
+    {
+        $payload = is_array($r->payload) ? $r->payload : [];
+        $source = (float) ($payload['total'] ?? 0) + (float) ($payload['credit'] ?? 0);
+        $drafts = round(array_sum(array_map(fn (Invoice $i) => (float) $i->fresh()->gross_total, $invoices)), 2);
+        $lines = array_sum(array_map(fn (Invoice $i) => $i->lines()->count(), $invoices));
+        if ($source <= 0.005 || abs($drafts - $source) <= 0.02 + 0.01 * $lines) {
+            return null;
+        }
+        $fmt = fn (float $v): string => number_format($v, 2, ',', '.').' €';
+
+        return 'Σύνολο προσχεδίων '.$fmt($drafts).', αξία '.$r->sourceName()->ref($r->whmcs_invoice_id).' '.$fmt($source).'.';
+    }
+
     /** A default type for the split only when it is one of its options. */
     private static function splitTypeDefault(?int $typeId): ?int
     {
@@ -1678,6 +1699,16 @@ class WhmcsInboxTable
                         ->success()
                         ->persistent()
                         ->send();
+                    // A split reconciles no group (each is a part of the total), but the drafts together are the
+                    // invoice: told when they differ from what the source billed (a 0% line taxed here, live test).
+                    if (($gap = static::splitTotalGap($r, $invoices)) !== null) {
+                        Notification::make()
+                            ->title('Τα προσχέδια δεν συμφωνούν με την πηγή')
+                            ->body($gap.' Έλεγξε τον ΦΠΑ των γραμμών πριν την έκδοση.')
+                            ->warning()
+                            ->persistent()
+                            ->send();
+                    }
                 } catch (Throwable $e) {
                     Notification::make()
                         ->title('Ο διαχωρισμός απέτυχε')
