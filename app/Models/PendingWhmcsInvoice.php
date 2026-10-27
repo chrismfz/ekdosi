@@ -391,6 +391,16 @@ class PendingWhmcsInvoice extends Model
      * WHMCS toggle propagates. The null (unmapped) case is exactly what stops a tenant
      * that doesn't use the field from having every customer's flag forced off.
      */
+    /**
+     * The source asks for «άμεση τιμολόγηση» but the row has no ekdosi customer yet (not entered, owner 2026-10-27):
+     * never issued unattended (auto-issue needs a customer), so it is flagged and belled for staff to create the
+     * customer («Δημ. πελάτη (ΑΑΔΕ)», which carries the flag over). Paid only, as the bell.
+     */
+    public function immediateWithoutCustomer(): bool
+    {
+        return $this->customer_id === null && ! $this->whmcsIsNotPaid() && $this->wantsImmediateInvoice() === true;
+    }
+
     public function wantsImmediateInvoice(): ?bool
     {
         // MyCS always says (clients.immediate_invoicing): its answer is the truth, as a mapped WHMCS field's.

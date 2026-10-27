@@ -393,7 +393,9 @@ class WhmcsInvoiceIngestor
                 // επί πιστώσει MANUALLY — never «άμεσα». Firing the immediate bell for it (when
                 // the customer happens to carry both flags) contradicts the actual workflow.
                 || $row->whmcsIsUnpaid()
-                || ! $row->customer?->needs_immediate_invoice) {
+                // Asked for at the source but no customer here yet (owner 2026-10-27): belled too, for staff to create
+                // it; never issued unattended meanwhile.
+                || ! ($row->customer?->needs_immediate_invoice || $row->immediateWithoutCustomer())) {
                 return;
             }
 
@@ -402,9 +404,13 @@ class WhmcsInvoiceIngestor
                 return;
             }
 
+            $body = $row->customer !== null
+                ? $row->sourceName()->ref($row->whmcs_invoice_id)." — {$row->customer->name} ζητά άμεση τιμολόγηση."
+                : $row->sourceName()->ref($row->whmcs_invoice_id).' — '.($row->whmcsClientName() ?? 'πελάτης').' ζητά άμεση τιμολόγηση,'
+                    .' αλλά δεν υπάρχει ακόμα πελάτης εδώ: «Δημ. πελάτη (ΑΑΔΕ)» στα Εισερχόμενα.';
             Notification::make()
                 ->title(ImmediateInvoiceBell::TITLE)
-                ->body("WHMCS #{$row->whmcs_invoice_id} — {$row->customer?->name} ζητά άμεση τιμολόγηση.")
+                ->body($body)
                 ->icon('heroicon-o-bolt')
                 ->color('danger')
                 // Structured tag so the bell can be auto-cleared once the WHMCS

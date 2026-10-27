@@ -198,7 +198,11 @@ class WhmcsAutoIssue extends Command
         $held = 0;
 
         foreach ($candidates as $row) {
-            $customer = $row->customer;   // eager-loaded, tenant-scoped, non-trashed
+            // Read whole, of this tenant: the eager load carries only what the candidate filters need, and the mapper
+            // takes the customer's snapshot from it (its country was GR whatever it was: review of #716).
+            $customer = $row->customer_id !== null
+                ? Customer::query()->where('company_id', $tenant->id)->find($row->customer_id)
+                : null;
 
             // Defense in depth: the relation already guarantees this, but
             // assert before handing anything to the filer / AADE.
