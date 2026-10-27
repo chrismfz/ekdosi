@@ -322,6 +322,7 @@ doesn't count as the second *shape* that contract needs. The MyCS side is docume
 | Payments ekdosi → billing | `add_payment` | the same `op=add_payment` (MyCS E3, K2): once per transid, cut to what is left (never credit), `already_settled` on an invoice already paid there |
 | Unpaid feed («τιμολόγιο πριν την πληρωμή») | `whmcs:fetch-unpaid` (native API, one call per customer) | `whmcs:fetch-unpaid` reads MyCS (K2): one `op=invoices status=Unpaid userids=[…]` a page for all the flagged customers; never the frozen WHMCS |
 | Split rows | not written back (one MARK per WHMCS invoice) | each document of the split goes back on its own MARK (K2), and so does its cancellation; a failure is retried (row action, `whmcs:retry-writebacks`) by pushing every document again in its state |
+| Staff «send to ekdosi» (also unpaid, also «ignore invoicing») | the plugin's button above the invoices pushes `invoice-paid` | MyCS E5/K3: `whmcs:fetch-pending` also reads `op=invoices status=requested` (when MyCS's `ping` lists it in `statuses`), all of it, no `since`; staged for a human (an unpaid one on credit), never issued unattended (auto-issue skips it); a NEW request (its `requested_at`) brings back a row archived here, once |
 | Sale reversed in the billing system | — | `mycs:watch-reversals` (K2, every 15′, read only): a few issued rows a run, in turn (`op=invoice` each, within MyCS's 120/min); refunded, cancelled or unpaid again → the staff bell «Χρειάζεται πιστωτικό (MyCS)», once each |
 | Credit/debit notes | — | `mycs.adjustments` ≠ 0 → the row is held («το σύνολο διαφέρει από τις γραμμές»), because a document built from the lines would be for the wrong amount. It is held when first seen, or when the amount changes; once the operator has sent it back to review, the same notes don't hold it again |
 
@@ -379,6 +380,29 @@ A missing `immediate_invoicing` in a MyCS payload is «unknown»: it leaves the 
 
 **Live test before the cut-over** (owner, 2026-10-25): real invoices on `ekdosi.myip.gr` (provider with DEV
 credentials) against MyCS, with Chrome. The checklist is in MyCS's `docs/ekdosi-bridge.md` → «Live δοκιμή».
+
+**Done in K3:** «Send to Ekdosi» from MyCS (`requested`), the source's name in the inbox modals and the sync action
+(and a MyCS-only company, with no WHMCS URL, can «Συγχρονισμός τώρα»).
+- **Read again before issuing** (owner 2026-10-27, «refresh»): «Δημιουργία Παραστατικού» and `whmcs:auto-issue` read a
+  MyCS row's invoice again (`op=invoice`, `MycsRowRefresher`). Changed since it came in (lines, amounts or notes — the
+  fingerprint —, status, client, the request, «ignore invoicing») → the row takes MyCS's invoice as it is now and is
+  held with why; MyCS not answering → nothing issued now. After issuing, nothing changes: an issued document is final.
+- A held row keeps its snapshot but follows the request (`requested_at`), so released it is never auto-issued on a
+  request it did not know of. A row archived here, or held only as «ignored», is brought back by a NEW request (once),
+  with the same holds as a fresh one (notes changing the total, third parties, consolidated); one archived from WHMCS
+  before the cut-over too, for the same client. The «Send to Ekdosi» note follows the request (off when withdrawn).
+- Read again: also before «Διαχωρισμός σε προσχέδια»; every row of a MyCS company (one staged from WHMCS before the
+  cut-over too); the whole snapshot counts (routing as `mycs.routing_hash`, the recipient, the flags), but what ekdosi
+  wrote back; a 404 is «no longer in MyCS» (held), a failure is «not answering» (nothing issued, tried again).
+- Not read again (MyCS's invoice under that number is not this row's): a released source conflict, a consolidated
+  mass-pay, a row staged from WHMCS that MyCS never had (404). Read again, a held row too takes MyCS's invoice (it is put
+  in review for the ingestor, then held with why), so the next try finds nothing changed. A WHMCS-era row still in
+  review at the cut-over is held once («πρώτη ανάγνωση από τη MyCS»), then goes on as a MyCS row.
+- Not covered: a draft made from the inbox and issued later from «Παραστατικά» is ekdosi's own document, reviewed by
+  staff: it is not read again at submission.
+- Not covered (by design): a document cancelled at AADE is reissued here («Ακύρωση & επανέκδοση»), not by sending it
+  again from MyCS (its row is filed). A document on credit issued through a split, or on a type without credit days,
+  sends no `add_payment` back (K2's rule): its payment is recorded in MyCS by hand.
 
 **Done in K2:** the unpaid feed from MyCS, payments to MyCS, split write-back, the reversal watch, and the operator's
 labels («MyCS #», «Κατάσταση MyCS», «Πελάτης (MyCS)» on MyCS rows and companies).

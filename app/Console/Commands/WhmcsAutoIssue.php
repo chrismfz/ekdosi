@@ -7,6 +7,7 @@ use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
+use App\Services\Mycs\MycsRowRefresher;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Support\Afm;
 use Illuminate\Console\Command;
@@ -233,6 +234,17 @@ class WhmcsAutoIssue extends Command
                 continue;
             }
 
+            // MyCS's invoice as it is now (K3): changed since it came in, or MyCS not answering, nothing is filed.
+            if (($why = app(MycsRowRefresher::class)->check($row)) !== null) {
+                $held++;
+                $this->line("  · {$label}: {$why} — left in inbox.");
+                Log::info('whmcs:auto-issue did not file a MyCS row (read again)', [
+                    'company_id' => $tenant->id, 'pending_id' => $row->id, 'whmcs_invoice_id' => $row->whmcs_invoice_id, 'reason' => $why,
+                ]);
+
+                continue;
+            }
+
             try {
                 $result = $filer->file(
                     tenant: $tenant,
@@ -392,9 +404,10 @@ class WhmcsAutoIssue extends Command
             ->with(['customer:id,company_id,name,afm,needs_immediate_invoice'])
             ->orderBy('id')
             ->get()
-            // «Ignore invoicing» in MyCS: released to review is for a human to look at, never to be filed unattended.
+            // «Ignore invoicing» in MyCS, or staff's «Send to Ekdosi» there (K3): for a human to look at, never to be filed
+            // unattended.
             ->reject(fn (PendingWhmcsInvoice $row) => MycsPayload::is(is_array($row->payload) ? $row->payload : null)
-                && MycsPayload::ignored($row->payload))
+                && (MycsPayload::ignored($row->payload) || MycsPayload::requested($row->payload)))
             ->values();
     }
 }

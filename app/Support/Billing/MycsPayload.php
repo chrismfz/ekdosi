@@ -84,6 +84,47 @@ final class MycsPayload
     }
 
     /**
+     * Staff's «Send to Ekdosi» in MyCS (E5/K3): they asked for a document of this invoice, which may be of an account
+     * with «ignore invoicing» or not paid yet (issued on credit). A human issues it, never the unattended paths.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function requested(array $payload): bool
+    {
+        return self::requestedAt($payload) !== null;
+    }
+
+    /**
+     * A hash of a MyCS invoice's line routing (`third_party`), which the stored snapshot does not keep (the ingestor
+     * moves it to third_party_resolution): what the refresh before issuing compares (R2-2 of #703).
+     */
+    public static function routingHash(mixed $thirdParty): string
+    {
+        $sort = function (mixed $value) use (&$sort): mixed {
+            if (! is_array($value)) {
+                return $value;
+            }
+            ksort($value);
+
+            return array_map($sort, $value);
+        };
+
+        return md5((string) json_encode($sort($thirdParty)));
+    }
+
+    /**
+     * When MyCS staff asked (each «Send to Ekdosi» its own time), or null.
+     *
+     * @param  array<string, mixed>|null  $payload
+     */
+    public static function requestedAt(?array $payload): ?string
+    {
+        $at = $payload['mycs']['requested_at'] ?? null;
+
+        return is_string($at) && $at !== '' ? $at : null;
+    }
+
+    /**
      * MyCS's credit/debit notes on the invoice (its total counts them, its lines don't), in euros; 0 when none.
      *
      * @param  array<string, mixed>  $payload

@@ -42,6 +42,12 @@ use InvalidArgumentException;
  */
 class WhmcsInvoiceIngestor
 {
+    /** The hold of an account with «ignore invoicing» in MyCS (a request from its staff releases it: K3). */
+    private const IGNORED_HOLD = 'Ο πελάτης είναι «χωρίς τιμολόγηση» στη MyCS: δεν εκδίδεται, εκτός αν το αποφασίσεις.';
+
+    /** The «Send to Ekdosi» note, as written below: taken off when MyCS withdraws the request. */
+    private const REQUESTED_NOTE_PATTERN = '/\s*Στάλθηκε από τη MyCS \(«Send to Ekdosi»\)(: απλήρωτο, εκδίδεται επί πιστώσει)?\. Δεν εκδίδεται ποτέ αυτόματα\./u';
+
     public function __construct(
         private WhmcsCustomerMatcher $matcher,
         private WhmcsBridgeClientFactory $bridgeFactory,
@@ -94,6 +100,10 @@ class WhmcsInvoiceIngestor
         // transport metadata (kept separately in third_party_resolution), and
         // dropping it keeps the snapshot identical to the native-API shape.
         unset($whmcsInvoicePayload['third_party']);
+        // MyCS: the routing's hash stays in the snapshot, for the refresh before issuing (R2-2 of #703).
+        if (MycsPayload::is($whmcsInvoicePayload)) {
+            $whmcsInvoicePayload['mycs']['routing_hash'] = MycsPayload::routingHash($embeddedRouting);
+        }
         $tp = $this->thirdPartyDecision($tenant, $invoiceId, $embeddedRouting);
 
         // MyCS's credit/debit notes change its total, not its lines: a document built from the lines would be for the
@@ -106,9 +116,15 @@ class WhmcsInvoiceIngestor
             .'έλεγξε το ποσό πριν την έκδοση.';
         // «Ignore invoicing» in MyCS: held, never issued unattended (the feed leaves such clients out; this is for an
         // invoice read by id, or staged before the flag was set). Held when it is new, as the notes (final review of #701).
-        $ignored = MycsPayload::is($whmcsInvoicePayload) && MycsPayload::ignored($whmcsInvoicePayload);
+        $requested = MycsPayload::is($whmcsInvoicePayload) && MycsPayload::requested($whmcsInvoicePayload);
+        // Sent by staff with «Send to Ekdosi» (K3): for a human to issue, so not held as «ignored»; never unattended.
+        $ignored = ! $requested && MycsPayload::is($whmcsInvoicePayload) && MycsPayload::ignored($whmcsInvoicePayload);
+        $requestedNote = $requested
+            ? 'Στάλθηκε από τη MyCS («Send to Ekdosi»)'.(strcasecmp((string) ($whmcsInvoicePayload['status'] ?? ''), 'Unpaid') === 0
+                ? ': απλήρωτο, εκδίδεται επί πιστώσει.' : '.').' Δεν εκδίδεται ποτέ αυτόματα.'
+            : null;
         if ($ignored) {
-            $adjustmentNote = trim('Ο πελάτης είναι «χωρίς τιμολόγηση» στη MyCS: δεν εκδίδεται, εκτός αν το αποφασίσεις. '
+            $adjustmentNote = trim(self::IGNORED_HOLD.' '
                 .($adjustmentNote ?? ''));
         }
 
@@ -128,7 +144,8 @@ class WhmcsInvoiceIngestor
         // lockForUpdate SELECT finds it and we take the clean existing-row path.
         // Belt (retry) + suspenders (inline unique-violation catch).
         $result = DB::transaction(function () use (
-            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored
+            $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored,
+            $requested, $requestedNote
         ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
@@ -164,7 +181,7 @@ class WhmcsInvoiceIngestor
                         'third_party_state' => $tp['state'],
                         'third_party_resolution' => $tp['resolution'],
                         'status' => $createStatus,
-                        'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '')) ?: null),
+                        'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '').' '.($requestedNote ?? '')) ?: null),
                         'hold_reason' => $consolidatedReason ?? $adjustmentNote,
                     ]);
 
@@ -206,6 +223,46 @@ class WhmcsInvoiceIngestor
                 Log::error('Inbox: a decided row\'s invoice id came from the other source for another client — not staged', [
                     'pending_id' => $existing->id, 'whmcs_invoice_id' => $invoiceId, 'stored_userid' => $existing->whmcs_userid, 'incoming_userid' => $whmcsUserId,
                 ]);
+            }
+            // «Send to Ekdosi» (K3): a NEW request from MyCS staff (its own time) brings back a row archived here — they
+            // asked again for this document. Once per request: archived again, it stays archived until they send it again.
+            // Archived here, or held only as «ignored» (the request is the decision that hold waited for); the same
+            // client, archived from MyCS or from WHMCS before the cut-over (ADV-5 of #703).
+            if ($requested && ($existing->status === PendingWhmcsInvoice::STATUS_REJECTED
+                    || ($existing->status === PendingWhmcsInvoice::STATUS_HELD && str_starts_with((string) $existing->hold_reason, self::IGNORED_HOLD)))
+                && ! $existing->hasBeenConsolidated()
+                && $existing->whmcs_userid !== null && (int) $existing->whmcs_userid === $whmcsUserId
+                && MycsPayload::requestedAt($whmcsInvoicePayload) !== MycsPayload::requestedAt(is_array($existing->payload) ? $existing->payload : null)) {
+                // The same holds as a row staged now: a consolidated payment, an unresolved third party, MyCS's notes
+                // changing the total (ADV-2 of #703, cross review).
+                $was = $existing->status === PendingWhmcsInvoice::STATUS_REJECTED
+                    ? ' Ήταν αρχειοθετημένο: '.($existing->rejected_reason ?? '—').'.' : '';
+                $existing->update([
+                    'status' => $createStatus,
+                    'source' => PendingWhmcsInvoice::SOURCE_MYCS,
+                    'payload' => $whmcsInvoicePayload,
+                    'customer_id' => $customerId,
+                    'match_reason' => $match->reason,
+                    'third_party_state' => $tp['state'],
+                    'third_party_resolution' => $tp['resolution'],
+                    'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '').' '.($requestedNote ?? '').$was) ?: null),
+                    'hold_reason' => $consolidatedReason ?? $adjustmentNote,
+                    'rejected_reason' => null,
+                ]);
+
+                return new IngestionResult(row: $existing, created: false, auditPreserved: false);
+            }
+            // Held, not decided: the snapshot stays (its hold was judged on it), but MyCS's «Send to Ekdosi» follows, so
+            // the row, once released, is never issued unattended on a request it did not know of (ADV-1 of #703).
+            if ($existing->status === PendingWhmcsInvoice::STATUS_HELD && MycsPayload::is($whmcsInvoicePayload)
+                && is_array($existing->payload) && MycsPayload::is($existing->payload)
+                && MycsPayload::requestedAt($existing->payload) !== MycsPayload::requestedAt($whmcsInvoicePayload)) {
+                $payload = $existing->payload;
+                $payload['mycs']['requested_at'] = MycsPayload::requestedAt($whmcsInvoicePayload);
+                $notes = trim((string) preg_replace(self::REQUESTED_NOTE_PATTERN, '', (string) $existing->notes).' '.($requestedNote ?? ''));
+                $existing->update(['payload' => $payload, 'notes' => $notes !== '' ? $notes : null]);
+
+                return new IngestionResult(row: $existing, created: false, auditPreserved: true);
             }
             if ($existing->isAuditFrozen() || $existing->hasBeenConsolidated()) {
                 // Freeze the payload/customer/status against this re-ingest; touch
@@ -292,6 +349,11 @@ class WhmcsInvoiceIngestor
                 $update['notes'] = $adjustmentNote;
                 $update['hold_reason'] = $adjustmentNote;
             }
+            // The «Send to Ekdosi» note follows the request: added when it comes, taken off when MyCS withdrew it (it no
+            // longer «never issued unattended»: ADV-3, ADV-4 of #703).
+            $notes = trim((string) preg_replace(self::REQUESTED_NOTE_PATTERN, '', (string) ($update['notes'] ?? $existing->notes ?? '')));
+            $notes = trim($notes.' '.($requestedNote ?? ''));
+            $update['notes'] = $notes !== '' ? $notes : null;
             $existing->update($update);
 
             return new IngestionResult(row: $existing, created: false, auditPreserved: false);
