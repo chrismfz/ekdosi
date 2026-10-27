@@ -394,6 +394,10 @@ credentials) against MyCS, with Chrome. The checklist is in MyCS's `docs/ekdosi-
 - Read again: also before «Διαχωρισμός σε προσχέδια»; every row of a MyCS company (one staged from WHMCS before the
   cut-over too); the whole snapshot counts (routing as `mycs.routing_hash`, the recipient, the flags), but what ekdosi
   wrote back; a 404 is «no longer in MyCS» (held), a failure is «not answering» (nothing issued, tried again).
+- Not read again (MyCS's invoice under that number is not this row's): a released source conflict, a consolidated
+  mass-pay, a row staged from WHMCS that MyCS never had (404). Read again, a held row too takes MyCS's invoice (it is put
+  in review for the ingestor, then held with why), so the next try finds nothing changed. A WHMCS-era row still in
+  review at the cut-over is held once («πρώτη ανάγνωση από τη MyCS»), then goes on as a MyCS row.
 - Not covered: a draft made from the inbox and issued later from «Παραστατικά» is ekdosi's own document, reviewed by
   staff: it is not read again at submission.
 - Not covered (by design): a document cancelled at AADE is reissued here («Ακύρωση & επανέκδοση»), not by sending it

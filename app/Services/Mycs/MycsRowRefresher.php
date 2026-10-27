@@ -7,6 +7,7 @@ use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsBridgeClientFactory;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Support\Billing\MycsPayload;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Throwable;
 
@@ -33,6 +34,11 @@ final class MycsRowRefresher
         if ($company === null || ! (bool) $company->mycs_enabled) {
             return null;
         }
+        // Not MyCS's invoice under this number: a released source conflict (another client's there: R3-1 of #703), or
+        // a consolidated mass-pay whose merged lines are no invoice of MyCS's (R3-4).
+        if ($row->source_conflict || $row->hasBeenConsolidated()) {
+            return null;
+        }
         try {
             $fresh = app(WhmcsBridgeClientFactory::class)->forSource($company)->fetchInvoice((int) $row->whmcs_invoice_id, true);
         } catch (Throwable $e) {
@@ -41,23 +47,40 @@ final class MycsRowRefresher
 
                 return self::NOT_ANSWERING;
             }
-            $fresh = null; // MyCS answered: no such invoice (R2-5)
+            // MyCS answered: no such invoice (R2-5). One staged from WHMCS that MyCS never had (issued past the last import)
+            // is WHMCS's alone: not held for it (R3-2).
+            if ($row->source !== PendingWhmcsInvoice::SOURCE_MYCS) {
+                return null;
+            }
+            $fresh = null;
         }
         $old = is_array($row->payload) ? $row->payload : [];
         $why = $fresh === null ? 'δεν υπάρχει πια στη MyCS' : $this->why($old, $fresh);
         if ($why === null) {
             return null;
         }
-        if ($fresh !== null) {
-            app(WhmcsInvoiceIngestor::class)->ingest($company, $fresh); // the snapshot (and the customer's flags) as MyCS has it now
-        }
-        $row->refresh();
         $note = 'Άλλαξε στη MyCS από τότε που ήρθε ('.$why.'): έλεγξέ το πριν την έκδοση.';
-        $row->update([
-            'status' => PendingWhmcsInvoice::STATUS_HELD,
-            'hold_reason' => $note,
-            'notes' => trim(((string) $row->notes).' '.$note),
-        ]);
+        try {
+            DB::transaction(function () use ($row, $company, $fresh, $note) {
+                if ($fresh !== null) {
+                    // The snapshot (lines, routing, the customer's flags) as MyCS has it now, also of a row held here: the
+                    // ingestor refreshes only a row in review, so it is put there first (R3-3: else held on every try).
+                    PendingWhmcsInvoice::query()->whereKey($row->id)->update(['status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW]);
+                    app(WhmcsInvoiceIngestor::class)->ingest($company, $fresh);
+                }
+                $row->refresh();
+                $row->update([
+                    'status' => PendingWhmcsInvoice::STATUS_HELD,
+                    'hold_reason' => $note,
+                    'notes' => trim(((string) $row->notes).' '.$note),
+                ]);
+            });
+        } catch (Throwable $e) {
+            // Never a failed run: nothing issued from it now, the row as it was (R3, unproven: auto-issue's loop).
+            report($e);
+
+            return self::NOT_ANSWERING;
+        }
 
         return $note;
     }
@@ -74,6 +97,10 @@ final class MycsRowRefresher
     {
         if (self::normalised($old) === self::normalised($new)) {
             return null;
+        }
+        // Staged from WHMCS before the cut-over: everything differs in shape; one reason, not every category.
+        if (! MycsPayload::is($old)) {
+            return 'πρώτη ανάγνωση από τη MyCS, γραμμή της εποχής WHMCS';
         }
         $changes = [];
         if ((string) ($old['mycs']['fingerprint'] ?? '') !== (string) ($new['mycs']['fingerprint'] ?? '')) {
