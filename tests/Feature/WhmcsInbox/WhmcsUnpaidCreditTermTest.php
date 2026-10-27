@@ -5,6 +5,7 @@ namespace Tests\Feature\WhmcsInbox;
 use App\Enums\PaymentStatus;
 use App\Models\Company;
 use App\Models\Customer;
+use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
@@ -113,6 +114,9 @@ class WhmcsUnpaidCreditTermTest extends TestCase
     public function test_an_issued_unpaid_invoice_stays_an_open_receivable(): void
     {
         $invoice = app(WhmcsInvoiceFiler::class)->file($this->tenant, $this->row('Unpaid'), $this->customer, $this->invoiceType)->invoice;
+        // Off mode keeps a filed invoice a draft, which InvoiceBalance never settles: mark it issued, as a live filing does
+        // (adversarial ADV-5 of #704: without it the balance proves nothing).
+        Invoice::query()->whereKey($invoice->id)->update(['local_status' => 'active']);
 
         $this->assertSame($this->credit->id, $invoice->payment_method_id);
         $balance = app(InvoiceBalance::class)->for($invoice->fresh());
@@ -137,5 +141,31 @@ class WhmcsUnpaidCreditTermTest extends TestCase
 
         $this->credit->delete();
         $this->assertStringContainsString('θα εκδοθεί εξοφλημένο', $preview());
+    }
+
+    public function test_payment_pending_and_collections_are_not_paid_either(): void
+    {
+        $this->assertSame($this->credit->id, $this->methodFor($this->row('Payment Pending')));
+        $this->assertSame($this->credit->id, $this->methodFor($this->row('Collections', 7002)));
+        $this->assertSame($this->cash->id, $this->methodFor($this->row('Cancelled', 7003)), 'not issued: as it was');
+    }
+
+    public function test_the_preview_warns_about_what_was_paid_before_issue(): void
+    {
+        $render = function (array $extra, int $id): string {
+            $row = $this->row('Unpaid', $id);
+            $row->update(['payload' => $extra + $row->payload]);
+
+            return view('filament.whmcs-inbox.preview-partial', ['preview' => app(WhmcsInvoiceFiler::class)
+                ->preview($this->tenant->fresh(), $row->fresh(), $this->customer, $this->invoiceType)])->render();
+        };
+
+        // WHMCS: account credit plus an incoming transaction (one, as a bare map) less a refund.
+        $whmcs = $render(['credit' => '4.00', 'transactions' => ['transaction' => ['transid' => 'T1', 'amountin' => '7.00', 'amountout' => '1.00']]], 8101);
+        $this->assertStringContainsString('Έχει ήδη πληρωθεί 10,00 €', $whmcs);
+        // MyCS: a list with amount/refunded.
+        $mycs = $render(['credit' => '0.00', 'transactions' => [['transid' => 'M1', 'amount' => '5.00', 'refunded' => '0.00']]], 8102);
+        $this->assertStringContainsString('Έχει ήδη πληρωθεί 5,00 €', $mycs);
+        $this->assertStringNotContainsString('Έχει ήδη πληρωθεί', $render([], 8103));
     }
 }

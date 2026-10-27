@@ -165,6 +165,7 @@ class Adv704Test extends TestCase
      */
     public function test_adv3_credit_applied_before_issue_is_not_owed_again(): void
     {
+        $this->markTestSkipped('Owner decision (2026-10-27): warning only — the preview shows what was paid before issue; staff record it by hand. See WhmcsUnpaidCreditTermTest::test_the_preview_warns_about_what_was_paid_before_issue.');
         $row = $this->row('Unpaid', ['total' => '14.80', 'credit' => '10.00']);
         $invoice = app(WhmcsInvoiceFiler::class)->file($this->tenant, $row, $this->customer, $this->invoiceType)->invoice;
         $invoice = $this->issued($invoice);
@@ -179,6 +180,7 @@ class Adv704Test extends TestCase
      */
     public function test_adv4_a_partial_payment_before_issue_is_not_owed_again(): void
     {
+        $this->markTestSkipped('Owner decision (2026-10-27): warning only — the preview shows what was paid before issue; staff record it by hand. See WhmcsUnpaidCreditTermTest::test_the_preview_warns_about_what_was_paid_before_issue.');
         $row = $this->row('Unpaid', [
             'balance' => '14.80',
             'transactions' => ['transaction' => [['transid' => 'T-1', 'gateway' => 'banktransfer', 'amountin' => '10.00', 'amountout' => '0.00']]],
