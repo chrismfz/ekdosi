@@ -199,7 +199,7 @@ class WhmcsInvoiceMapper
         // receivable. The type's default method may be cash-term (due_days 0: InvoiceBalance settles it at issue with
         // no payment at all), so it takes the tenant's «Επί Πιστώσει» instead; without one it keeps the default and
         // the preview says so.
-        if ($this->notPaidYet($pending) && ! $this->isCreditTerm($tenant, $paymentMethodId)) {
+        if ($pending->whmcsIsNotPaid() && ! $this->isCreditTerm($tenant, $paymentMethodId)) {
             $paymentMethodId = $this->creditTermMethodId($tenant) ?? $paymentMethodId;
         }
 
@@ -258,10 +258,10 @@ class WhmcsInvoiceMapper
                 'whmcs_date' => (string) ($payload['date'] ?? ''),
                 'whmcs_total' => (float) ($payload['total'] ?? 0.0),
                 // Unpaid at the source: the preview says whether the method keeps it an open receivable.
-                'whmcs_unpaid' => $this->notPaidYet($pending),
+                'whmcs_unpaid' => $pending->whmcsIsNotPaid(),
                 // What was paid already on a not-paid one (account credit, part payments): not recorded at issue (owner,
                 // adversarial ADV-3/4 of #704), so the preview asks for it to be recorded by hand.
-                'whmcs_paid_before_issue' => $this->notPaidYet($pending) ? self::paidBeforeIssue($payload) : 0.0,
+                'whmcs_paid_before_issue' => $pending->whmcsIsNotPaid() ? self::paidBeforeIssue($payload) : 0.0,
                 // WH-1: the WHMCS invoice currency. ekdosi files in EUR only
                 // (the AADE payload hardcodes CurrencyCode::EUR); a non-EUR
                 // amount taken as EUR would file the wrong value. Surfaced so
@@ -429,16 +429,6 @@ class WhmcsInvoiceMapper
         $payload['items']['item'] = array_values($out);
 
         return $payload;
-    }
-
-    /**
-     * Owed, not paid, at the source: WHMCS «Unpaid», «Payment Pending» and «Collections» (adversarial ADV-2 of #704);
-     * MyCS sends only «Unpaid». Cancelled, refunded or draft ones are not issued, and a payload without a status stays
-     * as it was.
-     */
-    private function notPaidYet(PendingWhmcsInvoice $pending): bool
-    {
-        return in_array(strtolower((string) $pending->whmcsStatus()), ['unpaid', 'payment pending', 'collections'], true);
     }
 
     /**
