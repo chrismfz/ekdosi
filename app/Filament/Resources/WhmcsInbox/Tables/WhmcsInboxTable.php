@@ -442,6 +442,12 @@ class WhmcsInboxTable
      *
      * @return array<int, string>
      */
+    /** A default type for the split only when it is one of its options. */
+    private static function splitTypeDefault(?int $typeId): ?int
+    {
+        return $typeId !== null && array_key_exists($typeId, static::splitTypeOptions()) ? $typeId : null;
+    }
+
     private static function splitTypeOptions(): array
     {
         return InvoiceType::query()
@@ -1596,8 +1602,11 @@ class WhmcsInboxTable
                 Select::make('invoice_type_id')
                     ->label('Τύπος τιμολογίου')
                     ->options(fn () => static::splitTypeOptions())
-                    // The tenant's invoice/receipt defaults, as «Δημιουργία Παραστατικού» pre-selects them.
-                    ->default(fn () => Filament::getTenant()?->whmcs_default_invoice_type_id)
+                    // As «Δημιουργία Παραστατικού» pre-selects it (an unpaid one: «επί πιστώσει», review of #716); only one
+                    // of the list (a deleted or non-monetary default would show an unknown value).
+                    ->default(fn (PendingWhmcsInvoice $r) => ($t = Filament::getTenant()) instanceof Company
+                        ? static::splitTypeDefault($r->whmcsIsNotPaid() ? ($t->whmcs_default_unpaid_type_id ?? $t->whmcs_default_invoice_type_id) : $t->whmcs_default_invoice_type_id)
+                        : null)
                     ->required()
                     ->searchable()
                     ->helperText('Για τους δικαιούχους που χρειάζονται τιμολόγιο.'),
@@ -1605,7 +1614,7 @@ class WhmcsInboxTable
                 Select::make('receipt_type_id')
                     ->label('Τύπος απόδειξης')
                     ->options(fn () => static::splitTypeOptions())
-                    ->default(fn () => Filament::getTenant()?->whmcs_default_receipt_type_id)
+                    ->default(fn () => static::splitTypeDefault(Filament::getTenant()?->whmcs_default_receipt_type_id))
                     ->searchable()
                     ->helperText('Υποχρεωτικό μόνο αν κάποιος δικαιούχος έχει σημανθεί ως απόδειξη (βλ. λίστα παρακάτω).'),
 

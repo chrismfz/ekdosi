@@ -112,4 +112,46 @@ class WhmcsInboxSplitFromListTest extends TestCase
             ->mountTableAction('split_third_party', $this->row())
             ->assertTableActionDataSet(['invoice_type_id' => $this->type->id]);
     }
+
+    /** Review of #716: an unpaid one pre-selects the «επί πιστώσει» type, as «Δημιουργία Παραστατικού» does. */
+    public function test_an_unpaid_split_pre_selects_the_unpaid_type(): void
+    {
+        $this->operator();
+        $unpaid = InvoiceType::create(['company_id' => $this->tenant->id, 'code' => 'TPYC', 'name' => 'Επί πιστώσει', 'invcount' => 0]);
+        $this->tenant->update(['whmcs_default_unpaid_type_id' => $unpaid->id]);
+        $row = $this->row();
+        $row->update(['payload' => ['status' => 'Unpaid'] + $row->payload]);
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->mountTableAction('split_third_party', $row->fresh())
+            ->assertTableActionDataSet(['invoice_type_id' => $unpaid->id]);
+    }
+
+    /** Review of #716: another tenant's customer on the row is neither used nor named. */
+    public function test_another_tenants_customer_is_neither_used_nor_named(): void
+    {
+        $other = Company::create(['name' => 'O', 'slug' => 'o-'.uniqid(), 'country_code' => 'GR', 'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off']);
+        $foreign = Customer::create(['company_id' => $other->id, 'name' => 'Other tenant SA', 'afm' => '094014201']);
+        $row = $this->row();
+        $row->update(['customer_id' => $foreign->id]);
+
+        $own = collect(app(WhmcsInvoiceSplitter::class)->planGroups($this->tenant, $row->fresh()))->firstWhere('key', 'reseller');
+
+        $this->assertNull($own['customer']);
+        $this->assertStringNotContainsString('Other tenant', $own['label']);
+    }
+
+    /** Review of #716: a name of spaces is no name; the ΑΦΜ is shown as the registry key. */
+    public function test_a_blank_name_falls_back_to_the_afm(): void
+    {
+        $row = $this->row();
+        $resolution = $row->third_party_resolution;
+        $resolution['lines'][0]['contact']['company_name'] = '   ';
+        $resolution['lines'][0]['contact']['gr_vatno'] = 'EL099206170';
+        $row->update(['third_party_resolution' => $resolution]);
+
+        $groups = collect(app(WhmcsInvoiceSplitter::class)->planGroups($this->tenant, $row->fresh()));
+
+        $this->assertSame('ΑΦΜ 099206170', $groups->firstWhere('key', 'contact:4')['label']);
+    }
 }
