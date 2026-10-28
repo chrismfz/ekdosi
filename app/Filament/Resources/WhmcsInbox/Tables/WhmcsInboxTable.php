@@ -453,10 +453,10 @@ class WhmcsInboxTable
      */
     public static function splitTotalGap(PendingWhmcsInvoice $r, array $invoices): ?string
     {
-        $payload = is_array($r->payload) ? $r->payload : [];
-        $source = (float) ($payload['total'] ?? 0) + (float) ($payload['credit'] ?? 0);
-        $drafts = round(array_sum(array_map(fn (Invoice $i) => (float) $i->fresh()->gross_total, $invoices)), 2);
-        $lines = array_sum(array_map(fn (Invoice $i) => $i->lines()->count(), $invoices));
+        $source = $r->whmcsDocumentTotal();
+        $fresh = array_values(array_filter(array_map(fn (Invoice $i) => $i->fresh(), $invoices)));
+        $drafts = round(array_sum(array_map(fn (Invoice $i) => (float) $i->gross_total, $fresh)), 2);
+        $lines = array_sum(array_map(fn (Invoice $i) => $i->lines()->count(), $fresh));
         if ($source <= 0.005 || abs($drafts - $source) <= 0.02 + 0.01 * $lines) {
             return null;
         }
@@ -1650,8 +1650,13 @@ class WhmcsInboxTable
                         } catch (\RuntimeException $e) {
                             // The resolver's GUIDED message (e.g. a routed contact whose
                             // ΑΦΜ belongs to a soft-deleted customer) — show it, don't
-                            // break the modal. Anything else propagates.
+                            // break the modal.
                             return '⚠ '.$e->getMessage();
+                        } catch (Throwable $e) {
+                            // The registry lookup now runs here (a cache store down, …): the modal says so, never a 500.
+                            report($e);
+
+                            return '⚠ Δεν βρέθηκαν οι δικαιούχοι: '.$e->getMessage();
                         }
                         if ($groups === []) {
                             return 'Δεν βρέθηκαν δικαιούχοι στην ανάλυση.';

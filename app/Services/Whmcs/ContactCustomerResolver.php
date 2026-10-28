@@ -34,7 +34,7 @@ class ContactCustomerResolver
      * @param  array<string, mixed>  $contact  A resolve.php contact object.
      * @return Customer|null Null when the contact has no usable ΑΦΜ.
      */
-    public function resolve(Company $tenant, array $contact): ?Customer
+    public function resolve(Company $tenant, array $contact, bool $registry = false, ?int $referredByCustomerId = null): ?Customer
     {
         $afm = Afm::uniqueKey((string) ($contact['gr_vatno'] ?? ''));
         if ($afm === null) {
@@ -57,8 +57,10 @@ class ContactCustomerResolver
         // Known by its ΑΦΜ only (MyCS sends a contact entered that way: the rest is the registry's): created from the
         // AADE registry as «Εισαγωγή δικαιούχων τρίτων» does, its own data where the registry has none (live split test
         // of 2026-10-27: it was created as «ΑΦΜ …» with nothing else).
-        if ($this->decode((string) ($contact['company_name'] ?? '')) === '') {
-            $result = app(WhmcsCustomerCreator::class)->createFromContact($tenant, $contact);
+        // Only where staff wait for it ($registry: the split, never the scheduled fetch or the re-read, which hold a row lock
+        // that a slow registry would keep for a minute: review of #718).
+        if ($registry && $this->decode((string) ($contact['company_name'] ?? '')) === '') {
+            $result = app(WhmcsCustomerCreator::class)->createFromContact($tenant, $contact, $referredByCustomerId);
             if ($result->customer !== null && $result->customer->trashed()) {
                 throw new RuntimeException(
                     'Υπάρχει ΔΙΑΓΡΑΜΜΕΝΟΣ πελάτης με ΑΦΜ '.$afm.' («'.$result->customer->name.'») — επανέφερέ τον από τη λίστα πελατών και ξαναπροσπάθησε.'

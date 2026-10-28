@@ -14,6 +14,7 @@ use App\Models\PendingWhmcsInvoice;
 use App\Models\User;
 use App\Models\VatCategory;
 use App\Services\AadeRegistryLookup;
+use App\Services\Whmcs\ContactCustomerResolver;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -211,5 +212,18 @@ class WhmcsInboxSplitFromListTest extends TestCase
         Livewire::test(ListWhmcsInbox::class)
             ->callTableAction('split_third_party', $this->row(), data: ['invoice_type_id' => $this->type->id])
             ->assertNotNotified('Τα προσχέδια δεν συμφωνούν με την πηγή');
+    }
+
+    /** Review of #718: the scheduled fetch and the re-read (a row lock held) never wait on the registry. */
+    public function test_outside_the_split_the_registry_is_never_called(): void
+    {
+        $gsis = \Mockery::mock(AadeRegistryLookup::class);
+        $gsis->shouldNotReceive('findByAfm');
+        $this->app->bind(AadeRegistryLookup::class, fn () => $gsis);
+
+        $customer = app(ContactCustomerResolver::class)
+            ->resolve($this->tenant, ['id' => 4, 'company_name' => '', 'gr_vatno' => '099206170']);
+
+        $this->assertSame('ΑΦΜ 099206170', $customer->name);
     }
 }
