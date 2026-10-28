@@ -2,6 +2,8 @@
 
 namespace Tests\Feature\WhmcsInbox;
 
+use App\DTOs\AadeRegistryRecord;
+use App\Exceptions\Aade\AadeUnreachable;
 use App\Filament\Resources\WhmcsInbox\Pages\ListWhmcsInbox;
 use App\Models\Company;
 use App\Models\Customer;
@@ -11,6 +13,8 @@ use App\Models\PaymentMethod;
 use App\Models\PendingWhmcsInvoice;
 use App\Models\User;
 use App\Models\VatCategory;
+use App\Services\AadeRegistryLookup;
+use App\Services\Whmcs\ContactCustomerResolver;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use Filament\Facades\Filament;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -153,5 +157,73 @@ class WhmcsInboxSplitFromListTest extends TestCase
         $groups = collect(app(WhmcsInvoiceSplitter::class)->planGroups($this->tenant, $row->fresh()));
 
         $this->assertSame('ΑΦΜ 099206170', $groups->firstWhere('key', 'contact:4')['label']);
+    }
+
+    /** Live split test of 2026-10-27: a third party known by its ΑΦΜ only takes its details from the AADE registry. */
+    public function test_a_third_party_known_by_its_afm_only_takes_the_registrys_details(): void
+    {
+        $gsis = \Mockery::mock(AadeRegistryLookup::class);
+        $gsis->shouldReceive('findByAfm')->with('099206170')->once()->andReturn(new AadeRegistryRecord(
+            afm: '099206170', name: 'ROTOGRAN ΑΕ', doy: 'ΣΕΡΡΩΝ', doyCode: '5211', active: true, statusDescr: 'ΕΝΕΡΓΟΣ',
+            address: '7 ΧΙΛ ΕΘΝΙΚΗΣ ΟΔΟΥ ΣΙΔΗΡΟΚΑΣΤΡΟΥ', city: 'ΣΙΔΗΡΟΚΑΣΤΡΟ', postcode: '62300',
+            activities: [['code' => '22.29', 'description' => 'ΚΑΤΑΣΚΕΥΗ ΤΑΜΙΕΥΤΗΡΩΝ', 'kind' => 'κύρια']]));
+        $this->app->bind(AadeRegistryLookup::class, fn () => $gsis);
+
+        $party = collect(app(WhmcsInvoiceSplitter::class)->planGroups($this->tenant, $this->row()))->firstWhere('key', 'contact:4')['customer'];
+
+        $this->assertSame('ROTOGRAN ΑΕ', $party->name);
+        $this->assertSame('ΣΕΡΡΩΝ', $party->tax_office);
+        $this->assertSame('ΣΙΔΗΡΟΚΑΣΤΡΟ', $party->city);
+    }
+
+    /** The registry not answering: the third party is still created from what the source sent, as before. */
+    public function test_without_the_registry_it_is_created_from_the_contact(): void
+    {
+        $gsis = \Mockery::mock(AadeRegistryLookup::class);
+        $gsis->shouldReceive('findByAfm')->andThrow(new AadeUnreachable('down'));
+        $this->app->bind(AadeRegistryLookup::class, fn () => $gsis);
+
+        $party = collect(app(WhmcsInvoiceSplitter::class)->planGroups($this->tenant, $this->row()))->firstWhere('key', 'contact:4')['customer'];
+
+        $this->assertSame('ΑΦΜ 099206170', $party->name);
+        $this->assertSame('099206170', $party->afm);
+    }
+
+    /** Live split test of 2026-10-27: drafts that do not add up to what the source billed are told, not passed silently. */
+    public function test_drafts_that_do_not_add_up_to_the_source_are_told(): void
+    {
+        $this->operator();
+        VatCategory::create(['company_id' => $this->tenant->id, 'name' => '0%', 'rate' => 0.00, 'is_default' => false]);
+        $row = $this->row();
+        $payload = $row->payload;
+        $payload['items']['item'][0]['taxed'] = '1'; // sent taxed, billed at 0% at the source: 24% here
+        $row->update(['payload' => $payload]);
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->callTableAction('split_third_party', $row, data: ['invoice_type_id' => $this->type->id])
+            ->assertNotified('Τα προσχέδια δεν συμφωνούν με την πηγή');
+    }
+
+    public function test_drafts_that_add_up_say_nothing_more(): void
+    {
+        $this->operator();
+        VatCategory::create(['company_id' => $this->tenant->id, 'name' => '0%', 'rate' => 0.00, 'is_default' => false]);
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->callTableAction('split_third_party', $this->row(), data: ['invoice_type_id' => $this->type->id])
+            ->assertNotNotified('Τα προσχέδια δεν συμφωνούν με την πηγή');
+    }
+
+    /** Review of #718: the scheduled fetch and the re-read (a row lock held) never wait on the registry. */
+    public function test_outside_the_split_the_registry_is_never_called(): void
+    {
+        $gsis = \Mockery::mock(AadeRegistryLookup::class);
+        $gsis->shouldNotReceive('findByAfm');
+        $this->app->bind(AadeRegistryLookup::class, fn () => $gsis);
+
+        $customer = app(ContactCustomerResolver::class)
+            ->resolve($this->tenant, ['id' => 4, 'company_name' => '', 'gr_vatno' => '099206170']);
+
+        $this->assertSame('ΑΦΜ 099206170', $customer->name);
     }
 }

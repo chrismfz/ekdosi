@@ -117,7 +117,8 @@ class WhmcsInvoiceSplitter
         $out = [];
         foreach ($groups as $group) {
             $group['customer'] = $group['contact'] !== null
-                ? $this->contactResolver->resolve($tenant, $group['contact'])
+                // The registry for a third party known by its ΑΦΜ only, «συστήθηκε από» the account (review of #718).
+                ? $this->contactResolver->resolve($tenant, $group['contact'], registry: true, referredByCustomerId: $own?->id)
                 : $own;
             $out[] = $group;
         }
