@@ -107,6 +107,10 @@ class WhmcsInvoiceFiler
         // (consuming ΑΑ) by the time the submit threw. Off-mode
         // tenants (NullSubmitter) tolerate 0%-VAT lines fine.
         $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
+        // An invoice worth 0 (a free .gr transfer) can't be filed — refuse FIRST (the
+        // clearest reason) and before any draft/ΑΑ exists (auto-issue used to leave an
+        // orphan all-zero draft behind). A 100% promo is left to «αρνητικό ποσό».
+        WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
         // Unattended (άμεση τιμολόγηση) must NEVER auto-file a 0%-VAT invoice —
         // a WHMCS-untaxed line (Apply Tax off) is either a grandfathered product
         // owing 24% or a genuine exemption, and only a human can decide. HOLD it
@@ -121,10 +125,6 @@ class WhmcsInvoiceFiler
         $this->refuseProblematicZeroVatLines($tenant, $mapped, $pending);
         // WH-1/WH-4: non-EUR or negative (promo/credit) lines → HOLD.
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
-        // An invoice worth 0 (a free .gr transfer) can't be filed — refuse BEFORE any
-        // draft/ΑΑ exists (auto-issue used to leave an orphan all-zero draft behind).
-        // After the more specific holds above (a 100% promo reads «αρνητικό ποσό»).
-        WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
         // WH-2/WH-5: recomputed gross must reconcile with the WHMCS total, and
         // the WHMCS tax rate must match the rate we apply (catches the
         // tax-inclusive case the gross-check alone misses). Whole-invoice.
@@ -305,6 +305,8 @@ class WhmcsInvoiceFiler
         // create-then-fix workflow that draft-first exists for. The unattended
         // paths (file() / whmcs:auto-issue) keep the full reconcile guards.
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
+        // A 0 € draft can never be issued (a free .gr transfer) — don't create one.
+        WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
 
         return DB::transaction(function () use ($tenant, $pending, $mapped, $createdByUserId) {
             $locked = PendingWhmcsInvoice::query()

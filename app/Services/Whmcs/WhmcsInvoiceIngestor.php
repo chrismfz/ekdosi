@@ -275,7 +275,12 @@ class WhmcsInvoiceIngestor
             }
             // Closed by us as worth 0, but WHMCS now gives it a value (edited/re-priced):
             // never leave a real sale unseen — back to review, through the refresh below.
-            if ($existing->isAutoResolvedZeroValue() && ! $zeroValue) {
+            // Only for the SAME source and client: a stale payload from the other system
+            // (WHMCS after a MyCS cut-over, or another client under the same number) is
+            // handled by the source branches below and must not reopen it (review).
+            if ($existing->isAutoResolvedZeroValue() && ! $zeroValue
+                && $existing->source === PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload)
+                && ($existing->whmcs_userid === null || (int) $existing->whmcs_userid === $whmcsUserId)) {
                 $existing->status = PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
                 $existing->notes = 'Ήταν μηδενικής αξίας και ολοκληρώθηκε αυτόματα· το WHMCS του έδωσε τώρα αξία — έλεγξέ το.';
             }

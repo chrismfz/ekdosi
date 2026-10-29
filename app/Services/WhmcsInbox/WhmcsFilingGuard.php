@@ -49,7 +49,10 @@ final class WhmcsFilingGuard
      */
     public static function assertNotZeroValue(array $mapped, PendingWhmcsInvoice $pending): void
     {
-        if (abs((float) ($mapped['totals']['gross_total'] ?? 0.0)) > 0.005) {
+        // A negative (promo/credit) line nets the value to 0 too — that hold
+        // (assertPayloadFilable, «αρνητικό ποσό») is the more useful message.
+        if (abs((float) ($mapped['totals']['gross_total'] ?? 0.0)) > 0.005
+            || ($mapped['totals']['negative_lines'] ?? []) !== []) {
             return;
         }
 

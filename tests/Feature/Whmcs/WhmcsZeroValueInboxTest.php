@@ -141,4 +141,37 @@ class WhmcsZeroValueInboxTest extends TestCase
         $this->assertSame(0, Invoice::count(), 'no orphan draft');
         $this->assertSame(1, $type->fresh()->invcount, 'no ΑΑ consumed');
     }
+
+    public function test_a_payload_from_the_other_source_or_client_does_not_reopen_it(): void
+    {
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->freeTransfer(800))->status);
+
+        // Another client under the same number (stale / other system): no reopen.
+        $other = $this->freeTransfer(800, '19.00');
+        $other['userid'] = 2;
+        $row = $this->ingest($other);
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
+        $this->assertSame('0.00', $row->payload['subtotal']);
+    }
+
+    public function test_create_draft_refuses_a_zero_value_invoice(): void
+    {
+        VatCategory::create(['company_id' => $this->tenant->id, 'name' => '24%', 'rate' => 24, 'is_default' => true]);
+        $pm = PaymentMethod::create(['company_id' => $this->tenant->id, 'name' => 'Bank', 'due_days' => 0, 'is_active' => true]);
+        $type = InvoiceType::create(['company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1, 'payment_method_id' => $pm->id]);
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'C', 'afm' => '111111111']);
+        $pending = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 900, 'payload' => $this->freeTransfer(900),
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED, 'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'customer_id' => $customer->id,
+        ]);
+
+        $this->expectException(LogicException::class);
+        try {
+            app(WhmcsInvoiceFiler::class)->createDraft($this->tenant, $pending, $customer, $type);
+        } finally {
+            $this->assertSame(0, Invoice::count());
+        }
+    }
 }
