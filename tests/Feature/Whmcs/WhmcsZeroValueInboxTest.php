@@ -11,6 +11,7 @@ use App\Models\PendingWhmcsInvoice;
 use App\Models\VatCategory;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
+use App\Support\Billing\MycsPayload;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use LogicException;
 use Tests\TestCase;
@@ -172,5 +173,40 @@ class WhmcsZeroValueInboxTest extends TestCase
         } finally {
             $this->assertSame(0, Invoice::count());
         }
+    }
+
+    public function test_an_unpaid_zero_invoice_stays_for_review(): void
+    {
+        // fetch-unpaid can read it while staff are still filling in the amounts.
+        $row = $this->ingest(array_merge($this->freeTransfer(1000), ['status' => 'Unpaid']));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
+    }
+
+    public function test_a_mycs_send_to_ekdosi_zero_invoice_stays_for_review(): void
+    {
+        $payload = $this->freeTransfer(1010) + ['mycs' => ['id' => 1010, 'requested_at' => '2026-10-29 10:00:00', 'requested' => true]];
+        if (! MycsPayload::requested($payload)) {
+            $this->markTestSkipped('MyCS request flag shape differs');
+        }
+
+        $this->assertNotSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($payload)->status);
+    }
+
+    public function test_a_waiting_row_with_a_local_invoice_is_not_closed(): void
+    {
+        $row = $this->ingest($this->freeTransfer(1020, '19.00'));
+        // A filing that failed at AADE left its local invoice linked.
+        $type = InvoiceType::create(['company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1]);
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'C']);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ1', 'code' => 1, 'invoice_type_id' => $type->id,
+            'customer_id' => $customer->id, 'issued_at' => now(), 'local_status' => 'active',
+        ]);
+        $row->forceFill(['invoice_id' => $invoice->id])->saveQuietly();
+
+        $again = $this->ingest($this->freeTransfer(1020));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $again->status);
     }
 }

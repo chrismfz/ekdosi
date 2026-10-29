@@ -137,7 +137,11 @@ class WhmcsInvoiceIngestor
         // Worth 0 (a free .gr transfer…): nothing to document, an all-zero draft can't be
         // issued — closed as «resolved» instead of queued for a human (45 such rows were
         // archived by hand). Not when MyCS staff explicitly sent it: a human asked.
-        $zeroValue = ! $requested && PendingWhmcsInvoice::isZeroValuePayload($whmcsInvoicePayload);
+        // Nor an UNPAID invoice (whmcs:fetch-unpaid, invoice-before-pay): it can be read
+        // while staff are still filling in the amounts, and the close is final (review).
+        $zeroValue = ! $requested
+            && strcasecmp((string) ($whmcsInvoicePayload['status'] ?? ''), 'Unpaid') !== 0
+            && PendingWhmcsInvoice::isZeroValuePayload($whmcsInvoicePayload);
 
         // attempts=3: two concurrent ingests of the SAME missing (company_id,
         // whmcs_invoice_id) row resolve differently by isolation level — a
@@ -364,7 +368,9 @@ class WhmcsInvoiceIngestor
             $notes = trim($notes.' '.($requestedNote ?? ''));
             $update['notes'] = $notes !== '' ? $notes : null;
             // Waiting for review and now worth 0 (a hold above still wins): closed.
-            if ($zeroValue && ! isset($update['status'])) {
+            // Not when a local invoice already exists for it (a filing that failed at
+            // AADE waits for a retry — «δεν απαιτείται παραστατικό» would be false).
+            if ($zeroValue && ! isset($update['status']) && $existing->invoice_id === null) {
                 $update['status'] = PendingWhmcsInvoice::STATUS_RESOLVED;
                 $update['notes'] = PendingWhmcsInvoice::ZERO_VALUE_NOTE;
             }

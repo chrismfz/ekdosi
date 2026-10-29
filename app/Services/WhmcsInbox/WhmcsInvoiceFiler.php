@@ -304,9 +304,10 @@ class WhmcsInvoiceFiler
         // VAT before issuing). Hard-blocking it would remove the legitimate
         // create-then-fix workflow that draft-first exists for. The unattended
         // paths (file() / whmcs:auto-issue) keep the full reconcile guards.
-        WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
         // A 0 € draft can never be issued (a free .gr transfer) — don't create one.
+        // First, as in file() (a 100% promo is left to «αρνητικό ποσό» below).
         WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
+        WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
 
         return DB::transaction(function () use ($tenant, $pending, $mapped, $createdByUserId) {
             $locked = PendingWhmcsInvoice::query()
