@@ -121,6 +121,10 @@ class WhmcsInvoiceFiler
         $this->refuseProblematicZeroVatLines($tenant, $mapped, $pending);
         // WH-1/WH-4: non-EUR or negative (promo/credit) lines → HOLD.
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
+        // An invoice worth 0 (a free .gr transfer) can't be filed — refuse BEFORE any
+        // draft/ΑΑ exists (auto-issue used to leave an orphan all-zero draft behind).
+        // After the more specific holds above (a 100% promo reads «αρνητικό ποσό»).
+        WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
         // WH-2/WH-5: recomputed gross must reconcile with the WHMCS total, and
         // the WHMCS tax rate must match the rate we apply (catches the
         // tax-inclusive case the gross-check alone misses). Whole-invoice.

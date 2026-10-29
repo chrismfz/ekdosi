@@ -250,6 +250,46 @@ class PendingWhmcsInvoice extends Model
         return $this->status === self::STATUS_RESOLVED;
     }
 
+    /** Notes stamp of a row the ingestor closed itself because the WHMCS invoice is worth 0. */
+    public const ZERO_VALUE_NOTE = 'Μηδενικής αξίας (π.χ. δωρεάν μεταφορά .gr domain) — δεν απαιτείται παραστατικό· ολοκληρώθηκε αυτόματα.';
+
+    /**
+     * A WHMCS invoice worth NOTHING: every line 0, no VAT, and no value even with
+     * the applied credit added back (a credit-paid invoice reports total 0 but is
+     * not this). Typically a free .gr domain transfer. There is no transaction to
+     * document — AADE has nothing to file and an all-zero draft can never be
+     * issued — so the inbox closes it instead of queueing it for a human.
+     * No lines at all → false (an odd payload is a human's call).
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function isZeroValuePayload(array $payload): bool
+    {
+        $items = $payload['items']['item'] ?? [];
+        if (! empty($items) && ! array_is_list($items)) {
+            $items = [$items];
+        }
+        if (! is_array($items) || $items === []) {
+            return false;
+        }
+        foreach ($items as $item) {
+            if (! is_array($item) || abs((float) ($item['amount'] ?? 0)) > 0.005) {
+                return false;
+            }
+        }
+
+        return abs((float) ($payload['subtotal'] ?? 0)) <= 0.005
+            && abs((float) ($payload['tax'] ?? 0)) + abs((float) ($payload['tax2'] ?? 0)) <= 0.005
+            && abs(self::documentTotalOf($payload)) <= 0.005;
+    }
+
+    /** Closed by the ingestor as worth 0 ({@see isZeroValuePayload}) — reopened if WHMCS later gives it a value. */
+    public function isAutoResolvedZeroValue(): bool
+    {
+        return $this->status === self::STATUS_RESOLVED
+            && str_starts_with((string) $this->notes, self::ZERO_VALUE_NOTE);
+    }
+
     public function filedByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'filed_by_user_id');
