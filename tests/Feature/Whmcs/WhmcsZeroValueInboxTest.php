@@ -18,8 +18,9 @@ use Tests\TestCase;
 /**
  * A WHMCS invoice worth 0 (a free .gr domain transfer) has no transaction to
  * document: the ingestor closes it as «resolved» instead of queueing it for a
- * human (45 such rows had been archived by hand), reopens it if WHMCS later gives
- * it a value, and the filer refuses it before any draft exists (auto-issue used to
+ * human (45 such rows had been archived by hand) — FINAL, like every inbox decision
+ * (a later WHMCS/MyCS edit doesn't reopen it) — and the filer refuses it before any
+ * draft exists (auto-issue used to
  * leave an orphan all-zero draft — ΠΡΟΣ-ΤΠΥ-7249).
  */
 class WhmcsZeroValueInboxTest extends TestCase
@@ -77,7 +78,6 @@ class WhmcsZeroValueInboxTest extends TestCase
         $row = $this->ingest($this->freeTransfer());
 
         $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
-        $this->assertTrue($row->isAutoResolvedZeroValue());
         $this->assertStringContainsString('Μηδενικής αξίας', (string) $row->notes);
     }
 
@@ -97,15 +97,16 @@ class WhmcsZeroValueInboxTest extends TestCase
         $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
     }
 
-    public function test_an_auto_closed_row_reopens_when_whmcs_gives_it_a_value(): void
+    public function test_an_auto_closed_row_is_final_even_if_whmcs_later_gives_it_a_value(): void
     {
+        // The transfer WAS free when it happened — a later bulk re-price in WHMCS must
+        // not resurface months-old rows. Same rule as any decided row: frozen.
         $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->freeTransfer(600))->status);
 
         $row = $this->ingest($this->freeTransfer(600, '19.00'));
 
-        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
-        $this->assertSame('19.00', $row->payload['subtotal'], 'the fresh payload is taken');
-        $this->assertStringContainsString('τώρα έχει αξία', (string) $row->notes);
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
+        $this->assertSame('0.00', $row->payload['subtotal'], 'the decision-time payload stays');
     }
 
     public function test_a_human_decision_is_never_reopened(): void
@@ -142,55 +143,15 @@ class WhmcsZeroValueInboxTest extends TestCase
         $this->assertSame(1, $type->fresh()->invcount, 'no ΑΑ consumed');
     }
 
-    /** @return array<string, mixed> the same invoice as MyCS sends it */
-    private function asMycs(array $payload): array
-    {
-        return $payload + ['mycs' => ['id' => $payload['invoiceid']]];
-    }
-
-    public function test_a_stale_whmcs_payload_never_reopens_a_mycs_row(): void
-    {
-        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->asMycs($this->freeTransfer(800)))->status);
-
-        $row = $this->ingest($this->freeTransfer(800, '19.00'));   // WHMCS, frozen at the cut-over
-
-        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
-        $this->assertSame('0.00', $row->payload['subtotal']);
-    }
-
-    public function test_the_cut_over_move_whmcs_to_mycs_for_the_same_client_reopens(): void
+    public function test_a_later_payload_from_the_other_system_does_not_reopen_it_either(): void
     {
         $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->freeTransfer(810))->status);
 
-        $row = $this->ingest($this->asMycs($this->freeTransfer(810, '19.00')));
-
-        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
-        $this->assertSame(PendingWhmcsInvoice::SOURCE_MYCS, $row->source);
-        $this->assertSame('19.00', $row->payload['subtotal']);
-    }
-
-    public function test_another_client_from_the_other_system_does_not_reopen(): void
-    {
-        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->freeTransfer(820))->status);
-
-        $other = $this->asMycs($this->freeTransfer(820, '19.00'));
-        $other['userid'] = 2;
-        $row = $this->ingest($other);
+        // The same invoice re-sent by MyCS after the cut-over, now with a value.
+        $row = $this->ingest($this->freeTransfer(810, '19.00') + ['mycs' => ['id' => 810]]);
 
         $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
         $this->assertSame('0.00', $row->payload['subtotal']);
-    }
-
-    public function test_same_source_moved_to_another_client_reopens_like_any_refresh(): void
-    {
-        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->freeTransfer(830))->status);
-
-        $moved = $this->freeTransfer(830, '19.00');
-        $moved['userid'] = 2;
-        $row = $this->ingest($moved);
-
-        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
-        $this->assertSame(2, (int) $row->whmcs_userid);
     }
 
     public function test_create_draft_refuses_a_zero_value_invoice(): void

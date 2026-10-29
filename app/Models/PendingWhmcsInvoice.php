@@ -283,13 +283,6 @@ class PendingWhmcsInvoice extends Model
             && abs(self::documentTotalOf($payload)) <= 0.005;
     }
 
-    /** Closed by the ingestor as worth 0 ({@see isZeroValuePayload}) — reopened if WHMCS later gives it a value. */
-    public function isAutoResolvedZeroValue(): bool
-    {
-        return $this->status === self::STATUS_RESOLVED
-            && str_starts_with((string) $this->notes, self::ZERO_VALUE_NOTE);
-    }
-
     public function filedByUser(): BelongsTo
     {
         return $this->belongsTo(User::class, 'filed_by_user_id');
