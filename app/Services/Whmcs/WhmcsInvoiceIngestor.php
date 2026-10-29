@@ -273,16 +273,21 @@ class WhmcsInvoiceIngestor
 
                 return new IngestionResult(row: $existing, created: false, auditPreserved: true);
             }
-            // Closed by us as worth 0, but WHMCS now gives it a value (edited/re-priced):
-            // never leave a real sale unseen — back to review, through the refresh below.
-            // Only for the SAME source and client: a stale payload from the other system
-            // (WHMCS after a MyCS cut-over, or another client under the same number) is
-            // handled by the source branches below and must not reopen it (review).
-            if ($existing->isAutoResolvedZeroValue() && ! $zeroValue
-                && $existing->source === PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload)
-                && ($existing->whmcs_userid === null || (int) $existing->whmcs_userid === $whmcsUserId)) {
+            // Closed by us as worth 0, but it now carries a value (re-priced), or MyCS
+            // staff explicitly asked for it: never leave a real sale unseen — back to
+            // review, through the refresh below. Same source, or the cut-over move
+            // WHMCS → MyCS for the SAME client (the refresh adopts it as MyCS's). A
+            // stale WHMCS payload over a MyCS row, or another client from the other
+            // system, is the source branches' business and must not reopen it.
+            $incomingSource = PendingWhmcsInvoice::sourceOf($whmcsInvoicePayload);
+            $sameOrigin = $existing->source === $incomingSource
+                || ($incomingSource === PendingWhmcsInvoice::SOURCE_MYCS
+                    && $existing->whmcs_userid !== null && (int) $existing->whmcs_userid === $whmcsUserId);
+            if ($existing->isAutoResolvedZeroValue() && ! $zeroValue && $sameOrigin) {
                 $existing->status = PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
-                $existing->notes = 'Ήταν μηδενικής αξίας και ολοκληρώθηκε αυτόματα· το WHMCS του έδωσε τώρα αξία — έλεγξέ το.';
+                $existing->notes = PendingWhmcsInvoice::isZeroValuePayload($whmcsInvoicePayload)
+                    ? 'Ήταν μηδενικής αξίας και ολοκληρώθηκε αυτόματα· ζητήθηκε έκδοση από τη MyCS, αλλά παραμένει 0 € — αρχειοθέτησέ το αν δεν χρειάζεται.'
+                    : 'Ήταν μηδενικής αξίας και ολοκληρώθηκε αυτόματα· τώρα έχει αξία — έλεγξέ το.';
             }
             if ($existing->isAuditFrozen() || $existing->hasBeenConsolidated()) {
                 // Freeze the payload/customer/status against this re-ingest; touch
