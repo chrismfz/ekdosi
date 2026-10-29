@@ -40,6 +40,30 @@ final class WhmcsFilingGuard
     private const TOTALS_PER_LINE_TOLERANCE = 0.01;
 
     /**
+     * Refuse a WHMCS invoice whose mapped value is 0 (every line 0 — e.g. a free .gr
+     * domain transfer): there is nothing to file, AADE won't take it, and creating
+     * the invoice first left an orphan all-zero draft. The ingestor already closes
+     * such rows as «resolved»; this is the filing-side backstop.
+     *
+     * @param  array<string, mixed>  $mapped  WhmcsInvoiceMapper::map() output
+     */
+    public static function assertNotZeroValue(array $mapped, PendingWhmcsInvoice $pending): void
+    {
+        // A negative (promo/credit) line nets the value to 0 too — that hold
+        // (assertPayloadFilable, «αρνητικό ποσό») is the more useful message.
+        if (abs((float) ($mapped['totals']['gross_total'] ?? 0.0)) > 0.005
+            || ($mapped['totals']['negative_lines'] ?? []) !== []) {
+            return;
+        }
+
+        throw new LogicException(
+            'Το WHMCS #'.$pending->whmcs_invoice_id.' είναι μηδενικής αξίας (π.χ. δωρεάν μεταφορά .gr '
+            .'domain) — δεν εκδίδεται παραστατικό 0 €. Αρχειοθέτησέ τη γραμμή στα εισερχόμενα αν δεν '
+            .'χρειάζεται (ή διόρθωσε το ποσό στο WHMCS/MyCS).'
+        );
+    }
+
+    /**
      * WH-1 + WH-4: refuse non-EUR invoices and negative (promo/credit) lines.
      * Path-independent — safe on a whole invoice or a single split group.
      *

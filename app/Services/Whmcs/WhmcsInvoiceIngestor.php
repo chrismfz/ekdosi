@@ -134,6 +134,14 @@ class WhmcsInvoiceIngestor
         // τιμολόγηση can issue it (the source invoices are the real
         // παραστατικά). Detection reads only the payload → computed here.
         $consolidatedRefs = PendingWhmcsInvoice::detectConsolidatedRefs($whmcsInvoicePayload);
+        // Worth 0 (a free .gr transfer…): nothing to document, an all-zero draft can't be
+        // issued — closed as «resolved» instead of queued for a human (45 such rows were
+        // archived by hand). Not when MyCS staff explicitly sent it: a human asked.
+        // Nor an UNPAID invoice (whmcs:fetch-unpaid, invoice-before-pay): it can be read
+        // while staff are still filling in the amounts, and the close is final (review).
+        $zeroValue = ! $requested
+            && strcasecmp((string) ($whmcsInvoicePayload['status'] ?? ''), 'Unpaid') !== 0
+            && PendingWhmcsInvoice::isZeroValuePayload($whmcsInvoicePayload);
 
         // attempts=3: two concurrent ingests of the SAME missing (company_id,
         // whmcs_invoice_id) row resolve differently by isolation level — a
@@ -145,7 +153,7 @@ class WhmcsInvoiceIngestor
         // Belt (retry) + suspenders (inline unique-violation catch).
         $result = DB::transaction(function () use (
             $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored,
-            $requested, $requestedNote
+            $requested, $requestedNote, $zeroValue
         ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
@@ -167,6 +175,9 @@ class WhmcsInvoiceIngestor
             $createStatus = ($isConsolidated || $tp['hold'] || $adjustmentNote !== null)
                 ? PendingWhmcsInvoice::STATUS_HELD
                 : PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
+            // A row that would wait for review but is worth 0 is closed instead (a hold
+            // reason still wins — it is the more specific signal).
+            $zeroResolve = $zeroValue && $createStatus === PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
 
             if ($existing === null) {
                 try {
@@ -180,8 +191,10 @@ class WhmcsInvoiceIngestor
                         'match_reason' => $match->reason,
                         'third_party_state' => $tp['state'],
                         'third_party_resolution' => $tp['resolution'],
-                        'status' => $createStatus,
-                        'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '').' '.($requestedNote ?? '')) ?: null),
+                        'status' => $zeroResolve ? PendingWhmcsInvoice::STATUS_RESOLVED : $createStatus,
+                        'notes' => $zeroResolve
+                            ? PendingWhmcsInvoice::ZERO_VALUE_NOTE
+                            : ($consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '').' '.($requestedNote ?? '')) ?: null)),
                         'hold_reason' => $consolidatedReason ?? $adjustmentNote,
                     ]);
 
@@ -354,6 +367,13 @@ class WhmcsInvoiceIngestor
             $notes = trim((string) preg_replace(self::REQUESTED_NOTE_PATTERN, '', (string) ($update['notes'] ?? $existing->notes ?? '')));
             $notes = trim($notes.' '.($requestedNote ?? ''));
             $update['notes'] = $notes !== '' ? $notes : null;
+            // Waiting for review and now worth 0 (a hold above still wins): closed.
+            // Not when a local invoice already exists for it (a filing that failed at
+            // AADE waits for a retry — «δεν απαιτείται παραστατικό» would be false).
+            if ($zeroValue && ! isset($update['status']) && $existing->invoice_id === null) {
+                $update['status'] = PendingWhmcsInvoice::STATUS_RESOLVED;
+                $update['notes'] = PendingWhmcsInvoice::ZERO_VALUE_NOTE;
+            }
             $existing->update($update);
 
             return new IngestionResult(row: $existing, created: false, auditPreserved: false);

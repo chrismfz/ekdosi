@@ -107,6 +107,10 @@ class WhmcsInvoiceFiler
         // (consuming ΑΑ) by the time the submit threw. Off-mode
         // tenants (NullSubmitter) tolerate 0%-VAT lines fine.
         $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
+        // An invoice worth 0 (a free .gr transfer) can't be filed — refuse FIRST (the
+        // clearest reason) and before any draft/ΑΑ exists (auto-issue used to leave an
+        // orphan all-zero draft behind). A 100% promo is left to «αρνητικό ποσό».
+        WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
         // Unattended (άμεση τιμολόγηση) must NEVER auto-file a 0%-VAT invoice —
         // a WHMCS-untaxed line (Apply Tax off) is either a grandfathered product
         // owing 24% or a genuine exemption, and only a human can decide. HOLD it
@@ -300,6 +304,9 @@ class WhmcsInvoiceFiler
         // VAT before issuing). Hard-blocking it would remove the legitimate
         // create-then-fix workflow that draft-first exists for. The unattended
         // paths (file() / whmcs:auto-issue) keep the full reconcile guards.
+        // A 0 € draft can never be issued (a free .gr transfer) — don't create one.
+        // First, as in file() (a 100% promo is left to «αρνητικό ποσό» below).
+        WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
 
         return DB::transaction(function () use ($tenant, $pending, $mapped, $createdByUserId) {
