@@ -111,6 +111,8 @@ class WhmcsInvoiceFiler
         // clearest reason) and before any draft/ΑΑ exists (auto-issue used to leave an
         // orphan all-zero draft behind). A 100% promo is left to «αρνητικό ποσό».
         WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
+        // An Add Funds top-up is not a sale; a mix is for the operator's draft.
+        WhmcsFilingGuard::assertNotAddFunds($pending);
         // Unattended (άμεση τιμολόγηση) must NEVER auto-file a 0%-VAT invoice —
         // a WHMCS-untaxed line (Apply Tax off) is either a grandfathered product
         // owing 24% or a genuine exemption, and only a human can decide. HOLD it
@@ -307,6 +309,9 @@ class WhmcsInvoiceFiler
         // A 0 € draft can never be issued (a free .gr transfer) — don't create one.
         // First, as in file() (a 100% promo is left to «αρνητικό ποσό» below).
         WhmcsFilingGuard::assertNotZeroValue($mapped, $pending);
+        // A pure top-up has nothing to draft; a mix is drafted for the operator to remove
+        // the Add Funds line (the hold told them so).
+        WhmcsFilingGuard::assertNotAddFunds($pending, allowMixed: true);
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
 
         return DB::transaction(function () use ($tenant, $pending, $mapped, $createdByUserId) {

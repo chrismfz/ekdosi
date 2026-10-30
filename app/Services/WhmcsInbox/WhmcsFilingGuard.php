@@ -64,6 +64,25 @@ final class WhmcsFilingGuard
     }
 
     /**
+     * Refuse a WHMCS «Add Funds» (wallet top-up) before any draft/ΑΑ exists: a prepayment
+     * is not a sale — its παραστατικό is issued when the credit is used (owner,
+     * 2026-10-30). The ingestor closes a pure top-up and holds a mix; this is the
+     * filing-side backstop. A mix is refused only unattended — the operator's draft is
+     * where the Add Funds line gets removed (`$allowMixed`).
+     */
+    public static function assertNotAddFunds(PendingWhmcsInvoice $pending, bool $allowMixed = false): void
+    {
+        $shape = PendingWhmcsInvoice::addFundsShape(is_array($pending->payload) ? $pending->payload : []);
+        if ($shape === null || ($allowMixed && $shape === PendingWhmcsInvoice::ADD_FUNDS_MIXED)) {
+            return;
+        }
+
+        throw new LogicException('Το WHMCS #'.$pending->whmcs_invoice_id.': '.($shape === PendingWhmcsInvoice::ADD_FUNDS_ONLY
+            ? PendingWhmcsInvoice::ADD_FUNDS_NOTE.' Αρχειοθέτησέ το στα εισερχόμενα.'
+            : PendingWhmcsInvoice::ADD_FUNDS_MIXED_REASON));
+    }
+
+    /**
      * WH-1 + WH-4: refuse non-EUR invoices and negative (promo/credit) lines.
      * Path-independent — safe on a whole invoice or a single split group.
      *

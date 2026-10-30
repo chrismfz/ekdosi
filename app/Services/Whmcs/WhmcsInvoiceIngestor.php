@@ -142,6 +142,17 @@ class WhmcsInvoiceIngestor
         $zeroValue = ! $requested
             && strcasecmp((string) ($whmcsInvoicePayload['status'] ?? ''), 'Unpaid') !== 0
             && PendingWhmcsInvoice::isZeroValuePayload($whmcsInvoicePayload);
+        // «Add Funds» (a wallet top-up) is a prepayment, not a sale: no παραστατικό —
+        // it is issued when the credit pays a real invoice (owner, 2026-10-30). Closed
+        // like a 0 € row (final). Next to real charges it is never guessed: held. Sent by
+        // MyCS staff: held too, with the reason (a human asked; the rule says no document).
+        $addFunds = PendingWhmcsInvoice::addFundsShape($whmcsInvoicePayload);
+        $addFundsClose = $addFunds === PendingWhmcsInvoice::ADD_FUNDS_ONLY && ! $requested;
+        $addFundsHold = match (true) {
+            $addFunds === PendingWhmcsInvoice::ADD_FUNDS_MIXED => PendingWhmcsInvoice::ADD_FUNDS_MIXED_REASON,
+            $addFunds === PendingWhmcsInvoice::ADD_FUNDS_ONLY && $requested => PendingWhmcsInvoice::ADD_FUNDS_NOTE,
+            default => null,
+        };
 
         // attempts=3: two concurrent ingests of the SAME missing (company_id,
         // whmcs_invoice_id) row resolve differently by isolation level — a
@@ -153,7 +164,7 @@ class WhmcsInvoiceIngestor
         // Belt (retry) + suspenders (inline unique-violation catch).
         $result = DB::transaction(function () use (
             $tenant, $whmcsInvoicePayload, $invoiceId, $whmcsUserId, $match, $tp, $consolidatedRefs, $adjustments, $adjustmentNote, $ignored,
-            $requested, $requestedNote, $zeroValue
+            $requested, $requestedNote, $zeroValue, $addFunds, $addFundsClose, $addFundsHold
         ) {
             $existing = PendingWhmcsInvoice::query()
                 ->where('company_id', $tenant->id)
@@ -172,12 +183,19 @@ class WhmcsInvoiceIngestor
             $consolidatedReason = $isConsolidated
                 ? PendingWhmcsInvoice::consolidatedPaymentReason($consolidatedRefs)
                 : null;
-            $createStatus = ($isConsolidated || $tp['hold'] || $adjustmentNote !== null)
+            // The Add Funds hold rides with MyCS's notes (both: «don't issue the lines as they are»);
+            // theirs first — the «ignored» hold is recognised by its prefix.
+            $holdNote = trim(($adjustmentNote ?? '').' '.($addFundsHold ?? '')) ?: null;
+            $createStatus = ($isConsolidated || $tp['hold'] || $holdNote !== null)
                 ? PendingWhmcsInvoice::STATUS_HELD
                 : PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
-            // A row that would wait for review but is worth 0 is closed instead (a hold
-            // reason still wins — it is the more specific signal).
-            $zeroResolve = $zeroValue && $createStatus === PendingWhmcsInvoice::STATUS_PENDING_REVIEW;
+            // A row that would wait for review but is worth 0, or is an Add Funds top-up, is
+            // closed instead (a hold reason still wins — it is the more specific signal).
+            $autoCloseNote = $createStatus !== PendingWhmcsInvoice::STATUS_PENDING_REVIEW ? null : match (true) {
+                $zeroValue => PendingWhmcsInvoice::ZERO_VALUE_NOTE,
+                $addFundsClose => PendingWhmcsInvoice::ADD_FUNDS_NOTE,
+                default => null,
+            };
 
             if ($existing === null) {
                 try {
@@ -191,11 +209,10 @@ class WhmcsInvoiceIngestor
                         'match_reason' => $match->reason,
                         'third_party_state' => $tp['state'],
                         'third_party_resolution' => $tp['resolution'],
-                        'status' => $zeroResolve ? PendingWhmcsInvoice::STATUS_RESOLVED : $createStatus,
-                        'notes' => $zeroResolve
-                            ? PendingWhmcsInvoice::ZERO_VALUE_NOTE
-                            : ($consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '').' '.($requestedNote ?? '')) ?: null)),
-                        'hold_reason' => $consolidatedReason ?? $adjustmentNote,
+                        'status' => $autoCloseNote !== null ? PendingWhmcsInvoice::STATUS_RESOLVED : $createStatus,
+                        'notes' => $autoCloseNote
+                            ?? ($consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($holdNote ?? '').' '.($requestedNote ?? '')) ?: null)),
+                        'hold_reason' => $consolidatedReason ?? $holdNote,
                     ]);
 
                     return new IngestionResult(row: $row, created: true, auditPreserved: false);
@@ -258,8 +275,8 @@ class WhmcsInvoiceIngestor
                     'match_reason' => $match->reason,
                     'third_party_state' => $tp['state'],
                     'third_party_resolution' => $tp['resolution'],
-                    'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($adjustmentNote ?? '').' '.($requestedNote ?? '').$was) ?: null),
-                    'hold_reason' => $consolidatedReason ?? $adjustmentNote,
+                    'notes' => $consolidatedReason ?? (trim(($tp['note'] ?? '').' '.($holdNote ?? '').' '.($requestedNote ?? '').$was) ?: null),
+                    'hold_reason' => $consolidatedReason ?? $holdNote,
                     'rejected_reason' => null,
                 ]);
 
@@ -354,7 +371,14 @@ class WhmcsInvoiceIngestor
                 $update['hold_reason'] = $consolidatedReason;
             } elseif ($tp['hold']) {
                 $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
-                $update['notes'] = trim(($tp['note'] ?? '').' '.($adjustmentNote ?? ''));
+                $update['notes'] = trim(($tp['note'] ?? '').' '.($holdNote ?? ''));
+            } elseif ($addFundsHold !== null && ! str_contains((string) $existing->notes, $addFundsHold)) {
+                // An Add Funds mix (or a top-up MyCS staff sent) the operator was not told of yet —
+                // newly so, or staged before this rule: held. «Επαναφορά προς έλεγχο» keeps the
+                // notes, so once released the same lines don't hold it again on every fetch.
+                $update['status'] = PendingWhmcsInvoice::STATUS_HELD;
+                $update['notes'] = $holdNote;
+                $update['hold_reason'] = $holdNote;
             } elseif ($adjustmentNote !== null && (MycsPayload::adjustments(is_array($existing->payload) ? $existing->payload : []) != $adjustments
                 || ($ignored && ! MycsPayload::ignored(is_array($existing->payload) ? $existing->payload : [])))) {
                 // New notes, or another amount, since the operator last saw it.
@@ -367,12 +391,14 @@ class WhmcsInvoiceIngestor
             $notes = trim((string) preg_replace(self::REQUESTED_NOTE_PATTERN, '', (string) ($update['notes'] ?? $existing->notes ?? '')));
             $notes = trim($notes.' '.($requestedNote ?? ''));
             $update['notes'] = $notes !== '' ? $notes : null;
-            // Waiting for review and now worth 0 (a hold above still wins): closed.
+            // Waiting for review and now worth 0, or an Add Funds top-up (a hold above
+            // still wins): closed. This is also how a top-up staged before the rule gets
+            // closed — the next fetch re-reads it (still paid + unfiled at the source).
             // Not when a local invoice already exists for it (a filing that failed at
             // AADE waits for a retry — «δεν απαιτείται παραστατικό» would be false).
-            if ($zeroValue && ! isset($update['status']) && $existing->invoice_id === null) {
+            if (($zeroValue || $addFundsClose) && ! isset($update['status']) && $existing->invoice_id === null) {
                 $update['status'] = PendingWhmcsInvoice::STATUS_RESOLVED;
-                $update['notes'] = PendingWhmcsInvoice::ZERO_VALUE_NOTE;
+                $update['notes'] = $zeroValue ? PendingWhmcsInvoice::ZERO_VALUE_NOTE : PendingWhmcsInvoice::ADD_FUNDS_NOTE;
             }
             $existing->update($update);
 

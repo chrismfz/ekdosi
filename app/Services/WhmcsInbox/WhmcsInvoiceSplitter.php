@@ -239,6 +239,9 @@ class WhmcsInvoiceSplitter
             throw new RuntimeException('Receipt type belongs to a different tenant.');
         }
 
+        // A pure Add Funds top-up is not a sale (nothing to split); a mix drafts as usual.
+        WhmcsFilingGuard::assertNotAddFunds($pending, allowMixed: true);
+
         $groups = $this->planGroups($tenant, $pending);
         if (count($groups) < 2) {
             throw new RuntimeException('Ο διαχωρισμός χρειάζεται τουλάχιστον δύο δικαιούχους.');

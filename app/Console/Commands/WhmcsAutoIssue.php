@@ -359,6 +359,14 @@ class WhmcsAutoIssue extends Command
             return [null, PendingWhmcsInvoice::consolidatedPaymentReason($row->consolidatedPaymentRefs())];
         }
 
+        // A WHMCS «Add Funds» top-up is a prepayment, not a sale (the ingestor closes it /
+        // holds a mix); a row staged before that rule must not throw an ERROR every run.
+        if (($addFunds = PendingWhmcsInvoice::addFundsShape(is_array($row->payload) ? $row->payload : [])) !== null) {
+            return [null, $addFunds === PendingWhmcsInvoice::ADD_FUNDS_ONLY
+                ? PendingWhmcsInvoice::ADD_FUNDS_NOTE
+                : PendingWhmcsInvoice::ADD_FUNDS_MIXED_REASON];
+        }
+
         // A container the operator manually CONSOLIDATED reads as a normal sale to
         // isConsolidatedPayment() above (its merged payload carries real child lines,
         // not references), so that guard misses it. But it's the product of a
