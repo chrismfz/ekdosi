@@ -4,6 +4,7 @@ namespace App\Support\Tenancy;
 
 use App\Models\Company;
 use Closure;
+use Filament\Facades\Filament;
 
 /**
  * The ambient "current company" for tenant scoping outside a Filament request.
@@ -54,6 +55,13 @@ class CompanyContext
      * Run $callback with the context pinned to $company, restoring whatever
      * was set before (nestable). The way CLI/queue code opts into auto-scoping.
      *
+     * Inside a panel request it ALSO pins Filament's tenant: Filament's tenancy
+     * `creating` hook re-associates every new tenant-owned row to the panel's
+     * CURRENT tenant, overriding an explicit company_id. Without this, seeding a
+     * newly created company from inside tenant A wrote A's rows (prod 2026-10-30:
+     * duplicate '1-ΤΙΜ' on «Δημιουργία Εταιρείας»). Swapped quietly (no
+     * TenantSet event) and restored afterwards; a no-op when no panel tenant.
+     *
      * @template T
      *
      * @param  Closure(): T  $callback
@@ -64,10 +72,22 @@ class CompanyContext
         $previous = $this->companyId;
         $this->set($company);
 
+        $previousTenant = Filament::getTenant();
+        $swapTenant = $previousTenant !== null && (string) $previousTenant->getKey() !== (string) $this->companyId;
+        if ($swapTenant) {
+            Filament::setTenant(
+                $company instanceof Company ? $company : Company::query()->withoutGlobalScopes()->findOrFail($company),
+                isQuiet: true,
+            );
+        }
+
         try {
             return $callback();
         } finally {
             $this->companyId = $previous;
+            if ($swapTenant) {
+                Filament::setTenant($previousTenant, isQuiet: true);
+            }
         }
     }
 }
