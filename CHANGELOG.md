@@ -68,6 +68,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   πρότεινε την κορυφή του κλάδου τους, #710) — από εδώ και πέρα προτείνει μόνο releases.
 
 ### Fixed
+- **myDATA διασταύρωση πωλήσεων: όχι ψευδείς «αποκλίσεις» από έξοδα του λογιστή** — τα 13.x/14.x/17.x που επιστρέφει το
+  RequestTransmittedDocs και έχουν ήδη εισαχθεί στα έξοδα (`expense_marks`, ανά εταιρεία) δεν μετρούν πια ως «λείπει τοπικά»
+  (νυχτερινό `mydata:reconcile-sales`, ops:health, κονσόλα, MCP `mydata_discrepancies`).
 - **Δημιουργία 2ης εταιρείας** — έσκαγε με «Duplicate entry '1-ΤΙΜ'»: το tenancy hook του Filament ξανάδενε τα
   τυπικά lookups (ΦΠΑ, είδη παραστατικών) στην *τρέχουσα* εταιρεία αντί για τη νέα. Το `CompanyContext::actAs` καρφώνει
   πλέον και τον tenant του Filament (και στην αλλαγή παρόχου στο EditCompany).

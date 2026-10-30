@@ -4,6 +4,7 @@ namespace App\Services\MyData;
 
 use App\Enums\MyDataMode;
 use App\Models\Company;
+use App\Models\ExpenseMark;
 use App\Models\Invoice;
 use App\Support\MyData\Codes;
 use Carbon\Carbon;
@@ -69,6 +70,7 @@ class SalesReconciler
             $local,
             $from->format('d/m/Y'),
             $to->format('d/m/Y'),
+            $this->loadImportedExpenseMarks($aadeDocs),
         );
     }
 
@@ -244,8 +246,10 @@ class SalesReconciler
      *
      * @param  list<AadeDocSummary>  $aadeDocs
      * @param  Collection<int, Invoice>  $localInvoices  invoices WITH a mydata_mark
+     * @param  array<string, true>  $importedExpenseMarks  MARKs already held in this tenant's
+     *                                                     `expense_marks` (self-declared 13/14/17.x)
      */
-    public function diff(array $aadeDocs, Collection $localInvoices, string $from, string $to): SalesReconciliationResult
+    public function diff(array $aadeDocs, Collection $localInvoices, string $from, string $to, array $importedExpenseMarks = []): SalesReconciliationResult
     {
         /** @var array<string, AadeDocSummary> $aadeByMark */
         $aadeByMark = [];
@@ -336,6 +340,15 @@ class SalesReconciler
 
         foreach ($aadeByMark as $mark => $aade) {
             if ($localByMark->has($mark)) {
+                continue;
+            }
+
+            // RequestTransmittedDocs also returns the accountant's self-declared
+            // EXPENSE docs (13.x/14.x/17.x) — not sales. Once the ExpenseImporter
+            // has them in `expense_marks` they ARE held locally (on the expense
+            // side), so they are no gap. An income-type MARK there would be a data
+            // fault, so it still surfaces.
+            if (isset($importedExpenseMarks[$mark]) && Codes::transmittedDocBucket($aade->invoiceType) !== 'income') {
                 continue;
             }
 
@@ -483,6 +496,34 @@ class SalesReconciler
             // series/type for the content compare (MYD-017).
             ->with('customer', 'invoiceType', 'lines')
             ->get();
+    }
+
+    /**
+     * The subset of the fetched AADE MARKs already imported on the expense side
+     * (`expense_marks`), explicitly scoped to this tenant (CLI/queue-safe).
+     *
+     * @param  list<AadeDocSummary>  $aadeDocs
+     * @return array<string, true>
+     */
+    private function loadImportedExpenseMarks(array $aadeDocs): array
+    {
+        // Only non-income docs can be skipped (see diff()), so only those are looked up.
+        $marks = array_map(fn (AadeDocSummary $d) => $d->mark, array_filter(
+            $aadeDocs,
+            fn (AadeDocSummary $d) => Codes::transmittedDocBucket($d->invoiceType) !== 'income',
+        ));
+        $found = [];
+
+        foreach (array_chunk($marks, 1000) as $chunk) {
+            foreach (ExpenseMark::query()
+                ->where('company_id', $this->tenant->getKey())
+                ->whereIn('mark', $chunk)
+                ->pluck('mark') as $mark) {
+                $found[(string) $mark] = true;
+            }
+        }
+
+        return $found;
     }
 
     private function initFirebed(): void
