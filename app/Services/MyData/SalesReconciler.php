@@ -507,7 +507,11 @@ class SalesReconciler
      */
     private function loadImportedExpenseMarks(array $aadeDocs): array
     {
-        $marks = array_map(fn (AadeDocSummary $d) => $d->mark, $aadeDocs);
+        // Only non-income docs can be skipped (see diff()), so only those are looked up.
+        $marks = array_map(fn (AadeDocSummary $d) => $d->mark, array_filter(
+            $aadeDocs,
+            fn (AadeDocSummary $d) => Codes::transmittedDocBucket($d->invoiceType) !== 'income',
+        ));
         $found = [];
 
         foreach (array_chunk($marks, 1000) as $chunk) {
