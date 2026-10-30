@@ -70,18 +70,22 @@ class CompanyContext
     public function actAs(Company|int|string $company, Closure $callback): mixed
     {
         $previous = $this->companyId;
-        $this->set($company);
-
         $previousTenant = Filament::getTenant();
-        $swapTenant = $previousTenant !== null && (string) $previousTenant->getKey() !== (string) $this->companyId;
-        if ($swapTenant) {
-            Filament::setTenant(
-                $company instanceof Company ? $company : Company::query()->withoutGlobalScopes()->findOrFail($company),
-                isQuiet: true,
-            );
-        }
+        $swapTenant = false;
 
         try {
+            $this->set($company);
+
+            // Quiet on purpose: TenantSet would also re-pin the spatie permission
+            // team, and these blocks scope DATA, not the operator's own rights.
+            if ($previousTenant !== null && (string) $previousTenant->getKey() !== (string) $this->companyId) {
+                Filament::setTenant(
+                    $company instanceof Company ? $company : Company::query()->withoutGlobalScopes()->findOrFail($company),
+                    isQuiet: true,
+                );
+                $swapTenant = true;
+            }
+
             return $callback();
         } finally {
             $this->companyId = $previous;
