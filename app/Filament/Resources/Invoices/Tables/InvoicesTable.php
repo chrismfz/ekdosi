@@ -69,6 +69,14 @@ class InvoicesTable
                     ->alignRight()
                     ->sortable(),
 
+                TextColumn::make('withhold_amount')
+                    ->label('Παρακράτηση')
+                    ->money('EUR')
+                    ->alignRight()
+                    ->placeholder('—')
+                    ->sortable()
+                    ->toggleable(isToggledHiddenByDefault: true),
+
                 TextColumn::make('local_status')
                     ->label('Κατάσταση')
                     ->badge()
@@ -217,6 +225,11 @@ class InvoicesTable
                     ->label('Μόνο ληξιπρόθεσμα')
                     ->toggle()
                     ->query(fn (Builder $query) => $query->overdue()),
+
+                Filter::make('withheld')
+                    ->label('Με παρακράτηση φόρου')
+                    ->toggle()
+                    ->query(fn (Builder $query) => $query->where('withhold_amount', '>', 0)),
 
                 // «Προτιμολόγια»: offered drafts, split by whether the money has
                 // arrived. They are invisible to «Απαιτήσεις» by design (an unpaid
