@@ -148,6 +148,11 @@ class ExpenseClassificationSubmitterTest extends TestCase
         $this->assertNotNull($auditRow);
         $this->assertNotEmpty($auditRow->request);
         $this->assertNotEmpty($auditRow->response);
+        // The stored response is AADE's ResponseDoc, never the request echoed back
+        // (firebed < 5.14.1 parked the response in requestDom; we read it from there).
+        $this->assertStringContainsString('ResponseDoc', $auditRow->response);
+        $this->assertStringContainsString('ExpensesClassificationsDoc', $auditRow->request);
+        $this->assertStringNotContainsString('ExpensesClassificationsDoc', $auditRow->response);
         $this->assertNotNull($auditRow->mark_date);       // regression: was NULL via non-fillable 'date'
         $this->assertNotNull($auditRow->mark_time);       // audit trail: filed-at time, like the sibling writers
     }
