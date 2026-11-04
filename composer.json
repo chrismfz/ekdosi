@@ -15,7 +15,7 @@
         "firebed/aade-mydata": "^5.10",
         "josemmo/einvoicing": "^0.3.1",
         "laravel/framework": "^13.8",
-        "laravel/mcp": "^0.9.3",
+        "laravel/mcp": "^1.1.2",
         "laravel/passport": "^13.0",
         "laravel/sanctum": "^4.0",
         "laravel/tinker": "^3.0",
