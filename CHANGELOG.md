@@ -69,6 +69,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   πρότεινε την κορυφή του κλάδου τους, #710) — από εδώ και πέρα προτείνει μόνο releases.
 
 ### Fixed
+- Χαρακτηρισμός εξόδων → myDATA: το audit trail κρατά πάλι την ΑΠΑΝΤΗΣΗ της ΑΑΔΕ (firebed 5.14.1 χωρίζει request/response — το παλιό workaround θα έγραφε το request στη θέση της απάντησης).
 - Έλεγχος ρυθμίσεων myDATA: σε εταιρεία με πάροχο (`gr-provider`) δεν βγαίνει πια «όχι gr-mydata — δεν θα γίνει υποβολή» / «myDATA Off» (η διαβίβαση γίνεται κανονικά μέσω παρόχου)· ελέγχεται αν ο πάροχος είναι ενεργός και αν υπάρχουν διαπιστευτήρια ανάγνωσης myDATA (Ε3/Έσοδα-Έξοδα/συμφωνία).
 - «Χρήση & κόστος AI»: επιλογή προηγούμενου μήνα την 31η έδειχνε τον τρέχοντα (`createFromFormat('Y-m')` κρατούσε τη σημερινή μέρα → overflow).
 - **myDATA διασταύρωση πωλήσεων: όχι ψευδείς «αποκλίσεις» από έξοδα του λογιστή** — τα 13.x/14.x/17.x που επιστρέφει το
@@ -319,6 +320,7 @@ from `[Unreleased]`; `--major` explicit for milestones).
   προεπιλογές στη βάση) — ένα «Αποθήκευση επιλογών» από εκεί τις έκλεινε όλες. Τώρα δείχνουν τις πραγματικές προεπιλογές.
 
 ### Security
+- Composer: `symfony/mime` 8.1.10 (CVE-2026-45070, header injection σε email)· `firebed/aade-mydata` 5.14.2 (parsing χαρακτηρισμών, packings), Laravel 13.40, Filament 5.11.1, Passport 13.10 + patch updates. Majors (`laravel/mcp` 1.x, PHPUnit 13) εκτός.
 - Filament 5.8.2 → 5.11 (GHSA-7m6h-rg42-m449, MFA χωρίς επανεπιβεβαίωση κωδικού) και Livewire 4.4.5 → 4.4.8
   (GHSA-mhf7-xp6r-6qrc, παράκαμψη `#[Authorize]`). `composer audit` καθαρό.
 - **`league/commonmark` 2.10.1 → 2.10.3** (`composer audit`: GHSA-3q6v-r5mr-hxv8 high — quadratic-time DoS στο GFM Table
