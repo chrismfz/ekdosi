@@ -64,6 +64,9 @@ from `[Unreleased]`; `--major` explicit for milestones).
   firebed/aade-mydata 5.14 (σφάλμα της ΑΑΔΕ σε ανάγνωση → exception αντί για σιωπηλά κενό αποτέλεσμα· όλα τα
   σημεία κλήσης το πιάνουν ήδη· ο in-doubt έλεγχος πριν από επαναποστολή πλέον αρνείται αντί να ξαναστείλει).
   Το Filament 5.11 κρατά τις ειδοποιήσεις στο cache (όχι στο session) — θέλει λειτουργικό cache store (εμείς: `database`).
+- **Majors (dependabot #728/#726):** `laravel/mcp` 0.9.7 → 1.1.2 (οι MCP servers χωρίς αλλαγή κώδικα· devbox OAuth +
+  tool call επαληθευμένα) και PHPUnit 12 → 13.4 (dev· το test helper `attempt()` μετονομάστηκε — το PHPUnit 13 έχει
+  πλέον `final TestCase::attempt()`).
 - **Dependabot** (`.github/dependabot.yml`): εβδομαδιαία composer/npm, μηνιαία actions· το firebed πάντα σε δικό του PR.
 - **CI**: το `shivammathur/setup-php` καρφωμένο στο SHA της release **2.40.0** (ήταν μη-release commit· το Dependabot
   πρότεινε την κορυφή του κλάδου τους, #710) — από εδώ και πέρα προτείνει μόνο releases.

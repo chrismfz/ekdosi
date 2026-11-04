@@ -91,7 +91,7 @@ class DeployPreflightGuardsTest extends TestCase
     {
         $this->fixture();
 
-        [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
+        [$reachedMaintenance, $out] = $this->attemptDeploy($via, 'v1');
 
         // Each run stops at `artisan down` — so the copies it left were taken
         // BEFORE maintenance, and nothing was checked out.
@@ -111,7 +111,7 @@ class DeployPreflightGuardsTest extends TestCase
         File::append($this->repo.'/public/.htaccess', "# php -- BEGIN cPanel-generated handler\n");
         $this->git('update-index', '--skip-worktree', 'public/.htaccess');
 
-        [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
+        [$reachedMaintenance, $out] = $this->attemptDeploy($via, 'v1');
 
         $this->assertFalse($reachedMaintenance, 'refused before maintenance');
         $this->assertStringContainsString('public/.htaccess', $out);
@@ -129,7 +129,7 @@ class DeployPreflightGuardsTest extends TestCase
         $this->git('update-index', '--skip-worktree', 'public/.htaccess');
         touch($this->repo.'/public/.htaccess', time() + 120);
 
-        [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
+        [$reachedMaintenance, $out] = $this->attemptDeploy($via, 'v1');
 
         $this->assertFalse($reachedMaintenance, 'refused before maintenance');
         $this->assertStringContainsString("--no-skip-worktree --no-assume-unchanged 'public/.htaccess'", $out);
@@ -144,7 +144,7 @@ class DeployPreflightGuardsTest extends TestCase
         File::append($this->repo.'/c.txt', "edited on the server\n");
         $this->git('update-index', '--assume-unchanged', 'c.txt');
 
-        [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
+        [$reachedMaintenance, $out] = $this->attemptDeploy($via, 'v1');
 
         $this->assertFalse($reachedMaintenance, 'refused before maintenance');
         $this->assertStringContainsString("--no-assume-unchanged 'c.txt'", $out, 'the instruction clears THIS flag too');
@@ -160,7 +160,7 @@ class DeployPreflightGuardsTest extends TestCase
         $this->git('update-index', '--skip-worktree', 'public/.htaccess');
         File::delete($this->repo.'/public/.htaccess');
 
-        [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
+        [$reachedMaintenance, $out] = $this->attemptDeploy($via, 'v1');
 
         $this->assertTrue($reachedMaintenance, $out);
         $this->assertStringNotContainsString('--no-skip-worktree', $out);
@@ -172,7 +172,7 @@ class DeployPreflightGuardsTest extends TestCase
         $this->fixture();
         File::append($this->repo.'/b.txt', "hand hotfix\n");
 
-        [$reachedMaintenance, $out] = $this->attempt($via, 'v1');
+        [$reachedMaintenance, $out] = $this->attemptDeploy($via, 'v1');
 
         $this->assertFalse($reachedMaintenance);
         $this->assertMatchesRegularExpression('/not clean|δεν είναι καθαρό/', $out);
@@ -289,7 +289,7 @@ class DeployPreflightGuardsTest extends TestCase
         $this->travelTo(now()->setDate(2026, 1, 2)->setTime(3, 4, 5));
         File::ensureDirectoryExists($this->repo.'/storage/app/deploy-untracked/'.now()->format('Ymd-His').'/ign.txt');
 
-        [$reachedMaintenance, $out] = $this->attempt('in-app rollback', 'v1');
+        [$reachedMaintenance, $out] = $this->attemptDeploy('in-app rollback', 'v1');
 
         $this->assertFalse($reachedMaintenance);
         $this->assertStringContainsString("αντίγραφο του 'ign.txt'", $out);
@@ -300,7 +300,7 @@ class DeployPreflightGuardsTest extends TestCase
     {
         $this->fixture();
 
-        [$reachedMaintenance, $out] = $this->attempt('in-app rollback', 'no-such-ref');
+        [$reachedMaintenance, $out] = $this->attemptDeploy('in-app rollback', 'no-such-ref');
 
         $this->assertFalse($reachedMaintenance);
         $this->assertStringContainsString('Άγνωστο target ref', $out);
@@ -321,7 +321,7 @@ class DeployPreflightGuardsTest extends TestCase
     // ─────────────────────────────── runners ───────────────────────────────
 
     /** @return array{bool, string} [reached `artisan down`, everything it said] */
-    private function attempt(string $via, string $ref): array
+    private function attemptDeploy(string $via, string $ref): array
     {
         return match ($via) {
             'rollback.sh' => $this->viaScript('rollback.sh', $ref),
