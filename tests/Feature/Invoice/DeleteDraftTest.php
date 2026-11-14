@@ -108,6 +108,10 @@ class DeleteDraftTest extends TestCase
         $marked = $this->invoice(['local_status' => 'cancelled']);
         $marked->forceFill(['mydata_mark' => '400001234567890'])->save();
         $this->assertFalse($marked->isDeletableDraft(), 'anything AADE knows about stays');
+
+        $inDoubt = $this->invoice();
+        $inDoubt->forceFill(['mydata_pending_since' => now()])->save();
+        $this->assertFalse($inDoubt->isDeletableDraft(), 'an in-doubt submission may exist at AADE');
     }
 
     public function test_deleting_an_inbox_draft_returns_the_row_to_review(): void

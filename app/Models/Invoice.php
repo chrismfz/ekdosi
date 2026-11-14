@@ -287,6 +287,8 @@ class Invoice extends Model implements MovableDocument
     {
         return $this->mydata_state === null
             && $this->mydata_mark === null
+            // an armed in-doubt submission may already exist at AADE — never delete it
+            && $this->mydata_pending_since === null
             && $this->code === null
             && in_array($this->local_status, ['draft', 'cancelled'], true)
             && ! $this->isOffered()

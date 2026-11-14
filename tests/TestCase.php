@@ -23,22 +23,35 @@ abstract class TestCase extends BaseTestCase
      * Refuse to touch a real database. RefreshDatabase (run from setUpTraits) does
      * `migrate:fresh` — on a host where `config:cache` is live (every deploy runs it),
      * Laravel ignores phpunit.xml/.env.testing and the suite would wipe the APP's DB.
-     * That happened on the devbox (2026-11-14). Only sqlite or a `*_test` database is
-     * allowed; anything else aborts BEFORE a single table is dropped.
+     * That happened on the devbox (2026-11-14). Only an in-memory sqlite or a `*_test`
+     * database is allowed; anything else aborts BEFORE a single table is dropped.
      */
     protected function setUpTraits()
     {
-        $connection = config('database.default');
-        $driver = config("database.connections.{$connection}.driver");
-        $database = (string) config("database.connections.{$connection}.database");
+        $connection = (string) config('database.default');
+        self::assertSafeTestDatabase(
+            (string) config("database.connections.{$connection}.driver"),
+            (string) config("database.connections.{$connection}.database"),
+        );
 
-        if ($driver !== 'sqlite' && ! str_ends_with($database, '_test')) {
+        return parent::setUpTraits();
+    }
+
+    /**
+     * The guard itself, public + static so it is unit-testable without a database.
+     * sqlite only as `:memory:` (or a file named *_test / *_test.sqlite) — a plain
+     * sqlite FILE may be an app database; any other driver needs a `*_test` name.
+     */
+    public static function assertSafeTestDatabase(string $driver, string $database): void
+    {
+        $name = pathinfo($database, PATHINFO_FILENAME);
+        $safe = ($driver === 'sqlite' && $database === ':memory:') || str_ends_with($name, '_test');
+
+        if (! $safe) {
             throw new RuntimeException(
-                "Refusing to run tests against database «{$database}» ({$driver}): only sqlite or a *_test database. "
+                "Refusing to run tests against database «{$database}» ({$driver}): only in-memory sqlite or a *_test database. "
                 .'A cached config ignores .env.testing — run `php artisan optimize:clear` first.'
             );
         }
-
-        return parent::setUpTraits();
     }
 }
