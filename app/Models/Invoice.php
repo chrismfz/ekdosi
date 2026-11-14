@@ -273,6 +273,21 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
+     * May the operator delete this document outright? Only a genuine unfiled
+     * πρόχειρο («ΠΡΟΣ-…»): it never consumed a ΑΑ (allocated at transmission), so
+     * deleting leaves no gap. NOT while offered to the customer (they may be
+     * looking at / paying it — «Ανάκληση προσφοράς» first) or holding money.
+     * The one predicate behind every «Διαγραφή πρόχειρου» button.
+     */
+    public function isDeletableDraft(): bool
+    {
+        return $this->mydata_state === null
+            && $this->local_status === 'draft'
+            && ! $this->isOffered()
+            && ! $this->hasRecordedPayments();
+    }
+
+    /**
      * Captures still in flight for THIS document. Withdrawing an offer (or issuing)
      * re-checks the settle target, so a pending intent would silently fall back to
      * FIFO and pay something else — the operator should be told before, not after.

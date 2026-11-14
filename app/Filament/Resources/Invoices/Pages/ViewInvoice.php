@@ -37,6 +37,7 @@ use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\InvoiceScope;
 use App\Support\Whmcs\WhmcsPaymentSyncCache;
 use Filament\Actions\Action;
+use Filament\Actions\DeleteAction;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\DatePicker;
 use Filament\Forms\Components\Hidden;
@@ -120,6 +121,18 @@ class ViewInvoice extends ViewRecord
                     'record' => $record,
                     'tenant' => $record->company,
                 ])),
+
+            // «Διαγραφή πρόχειρου» — a draft is a sandbox (WHMCS inbox drafts, tests,
+            // templates): the operator lands HERE, not on Edit, so the delete lives
+            // here too (it used to hide inside Edit only → «κολλημένα» ΠΡΟΣ-…). Same
+            // predicate as EditInvoice's: no ΑΑ consumed, not offered, no money.
+            DeleteAction::make('delete_draft')
+                ->label('Διαγραφή')
+                ->visible(fn (Invoice $record) => $record->isDeletableDraft())
+                ->modalHeading('Διαγραφή πρόχειρου παραστατικού')
+                ->modalDescription(fn (Invoice $record) => "Το πρόχειρο {$record->invcode} θα διαγραφεί. "
+                    .'Δεν έχει δεσμεύσει αύξοντα αριθμό (ο ΑΑ μπαίνει στην αποστολή), οπότε ΔΕΝ μένει κενό στη σειρά.')
+                ->successRedirectUrl(fn () => static::getResource()::getUrl('index')),
 
             // «Ημερομηνία έκδοσης → σήμερα» — the one-click resolution for the
             // provider's «issue date must be today» rule (InvoSign 238). Only on a

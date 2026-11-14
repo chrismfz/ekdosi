@@ -83,9 +83,7 @@ class EditInvoice extends EditRecord
                 // …and not while it holds money: deleting would leave the Payment rows
                 // pointing at a soft-deleted invoice, still reducing the customer's
                 // balance with no document to explain them.
-                ->visible(fn (Invoice $record) => $record->mydata_state === null
-                    && $record->local_status === 'draft'
-                    && ! $record->hasRecordedPayments())
+                ->visible(fn (Invoice $record) => $record->isDeletableDraft())
                 ->requiresConfirmation()
                 ->modalHeading('Διαγραφή πρόχειρου παραστατικού')
                 ->modalDescription(fn (Invoice $record) => "Το πρόχειρο {$record->invcode} θα διαγραφεί. "

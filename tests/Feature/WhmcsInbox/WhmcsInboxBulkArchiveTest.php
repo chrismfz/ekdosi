@@ -70,13 +70,13 @@ class WhmcsInboxBulkArchiveTest extends TestCase
             ->set('activeTab', 'all')
             ->callTableBulkAction('archive_selected', [
                 $pending->getKey(), $held->getKey(), $filed->getKey(), $already->getKey(),
-            ], data: ['rejected_reason' => 'δικά μας']);
+            ]);
 
-        // Archived with the shared note.
+        // Archived (one click — no shared note any more).
         $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $pending->refresh()->status);
-        $this->assertSame('δικά μας', $pending->rejected_reason);
+        $this->assertNull($pending->rejected_reason);
         $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $held->refresh()->status);
-        $this->assertSame('δικά μας', $held->rejected_reason);
+        $this->assertNull($held->rejected_reason);
 
         // Untouched: filed stays filed; the already-archived row keeps its own note.
         $this->assertSame(PendingWhmcsInvoice::STATUS_FILED, $filed->refresh()->status);
