@@ -85,6 +85,31 @@ class DeleteDraftTest extends TestCase
         $this->assertFalse($offered->isDeletableDraft());
     }
 
+    public function test_a_draft_cancelled_before_numbering_can_be_deleted(): void
+    {
+        $cancelled = $this->invoice(['local_status' => 'cancelled']);
+        $this->assertNull($cancelled->code);
+
+        Livewire::test(ViewInvoice::class, ['record' => $cancelled->getRouteKey()])
+            ->assertActionVisible('delete_draft')
+            ->callAction('delete_draft');
+
+        $this->assertSoftDeleted($cancelled);
+    }
+
+    public function test_a_cancelled_document_that_got_a_number_is_never_deletable(): void
+    {
+        $numbered = $this->invoice(['local_status' => 'cancelled', 'code' => 8, 'invcode' => 'TPY8']);
+        $this->assertFalse($numbered->isDeletableDraft(), 'a ΑΑ was consumed → deleting leaves a gap');
+
+        Livewire::test(ViewInvoice::class, ['record' => $numbered->getRouteKey()])
+            ->assertActionHidden('delete_draft');
+
+        $marked = $this->invoice(['local_status' => 'cancelled']);
+        $marked->forceFill(['mydata_mark' => '400001234567890'])->save();
+        $this->assertFalse($marked->isDeletableDraft(), 'anything AADE knows about stays');
+    }
+
     public function test_deleting_an_inbox_draft_returns_the_row_to_review(): void
     {
         $pending = $this->pending(PendingWhmcsInvoice::STATUS_DRAFTED);

@@ -273,16 +273,22 @@ class Invoice extends Model implements MovableDocument
     }
 
     /**
-     * May the operator delete this document outright? Only a genuine unfiled
-     * πρόχειρο («ΠΡΟΣ-…»): it never consumed a ΑΑ (allocated at transmission), so
-     * deleting leaves no gap. NOT while offered to the customer (they may be
-     * looking at / paying it — «Ανάκληση προσφοράς» first) or holding money.
-     * The one predicate behind every «Διαγραφή πρόχειρου» button.
+     * May the operator delete this document outright? Only one that never became
+     * a legal document: no ΑΑ (`code` null → still «ΠΡΟΣ-…», allocated only at
+     * transmission/finalize) and nothing at AADE (no state, no MARK) — so deleting
+     * leaves no gap. That covers a live πρόχειρο AND a πρόχειρο cancelled before it
+     * was ever numbered (it would otherwise sit in the list forever). A cancelled
+     * document that DID get a ΑΑ is never deletable (it's a gap in the series).
+     * NOT while offered to the customer (they may be looking at / paying it —
+     * «Ανάκληση προσφοράς» first) or holding money.
+     * The one predicate behind every «Διαγραφή» button on a document.
      */
     public function isDeletableDraft(): bool
     {
         return $this->mydata_state === null
-            && $this->local_status === 'draft'
+            && $this->mydata_mark === null
+            && $this->code === null
+            && in_array($this->local_status, ['draft', 'cancelled'], true)
             && ! $this->isOffered()
             && ! $this->hasRecordedPayments();
     }

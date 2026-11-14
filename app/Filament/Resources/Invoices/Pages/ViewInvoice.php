@@ -124,14 +124,17 @@ class ViewInvoice extends ViewRecord
 
             // «Διαγραφή πρόχειρου» — a draft is a sandbox (WHMCS inbox drafts, tests,
             // templates): the operator lands HERE, not on Edit, so the delete lives
-            // here too (it used to hide inside Edit only → «κολλημένα» ΠΡΟΣ-…). Same
-            // predicate as EditInvoice's: no ΑΑ consumed, not offered, no money.
+            // here too (it used to hide inside Edit only → «κολλημένα» ΠΡΟΣ-…). Also
+            // on a πρόχειρο cancelled before it got a ΑΑ (Edit is draft-only, so this
+            // is its only delete). Predicate: Invoice::isDeletableDraft().
             DeleteAction::make('delete_draft')
                 ->label('Διαγραφή')
                 ->visible(fn (Invoice $record) => $record->isDeletableDraft())
-                ->modalHeading('Διαγραφή πρόχειρου παραστατικού')
-                ->modalDescription(fn (Invoice $record) => "Το πρόχειρο {$record->invcode} θα διαγραφεί. "
-                    .'Δεν έχει δεσμεύσει αύξοντα αριθμό (ο ΑΑ μπαίνει στην αποστολή), οπότε ΔΕΝ μένει κενό στη σειρά.')
+                ->modalHeading(fn (Invoice $record) => $record->local_status === 'cancelled'
+                    ? 'Διαγραφή ακυρωμένου πρόχειρου'
+                    : 'Διαγραφή πρόχειρου παραστατικού')
+                ->modalDescription(fn (Invoice $record) => "Το {$record->invcode} θα διαγραφεί. "
+                    .'Δεν έχει δεσμεύσει αύξοντα αριθμό ούτε έχει σταλεί στην ΑΑΔΕ, οπότε ΔΕΝ μένει κενό στη σειρά.')
                 ->successRedirectUrl(fn () => static::getResource()::getUrl('index')),
 
             // «Ημερομηνία έκδοσης → σήμερα» — the one-click resolution for the
