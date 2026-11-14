@@ -20,6 +20,7 @@ class TestDatabaseGuardTest extends PhpUnitTestCase
             'sqlite in memory' => ['sqlite', ':memory:'],
             'mariadb *_test' => ['mariadb', 'ekdosi_test'],
             'sqlite *_test file' => ['sqlite', '/tmp/ekdosi_test.sqlite'],
+            'the CI sqlite file' => ['sqlite', 'database/ci_test.sqlite'],
         ];
     }
 
