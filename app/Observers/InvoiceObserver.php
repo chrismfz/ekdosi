@@ -3,6 +3,7 @@
 namespace App\Observers;
 
 use App\Models\Invoice;
+use App\Models\PendingWhmcsInvoice;
 use App\Models\Scopes\CompanyScope;
 use App\Models\ServiceContract;
 use App\Services\CustomerLedger\CustomerLedgerBuilder;
@@ -332,11 +333,85 @@ class InvoiceObserver
     public function deleted(Invoice $invoice): void
     {
         $this->recomputeOriginal($invoice);
+        $this->releaseInboxRow($invoice);
+    }
+
+    /**
+     * Deleting a WHMCS-inbox draft must hand the WHMCS invoice BACK to the inbox.
+     * Otherwise its pending row stays «Προσχέδιο» pointing at a trashed invoice —
+     * no action can move it (re_stage only shows on rejected/held) and the sync
+     * never re-stages it, so that WHMCS invoice silently never gets a document.
+     * Only when NO live draft/document of that row remains (a split row keeps its
+     * state while any of its per-party parts survives). Never touches a filed row.
+     */
+    private function releaseInboxRow(Invoice $invoice): void
+    {
+        if ($invoice->whmcs_pending_id === null) {
+            return;
+        }
+
+        $pending = PendingWhmcsInvoice::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $invoice->company_id)
+            ->whereKey($invoice->whmcs_pending_id)
+            ->first();
+        if ($pending === null
+            || ! in_array($pending->status, [PendingWhmcsInvoice::STATUS_DRAFTED, PendingWhmcsInvoice::STATUS_SPLIT], true)) {
+            return;
+        }
+
+        $survivors = Invoice::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $invoice->company_id)
+            ->where('whmcs_pending_id', $pending->id)
+            ->exists();
+        if ($survivors) {
+            return;
+        }
+
+        $pending->update([
+            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'invoice_id' => null,
+            // Append, don't replace: keep the filer's / consolidator's context.
+            'notes' => trim(($pending->notes ?? '')."\n".'Το προσχέδιο '.$invoice->invcode.' διαγράφηκε — ξανά προς έλεγχο.'),
+        ]);
     }
 
     public function restored(Invoice $invoice): void
     {
         $this->recomputeOriginal($invoice);
+        $this->relinkInboxRow($invoice);
+    }
+
+    /**
+     * The inverse of releaseInboxRow(): restoring a deleted inbox draft re-claims
+     * its pending row, so the row doesn't offer «Δημιουργία Παραστατικού» beside
+     * a live draft (→ two documents for one WHMCS invoice). Only when the row is
+     * still the released, unclaimed «Προς έλεγχο» — if a new draft was made
+     * meanwhile, it's left alone (the operator deletes the extra one).
+     */
+    private function relinkInboxRow(Invoice $invoice): void
+    {
+        if ($invoice->whmcs_pending_id === null || $invoice->local_status !== 'draft') {
+            return;
+        }
+
+        $pending = PendingWhmcsInvoice::query()
+            ->withoutGlobalScope(CompanyScope::class)
+            ->where('company_id', $invoice->company_id)
+            ->whereKey($invoice->whmcs_pending_id)
+            ->first();
+        if ($pending === null
+            || $pending->status !== PendingWhmcsInvoice::STATUS_PENDING_REVIEW
+            || $pending->invoice_id !== null) {
+            return;
+        }
+
+        $pending->update([
+            'status' => PendingWhmcsInvoice::STATUS_DRAFTED,
+            'invoice_id' => $invoice->id,
+            'notes' => trim(($pending->notes ?? '')."\n".'Το προσχέδιο '.$invoice->invcode.' επαναφέρθηκε.'),
+        ]);
     }
 
     /**

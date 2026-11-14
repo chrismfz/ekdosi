@@ -28,7 +28,6 @@ use Cron\CronExpression;
 use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
-use Filament\Actions\BulkActionGroup;
 use Filament\Facades\Filament;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
@@ -406,6 +405,7 @@ class WhmcsInboxTable
                     self::holdAction(),
                     self::reStageAction(),
                     self::rejectAction(),
+                    self::archiveNoteAction(),
                     self::deleteRowAction(),
                 ])
                     ->label('Ενέργειες')
@@ -414,12 +414,11 @@ class WhmcsInboxTable
                     ->color('gray'),
             ])
             ->toolbarActions([
-                BulkActionGroup::make([
-                    // Archive first: it's the operator-safe bulk op (Update), unlike
-                    // the admin-only bulk delete below it.
-                    self::archiveSelectedAction(),
-                    self::deleteSelectedAction(),
-                ]),
+                // Only two bulk ops → shown directly (no «Μαζικές ενέργειες» dropdown).
+                // Archive first: the operator-safe op (Update), unlike admin-only delete.
+                self::archiveSelectedAction(),
+                self::reStageSelectedAction(),
+                self::deleteSelectedAction(),
             ]);
     }
 
@@ -624,27 +623,14 @@ class WhmcsInboxTable
             ->icon('heroicon-o-archive-box-arrow-down')
             ->color('gray')
             ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
-            ->requiresConfirmation()
-            ->modalHeading('Αρχειοθέτηση επιλεγμένων εγγραφών inbox')
-            ->modalDescription('Αρχειοθετούνται όσες είναι «προς έλεγχο» ή «σε αναμονή»: φεύγουν από τα «Ανοιχτά», ΔΕΝ καταχωρούνται στην ΑΑΔΕ και δεν ξαναέρχονται στο sync (σε αντίθεση με τη διαγραφή). Επαναφέρονται όποτε θες. Ό,τι έχει ήδη εκδοθεί/αρχειοθετηθεί παραλείπεται.')
-            ->modalSubmitActionLabel('Αρχειοθέτηση')
-            ->form([
-                Textarea::make('rejected_reason')
-                    ->label('Κοινή σημείωση (προαιρετικό)')
-                    ->placeholder('π.χ. δικά μας / φίλου — να μην καταχωρηθούν στην ΑΑΔΕ')
-                    ->rows(2)
-                    ->maxLength(200),
-            ])
-            ->action(function (Collection $records, array $data): void {
-                $note = trim((string) ($data['rejected_reason'] ?? '')) ?: null;
+            // One click, no confirm: archiving is harmless and reversible (find it
+            // in «Αρχειοθετημένα» → «Επαναφορά προς έλεγχο»).
+            ->action(function (Collection $records): void {
                 $archived = 0;
                 $skipped = 0;
                 foreach ($records as $record) {
                     if (self::isArchivable($record)) {
-                        $record->update([
-                            'status' => PendingWhmcsInvoice::STATUS_REJECTED,
-                            'rejected_reason' => $note,
-                        ]);
+                        $record->update(['status' => PendingWhmcsInvoice::STATUS_REJECTED]);
                         $archived++;
                     } else {
                         $skipped++;
@@ -976,13 +962,12 @@ class WhmcsInboxTable
             // Check the raw shield permission directly instead, exactly like the
             // no-record archiveSelectedAction bulk action does.
             ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
-            ->requiresConfirmation()
-            // The tenant's source (K3): MyCS once its bridge is on, else WHMCS.
-            ->modalHeading(fn () => 'Συγχρονισμός τώρα από '.(Filament::getTenant()?->usesMycs() ? 'τη MyCS' : 'το WHMCS').';')
-            ->modalDescription(fn () => Filament::getTenant()?->usesMycs()
-                ? 'Τραβά από τη MyCS τα πληρωμένα που δεν έχουν παραστατικό και όσα έστειλε το staff της («Send to Ekdosi»), και τα βάζει στα Εισερχόμενα (ίδιο με το προγραμματισμένο). Ασφαλές να ξανατρέξει.'
-                : 'Τραβά τα πληρωμένα/μη-εκδομένα τιμολόγια από το WHMCS και τα στάζει στο inbox (ίδιο με το προγραμματισμένο whmcs:fetch-pending). Idempotent — ασφαλές να ξανατρέξει. Μεγάλος tenant μπορεί να αργήσει λίγο.')
-            ->modalSubmitActionLabel('Συγχρονισμός')
+            // One click, no confirm: idempotent and only STAGES rows (never files
+            // to AADE), so there's nothing to guard — the result notification says
+            // what came in.
+            ->tooltip(fn () => Filament::getTenant()?->usesMycs()
+                ? 'Τραβά από τη MyCS τα πληρωμένα χωρίς παραστατικό (ίδιο με το προγραμματισμένο)'
+                : 'Τραβά από το WHMCS τα πληρωμένα χωρίς παραστατικό (ίδιο με το προγραμματισμένο whmcs:fetch-pending)')
             ->action(function () {
                 $tenant = Filament::getTenant();
                 if (! $tenant) {
@@ -1741,24 +1726,80 @@ class WhmcsInboxTable
             ->authorize('update')
             ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_PENDING_REVIEW
                 || $r->status === PendingWhmcsInvoice::STATUS_HELD)
+            // One click, no confirm: harmless + reversible («Αρχειοθετημένα» →
+            // «Επαναφορά προς έλεγχο»).
+            ->action(function (PendingWhmcsInvoice $r) {
+                $r->update(['status' => PendingWhmcsInvoice::STATUS_REJECTED]);
+                Notification::make()->title('Αρχειοθετήθηκε')
+                    ->body('Βρίσκεται στα «Αρχειοθετημένα» αν χρειαστεί επαναφορά.')
+                    ->success()->send();
+            });
+    }
+
+    /**
+     * «Σημείωση αρχειοθέτησης» — archiving is one click, so the optional «why»
+     * (δικά μας / φίλου / διπλό) is added AFTERWARDS on the archived row, only
+     * when it's worth noting. Feeds the status tooltip like before.
+     */
+    private static function archiveNoteAction(): Action
+    {
+        return Action::make('archive_note')
+            ->label('Σημείωση αρχειοθέτησης')
+            ->icon('heroicon-o-pencil')
+            ->color('gray')
+            ->authorize('update')
+            ->visible(fn (PendingWhmcsInvoice $r) => $r->status === PendingWhmcsInvoice::STATUS_REJECTED)
+            ->fillForm(fn (PendingWhmcsInvoice $r) => ['rejected_reason' => $r->rejected_reason])
             ->form([
                 Textarea::make('rejected_reason')
-                    ->label('Σημείωση αρχειοθέτησης (προαιρετικό)')
-                    ->placeholder('π.χ. δική μας υπηρεσία, φίλου, διπλό, ακυρωμένο — να μην καταχωρηθεί στην ΑΑΔΕ')
+                    ->label('Σημείωση (προαιρετικό)')
+                    ->placeholder('π.χ. δική μας υπηρεσία, φίλου, διπλό — να μην καταχωρηθεί στην ΑΑΔΕ')
                     ->rows(3)
                     ->maxLength(200),
             ])
-            ->requiresConfirmation()
-            ->modalHeading(fn (PendingWhmcsInvoice $r) => 'Αρχειοθέτηση '.$r->sourceName()->ref($r->whmcs_invoice_id).';')
-            ->modalDescription('Δεν θα καταχωρηθεί στην ΑΑΔΕ και φεύγει από τα «Ανοιχτά» (πάει στα «Αρχειοθετημένα»). Μπορείς να το επαναφέρεις αργότερα αν αλλάξεις γνώμη.')
-            ->modalSubmitActionLabel('Αρχειοθέτηση')
+            ->modalSubmitActionLabel('Αποθήκευση')
             ->action(function (PendingWhmcsInvoice $r, array $data) {
-                $r->update([
-                    'status' => PendingWhmcsInvoice::STATUS_REJECTED,
-                    'rejected_reason' => trim((string) ($data['rejected_reason'] ?? '')) ?: null,
-                ]);
-                Notification::make()->title('Αρχειοθετήθηκε')->success()->send();
+                $r->update(['rejected_reason' => trim((string) ($data['rejected_reason'] ?? '')) ?: null]);
+                Notification::make()->title('Η σημείωση αποθηκεύτηκε')->success()->send();
             });
+    }
+
+    /**
+     * Bulk undo of the (now unconfirmed) bulk archive: archived/held rows →
+     * «Προς έλεγχο», same write as the per-row «Επαναφορά προς έλεγχο». Shown
+     * only on the tabs that hold such rows, so the open-tab toolbar stays two
+     * buttons.
+     */
+    private static function reStageSelectedAction(): BulkAction
+    {
+        return BulkAction::make('re_stage_selected')
+            ->label('Επαναφορά επιλεγμένων')
+            ->icon('heroicon-o-arrow-uturn-left')
+            ->color('warning')
+            ->authorize(fn () => (bool) auth()->user()?->can('Update:PendingWhmcsInvoice'))
+            ->visible(fn ($livewire) => in_array($livewire->activeTab ?? null, ['rejected', 'held', 'all'], true))
+            ->action(function (Collection $records): void {
+                $restored = 0;
+                $skipped = 0;
+                foreach ($records as $record) {
+                    if (in_array($record->status, [PendingWhmcsInvoice::STATUS_REJECTED, PendingWhmcsInvoice::STATUS_HELD], true)) {
+                        $record->update([
+                            'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+                            'rejected_reason' => null,
+                            'hold_reason' => null,
+                        ]);
+                        $restored++;
+                    } else {
+                        $skipped++;
+                    }
+                }
+
+                Notification::make()
+                    ->title("Επαναφέρθηκαν: {$restored}".($skipped > 0 ? " · Παραλείφθηκαν: {$skipped}" : ''))
+                    ->{$skipped > 0 ? 'warning' : 'success'}()
+                    ->send();
+            })
+            ->deselectRecordsAfterCompletion();
     }
 
     private static function holdAction(): Action

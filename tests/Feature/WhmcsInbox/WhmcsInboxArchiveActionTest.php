@@ -49,18 +49,18 @@ class WhmcsInboxArchiveActionTest extends TestCase
         ]);
     }
 
-    public function test_archiving_a_pending_row_sets_rejected_status_and_stores_the_note(): void
+    public function test_archiving_a_pending_row_is_one_click_and_sets_rejected_status(): void
     {
         $this->boot();
         $row = $this->row(PendingWhmcsInvoice::STATUS_PENDING_REVIEW);
 
         Livewire::test(ListWhmcsInbox::class)
-            ->callTableAction('reject', $row, data: ['rejected_reason' => 'δική μας υπηρεσία'])
+            ->callTableAction('reject', $row)
             ->assertHasNoTableActionErrors();
 
         $row->refresh();
         $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $row->status);
-        $this->assertSame('δική μας υπηρεσία', $row->rejected_reason);
+        $this->assertNull($row->rejected_reason, 'one-click archive: no note');
     }
 
     public function test_archiving_a_held_row_is_available_and_sets_rejected_status(): void
@@ -73,11 +73,11 @@ class WhmcsInboxArchiveActionTest extends TestCase
         Livewire::test(ListWhmcsInbox::class)
             ->set('activeTab', 'held')
             ->assertTableActionVisible('reject', $held)
-            ->callTableAction('reject', $held, data: ['rejected_reason' => 'φίλου'])
+            ->callTableAction('reject', $held)
             ->assertHasNoTableActionErrors();
 
         $held->refresh();
         $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $held->status);
-        $this->assertSame('φίλου', $held->rejected_reason);
+        $this->assertNull($held->rejected_reason);
     }
 }
