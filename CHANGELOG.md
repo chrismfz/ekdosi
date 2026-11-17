@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.8.2] - 2026-11-17
+
 ### Changed
 - **PHP 8.5:** production (myipgr + nexon) και devbox σε PHP 8.5· `composer.json` ζητά `php ^8.5`, αφαιρέθηκε το `config.platform.php` (8.4) → endroid/qr-code 6.2, laravel/sanctum 4.5, laravel/tinker 3.2, guzzle 7.16.3· CI μόνο σε 8.5.
 
