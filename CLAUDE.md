@@ -157,14 +157,23 @@ Every change ends with a **whole-PR adversarial review** (`/code-review`, high e
   P0/P1 findings»**, NOT «zero findings» — an adversarial reviewer always finds *something*.
 - **Triage + cap the rounds per priority:** **P0** (data loss / legal-document / tenant-leak /
   money wrong) → fix, up to **3** rounds; **P1** (real bug an operator hits) → fix, up to **2**;
-  **P2** (edge case, cleanup, perf on data we don't have, docs) → **1** round, then a surviving P2
-  goes to `docs/BACKLOG.md` **only if it's costly to rediscover** (a real design gap, a legal/money
-  trap, needs the owner/an external party). Small ones stay in the commit message / PR body — if one
-  bites later we find it with logs, repro, MCP. Keep the backlog lean. Don't spend a P0-loop on a P2.
+  **P2** (edge case, cleanup, perf on data we don't have, docs) → **1** round. Don't spend a P0-loop on a P2.
+- **P2 disposition — we're in PRODUCTION now (rule since 2026-11-17): a P2 never just vanishes into a
+  commit message.** Within that one round:
+  - **P2 that touches money / a legal document / tenant data / operator data-entry** (a parse that
+    can silently write a wrong amount, a confirm that can be skipped…) → **fix it in the same PR.**
+  - **Cheap P2** (≈15 min, one file, no design decision) → **fix it in the same PR** — closing it now
+    is cheaper than rediscovering it.
+  - **Costly / design P2** (needs a decision, the owner, an external party, or a wider refactor) →
+    a line in **`docs/BACKLOG.md` → «🧹 P2 εκκρεμότητες»** (file:line · failure scenario · PR it came
+    from). Never only in the commit message / PR body.
+  - **Periodic sweep:** each release (or ~every 2 weeks) one PR burns that list down, so it can't
+    silently grow. A P2 that turns out to be wrong/obsolete is deleted from the list, with the reason.
+  - The round caps are unchanged (P0 3 · P1 2 · P2 1) — what changes is only WHERE a surviving P2 lands.
 - **"I fixed the findings" ≠ "the review passed."** Say which commit was reviewed, how many
   findings came back, and whether the post-fix state was re-checked.
-- **Every finding gets an explicit disposition** — fixed, deferred (reason in the commit/PR; costly
-  ones in `docs/BACKLOG.md`), or declined with the reason at the call site — legitimate, not a dodge.
+- **Every finding gets an explicit disposition** — fixed, deferred (to «🧹 P2 εκκρεμότητες» in
+  `docs/BACKLOG.md`, see above), or declined with the reason at the call site — legitimate, not a dodge.
 - **Sanity-check a fix against real values** (a cheap `php -r` probe beats a plausible diff) and
   **run the full suite before every commit** (it catches regressions the reviewer didn't see).
 - **Don't let a fix widen into a new regression — check BOTH directions**, and **fix at the ROOT,
