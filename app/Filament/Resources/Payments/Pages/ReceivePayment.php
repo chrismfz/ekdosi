@@ -14,6 +14,7 @@ use Carbon\Carbon;
 use Filament\Facades\Filament;
 use Filament\Notifications\Notification;
 use Filament\Resources\Pages\Page;
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use InvalidArgumentException;
 use Livewire\Attributes\Url;
@@ -41,8 +42,10 @@ class ReceivePayment extends Page
 
     protected string $view = 'filament.resources.payments.pages.receive-payment';
 
+    // ?string, not ?int: it comes from the URL (?customer=…), and a typed int
+    // would 500 on «?customer=abc» during hydration. Normalised in customer().
     #[Url(as: 'customer')]
-    public ?int $customerId = null;
+    public ?string $customerId = null;
 
     public string $search = '';
 
@@ -164,7 +167,7 @@ class ReceivePayment extends Page
 
     public function selectCustomer(int $id): void
     {
-        $this->customerId = $id;
+        $this->customerId = (string) $id;
         if ($this->customer() === null) {
             $this->customerId = null;
 
@@ -192,13 +195,13 @@ class ReceivePayment extends Page
 
     public function customer(): ?Customer
     {
-        if ($this->customerId === null) {
+        if ($this->customerId === null || ! ctype_digit($this->customerId)) {
             return null;
         }
 
         return Customer::query()
             ->where('company_id', $this->tenantId())
-            ->find($this->customerId);
+            ->find((int) $this->customerId);
     }
 
     /** @return array<int, array{id: int, invcode: string, issued_at: ?string, due_at: ?string, balance: float}> */
@@ -364,7 +367,14 @@ class ReceivePayment extends Page
 
     /* ===================== Writes ===================== */
 
-    public function save(): void
+    /**
+     * @param  float|null  $shownOnAccount  the on-account remainder the operator SAW (and
+     *                                      confirmed) on the last render. Re-checked here: if the
+     *                                      real remainder differs (a debounced amount not yet
+     *                                      rendered, or a ticked invoice paid elsewhere meanwhile),
+     *                                      refuse instead of silently parking money on-account.
+     */
+    public function save(?float $shownOnAccount = null): void
     {
         $customer = $this->customer();
         if ($customer === null) {
@@ -422,6 +432,23 @@ class ReceivePayment extends Page
             $lines[] = ['invoice_id' => $id, 'amount' => $line];
         }
 
+        // A ticked line whose invoice dropped out of the open set (paid/cancelled
+        // elsewhere since the screen was drawn) would silently turn into credit.
+        foreach ($this->lines as $id => $state) {
+            if (($state['on'] ?? false) && ($this->parseAmount($state['amount'] ?? '') ?? 0) > 0.005 && ! isset($rows[$id])) {
+                $this->notifyError('Κάποιο παραστατικό άλλαξε στο μεταξύ (πληρώθηκε ή ακυρώθηκε). Η λίστα ανανεώθηκε — έλεγξε και ξαναπάτα.');
+                $this->resetForCustomer();
+
+                return;
+            }
+        }
+        $onAccount = round($amount - array_sum(array_column($lines, 'amount')), 2);
+        if ($onAccount > 0.005 && abs($onAccount - (float) ($shownOnAccount ?? 0)) > 0.005) {
+            $this->notifyError('Θα μείνουν '.Money::eur($onAccount).' έναντι λογαριασμού — έλεγξε το ποσό και ξαναπάτα «Καταχώριση».');
+
+            return;
+        }
+
         try {
             $res = app(PaymentAllocator::class)->allocateSelected(
                 $customer,
@@ -436,6 +463,10 @@ class ReceivePayment extends Page
             );
         } catch (InvalidArgumentException $e) {
             $this->notifyError($e->getMessage());
+
+            return;
+        } catch (QueryException $e) {
+            $this->rethrowUnlessDeadlock($e);
 
             return;
         }
@@ -489,6 +520,10 @@ class ReceivePayment extends Page
             });
         } catch (InvalidArgumentException $e) {
             $this->notifyError($e->getMessage());
+
+            return;
+        } catch (QueryException $e) {
+            $this->rethrowUnlessDeadlock($e);
 
             return;
         }
@@ -546,9 +581,11 @@ class ReceivePayment extends Page
         if ($s === '') {
             return null;
         }
-        if (str_contains($s, ',')) {
+        if (str_contains($s, ',') && str_contains($s, '.') && strrpos($s, '.') > strrpos($s, ',')) {
+            $s = str_replace(',', '', $s); // English «1,234.56»
+        } elseif (str_contains($s, ',')) {
             $s = str_replace(['.', ','], ['', '.'], $s);
-        } elseif (preg_match('/^\d{1,3}(\.\d{3})+$/', $s)) {
+        } elseif (preg_match('/^[1-9]\d{0,2}(\.\d{3})+$/', $s)) {
             $s = str_replace('.', '', $s);
         }
         if (! is_numeric($s)) {
@@ -561,6 +598,21 @@ class ReceivePayment extends Page
     private function fmtInput(float $value): string
     {
         return number_format($value, 2, ',', '');
+    }
+
+    /**
+     * Two receipts / credit-applies on the same customer can deadlock (pool vs
+     * invoice lock order). The transaction rolled back cleanly — tell the
+     * operator to retry instead of an error modal. Anything else is a real bug.
+     */
+    private function rethrowUnlessDeadlock(QueryException $e): void
+    {
+        $sqlState = (string) ($e->errorInfo[0] ?? $e->getCode());
+        $driverCode = (int) ($e->errorInfo[1] ?? 0);
+        if ($sqlState !== '40001' && $driverCode !== 1213 && $driverCode !== 1205) {
+            throw $e;
+        }
+        $this->notifyError('Ταυτόχρονη ενημέρωση στον ίδιο πελάτη — δεν καταχωρίστηκε τίποτα. Δοκίμασε ξανά.');
     }
 
     private function notifyError(string $message): void

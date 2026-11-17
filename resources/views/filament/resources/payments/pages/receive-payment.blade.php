@@ -64,7 +64,7 @@
             <div class="rcv-list">
                 @forelse ($customers as $c)
                     <button type="button" wire:key="cust-{{ $c['id'] }}" wire:click="selectCustomer({{ $c['id'] }})"
-                        class="rcv-row {{ $customerId === $c['id'] ? 'is-active' : '' }}">
+                        class="rcv-row {{ (string) $customerId === (string) $c['id'] ? 'is-active' : '' }}">
                         <div style="flex: 1; min-width: 0;">
                             <div class="rcv-ellipsis">{{ $c['name'] }}</div>
                             @if ($c['afm'])
@@ -261,7 +261,7 @@
                             Στα παραστατικά: <strong>{{ $this->money($t['toInvoices']) }}</strong>
                             · Νέο υπόλοιπο: <strong class="{{ $t['newBalance'] > 0.005 ? 'rcv-danger' : 'rcv-success' }}">{{ $this->money($t['newBalance']) }}</strong>
                         </div>
-                        <x-filament::button icon="heroicon-o-check" wire:click="save" wire:loading.attr="disabled" wire:target="save"
+                        <x-filament::button icon="heroicon-o-check" wire:click="save({{ $t['onAccount'] }})" wire:loading.attr="disabled" wire:target="save"
                             :wire:confirm="$t['onAccount'] > 0.005 ? $this->money($t['onAccount']).' θα καταχωριστούν ως πίστωση/προκαταβολή του πελάτη (έναντι λογαριασμού). Συνέχεια;' : null">
                             Καταχώριση είσπραξης
                         </x-filament::button>

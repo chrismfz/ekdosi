@@ -194,7 +194,7 @@ class ReceivePaymentCockpitTest extends TestCase
         Livewire::test(ReceivePayment::class, ['customerId' => $this->customer->id])
             ->set("lines.{$old->id}.on", false)
             ->set('amount', '250')
-            ->call('save');
+            ->call('save', 50.0);
 
         $this->assertSame(300.0, $this->balance($old), 'untouched');
         $this->assertSame(0.0, $this->balance($new));
@@ -242,6 +242,35 @@ class ReceivePaymentCockpitTest extends TestCase
         $this->assertSame(0.0, app(PaymentAllocator::class)->availableCredit($this->customer));
     }
 
+    public function test_unconfirmed_on_account_remainder_is_refused(): void
+    {
+        $a = $this->invoice('ΤΠΥ1', 100);
+        $this->bootPanel();
+
+        $page = Livewire::test(ReceivePayment::class, ['customerId' => $this->customer->id])
+            ->set('amount', '150')
+            ->call('save', 0.0); // the operator never saw the 50 € remainder
+        $this->assertSame(0, Payment::count());
+
+        $page->call('save', 50.0);
+        $this->assertSame(0.0, $this->balance($a));
+        $this->assertSame(50.0, (float) Payment::whereNull('invoice_id')->sum('amount'));
+    }
+
+    public function test_ticked_invoice_paid_elsewhere_blocks_save(): void
+    {
+        $a = $this->invoice('ΤΠΥ1', 100, 10);
+        $b = $this->invoice('ΤΠΥ2', 100, 2);
+        $this->bootPanel();
+
+        $page = Livewire::test(ReceivePayment::class, ['customerId' => $this->customer->id]);
+        Payment::create(['company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $a->id, 'kind' => 'payment', 'amount' => 100, 'pay_date' => now()]);
+        $page->call('save', 0.0);
+
+        $this->assertSame(1, Payment::count(), 'only the other payment');
+        $this->assertSame(100.0, $this->balance($b));
+    }
+
     public function test_amount_parsing_handles_greek_thousands(): void
     {
         $this->bootPanel();
@@ -251,6 +280,8 @@ class ReceivePaymentCockpitTest extends TestCase
         $this->assertSame(1234.56, $page->parseAmount('1.234,56'));
         $this->assertSame(430.0, $page->parseAmount('430.00'));
         $this->assertSame(1.5, $page->parseAmount('1.5'));
+        $this->assertSame(1234.56, $page->parseAmount('1,234.56'));
+        $this->assertSame(0.5, $page->parseAmount('0.500'));
         $this->assertNull($page->parseAmount('abc'));
     }
 
@@ -292,6 +323,15 @@ class ReceivePaymentCockpitTest extends TestCase
 
         $page = Livewire::test(ReceivePayment::class)->assertSee('αναζήτησε για τους υπόλοιπους');
         $this->assertCount(40, $page->instance()->customerRows());
+    }
+
+    public function test_garbage_customer_param_is_ignored(): void
+    {
+        $this->bootPanel();
+
+        Livewire::test(ReceivePayment::class, ['customerId' => 'abc'])
+            ->assertOk()
+            ->assertSet('customerId', null);
     }
 
     public function test_page_requires_create_permission(): void
