@@ -309,6 +309,15 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 
 ---
 
+## 🐘 PHP 8.5 (σε 2ο χρόνο — owner 2026-11-17)
+
+- **Ανέβασμα σε PHP 8.5** σε devbox (alma10) + prod (rigel: myipgr, nexon — 2 production ekdosi). Μέχρι τότε το
+  `composer.json` έχει `config.platform.php = 8.4.27`, ώστε composer/dependabot να μη διαλέγουν πακέτα που θέλουν 8.5
+  (π.χ. `endroid/qr-code` 6.2.0 — έσπασε το CI στο #737). **Μετά το upgrade:** σήκωσε/αφαίρεσε
+  το `platform.php`, `composer update`, CI σε 8.5.
+
+---
+
 ## 🧭 Guardrails — decided, don't re-open without a NEW reason
 
 **Scope / product**
