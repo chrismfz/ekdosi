@@ -11,12 +11,12 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    # Both PHP lines we run in production: myipgr = ea-php84, nexon = ea-php85
-    # (rigel, 2026-11-17). Drop 8.4 once myipgr moves to 8.5 (docs/BACKLOG.md «PHP 8.5»).
+    # Production (rigel: myipgr + nexon) and the devbox run PHP 8.5 (since 2026-11-17).
+    # Add the next line here (e.g. '8.6') BEFORE moving any prod to it.
     strategy:
       fail-fast: false
       matrix:
-        php: [ '8.4', '8.5' ]
+        php: [ '8.5' ]
 
     steps:
     - uses: actions/checkout@v7
@@ -60,12 +60,12 @@ jobs:
 
     runs-on: ubuntu-latest
 
-    # Both PHP lines we run in production: myipgr = ea-php84, nexon = ea-php85
-    # (rigel, 2026-11-17). Drop 8.4 once myipgr moves to 8.5 (docs/BACKLOG.md «PHP 8.5»).
+    # Production (rigel: myipgr + nexon) and the devbox run PHP 8.5 (since 2026-11-17).
+    # Add the next line here (e.g. '8.6') BEFORE moving any prod to it.
     strategy:
       fail-fast: false
       matrix:
-        php: [ '8.4', '8.5' ]
+        php: [ '8.5' ]
 
     services:
       mariadb:

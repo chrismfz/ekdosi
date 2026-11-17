@@ -43,7 +43,7 @@ cutover.
   a common issue flow. Estonian PEPPOL is a stub until their e-invoicing deadline forces it.
 
 ## Stack (locked)
-- **PHP 8.4+**, **Laravel 13**, **MariaDB 11.x** (`utf8mb4_unicode_ci`).
+- **PHP 8.5+**, **Laravel 13**, **MariaDB 11.x** (`utf8mb4_unicode_ci`).
 - **FilamentPHP 5** as admin panel AND tenancy driver (Company = tenant; no separate
   multi-tenancy package).
 - **myDATA**: `firebed/aade-mydata`.

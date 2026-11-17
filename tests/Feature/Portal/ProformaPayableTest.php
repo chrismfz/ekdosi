@@ -86,6 +86,8 @@ class ProformaPayableTest extends TestCase
         ]);
     }
 
+    private int $draftSeq = 1000;
+
     /** A draft worth €100, offered or not. */
     private function draft(bool $offered, float $gross = 100.0): Invoice
     {
@@ -93,7 +95,9 @@ class ProformaPayableTest extends TestCase
             'company_id' => $this->tenant->id,
             'invoice_type_id' => $this->type->id,
             'customer_id' => $this->customer->id,
-            'invcode' => 'ΠΡΟΣ-ΤΠΥ-'.random_int(1000, 9999),
+            // A counter, not random_int(): two random codes in one test can collide on
+            // the unique (company_id, invcode) — a CI flake seen on PR #745.
+            'invcode' => 'ΠΡΟΣ-ΤΠΥ-'.(++$this->draftSeq),
             'issued_at' => now(),
             'payment_method_id' => $this->credit->id,
         ]);

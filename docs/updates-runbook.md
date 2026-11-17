@@ -22,7 +22,7 @@ chmod +x deploy/update.sh deploy/rollback.sh
 If `php`/`composer` aren't on the default PATH for the deploy user, export them:
 
 ```bash
-export PHP=/usr/bin/php8.4
+export PHP=/usr/bin/php8.5
 export COMPOSER=/usr/local/bin/composer
 ```
 
