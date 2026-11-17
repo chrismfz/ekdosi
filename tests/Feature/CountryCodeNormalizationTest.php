@@ -159,7 +159,6 @@ class CountryCodeNormalizationTest extends TestCase
             'tests/Fixtures/migrations/2026_09_08_000001_add_country_code_to_customers_and_suppliers.php'
         );
         $method = new ReflectionMethod($migration, 'backfill');
-        $method->setAccessible(true);
         $method->invoke($migration, 'customers');
 
         $this->assertSame('IT', $legacy->fresh()->country_code);

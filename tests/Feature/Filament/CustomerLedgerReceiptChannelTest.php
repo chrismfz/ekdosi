@@ -50,7 +50,6 @@ class CustomerLedgerReceiptChannelTest extends TestCase
         $page = new CustomerLedger;
         $page->record = $this->customer;
         $m = new ReflectionMethod($page, 'receiptChannelInfo');
-        $m->setAccessible(true);
 
         return $m->invoke($page, $paymentIds);
     }

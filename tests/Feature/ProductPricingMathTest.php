@@ -138,7 +138,6 @@ class ProductPricingMathTest extends TestCase
         // historical markup is (sell - buy) / buy * 100 = 25, NOT 80.
         $page = new \App\Filament\Resources\Products\Pages\EditProduct();
         $reflector = new \ReflectionMethod($page, 'mutateFormDataBeforeFill');
-        $reflector->setAccessible(true);
         $hydrated = $reflector->invoke($page, $product->fresh()->toArray());
 
         $this->assertSame(25.0, $hydrated['markup_display']);

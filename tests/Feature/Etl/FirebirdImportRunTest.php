@@ -372,7 +372,6 @@ class FirebirdImportRunTest extends TestCase
 
         $job = new RunFirebirdImport($run->id, 'pw');
         $reflection = new \ReflectionMethod($job, 'failRun');
-        $reflection->setAccessible(true);
         $reflection->invoke($job, $run, 'gbak', $huge);
 
         $run->refresh();

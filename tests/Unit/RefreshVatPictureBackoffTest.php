@@ -15,7 +15,6 @@ class RefreshVatPictureBackoffTest extends TestCase
     private function backoff(string $message, int $attempt): int
     {
         $m = new ReflectionMethod(RefreshVatPicture::class, 'backoffSeconds');
-        $m->setAccessible(true);
 
         return $m->invoke(new RefreshVatPicture, $message, $attempt);
     }

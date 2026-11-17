@@ -20,7 +20,6 @@ class RemoteBackupDestinationTest extends TestCase
     private function diskConfig(object $driver, array $input): array
     {
         $m = new ReflectionMethod($driver, 'diskConfig');
-        $m->setAccessible(true);
 
         return $m->invoke($driver, $input);
     }

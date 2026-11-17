@@ -118,7 +118,6 @@ class CompanyWhmcsTypePaymentTermTest extends TestCase
         ]);
 
         $m = new \ReflectionMethod(CompanyForm::class, 'whmcsDefaultTypeOptions');
-        $m->setAccessible(true);
         $keys = array_keys($m->invoke(null, $this->company));
 
         $this->assertContains($this->cashType->id, $keys, 'null mydata_type stays selectable');

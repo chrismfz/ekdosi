@@ -52,7 +52,6 @@ class VatRateIsValidTest extends TestCase
         $document = (new \ReflectionClass(AadeInvoiceDocument::class))
             ->newInstanceWithoutConstructor();
         $m = new \ReflectionMethod($document, 'vatCategoryFor');
-        $m->setAccessible(true);
 
         foreach (Codes::FILEABLE_VAT_RATES as $rate) {
             $cat = $m->invoke($document, $rate);
