@@ -6,6 +6,7 @@ use App\Filament\RelationManagers\ActivityLogRelationManager;
 use App\Filament\Resources\Payments\Pages\CreatePayment;
 use App\Filament\Resources\Payments\Pages\EditPayment;
 use App\Filament\Resources\Payments\Pages\ListPayments;
+use App\Filament\Resources\Payments\Pages\ReceivePayment;
 use App\Filament\Resources\Payments\Schemas\PaymentForm;
 use App\Filament\Resources\Payments\Tables\PaymentsTable;
 use App\Models\Payment;
@@ -61,6 +62,7 @@ class PaymentResource extends Resource
         return [
             'index' => ListPayments::route('/'),
             'create' => CreatePayment::route('/create'),
+            'receive' => ReceivePayment::route('/receive'),
             'edit' => EditPayment::route('/{record}/edit'),
         ];
     }

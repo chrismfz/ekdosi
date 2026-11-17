@@ -781,6 +781,14 @@ class CustomerLedger extends Page implements HasTable
             // compact (was ~9 top-level actions → the row overflowed off-screen
             // on narrow viewports). Πιο συχνό πρώτο: Είσπραξη.
             ActionGroup::make([
+                // The full-screen receipt cockpit, pre-selected on this customer.
+                Action::make('receipt_cockpit')
+                    ->label('Νέα είσπραξη (οθόνη)')
+                    ->icon('heroicon-o-banknotes')
+                    ->color('success')
+                    ->visible(fn (): bool => PaymentResource::canCreate())
+                    ->url(fn (): string => PaymentResource::getUrl('receive', ['customer' => $this->record->getKey()])),
+
                 // One «έμβασμα/είσπραξη» auto-allocated FIFO across the open invoices
                 // (oldest first), remainder → on-account credit. Mirrors Epsilon.
                 Action::make('record_receipt')

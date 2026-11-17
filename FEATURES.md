@@ -530,6 +530,9 @@ Design + gates: `docs/archive/leads-mini-crm.md`. **Χτισμένο (L0):**
 - **`InvoiceBalance` = μοναδική πηγή** για paid/credited/balance/status (cross-surface
   consistency test).
 - **Cockpit ανά τιμολόγιο** (πλήρης/μερική εξόφληση, σήμανση ανεξόφλητου).
+- **«Νέα είσπραξη» (οθόνη είσπραξης)** (`ReceivePayment`): οφειλέτες πρώτοι → υπόλοιπο/πίστωση → ανοιχτά παραστατικά
+  με αυτόματη FIFO πρόταση, επιλογή/αλλαγή ανά γραμμή, περίσσευμα → έναντι, «Συμψηφισμός πίστωσης»
+  (`PaymentAllocator::allocateSelected` / `openInvoiceRows`). `?customer=ID` για προεπιλογή (link από την Καρτέλα).
 - **Έμβασμα FIFO** + **on-account πίστωση/προκαταβολή** + **χρήση πίστωσης** +
   **χειροκίνητη κατανομή** + **επιστροφές (refunds)**.
 - **Import cleanup — αντιστοίχιση εισαγόμενων «έναντι» σε ανοιχτά τιμολόγια**

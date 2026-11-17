@@ -275,6 +275,144 @@ class PaymentAllocator
     }
 
     /**
+     * The customer's OPEN invoices as the receipt cockpit shows them: the SAME
+     * target set + balance read as {@see allocate} / {@see absorbableTotal}
+     * (live, issued, non-credit-note, oldest first, balance > 0.005), so what the
+     * screen offers is exactly what {@see allocateSelected} will accept.
+     * (Deliberately NOT CustomerLedger::openInvoiceRows — that one feeds the
+     * credit-term-only pickers from the cache columns; this must mirror the write.)
+     *
+     * @return array<int, array{id: int, invcode: string, issued_at: ?string, due_at: ?string, balance: float}> keyed by invoice id, FIFO order
+     */
+    public function openInvoiceRows(Customer $customer): array
+    {
+        $rows = [];
+        foreach ($this->openInvoicesQuery($customer)->with('paymentMethod')->get() as $invoice) {
+            $balance = round((float) $invoice->balanceData()->balance, 2);
+            if ($balance > 0.005) {
+                $rows[(int) $invoice->id] = [
+                    'id' => (int) $invoice->id,
+                    'invcode' => (string) $invoice->invcode,
+                    'issued_at' => $invoice->issued_at?->toDateString(),
+                    'due_at' => $invoice->dueDate()?->toDateString(),
+                    'balance' => $balance,
+                ];
+            }
+        }
+
+        return $rows;
+    }
+
+    /**
+     * Receipt cockpit («Νέα είσπραξη»): ONE received amount, split the way the
+     * operator chose — an amount per selected invoice — with whatever is left of
+     * $total parked as on-account credit. Each line is capped at its invoice's
+     * LOCKED current balance (an invoice paid meanwhile by another receipt can't
+     * be overpaid — the excess falls to on-account instead), exactly like
+     * {@see allocate}/{@see allocateToInvoice}. Targets are locked one by one by
+     * PRIMARY KEY in FIFO (issued_at, id) order → same lock order as allocate(),
+     * no deadlock between concurrent receipts. Σ lines may not exceed $total.
+     *
+     * @param  array<int, array{invoice_id: int, amount: float}>  $lines
+     */
+    public function allocateSelected(
+        Customer $customer,
+        float $total,
+        array $lines,
+        Carbon $date,
+        ?int $paymentMethodId = null,
+        ?string $reference = null,
+        ?string $notes = null,
+        ?string $transactionId = null,
+        ?int $bankAccountId = null,
+    ): PaymentAllocationResult {
+        $total = round($total, 2);
+        if ($total <= 0) {
+            throw new InvalidArgumentException('Το ποσό της είσπραξης πρέπει να είναι θετικό.');
+        }
+
+        $wanted = [];
+        foreach ($lines as $line) {
+            $invoiceId = (int) ($line['invoice_id'] ?? 0);
+            $amount = round((float) ($line['amount'] ?? 0), 2);
+            if ($invoiceId <= 0 || $amount <= 0) {
+                continue;
+            }
+            $wanted[$invoiceId] = round(($wanted[$invoiceId] ?? 0) + $amount, 2);
+        }
+        if (round(array_sum($wanted), 2) > $total + 0.005) {
+            throw new InvalidArgumentException('Η κατανομή στα παραστατικά ξεπερνά το ποσό της είσπραξης.');
+        }
+
+        $ref = $reference ?: 'ΕΙΣ-'.now()->format('YmdHis').'-'.substr(uniqid(), -4);
+
+        return DB::transaction(function () use ($customer, $total, $wanted, $date, $paymentMethodId, $ref, $notes, $transactionId, $bankAccountId) {
+            $allocations = [];
+            $remaining = $total;
+
+            if ($wanted !== []) {
+                // FIFO order over ONLY the chosen ids; an id outside the eligible
+                // set (another customer's, a draft, cancelled, a ΠΙΣ) is rejected
+                // outright — never silently re-routed to on-account.
+                $targets = $this->openInvoicesQuery($customer)->whereKey(array_keys($wanted))->pluck('id')->all();
+                if (count($targets) !== count($wanted)) {
+                    $bad = array_diff(array_keys($wanted), array_map('intval', $targets));
+                    throw new InvalidArgumentException('Μη έγκυρο τιμολόγιο για είσπραξη (#'.implode(', #', $bad).').');
+                }
+
+                foreach ($targets as $id) {
+                    $invoice = $this->openInvoicesQuery($customer)->whereKey($id)->lockForUpdate()->first();
+                    if ($invoice === null) {
+                        continue; // left the eligible set between the read and the lock → on-account
+                    }
+                    $balance = round((float) app(InvoiceBalance::class)->for($invoice, true)->balance, 2);
+                    $pay = round(min($wanted[(int) $id], $balance, $remaining), 2);
+                    if ($pay <= 0.005) {
+                        continue;
+                    }
+
+                    Payment::create([
+                        'company_id' => $customer->company_id,
+                        'customer_id' => $customer->id,
+                        'invoice_id' => $invoice->id,
+                        'kind' => 'payment',
+                        'payment_method_id' => $paymentMethodId,
+                        'bank_account_id' => $bankAccountId,
+                        'pay_date' => $date->toDateString(),
+                        'amount' => $pay,
+                        'reference' => $ref,
+                        'transaction_id' => $transactionId,
+                        'notes' => $notes,
+                    ]);
+
+                    $allocations[] = ['invcode' => (string) $invoice->invcode, 'amount' => $pay];
+                    $remaining = round($remaining - $pay, 2);
+                }
+            }
+
+            $onAccount = 0.0;
+            if ($remaining > 0.005) {
+                Payment::create([
+                    'company_id' => $customer->company_id,
+                    'customer_id' => $customer->id,
+                    'invoice_id' => null,
+                    'kind' => 'payment',
+                    'payment_method_id' => $paymentMethodId,
+                    'bank_account_id' => $bankAccountId,
+                    'pay_date' => $date->toDateString(),
+                    'amount' => $remaining,
+                    'reference' => $ref,
+                    'transaction_id' => $transactionId,
+                    'notes' => trim(($notes ? $notes.' · ' : '').'Πίστωση / προκαταβολή (on-account)'),
+                ]);
+                $onAccount = $remaining;
+            }
+
+            return new PaymentAllocationResult($ref, $total, $allocations, $onAccount);
+        });
+    }
+
+    /**
      * #2 — MANUAL allocation: the operator says exactly how much goes on each
      * invoice (vs the FIFO {@see allocate}). One Payment row per line, all
      * sharing a reference so the Καρτέλα groups them. Each invoice must belong
