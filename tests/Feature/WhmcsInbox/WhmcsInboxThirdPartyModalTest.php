@@ -64,7 +64,6 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
         ]);
 
         $m = new \ReflectionMethod(WhmcsInboxTable::class, 'routedBeneficiaries');
-        $m->setAccessible(true);
         /** @var list<array{name:string,afm:string,lines:int,is_receipt:bool}> $out */
         $out = $m->invoke(null, $row);
 
@@ -78,7 +77,6 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
     public function test_routed_beneficiaries_empty_when_no_resolution(): void
     {
         $m = new \ReflectionMethod(WhmcsInboxTable::class, 'routedBeneficiaries');
-        $m->setAccessible(true);
 
         $this->assertSame([], $m->invoke(null, $this->pending(null)));
         $this->assertSame([], $m->invoke(null, $this->pending(['lines' => []])));
@@ -101,7 +99,6 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
         ]);
 
         $m = new \ReflectionMethod(WhmcsInboxTable::class, 'routingRows');
-        $m->setAccessible(true);
         $rows = $m->invoke(null, $row);
 
         $this->assertCount(2, $rows);
@@ -159,7 +156,6 @@ class WhmcsInboxThirdPartyModalTest extends TestCase
         ]);
 
         $m = new \ReflectionMethod(WhmcsInboxTable::class, 'splitTypeOptions');
-        $m->setAccessible(true);
         $keys = array_keys($m->invoke(null));
 
         $this->assertContains($monetary->id, $keys);

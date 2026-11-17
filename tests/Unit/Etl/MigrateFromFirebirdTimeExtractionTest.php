@@ -22,7 +22,6 @@ class MigrateFromFirebirdTimeExtractionTest extends TestCase
     {
         $cmd = new MigrateFromFirebird();
         $m = new ReflectionMethod($cmd, $method);
-        $m->setAccessible(true);
         return $m->invokeArgs($cmd, $args);
     }
 

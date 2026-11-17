@@ -289,7 +289,6 @@ class WhmcsInvoiceIngestorTest extends TestCase
         // mirror what Laravel produces in production.
         $ingestor = $this->ingestor();
         $ref = new \ReflectionMethod($ingestor, 'isUniqueConstraintViolation');
-        $ref->setAccessible(true);
 
         $makeQE = function (string $message, string $sqlState): QueryException {
             // PDOException's $code is set to a SQLSTATE string in
@@ -298,7 +297,6 @@ class WhmcsInvoiceIngestorTest extends TestCase
             // Exception::$code field directly to mirror the real shape.
             $pdo = new \PDOException($message);
             $codeProp = new \ReflectionProperty(\Exception::class, 'code');
-            $codeProp->setAccessible(true);
             $codeProp->setValue($pdo, $sqlState);
 
             return new QueryException('mariadb', '', [], $pdo);

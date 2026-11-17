@@ -54,11 +54,9 @@ class CreditNotePaymentGuardTest extends TestCase
     {
         $rm = new InvoicePaymentsRelationManager;
         $owner = new ReflectionProperty($rm, 'ownerRecord');
-        $owner->setAccessible(true);
         $owner->setValue($rm, $invoice);
 
         $method = new ReflectionMethod($rm, 'canRecordPayment');
-        $method->setAccessible(true);
 
         return (bool) $method->invoke($rm);
     }

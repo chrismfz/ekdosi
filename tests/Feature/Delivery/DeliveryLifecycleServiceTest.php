@@ -422,7 +422,6 @@ class DeliveryLifecycleServiceTest extends TestCase
         // refresh on a return movement crashes. (Method uses no $this state, so a
         // constructor-less instance is enough to exercise the match.)
         $method = new \ReflectionMethod(DeliveryLifecycleService::class, 'deliveryStateFromAade');
-        $method->setAccessible(true);
         $service = (new \ReflectionClass(DeliveryLifecycleService::class))->newInstanceWithoutConstructor();
 
         foreach (DeliveryStatus::cases() as $case) {

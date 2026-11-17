@@ -57,7 +57,6 @@ class RecipientCountryBackfillTest extends TestCase
         );
 
         $method = new ReflectionMethod($migration, 'backfillFromCustomers');
-        $method->setAccessible(true);
         $method->invoke($migration);
     }
 

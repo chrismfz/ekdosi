@@ -126,7 +126,6 @@ class AgedReceivablesTest extends TestCase
 
         $page = new AgedReceivablesPage;
         $ref = new \ReflectionMethod($page, 'exportCsv');
-        $ref->setAccessible(true);
         /** @var \Symfony\Component\HttpFoundation\StreamedResponse $resp */
         $resp = $ref->invoke($page);
         ob_start();
