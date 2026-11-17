@@ -309,21 +309,6 @@ Pruned 2026-09-22 (2280→212 lines): done/minor items removed. Σχόλια κ�
 
 ---
 
-## 🐘 PHP 8.5 (σε 2ο χρόνο — owner 2026-11-17)
-
-**Κατάσταση (2026-11-17):** το **nexon τρέχει ήδη 8.5** στο rigel (vhost + cron + PATH σε ea-php85)· το **myipgr** είναι ακόμα
-ea-php84. Όλο το suite περνά σε PHP 8.5.12 (devbox, remi `php85` δίπλα στο 8.4)· τα test-side `setAccessible` (deprecated
-8.5) αφαιρέθηκαν και το CI τρέχει **8.4 + 8.5** (matrix). Το `composer.json` έχει `config.platform.php = 8.4.27`, ώστε
-composer/dependabot να μη διαλέγουν πακέτα μόνο-8.5 (π.χ. `endroid/qr-code` 6.2.0 — έσπασε το CI στο #737) όσο υπάρχει prod σε 8.4.
-
-**Υπόλοιπα βήματα:**
-1. **Devbox (alma10) σε 8.5:** `dnf module switch-to php:remi-8.5` (CLI + FPM) + `php-pdo-firebird` (ETL).
-2. **myipgr σε 8.5 (owner, rigel):** MultiPHP `invoicer.myip.gr` → ea-php85 · crontab `ea-php84` → `ea-php85` (schedule +
-   queue) · `.bash_profile` PATH → ea-php85 · `ops:health`.
-3. **Μετά:** αφαίρεσε το `platform.php` → `composer update` (qr-code 6.2, sanctum 4.5, tinker 3.2) · CI μόνο 8.5.
-
----
-
 ## 🧭 Guardrails — decided, don't re-open without a NEW reason
 
 **Scope / product**

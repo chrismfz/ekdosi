@@ -15,7 +15,7 @@ what's left → [`docs/BACKLOG.md`](docs/BACKLOG.md) · changes → [`CHANGELOG.
 
 ## Stack
 
-- **PHP 8.4+**, **Laravel 13**, **MariaDB 11.x** (`utf8mb4_unicode_ci`)
+- **PHP 8.5+**, **Laravel 13**, **MariaDB 11.x** (`utf8mb4_unicode_ci`)
 - **FilamentPHP 5** — admin panel **and** tenancy driver (Company = tenant)
 - **myDATA**: `firebed/aade-mydata` (wrapped in `App\Services\MyDataSubmitter`)
 - **Roles**: `spatie/laravel-permission` + `bezhanSalleh/filament-shield` —
