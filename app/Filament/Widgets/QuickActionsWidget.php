@@ -55,7 +55,7 @@ class QuickActionsWidget extends Widget
 
         // Δημιουργία — gated on canCreate().
         $add(InvoiceResource::canCreate(), 'Νέο Παραστατικό', InvoiceResource::getUrl('create'), 'heroicon-o-document-plus', 'primary');
-        $add(PaymentResource::canCreate(), 'Νέα Είσπραξη', PaymentResource::getUrl('create'), 'heroicon-o-banknotes', 'primary');
+        $add(PaymentResource::canCreate(), 'Νέα Είσπραξη', PaymentResource::getUrl('receive'), 'heroicon-o-banknotes', 'primary');
         $add(QuoteResource::canCreate(), 'Νέα Προσφορά', QuoteResource::getUrl('create'), 'heroicon-o-document-text', 'primary');
         $add(CustomerResource::canCreate(), 'Νέος Πελάτης', CustomerResource::getUrl('create'), 'heroicon-o-user-plus', 'primary');
 
