@@ -4,6 +4,7 @@ namespace App\Console\Commands;
 
 use App\Models\Company;
 use App\Services\MyDataSubmitter;
+use Firebed\AadeMyData\Exceptions\ErrorResponseException;
 use Illuminate\Console\Command;
 use Throwable;
 
@@ -105,6 +106,10 @@ class MyDataSetCredentials extends Command
         $this->line('Testing connection to AADE…');
         try {
             $ok = (new MyDataSubmitter($tenant->fresh()))->testConnection();
+        } catch (ErrorResponseException $e) {
+            $this->error('AADE answered with an error: '.$e->getMessage());
+
+            return self::FAILURE;
         } catch (Throwable $e) {
             $this->error('Connection test could not complete (transport/parse): '.$e->getMessage());
 

@@ -159,6 +159,37 @@ class MyDataConfigAuditTest extends TestCase
         $this->assertFalse($result->isClean());
     }
 
+    public function test_live_provider_tenant_with_mydata_off_is_not_flagged_as_not_filing(): void
+    {
+        // Prod 2026-10-31: a gr-provider tenant (mydata_mode off BY DESIGN) was told
+        // «όχι gr-mydata — δεν θα γίνει υποβολή» + «myDATA Off» while it was filing
+        // fine through the provider. Only the read creds matter on this channel.
+        $c = $this->tenant([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'production',
+            'mydata_mode' => 'off',
+            'mydata_aade_id_production' => 'READUSER', 'mydata_subscription_key_production' => 'READKEY',
+        ]);
+
+        $this->assertSame([], app(MyDataConfigAudit::class)->auditTenant($c)->messages());
+    }
+
+    public function test_provider_tenant_warns_when_provider_off_or_no_read_credentials(): void
+    {
+        $c = $this->tenant([
+            'einvoice_provider' => 'gr-provider', 'einvoice_provider_mode' => 'off', 'mydata_mode' => 'off',
+            'mydata_aade_id_sandbox' => null, 'mydata_subscription_key_sandbox' => null,
+        ]);
+
+        $messages = app(MyDataConfigAudit::class)->auditTenant($c)->messages();
+
+        $this->assertCount(2, $messages);
+        $this->assertStringContainsString('μέσω παρόχου είναι κλειστή', $messages[0]);
+        $this->assertStringContainsString('διαπιστευτήρια ανάγνωσης myDATA', $messages[1]);
+        foreach ($messages as $m) {
+            $this->assertStringNotContainsString('όχι gr-mydata', $m);
+        }
+    }
+
     public function test_unmapped_payment_method_warns_on_the_readiness_row(): void
     {
         // MYD-4: a payment method with no §8.12 type would be filed as cash — warn.

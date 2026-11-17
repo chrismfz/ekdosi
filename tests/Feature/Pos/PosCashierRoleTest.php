@@ -21,6 +21,7 @@ use App\Services\Products\ProductMediaService;
 use App\Services\TenantRoleProvisioner;
 use App\Support\Hr\ErganiStaff;
 use Filament\Notifications\Notification;
+use Filament\Notifications\NotificationMailbox;
 use Illuminate\Support\Facades\Storage;
 use Livewire\Livewire;
 use ReflectionMethod;
@@ -120,7 +121,7 @@ class PosCashierRoleTest extends HrTestCase
         $method->invoke($page->instance(), Notification::make()->title('Δεν εκδόθηκε')
             ->body((new PosSaleNotIssued($draft->id, new \RuntimeException('AADE down')))->getMessage()), $draft->id);
 
-        $sent = collect(session()->get('filament.notifications', []))->last();
+        $sent = $this->lastNotification();
         $this->assertSame([], $sent['actions'] ?? []);
         $this->assertStringContainsString('Ενημέρωσε τον υπεύθυνο για το πρόχειρο #'.$draft->id, $sent['body']);
     }
@@ -133,7 +134,7 @@ class PosCashierRoleTest extends HrTestCase
         $page = Livewire::test(PointOfSale::class);
         (new ReflectionMethod(PointOfSale::class, 'draftNotice'))->invoke($page->instance(), Notification::make()->title('Δεν εκδόθηκε')->body('x'), $draft->id);
 
-        $sent = collect(session()->get('filament.notifications', []))->last();
+        $sent = $this->lastNotification();
         $this->assertStringContainsString('/invoices/'.$draft->id, $sent['actions'][0]['url'] ?? '');
     }
 
@@ -156,5 +157,14 @@ class PosCashierRoleTest extends HrTestCase
         $this->actAs($this->makeUser(TenantRoleProvisioner::ROLE_CASHIER));
 
         $this->get('/admin/'.$this->company->slug.'/invoices')->assertRedirect(LeaveRequestResource::getUrl('index', tenant: $this->company));
+    }
+
+    /** Filament ≥ 5.11 keeps notifications in a cache-backed mailbox, not the session. */
+    private function lastNotification(): array
+    {
+        $mailbox = app(NotificationMailbox::class);
+        $mailbox->flush();
+
+        return collect($mailbox->pull())->last() ?? [];
     }
 }

@@ -1,0 +1,212 @@
+<?php
+
+namespace Tests\Feature\Whmcs;
+
+use App\Models\Company;
+use App\Models\Customer;
+use App\Models\Invoice;
+use App\Models\InvoiceType;
+use App\Models\PaymentMethod;
+use App\Models\PendingWhmcsInvoice;
+use App\Models\VatCategory;
+use App\Services\Whmcs\WhmcsInvoiceIngestor;
+use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
+use App\Support\Billing\MycsPayload;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use LogicException;
+use Tests\TestCase;
+
+/**
+ * A WHMCS invoice worth 0 (a free .gr domain transfer) has no transaction to
+ * document: the ingestor closes it as «resolved» instead of queueing it for a
+ * human (45 such rows had been archived by hand) — FINAL, like every inbox decision
+ * (a later WHMCS/MyCS edit doesn't reopen it) — and the filer refuses it before any
+ * draft exists (auto-issue used to
+ * leave an orphan all-zero draft — ΠΡΟΣ-ΤΠΥ-7249).
+ */
+class WhmcsZeroValueInboxTest extends TestCase
+{
+    use RefreshDatabase;
+
+    private Company $tenant;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+        $this->tenant = Company::create([
+            'name' => 'Zero', 'slug' => 'zero-'.uniqid(), 'country_code' => 'GR',
+            'einvoice_provider' => 'gr-mydata', 'mydata_mode' => 'off',
+        ]);
+    }
+
+    /** @return array<string, mixed> the real shape of WHMCS #32615 */
+    private function freeTransfer(int $id = 32615, string $amount = '0.00'): array
+    {
+        $tax = $amount === '0.00' ? '0.00' : number_format((float) $amount * 0.24, 2, '.', '');
+
+        return [
+            'invoiceid' => $id, 'userid' => 1, 'status' => 'Paid', 'date' => '2026-10-27',
+            'subtotal' => $amount, 'tax' => $tax, 'tax2' => '0.00', 'taxrate' => '24.000',
+            'total' => number_format((float) $amount + (float) $tax, 2, '.', ''), 'credit' => '0.00', 'taxtype' => 'Exclusive',
+            'items' => ['item' => [[
+                'id' => 1, 'type' => 'DomainTransfer', 'description' => 'Μεταφορά Domain - example.gr - 2 Έτος/η',
+                'amount' => $amount, 'taxed' => 1,
+            ]]],
+        ];
+    }
+
+    private function ingest(array $payload): PendingWhmcsInvoice
+    {
+        return app(WhmcsInvoiceIngestor::class)->ingest($this->tenant, $payload)->row->fresh();
+    }
+
+    public function test_zero_value_detection(): void
+    {
+        $this->assertTrue(PendingWhmcsInvoice::isZeroValuePayload($this->freeTransfer()));
+        // Paid from credit: total 0 but worth 20,46 → NOT zero.
+        $this->assertFalse(PendingWhmcsInvoice::isZeroValuePayload(array_merge($this->freeTransfer(9, '16.50'), ['total' => '0.00', 'credit' => '20.46'])));
+        // A free line next to a charged one → NOT zero (the line is skipped at filing, #661).
+        $mixed = $this->freeTransfer();
+        $mixed['items']['item'][] = ['description' => 'Hosting', 'amount' => '10.00', 'taxed' => 1];
+        $mixed['subtotal'] = '10.00';
+        $this->assertFalse(PendingWhmcsInvoice::isZeroValuePayload($mixed));
+        // No lines at all → a human's call.
+        $this->assertFalse(PendingWhmcsInvoice::isZeroValuePayload(['invoiceid' => 1, 'total' => '0.00']));
+    }
+
+    public function test_a_free_transfer_is_closed_as_resolved_not_queued(): void
+    {
+        $row = $this->ingest($this->freeTransfer());
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
+        $this->assertStringContainsString('Μηδενικής αξίας', (string) $row->notes);
+    }
+
+    public function test_a_credit_paid_invoice_is_still_queued(): void
+    {
+        $row = $this->ingest(array_merge($this->freeTransfer(32467, '16.50'), ['total' => '0.00', 'credit' => '20.46']));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
+    }
+
+    public function test_a_waiting_row_that_turns_zero_is_closed(): void
+    {
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $this->ingest($this->freeTransfer(500, '19.00'))->status);
+
+        $row = $this->ingest($this->freeTransfer(500));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
+    }
+
+    public function test_an_auto_closed_row_is_final_even_if_whmcs_later_gives_it_a_value(): void
+    {
+        // The transfer WAS free when it happened — a later bulk re-price in WHMCS must
+        // not resurface months-old rows. Same rule as any decided row: frozen.
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->freeTransfer(600))->status);
+
+        $row = $this->ingest($this->freeTransfer(600, '19.00'));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
+        $this->assertSame('0.00', $row->payload['subtotal'], 'the decision-time payload stays');
+    }
+
+    public function test_a_human_decision_is_never_reopened(): void
+    {
+        $row = $this->ingest($this->freeTransfer(700, '19.00'));
+        $row->update(['status' => PendingWhmcsInvoice::STATUS_REJECTED, 'rejected_reason' => 'χειροκίνητα']);
+
+        $again = $this->ingest($this->freeTransfer(700, '25.00'));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_REJECTED, $again->status);
+        $this->assertSame('19.00', $again->payload['subtotal'], 'decided rows stay frozen');
+    }
+
+    public function test_the_filer_refuses_a_zero_value_invoice_before_any_draft_exists(): void
+    {
+        VatCategory::create(['company_id' => $this->tenant->id, 'name' => '24%', 'rate' => 24, 'is_default' => true]);
+        $pm = PaymentMethod::create(['company_id' => $this->tenant->id, 'name' => 'Bank', 'due_days' => 0, 'is_active' => true]);
+        $type = InvoiceType::create(['company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1, 'payment_method_id' => $pm->id]);
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'C', 'afm' => '111111111']);
+        $pending = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 32615, 'payload' => $this->freeTransfer(),
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED, 'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'customer_id' => $customer->id,
+        ]);
+
+        try {
+            app(WhmcsInvoiceFiler::class)->file($this->tenant, $pending, $customer, $type, unattended: true);
+            $this->fail('a zero-value WHMCS invoice must not be filed');
+        } catch (LogicException $e) {
+            $this->assertStringContainsString('μηδενικής αξίας', $e->getMessage());
+        }
+
+        $this->assertSame(0, Invoice::count(), 'no orphan draft');
+        $this->assertSame(1, $type->fresh()->invcount, 'no ΑΑ consumed');
+    }
+
+    public function test_a_later_payload_from_the_other_system_does_not_reopen_it_either(): void
+    {
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($this->freeTransfer(810))->status);
+
+        // The same invoice re-sent by MyCS after the cut-over, now with a value.
+        $row = $this->ingest($this->freeTransfer(810, '19.00') + ['mycs' => ['id' => 810]]);
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_RESOLVED, $row->status);
+        $this->assertSame('0.00', $row->payload['subtotal']);
+    }
+
+    public function test_create_draft_refuses_a_zero_value_invoice(): void
+    {
+        VatCategory::create(['company_id' => $this->tenant->id, 'name' => '24%', 'rate' => 24, 'is_default' => true]);
+        $pm = PaymentMethod::create(['company_id' => $this->tenant->id, 'name' => 'Bank', 'due_days' => 0, 'is_active' => true]);
+        $type = InvoiceType::create(['company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1, 'payment_method_id' => $pm->id]);
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'C', 'afm' => '111111111']);
+        $pending = PendingWhmcsInvoice::create([
+            'company_id' => $this->tenant->id, 'whmcs_invoice_id' => 900, 'payload' => $this->freeTransfer(900),
+            'match_reason' => PendingWhmcsInvoice::REASON_LINKED, 'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
+            'customer_id' => $customer->id,
+        ]);
+
+        $this->expectException(LogicException::class);
+        try {
+            app(WhmcsInvoiceFiler::class)->createDraft($this->tenant, $pending, $customer, $type);
+        } finally {
+            $this->assertSame(0, Invoice::count());
+        }
+    }
+
+    public function test_an_unpaid_zero_invoice_stays_for_review(): void
+    {
+        // fetch-unpaid can read it while staff are still filling in the amounts.
+        $row = $this->ingest(array_merge($this->freeTransfer(1000), ['status' => 'Unpaid']));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $row->status);
+    }
+
+    public function test_a_mycs_send_to_ekdosi_zero_invoice_stays_for_review(): void
+    {
+        $payload = $this->freeTransfer(1010) + ['mycs' => ['id' => 1010, 'requested_at' => '2026-10-29 10:00:00', 'requested' => true]];
+        if (! MycsPayload::requested($payload)) {
+            $this->markTestSkipped('MyCS request flag shape differs');
+        }
+
+        $this->assertNotSame(PendingWhmcsInvoice::STATUS_RESOLVED, $this->ingest($payload)->status);
+    }
+
+    public function test_a_waiting_row_with_a_local_invoice_is_not_closed(): void
+    {
+        $row = $this->ingest($this->freeTransfer(1020, '19.00'));
+        // A filing that failed at AADE left its local invoice linked.
+        $type = InvoiceType::create(['company_id' => $this->tenant->id, 'name' => 'ΤΠΥ', 'code' => 'ΤΠΥ', 'invcount' => 1]);
+        $customer = Customer::create(['company_id' => $this->tenant->id, 'name' => 'C']);
+        $invoice = Invoice::create([
+            'company_id' => $this->tenant->id, 'invcode' => 'ΤΠΥ1', 'code' => 1, 'invoice_type_id' => $type->id,
+            'customer_id' => $customer->id, 'issued_at' => now(), 'local_status' => 'active',
+        ]);
+        $row->forceFill(['invoice_id' => $invoice->id])->saveQuietly();
+
+        $again = $this->ingest($this->freeTransfer(1020));
+
+        $this->assertSame(PendingWhmcsInvoice::STATUS_PENDING_REVIEW, $again->status);
+    }
+}

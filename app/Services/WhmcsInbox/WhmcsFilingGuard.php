@@ -40,6 +40,49 @@ final class WhmcsFilingGuard
     private const TOTALS_PER_LINE_TOLERANCE = 0.01;
 
     /**
+     * Refuse a WHMCS invoice whose mapped value is 0 (every line 0 — e.g. a free .gr
+     * domain transfer): there is nothing to file, AADE won't take it, and creating
+     * the invoice first left an orphan all-zero draft. The ingestor already closes
+     * such rows as «resolved»; this is the filing-side backstop.
+     *
+     * @param  array<string, mixed>  $mapped  WhmcsInvoiceMapper::map() output
+     */
+    public static function assertNotZeroValue(array $mapped, PendingWhmcsInvoice $pending): void
+    {
+        // A negative (promo/credit) line nets the value to 0 too — that hold
+        // (assertPayloadFilable, «αρνητικό ποσό») is the more useful message.
+        if (abs((float) ($mapped['totals']['gross_total'] ?? 0.0)) > 0.005
+            || ($mapped['totals']['negative_lines'] ?? []) !== []) {
+            return;
+        }
+
+        throw new LogicException(
+            'Το WHMCS #'.$pending->whmcs_invoice_id.' είναι μηδενικής αξίας (π.χ. δωρεάν μεταφορά .gr '
+            .'domain) — δεν εκδίδεται παραστατικό 0 €. Αρχειοθέτησέ τη γραμμή στα εισερχόμενα αν δεν '
+            .'χρειάζεται (ή διόρθωσε το ποσό στο WHMCS/MyCS).'
+        );
+    }
+
+    /**
+     * Refuse a WHMCS «Add Funds» (wallet top-up) before any draft/ΑΑ exists: a prepayment
+     * is not a sale — its παραστατικό is issued when the credit is used (owner,
+     * 2026-10-30). The ingestor closes a pure top-up and holds a mix; this is the
+     * filing-side backstop. A mix is refused only unattended — the operator's draft is
+     * where the Add Funds line gets removed (`$allowMixed`).
+     */
+    public static function assertNotAddFunds(PendingWhmcsInvoice $pending, bool $allowMixed = false): void
+    {
+        $shape = PendingWhmcsInvoice::addFundsShape(is_array($pending->payload) ? $pending->payload : []);
+        if ($shape === null || ($allowMixed && $shape === PendingWhmcsInvoice::ADD_FUNDS_MIXED)) {
+            return;
+        }
+
+        throw new LogicException('Το WHMCS #'.$pending->whmcs_invoice_id.': '.($shape === PendingWhmcsInvoice::ADD_FUNDS_ONLY
+            ? PendingWhmcsInvoice::ADD_FUNDS_NOTE.' Αρχειοθέτησέ το στα εισερχόμενα.'
+            : PendingWhmcsInvoice::ADD_FUNDS_MIXED_REASON));
+    }
+
+    /**
      * WH-1 + WH-4: refuse non-EUR invoices and negative (promo/credit) lines.
      * Path-independent — safe on a whole invoice or a single split group.
      *

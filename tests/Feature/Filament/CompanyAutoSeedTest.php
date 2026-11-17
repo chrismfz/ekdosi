@@ -75,6 +75,44 @@ class CompanyAutoSeedTest extends TestCase
         $this->assertGreaterThan(0, DB::table('product_categories')->where('company_id', $company->id)->count());
     }
 
+    public function test_creating_a_tenant_seeds_the_new_record_not_the_operators_current_tenant(): void
+    {
+        // Prod regression (2026-10-30): adding a 2nd company from inside MyIP threw
+        // a duplicate '1-ΤΙΜ' — Filament's tenancy `creating` hook re-associated
+        // every seeded row to the panel's CURRENT tenant, overriding the explicit
+        // company_id. The host here is already seeded, exactly like a live tenant.
+        // A real panel request boots tenancy in middleware (IdentifyTenant), which
+        // registers that hook; Livewire::test skips middleware, so boot it here.
+        Filament::setCurrentPanel(Filament::getDefaultPanel());
+        Filament::getCurrentPanel()->bootTenancy();
+
+        $host = Filament::getTenant();
+        app(CompanyContext::class)->actAs($host, fn () => app(MyDataLookupSeeder::class)->seedStandardLookups($host));
+        $hostVat = DB::table('vat_categories')->where('company_id', $host->id)->count();
+        $hostTypes = DB::table('invoice_types')->where('company_id', $host->id)->count();
+
+        $slug = 'gr2-'.uniqid();
+        Livewire::test(CreateCompany::class)
+            ->fillForm([
+                'name' => 'Δεύτερη ΑΕ',
+                'slug' => $slug,
+                'country_code' => 'GR',
+                'send_channel' => 'mydata-off',
+            ])
+            ->call('create')
+            ->assertHasNoFormErrors();
+
+        $company = Company::query()->withoutGlobalScopes()->where('slug', $slug)->firstOrFail();
+
+        $this->assertSame($hostVat, DB::table('vat_categories')->where('company_id', $company->id)->count());
+        $this->assertSame($hostTypes, DB::table('invoice_types')->where('company_id', $company->id)->count());
+        // The operator's tenant is untouched (no duplicate VAT rows leaked into it)…
+        $this->assertSame($hostVat, DB::table('vat_categories')->where('company_id', $host->id)->count());
+        $this->assertSame($hostTypes, DB::table('invoice_types')->where('company_id', $host->id)->count());
+        // …and the panel is still on it afterwards.
+        $this->assertTrue(Filament::getTenant()->is($host));
+    }
+
     public function test_creating_a_non_gr_tenant_installs_no_greek_lookups(): void
     {
         $slug = 'ee-'.uniqid();

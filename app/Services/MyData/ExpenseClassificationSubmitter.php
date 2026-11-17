@@ -2,6 +2,7 @@
 
 namespace App\Services\MyData;
 
+use App\Models\Company;
 use App\Models\Expense;
 use Firebed\AadeMyData\Enums\ExpenseClassificationCategory;
 use Firebed\AadeMyData\Enums\ExpenseClassificationType;
@@ -34,12 +35,12 @@ class ExpenseClassificationSubmitter
 {
     /** @param callable|object|null $mockHandler Guzzle handler for tests (null = reset). */
     public function __construct(
-        private readonly \App\Models\Company $tenant,
+        private readonly Company $tenant,
         private readonly mixed $mockHandler = null,
     ) {}
 
     /**
-     * @return string  the AADE classification MARK
+     * @return string the AADE classification MARK
      *
      * @throws RuntimeException with an operator-facing Greek message
      */
@@ -84,10 +85,9 @@ class ExpenseClassificationSubmitter
             'mark_date' => now()->toDateString(),
             'mark_time' => now()->toTimeString(),
             'request' => $requestXml ?: null,
-            // firebed quirk: SendExpensesClassification::handle() leaves
-            // responseDom null and parks the RESPONSE reader's DOM in requestDom —
-            // so getRequestDom() here is actually the response XML.
-            'response' => $action->getRequestDom()?->saveXML() ?: null,
+            // firebed ≥ 5.14.1 keeps request and response apart (before, the response
+            // overwrote requestDom and responseDom stayed null).
+            'response' => $action->getResponseDom()?->saveXML() ?: null,
         ]);
 
         $expense->forceFill(['classification_state' => 'submitted'])->save();

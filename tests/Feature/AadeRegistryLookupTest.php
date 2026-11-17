@@ -271,7 +271,8 @@ class AadeRegistryLookupTest extends TestCase
             ->once()
             ->andReturn($this->canonicalResponse());
 
-        (new AadeRegistryLookup($otherTenant, $mockB))->findByAfm('800561849');
+        $result = (new AadeRegistryLookup($otherTenant, $mockB))->findByAfm('800561849');
+        $this->assertSame('800561849', $result->afm);
     }
 
     /**

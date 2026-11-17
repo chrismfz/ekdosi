@@ -391,6 +391,13 @@ Reference only — the legacy was a DB‑hack; we keep the *intent*, not the met
 - **timologia routing** runtime columns (DDL is stale): `mod_ekdosi_contacts`
   (company_name, gr_vatno, tax_office, occupation, address…); `mod_ekdosi_routing`
   (userid, contactid, serviceid, service_type, **isReceipt** 0=τιμολόγιο/1=απόδειξη).
+- **Add Funds (wallet top‑up, 2026‑10‑30 owner decision)**: a prepayment with no
+  identified supply → **not a sale, no παραστατικό**. The ingestor closes an
+  all‑`AddFunds` invoice as `resolved` («Προκαταβολή (Add Funds)…», final); a mix of
+  Add Funds + real charges is **held, never guessed**; filer/auto‑issue refuse it.
+  The document is issued on the later invoice the credit pays, at its FULL value
+  (applied `credit` is a payment, not a discount). MyCS types its credit purchases
+  `AddFunds` too. `PendingWhmcsInvoice::addFundsShape()`.
 - **Multi‑party**: legacy SILENTLY mixed beneficiaries in one doc (a legal
   bug). We **block + flag** (TP_MULTI → guided split) — better than legacy.
 

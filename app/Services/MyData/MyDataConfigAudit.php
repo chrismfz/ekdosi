@@ -56,18 +56,34 @@ class MyDataConfigAudit
     {
         $findings = [];
 
-        if ($company->einvoice_provider !== 'gr-mydata') {
-            $findings[] = new ConfigAuditFinding('warn',
-                "Ο πάροχος είναι «{$company->einvoice_provider}», όχι gr-mydata — δεν θα γίνει υποβολή στο myDATA.");
-        }
-        if ($company->mydata_mode_enum === MyDataMode::Off) {
-            $findings[] = new ConfigAuditFinding('warn',
-                'Η λειτουργία myDATA είναι κλειστή (Off) — δεν θα επιχειρηθεί καμία υποβολή.');
-        }
-        [$aadeId, $subKey] = $company->mydataCredentials();
-        if (empty($aadeId) || empty($subKey)) {
-            $findings[] = new ConfigAuditFinding('warn',
-                "Δεν έχουν οριστεί διαπιστευτήρια myDATA για την ενεργή λειτουργία («{$company->mydata_mode_enum->value}»).");
+        if ($company->einvoice_provider === 'gr-provider') {
+            // Filing goes through the provider; mydata_mode is 'off' BY DESIGN here
+            // (the channel form clears it), so «myDATA Off» is not a gap. The
+            // provider's own creds/transport are ProviderPreflight's job; here only
+            // whether it's switched on, and whether we can still READ myDATA back.
+            if (($company->einvoice_provider_mode ?? 'off') === 'off') {
+                $findings[] = new ConfigAuditFinding('warn',
+                    'Η αποστολή μέσω παρόχου είναι κλειστή (Off) — δεν θα διαβιβαστεί κανένα παραστατικό.');
+            }
+            if (! $company->canReadMyData()) {
+                $findings[] = new ConfigAuditFinding('warn',
+                    'Η διαβίβαση γίνεται μέσω παρόχου, αλλά δεν έχουν οριστεί διαπιστευτήρια ανάγνωσης myDATA — '
+                    .'Ε3, Έσοδα/Έξοδα, ΦΠΑ και συμφωνία με την ΑΑΔΕ δεν θα είναι διαθέσιμα.');
+            }
+        } else {
+            if ($company->einvoice_provider !== 'gr-mydata') {
+                $findings[] = new ConfigAuditFinding('warn',
+                    "Ο πάροχος είναι «{$company->einvoice_provider}», όχι gr-mydata — δεν θα γίνει υποβολή στο myDATA.");
+            }
+            if ($company->mydata_mode_enum === MyDataMode::Off) {
+                $findings[] = new ConfigAuditFinding('warn',
+                    'Η λειτουργία myDATA είναι κλειστή (Off) — δεν θα επιχειρηθεί καμία υποβολή.');
+            }
+            [$aadeId, $subKey] = $company->mydataCredentials();
+            if (empty($aadeId) || empty($subKey)) {
+                $findings[] = new ConfigAuditFinding('warn',
+                    "Δεν έχουν οριστεί διαπιστευτήρια myDATA για την ενεργή λειτουργία («{$company->mydata_mode_enum->value}»).");
+            }
         }
         if ($noInvoiceTypes) {
             $findings[] = new ConfigAuditFinding('warn', 'Δεν έχουν οριστεί τύποι παραστατικών.');

@@ -255,7 +255,7 @@ class AiUsageReport
     private function monthBounds(string $month): array
     {
         $start = CarbonImmutable::hasFormat($month, 'Y-m')
-            ? CarbonImmutable::createFromFormat('Y-m', $month)->startOfMonth()
+            ? CarbonImmutable::createFromFormat('!Y-m', $month)->startOfMonth()
             : CarbonImmutable::now()->startOfMonth();
 
         return [$start, $start->addMonth()];

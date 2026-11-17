@@ -11,6 +11,7 @@ use App\Models\InvoiceType;
 use App\Models\MyDataMark;
 use App\Models\VatCategory;
 use App\Services\MyDataSubmitter;
+use Firebed\AadeMyData\Exceptions\ErrorResponseException;
 use GuzzleHttp\Handler\MockHandler;
 use GuzzleHttp\Psr7\Response as GuzzleResponse;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -464,4 +465,37 @@ class MyDataSubmitInDoubtTest extends TestCase
         // Only the reconcile lookup was consumed — no SendInvoices was attempted.
         $this->assertSame(0, $mock->count());
     }
+
+    public function test_in_doubt_past_grace_refuses_when_aade_answers_the_lookup_with_an_error(): void
+    {
+        // firebed ≥ 5.14: an AADE error document on the reconcile lookup THROWS (it used to
+        // read as an empty feed → «no MARK» → a blind resubmit = a second MARK). Even past
+        // the grace window, an unanswered lookup must refuse, never file.
+        $this->markInDoubt(20);
+
+        $mock = new MockHandler([new GuzzleResponse(200, [], self::AADE_ERROR_DOC)]);
+
+        try {
+            (new MyDataSubmitter($this->tenant, $mock))->submit($this->invoice->fresh('lines'));
+            $this->fail('Expected the in-doubt submit to be refused.');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('Refusing to resubmit blindly', $e->getMessage());
+        }
+
+        $this->assertNull($this->invoice->fresh()->mydata_state);
+        $this->assertSame(0, $mock->count(), 'only the lookup ran — no SendInvoices');
+    }
+
+    public function test_connection_test_surfaces_an_aade_error_answer_instead_of_connected(): void
+    {
+        // Before firebed 5.14 an AADE error document read as «connected». It now reaches the
+        // caller as AADE's own error, which the company form and set-credentials show as such.
+        $mock = new MockHandler([new GuzzleResponse(200, [], self::AADE_ERROR_DOC)]);
+
+        $this->expectException(ErrorResponseException::class);
+        $this->expectExceptionMessage('101: Invalid date range');
+        (new MyDataSubmitter($this->tenant, $mock))->testConnection();
+    }
+
+    private const AADE_ERROR_DOC = '<?xml version="1.0" encoding="utf-8"?><ResponseDoc xmlns="http://www.aade.gr/myDATA/invoice/v1.0"><response><index>1</index><statusCode>ValidationError</statusCode><errors><error><message>Invalid date range</message><code>101</code></error></errors></response></ResponseDoc>';
 }
