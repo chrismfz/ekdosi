@@ -18,6 +18,8 @@ from `[Unreleased]`; `--major` explicit for milestones).
 
 ## [Unreleased]
 
+## [2.8.1] - 2026-11-17
+
 ### Changed
 - **Εξαρτήσεις (minor/patch):** Filament 5.11.4, Laravel 13.43, PHPUnit 13.4.7, picqer 3.3.1, monolog 3.13, guzzle 7.16.2, aws-sdk, symfony filesystem/yaml. Το `laravel/passport` μένει 13.7.6 (το 13.11 θέλει phpseclib 4, το `flysystem-sftp-v3` ^3).
 
