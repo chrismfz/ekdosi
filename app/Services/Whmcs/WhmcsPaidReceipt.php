@@ -4,6 +4,7 @@ namespace App\Services\Whmcs;
 
 use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
+use App\Support\Billing\MycsPayload;
 use Illuminate\Support\Carbon;
 
 /**
@@ -99,6 +100,7 @@ final class WhmcsPaidReceipt
      *    customer or the WHMCS client's): their WHMCS «Paid» is never taken for a payment automatically — whatever
      *    the timeline (issued Unpaid first and marked Paid later only to stop a suspension, included). Staff record
      *    their payments by hand («Νέα είσπραξη»);
+     *  - or MyCS reports this «Paid» short (`mycs.balance` > 0 — marked Paid by hand without all the money);
      *  - or the operator issued this row ΕΠΙ ΠΙΣΤΩΣΕΙ with «Δεν έχει πληρωθεί ακόμα» (`whmcs_paid_waived_at`): the
      *    settlement WHMCS already reported then (`datepaid` ≤ waived_at + grace) is the waived one; a LATER one (WHMCS
      *    unwound and really paid) is money and syncs. No usable `datepaid` → waived (the conservative side). A real
@@ -112,6 +114,15 @@ final class WhmcsPaidReceipt
     {
         if ($row->customer?->whmcs_paid_on_credit || $row->invoice?->customer?->whmcs_paid_on_credit) {
             return true;
+        }
+        // MyCS says its «Paid» is short (`mycs.balance` > 0): not a full settlement to close the receivable with.
+        if (MycsPayload::shortfall($payload) > 0.005) {
+            return true;
+        }
+        // It WAS short when it came in and MyCS now reports it settled: the rest has really been paid since (MyCS
+        // keeps its first paid_at, so the datepaid rule below would wrongly call it the waived settlement).
+        if (MycsPayload::is($payload) && MycsPayload::shortfall(is_array($row->payload) ? $row->payload : null) > 0.005) {
+            return false;
         }
         $waivedAt = $row->whmcs_paid_waived_at;
         if ($waivedAt === null) {

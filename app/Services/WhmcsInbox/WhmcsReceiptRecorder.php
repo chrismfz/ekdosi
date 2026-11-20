@@ -6,6 +6,7 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\Whmcs\WhmcsPaidReceipt;
+use App\Support\Billing\MycsPayload;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -67,9 +68,16 @@ class WhmcsReceiptRecorder
         if (! WhmcsPaidReceipt::isPaid($payload)) {
             return 0.0;
         }
+        // A MyCS «Paid» that MyCS itself says is short (`mycs.balance` > 0: marked Paid by hand with no / not all the
+        // money): the receipt is ONLY what MyCS collected — never the full amount.
+        $cap = MycsPayload::shortfall($payload) > 0.005 ? MycsPayload::collected($payload) : null;
         // «Paid» in WHMCS only to keep the service running — the operator declared it is not money
-        // (issued ΕΠΙ ΠΙΣΤΩΣΕΙ): no receipt, the invoice stays an open receivable.
-        if ($pending->whmcsPaidIsWaived()) {
+        // (issued ΕΠΙ ΠΙΣΤΩΣΕΙ): no receipt, the invoice stays an open receivable. (A MyCS shortfall row keeps its
+        // collected part: MyCS's own transactions ARE money.)
+        if ($pending->whmcsPaidIsWaived() && $cap === null) {
+            return 0.0;
+        }
+        if ($cap !== null && $cap <= self::EPS) {
             return 0.0;
         }
 
@@ -87,8 +95,13 @@ class WhmcsReceiptRecorder
         // BOTH (WhmcsPaidReceipt::alreadyHeld — the ref only on this same invoice),
         // so a deleted or refunded receipt here is never re-added by a later sweep.
         $txnId = $ref ?? WhmcsPaidReceipt::transactionKey($whmcsInvoiceId);
+        // A PART of a short MyCS «Paid» gets its own key: the deterministic whmcs-paid key stays free for the payment
+        // sync to close the rest once MyCS reports it settled (alreadyHeld matches that key, not this one).
+        if ($cap !== null) {
+            $txnId = WhmcsPaidReceipt::transactionKey($whmcsInvoiceId).':partial';
+        }
 
-        return DB::transaction(function () use ($invoice, $payload, $txnId, $gateway, $whmcsInvoiceId): float {
+        return DB::transaction(function () use ($invoice, $payload, $txnId, $gateway, $whmcsInvoiceId, $cap): float {
             $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();
             if ($locked === null) {
                 return 0.0;
@@ -116,6 +129,9 @@ class WhmcsReceiptRecorder
             // The collectible still owed — the same figure the invoice's «Πληρωμές»
             // tab records (NOT the synthetic cash-term balance, which is 0 at issue).
             $owed = round((float) $locked->balanceData()->owed, 2);
+            if ($cap !== null) {
+                $owed = min($owed, $cap);
+            }
             if ($owed <= self::EPS) {
                 return 0.0;
             }

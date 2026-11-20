@@ -10,6 +10,7 @@ use App\Models\Customer;
 use App\Models\Invoice;
 use App\Models\InvoiceType;
 use App\Models\PendingWhmcsInvoice;
+use App\Support\Billing\MycsPayload;
 use App\Support\Billing\SourceName;
 use App\Services\Billing\BillingSourceRegistry;
 use App\Services\Whmcs\WhmcsCustomerCreateResult;
@@ -1174,9 +1175,21 @@ class WhmcsInboxTable
      */
     private static function preTickOnCredit(PendingWhmcsInvoice $r, mixed $customerId): bool
     {
-        return $r->whmcsReportsPaid()
-            && self::customerPaidOnCredit($customerId)
-            && self::gatewayRef($r) === null;
+        if (! $r->whmcsReportsPaid()) {
+            return false;
+        }
+        // MyCS says its «Paid» is short (marked Paid by hand without all the money): on credit, whatever the customer.
+        if (self::mycsShortfall($r) > 0.005) {
+            return true;
+        }
+
+        return self::customerPaidOnCredit($customerId) && self::gatewayRef($r) === null;
+    }
+
+    /** What a MyCS «Paid» still owes by MyCS's own account (`mycs.balance`), 0.0 otherwise. */
+    private static function mycsShortfall(PendingWhmcsInvoice $r): float
+    {
+        return MycsPayload::shortfall(is_array($r->payload) ? $r->payload : null);
     }
 
     /** The acquirer/gateway ref of the payment WHMCS recorded, if any (evidence real money came in). */
@@ -1371,6 +1384,7 @@ class WhmcsInboxTable
                     ->hiddenLabel()
                     ->content(fn (Get $get): HtmlString => match (true) {
                         $r->whmcsIsUnpaid() => new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ '.$r->sourceLabel().': ΑΠΛΗΡΩΤΟ — εκδίδεται επί πιστώσει (ανοιχτή οφειλή), όχι εξοφλημένο στην έκδοση.</span>'),
+                        self::mycsShortfall($r) > 0.005 => new HtmlString('<span style="color:#d97706; font-weight:600;">'.$r->sourceLabel().': «Πληρωμένο», αλλά λείπουν '.e(number_format(self::mycsShortfall($r), 2, ',', '.')).' € — εκδίδεται ΥΠΟΧΡΕΩΤΙΚΑ επί πιστώσει· ως είσπραξη μόνο ό,τι μπήκε.</span>'),
                         $r->whmcsReportsPaid() && (bool) $get('whmcs_paid_on_credit') => new HtmlString('<span style="color:#d97706; font-weight:600;">'.$r->sourceLabel().': «Πληρωμένο», αλλά ΔΕΝ μπήκαν χρήματα — εκδίδεται επί πιστώσει, χωρίς είσπραξη.</span>'),
                         default => new HtmlString('<span style="color:#6b7280;">'.$r->sourceLabel().': '.($r->whmcsReportsPaid() ? 'Πληρωμένο (εξοφλημένο στην έκδοση)' : e((string) ($r->whmcsStatus() ?? '—'))).'</span>'),
                     })
@@ -1385,9 +1399,12 @@ class WhmcsInboxTable
                     ->visible(fn (): bool => $r->whmcsReportsPaid())
                     ->default(fn (): bool => $r->whmcsReportsPaid() && ($r->whmcsPaidIsWaived() || self::preTickOnCredit($r, $r->customer_id)))
                     // A real gateway transaction in WHMCS (card/vPOS/PayPal ref) says money DID come in.
-                    ->hint(fn (): ?string => self::gatewayRef($r) !== null
-                        ? '⚠ Το '.$r->sourceLabel().' έχει πραγματική συναλλαγή ('.self::gatewayRef($r).'): μάλλον πληρώθηκε.'
-                        : null)
+                    ->hint(fn (): ?string => match (true) {
+                        self::mycsShortfall($r) > 0.005 => '⚠ Η MyCS το έχει «Paid» χωρίς (όλα) τα χρήματα — υπόλοιπο '
+                            .number_format(self::mycsShortfall($r), 2, ',', '.').' €. Ως είσπραξη γράφεται μόνο ό,τι μπήκε.',
+                        self::gatewayRef($r) !== null => '⚠ Το '.$r->sourceLabel().' έχει πραγματική συναλλαγή ('.self::gatewayRef($r).'): μάλλον πληρώθηκε.',
+                        default => null,
+                    })
                     ->hintColor('warning')
                     ->live(),
 
@@ -1531,7 +1548,7 @@ class WhmcsInboxTable
                 // method, its issue records no receipt, the payment sync ignores it. Persisted by createDraft under
                 // the row lock (with the draft — a failed draft leaves the row untouched). Only on a WHMCS-Paid row.
                 $onCredit = $r->whmcsReportsPaid() && (bool) ($data['whmcs_paid_on_credit'] ?? false);
-                if ($onCredit && WhmcsInvoiceMapper::creditTermMethodId($tenant) === null) {
+                if (($onCredit || self::mycsShortfall($r) > 0.005) && WhmcsInvoiceMapper::creditTermMethodId($tenant) === null) {
                     Notification::make()
                         ->title('Δεν υπάρχει τρόπος πληρωμής «Επί Πιστώσει»')
                         ->body('Χρειάζεται τρόπος πληρωμής με τύπο myDATA 5 και ημέρες πίστωσης (Τρόποι πληρωμής). Χωρίς αυτόν θα εκδιδόταν εξοφλημένο — δεν δημιουργήθηκε προσχέδιο.')
@@ -1771,7 +1788,7 @@ class WhmcsInboxTable
                         ->first()
                     : null;
                 $onCredit = $r->whmcsReportsPaid() && (bool) ($data['whmcs_paid_on_credit'] ?? false);
-                if ($onCredit && WhmcsInvoiceMapper::creditTermMethodId($tenant) === null) {
+                if (($onCredit || self::mycsShortfall($r) > 0.005) && WhmcsInvoiceMapper::creditTermMethodId($tenant) === null) {
                     Notification::make()
                         ->title('Δεν υπάρχει τρόπος πληρωμής «Επί Πιστώσει»')
                         ->body('Χρειάζεται τρόπος πληρωμής με τύπο myDATA 5 και ημέρες πίστωσης (Τρόποι πληρωμής). Χωρίς αυτόν θα εκδίδονταν εξοφλημένα — δεν δημιουργήθηκαν προσχέδια.')

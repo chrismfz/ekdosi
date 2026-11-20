@@ -2,6 +2,8 @@
 
 namespace App\Support\Billing;
 
+use App\Models\PendingWhmcsInvoice;
+
 /**
  * Reads what a MyCS feed payload says outright (docs/bridges-connectors.md §12), where a WHMCS one carries client
  * custom fields resolved through the company's whmcs_custom_field_map: the `mycs` block, with the account's
@@ -13,6 +15,61 @@ final class MycsPayload
     public static function is(?array $payload): bool
     {
         return is_array($payload['mycs'] ?? null);
+    }
+
+    /**
+     * What a MyCS invoice reported «Paid» still owes (`mycs.balance`, docs ekdosi-bridge «Paid χωρίς (όλα) τα χρήματα»):
+     * MyCS lets staff mark an invoice Paid by hand with no (or not all the) money, and says so here. > 0 → «Paid» is
+     * not (all) money: issued on credit, never a full receipt, never auto-issued or auto-synced. 0.0 for anything else
+     * (a WHMCS payload, not Paid, settled, overpaid — a negative balance).
+     *
+     * @param  array<string, mixed>|null  $payload
+     */
+    public static function shortfall(?array $payload): float
+    {
+        if (! self::is($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0) {
+            return 0.0;
+        }
+        $balance = $payload['mycs']['balance'] ?? null;
+
+        return is_numeric($balance) && (float) $balance > 0.005 ? round((float) $balance, 2) : 0.0;
+    }
+
+    /**
+     * What the customer HAS paid on a «Paid» invoice with a shortfall: the document value (MyCS `total` is net of the
+     * account credit applied, so total + credit — PendingWhmcsInvoice::documentTotalOf) − balance (≥ 0). Account
+     * credit counts as paid, as everywhere else in ekdosi. Meaningful only when shortfall() > 0.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function collected(array $payload): float
+    {
+        return max(0.0, round(PendingWhmcsInvoice::documentTotalOf($payload) - self::shortfall($payload), 2));
+    }
+
+    /**
+     * The date (Y-m-d) of the latest incoming MyCS transaction (net of refunds), or null. MyCS sends `transactions` as a flat list of
+     * {transid, gateway, date, amount, refunded}.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    public static function latestTransactionDate(array $payload): ?string
+    {
+        $rows = $payload['transactions'] ?? [];
+        if (! is_array($rows)) {
+            return null;
+        }
+        $latest = null;
+        foreach ($rows as $row) {
+            $date = is_array($row) ? substr((string) ($row['date'] ?? ''), 0, 10) : '';
+            if (preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) === 1 && $date !== '0000-00-00'
+                // Net of what was refunded: a payment refunded in full is not money that came in.
+                && (float) ($row['amount'] ?? 0) - (float) ($row['refunded'] ?? 0) > 0.005 && ($latest === null || $date > $latest)) {
+                $latest = $date;
+            }
+        }
+
+        return $latest;
     }
 
     /**

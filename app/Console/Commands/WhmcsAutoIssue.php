@@ -2,7 +2,6 @@
 
 namespace App\Console\Commands;
 
-use App\Support\Billing\MycsPayload;
 use App\Models\Company;
 use App\Models\Customer;
 use App\Models\InvoiceType;
@@ -10,6 +9,7 @@ use App\Models\PendingWhmcsInvoice;
 use App\Services\Mycs\MycsRowRefresher;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
 use App\Support\Afm;
+use App\Support\Billing\MycsPayload;
 use App\Support\IsoCountry;
 use App\Support\MyData\Codes;
 use Illuminate\Console\Command;
@@ -225,6 +225,10 @@ class WhmcsAutoIssue extends Command
             // operator issues it ΕΠΙ ΠΙΣΤΩΣΕΙ from the inbox (the modal pre-ticks «Δεν έχει πληρωθεί ακόμα»).
             if ($chosenType !== null && $customer->whmcs_paid_on_credit) {
                 [$chosenType, $holdReason] = [null, 'πελάτης «Πληρωμένο στο WHMCS ≠ εισπραγμένο» — έκδοση επί πιστώσει από χειριστή'];
+            }
+            // MyCS marked it «Paid» by hand without (all) the money (`mycs.balance` > 0): a human decides how to issue it.
+            if ($chosenType !== null && ($short = MycsPayload::shortfall(is_array($row->payload) ? $row->payload : null)) > 0.005) {
+                [$chosenType, $holdReason] = [null, 'MyCS: «Paid» χωρίς (όλα) τα χρήματα (υπόλοιπο '.number_format($short, 2, ',', '.').' €) — χειριστής'];
             }
             // The customer's country for this type, before anything is saved: a submit that refused it later left a
             // provisional document no run retries (review of #717).
