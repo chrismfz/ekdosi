@@ -16,9 +16,11 @@ use App\Services\Whmcs\WhmcsCustomerCreateResult;
 use App\Services\Mycs\MycsRowRefresher;
 use App\Services\Whmcs\WhmcsCustomerCreator;
 use App\Services\Whmcs\WhmcsInvoiceIngestor;
+use App\Services\Whmcs\WhmcsPaidReceipt;
 use App\Services\Whmcs\WhmcsWritebackService;
 use App\Services\WhmcsInbox\MassPayConsolidator;
 use App\Services\WhmcsInbox\WhmcsInvoiceFiler;
+use App\Services\WhmcsInbox\WhmcsInvoiceMapper;
 use App\Services\WhmcsInbox\WhmcsInvoiceSplitter;
 use App\Support\Afm;
 use App\Support\OperatorHealth\HealthKeys;
@@ -29,12 +31,14 @@ use Filament\Actions\Action;
 use Filament\Actions\ActionGroup;
 use Filament\Actions\BulkAction;
 use Filament\Facades\Filament;
+use Filament\Forms\Components\Checkbox;
 use Filament\Forms\Components\Placeholder;
 use Filament\Forms\Components\Select;
 use Filament\Forms\Components\Textarea;
 use Filament\Forms\Components\TextInput;
 use Filament\Notifications\Notification;
 use Filament\Schemas\Components\Utilities\Get;
+use Filament\Schemas\Components\Utilities\Set;
 use Filament\Tables\Columns\TextColumn;
 use Filament\Tables\Filters\SelectFilter;
 use Filament\Tables\Table;
@@ -1164,6 +1168,36 @@ class WhmcsInboxTable
      * (Οριστικοποίηση → Υποβολή στο myDATA). Visible only on pending_review
      * rows.
      */
+    /**
+     * Pre-tick «Δεν έχει πληρωθεί ακόμα»: the customer is flagged «Πληρωμένο στο WHMCS ≠ εισπραγμένο», unless the
+     * payload carries a real gateway transaction (a card/vPOS/PayPal ref → money did come in: the operator decides).
+     */
+    private static function preTickOnCredit(PendingWhmcsInvoice $r, mixed $customerId): bool
+    {
+        return $r->whmcsReportsPaid()
+            && self::customerPaidOnCredit($customerId)
+            && self::gatewayRef($r) === null;
+    }
+
+    /** The acquirer/gateway ref of the payment WHMCS recorded, if any (evidence real money came in). */
+    private static function gatewayRef(PendingWhmcsInvoice $r): ?string
+    {
+        return is_array($r->payload) ? WhmcsPaidReceipt::provenance($r->payload)[0] : null;
+    }
+
+    /** The picked customer is flagged «Πληρωμένο στο WHMCS ≠ εισπραγμένο» (tenant-scoped). */
+    private static function customerPaidOnCredit(mixed $customerId): bool
+    {
+        if (! is_numeric($customerId)) {
+            return false;
+        }
+
+        return (bool) Customer::query()
+            ->where('company_id', Filament::getTenant()?->getKey())
+            ->whereKey((int) $customerId)
+            ->value('whmcs_paid_on_credit');
+    }
+
     private static function createDraftAction(): Action
     {
         return Action::make('create_draft')
@@ -1271,6 +1305,12 @@ class WhmcsInboxTable
                     })
                     ->required()
                     ->live()     // re-renders the preview Placeholder below
+                    // A customer flagged «Πληρωμένο στο WHMCS ≠ εισπραγμένο» pre-ticks the on-credit box.
+                    ->afterStateUpdated(function ($state, Set $set) use ($r): void {
+                        if ($r->whmcsReportsPaid()) {
+                            $set('whmcs_paid_on_credit', self::preTickOnCredit($r, $state));
+                        }
+                    })
                     ->default($r->customer_id)
                     ->helperText('Προτείνεται ο πελάτης που εντοπίστηκε από τη Stage B-1 (match: '
                         .$r->match_reason.'). Άλλαξέ τον αν δεν είναι σωστός.'),
@@ -1314,6 +1354,10 @@ class WhmcsInboxTable
                                 // A soft-deleted owner is NOT selectable — restore first.
                                 if ($result->customer !== null && $result->source !== 'deleted_owner') {
                                     $set('customer_id', $result->customer->id);
+                                    // $set fires no afterStateUpdated: re-derive the on-credit box here too.
+                                    if ($r->whmcsReportsPaid()) {
+                                        $set('whmcs_paid_on_credit', self::preTickOnCredit($r, $result->customer->id));
+                                    }
                                 }
                                 self::notifyCustomerCreateResult($result, $r->sourceName());
                             }),
@@ -1325,10 +1369,27 @@ class WhmcsInboxTable
                 // would wrongly settle a real receivable.
                 Placeholder::make('whmcs_payment_status_hint')
                     ->hiddenLabel()
-                    ->content(fn (): HtmlString => $r->whmcsIsUnpaid()
-                        ? new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ '.$r->sourceLabel().': ΑΠΛΗΡΩΤΟ — εκδίδεται επί πιστώσει (ανοιχτή οφειλή), όχι εξοφλημένο στην έκδοση.</span>')
-                        : new HtmlString('<span style="color:#6b7280;">'.$r->sourceLabel().': '.(strcasecmp((string) $r->whmcsStatus(), 'Paid') === 0 ? 'Πληρωμένο (εξοφλημένο στην έκδοση)' : e((string) ($r->whmcsStatus() ?? '—'))).'</span>'))
+                    ->content(fn (Get $get): HtmlString => match (true) {
+                        $r->whmcsIsUnpaid() => new HtmlString('<span style="color:#dc2626; font-weight:600;">⚠️ '.$r->sourceLabel().': ΑΠΛΗΡΩΤΟ — εκδίδεται επί πιστώσει (ανοιχτή οφειλή), όχι εξοφλημένο στην έκδοση.</span>'),
+                        $r->whmcsReportsPaid() && (bool) $get('whmcs_paid_on_credit') => new HtmlString('<span style="color:#d97706; font-weight:600;">'.$r->sourceLabel().': «Πληρωμένο», αλλά ΔΕΝ μπήκαν χρήματα — εκδίδεται επί πιστώσει, χωρίς είσπραξη.</span>'),
+                        default => new HtmlString('<span style="color:#6b7280;">'.$r->sourceLabel().': '.($r->whmcsReportsPaid() ? 'Πληρωμένο (εξοφλημένο στην έκδοση)' : e((string) ($r->whmcsStatus() ?? '—'))).'</span>'),
+                    })
                     ->visible(fn (): bool => $r->whmcsStatus() !== null),
+
+                // «Paid» in WHMCS only so the service keeps running (no suspend / terminate, domains get registered) —
+                // no money in yet. Ticked: issued ΕΠΙ ΠΙΣΤΩΣΕΙ, no receipt, and the payment sync never takes this
+                // WHMCS «Paid» for a payment. Pre-ticked for a customer flagged «Πληρωμένο στο WHMCS ≠ εισπραγμένο».
+                Checkbox::make('whmcs_paid_on_credit')
+                    ->label(new HtmlString('<strong>Δεν έχει πληρωθεί ακόμα — έκδοση επί πιστώσει</strong>'))
+                    ->helperText('Το '.$r->sourceLabel().' μένει «Paid» (οι υπηρεσίες δεν κόβονται). Στο ekdosi: επί πιστώσει, ανοιχτή οφειλή, χωρίς είσπραξη. Την πληρωμή την περνάς όταν έρθουν τα χρήματα («Νέα είσπραξη»).')
+                    ->visible(fn (): bool => $r->whmcsReportsPaid())
+                    ->default(fn (): bool => $r->whmcsReportsPaid() && ($r->whmcsPaidIsWaived() || self::preTickOnCredit($r, $r->customer_id)))
+                    // A real gateway transaction in WHMCS (card/vPOS/PayPal ref) says money DID come in.
+                    ->hint(fn (): ?string => self::gatewayRef($r) !== null
+                        ? '⚠ Το '.$r->sourceLabel().' έχει πραγματική συναλλαγή ('.self::gatewayRef($r).'): μάλλον πληρώθηκε.'
+                        : null)
+                    ->hintColor('warning')
+                    ->live(),
 
                 Select::make('invoice_type_id')
                     ->label('Τύπος παραστατικού')
@@ -1388,8 +1449,15 @@ class WhmcsInboxTable
                             ]);
                         }
                         try {
+                            // The box is not saved yet: preview a copy of the row as it WILL be issued — both ways
+                            // (a waiver kept from a deleted draft must not show «επί πιστώσει» when unticked now).
+                            $probe = $r;
+                            if ($r->whmcsReportsPaid()) {
+                                $probe = clone $r;
+                                $probe->whmcs_paid_waived_at = (bool) $get('whmcs_paid_on_credit') ? now() : null;
+                            }
                             $preview = app(WhmcsInvoiceFiler::class)
-                                ->preview($tenant, $r, $customer, $invoiceType);
+                                ->preview($tenant, $probe, $customer, $invoiceType);
 
                             return view('filament.whmcs-inbox.preview-partial', ['preview' => $preview]);
                         } catch (Throwable $e) {
@@ -1459,6 +1527,21 @@ class WhmcsInboxTable
                     ->whereKey($data['invoice_type_id'])
                     ->firstOrFail();
 
+                // «Δεν έχει πληρωθεί ακόμα»: this WHMCS «Paid» is not money → the draft takes the «Επί Πιστώσει»
+                // method, its issue records no receipt, the payment sync ignores it. Persisted by createDraft under
+                // the row lock (with the draft — a failed draft leaves the row untouched). Only on a WHMCS-Paid row.
+                $onCredit = $r->whmcsReportsPaid() && (bool) ($data['whmcs_paid_on_credit'] ?? false);
+                if ($onCredit && WhmcsInvoiceMapper::creditTermMethodId($tenant) === null) {
+                    Notification::make()
+                        ->title('Δεν υπάρχει τρόπος πληρωμής «Επί Πιστώσει»')
+                        ->body('Χρειάζεται τρόπος πληρωμής με τύπο myDATA 5 και ημέρες πίστωσης (Τρόποι πληρωμής). Χωρίς αυτόν θα εκδιδόταν εξοφλημένο — δεν δημιουργήθηκε προσχέδιο.')
+                        ->danger()
+                        ->persistent()
+                        ->send();
+
+                    return;
+                }
+
                 try {
                     $invoice = app(WhmcsInvoiceFiler::class)->createDraft(
                         tenant: $tenant,
@@ -1466,6 +1549,7 @@ class WhmcsInboxTable
                         customer: $customer,
                         invoiceType: $invoiceType,
                         createdByUserId: auth()->id(),
+                        paidOnCredit: $onCredit,
                     );
                 } catch (Throwable $e) {
                     Notification::make()
@@ -1619,6 +1703,13 @@ class WhmcsInboxTable
                     ->searchable()
                     ->helperText('Για τους δικαιούχους που χρειάζονται τιμολόγιο.'),
 
+                // As in «Δημιουργία Παραστατικού»: a WHMCS «Paid» that is not money → every party's draft on credit.
+                Checkbox::make('whmcs_paid_on_credit')
+                    ->label(new HtmlString('<strong>Δεν έχει πληρωθεί ακόμα — έκδοση επί πιστώσει</strong>'))
+                    ->helperText(fn (PendingWhmcsInvoice $r): string => 'Το '.$r->sourceLabel().' μένει «Paid» (οι υπηρεσίες δεν κόβονται). Στο ekdosi: όλα τα προσχέδια επί πιστώσει, χωρίς είσπραξη.')
+                    ->visible(fn (PendingWhmcsInvoice $r): bool => $r->whmcsReportsPaid())
+                    ->default(fn (PendingWhmcsInvoice $r): bool => self::preTickOnCredit($r, $r->customer_id)),
+
                 Select::make('receipt_type_id')
                     ->label('Τύπος απόδειξης')
                     ->options(fn () => static::splitTypeOptions())
@@ -1679,9 +1770,20 @@ class WhmcsInboxTable
                         ->whereKey($data['receipt_type_id'])
                         ->first()
                     : null;
+                $onCredit = $r->whmcsReportsPaid() && (bool) ($data['whmcs_paid_on_credit'] ?? false);
+                if ($onCredit && WhmcsInvoiceMapper::creditTermMethodId($tenant) === null) {
+                    Notification::make()
+                        ->title('Δεν υπάρχει τρόπος πληρωμής «Επί Πιστώσει»')
+                        ->body('Χρειάζεται τρόπος πληρωμής με τύπο myDATA 5 και ημέρες πίστωσης (Τρόποι πληρωμής). Χωρίς αυτόν θα εκδίδονταν εξοφλημένα — δεν δημιουργήθηκαν προσχέδια.')
+                        ->danger()
+                        ->persistent()
+                        ->send();
+
+                    return;
+                }
                 try {
                     $invoices = app(WhmcsInvoiceSplitter::class)
-                        ->split($tenant, $r, $invoiceType, $receiptType, auth()->id());
+                        ->split($tenant, $r, $invoiceType, $receiptType, auth()->id(), paidOnCredit: $onCredit);
                     $codes = implode(', ', array_map(fn ($i) => $i->invcode, $invoices));
                     Notification::make()
                         ->title('Δημιουργήθηκαν '.count($invoices).' προσχέδια')

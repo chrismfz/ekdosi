@@ -198,6 +198,8 @@ class PendingWhmcsInvoice extends Model
             'third_party_resolution' => 'array',
             'filed_at' => 'datetime',
             'whmcs_payment_pushed_at' => 'datetime',
+            // Not fillable: set only by the inbox modal's «Δεν έχει πληρωθεί ακόμα» (forceFill).
+            'whmcs_paid_waived_at' => 'datetime',
             'whmcs_invoice_id' => 'integer',
             'whmcs_userid' => 'integer',
             'legacy_invoiced' => 'integer',
@@ -614,6 +616,28 @@ class PendingWhmcsInvoice extends Model
     public function whmcsIsNotPaid(): bool
     {
         return in_array(strtolower((string) $this->whmcsStatus()), ['unpaid', 'payment pending', 'collections'], true);
+    }
+
+    /**
+     * Issued ON CREDIT: owed at the source (whmcsIsNotPaid), OR «Paid» in WHMCS but declared by the operator as not
+     * money (`whmcs_paid_waived_at` — the service kept running, the customer hasn't paid yet). Picks the «Επί
+     * Πιστώσει» payment method; the waived case also records no receipt and is ignored by the payment sync.
+     */
+    public function issuesOnCredit(): bool
+    {
+        return $this->whmcsIsNotPaid() || $this->whmcsPaidIsWaived();
+    }
+
+    /** The source reports this invoice fully «Paid» — the only case «Δεν έχει πληρωθεί ακόμα» applies to. */
+    public function whmcsReportsPaid(): bool
+    {
+        return strcasecmp((string) $this->whmcsStatus(), 'Paid') === 0;
+    }
+
+    /** The operator declared this row's WHMCS «Paid» as not money (see whmcs_paid_waived_at). */
+    public function whmcsPaidIsWaived(): bool
+    {
+        return $this->whmcs_paid_waived_at !== null;
     }
 
     /**

@@ -199,8 +199,10 @@ class WhmcsInvoiceMapper
         // receivable. The type's default method may be cash-term (due_days 0: InvoiceBalance settles it at issue with
         // no payment at all), so it takes the tenant's «Επί Πιστώσει» instead; without one it keeps the default and
         // the preview says so.
-        if ($pending->whmcsIsNotPaid() && ! $this->isCreditTerm($tenant, $paymentMethodId)) {
-            $paymentMethodId = $this->creditTermMethodId($tenant) ?? $paymentMethodId;
+        // Same for a «Paid» the operator declared as not money (whmcs_paid_waived_at): the gateway method mapped
+        // above is settled-at-issue, so it is replaced too.
+        if ($pending->issuesOnCredit() && ! $this->isCreditTerm($tenant, $paymentMethodId)) {
+            $paymentMethodId = self::creditTermMethodId($tenant) ?? $paymentMethodId;
         }
 
         return [
@@ -261,6 +263,8 @@ class WhmcsInvoiceMapper
                 // «MyCS» / «WHMCS»: the preview names where it came from.
                 'source_label' => $pending->sourceLabel(),
                 'whmcs_unpaid' => $pending->whmcsIsNotPaid(),
+                // «Paid» at the source but declared not money → issued on credit (the preview says so).
+                'whmcs_paid_waived' => $pending->whmcsPaidIsWaived(),
                 // What was paid already on a not-paid one (account credit, part payments): not recorded at issue (owner,
                 // adversarial ADV-3/4 of #704), so the preview asks for it to be recorded by hand.
                 'whmcs_paid_before_issue' => $pending->whmcsIsNotPaid() ? self::paidBeforeIssue($payload) : 0.0,
@@ -472,7 +476,7 @@ class WhmcsInvoiceMapper
      * The tenant's «Επί Πιστώσει»: myDATA payment type 5 (§8.12) with due days, so it is also credit-term here (one
      * with due_days 0 would still be settled at issue). The lowest id when there are several; null when none.
      */
-    private function creditTermMethodId(Company $tenant): ?int
+    public static function creditTermMethodId(Company $tenant): ?int
     {
         $id = PaymentMethod::withoutGlobalScopes()
             ->where('company_id', $tenant->id)

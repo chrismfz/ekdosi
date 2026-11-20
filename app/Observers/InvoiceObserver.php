@@ -369,6 +369,8 @@ class InvoiceObserver
             return;
         }
 
+        // `whmcs_paid_waived_at` («Δεν έχει πληρωθεί ακόμα») is deliberately KEPT: a restored draft (relinkInboxRow)
+        // is still on credit and must still record no receipt; a NEW draft overwrites it from its own modal choice.
         $pending->update([
             'status' => PendingWhmcsInvoice::STATUS_PENDING_REVIEW,
             'invoice_id' => null,

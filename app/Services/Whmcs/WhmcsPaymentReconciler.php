@@ -44,7 +44,7 @@ class WhmcsPaymentReconciler
             ->where('status', PendingWhmcsInvoice::STATUS_FILED)
             ->whereNotNull('invoice_id')
             ->whereNotNull('whmcs_invoice_id')
-            ->with('invoice.paymentMethod')
+            ->with(['invoice.paymentMethod', 'invoice.customer', 'customer'])
             ->get();
 
         // Outbound is only meaningful for tenants who opted into pushing to WHMCS.
@@ -114,6 +114,10 @@ class WhmcsPaymentReconciler
         // already holds — or one whose receipt an operator DELETED as bogus while
         // WHMCS still reports that same settlement — is not a worklist item (it
         // would sit there forever behind a button that records nothing).
+        if (WhmcsPaidReceipt::isWaived($row, $payload)) {
+            return false;   // issued ΕΠΙ ΠΙΣΤΩΣΕΙ — this WHMCS «Paid» was declared not money
+        }
+
         return ! WhmcsPaidReceipt::alreadyHeld(
             (int) $row->company_id,
             (int) $row->whmcs_invoice_id,

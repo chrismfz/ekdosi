@@ -67,6 +67,11 @@ class WhmcsReceiptRecorder
         if (! WhmcsPaidReceipt::isPaid($payload)) {
             return 0.0;
         }
+        // «Paid» in WHMCS only to keep the service running — the operator declared it is not money
+        // (issued ΕΠΙ ΠΙΣΤΩΣΕΙ): no receipt, the invoice stays an open receivable.
+        if ($pending->whmcsPaidIsWaived()) {
+            return 0.0;
+        }
 
         if ($invoice->customer_id === null
             || $invoice->local_status === 'cancelled'

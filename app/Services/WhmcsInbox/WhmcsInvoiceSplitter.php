@@ -225,6 +225,7 @@ class WhmcsInvoiceSplitter
         InvoiceType $invoiceType,
         ?InvoiceType $receiptType = null,
         ?int $splitByUserId = null,
+        ?bool $paidOnCredit = null,
     ): array {
         if ($pending->company_id !== $tenant->id) {
             throw new RuntimeException('Pending row belongs to a different tenant.');
@@ -282,11 +283,18 @@ class WhmcsInvoiceSplitter
         // per-group mapping can't see the whole picture, so assert it here.
         $this->assertSplitCoversAllItems($pending, $groups);
 
-        return DB::transaction(function () use ($tenant, $pending, $invoiceType, $receiptType, $groups, $splitByUserId) {
+        return DB::transaction(function () use ($tenant, $pending, $invoiceType, $receiptType, $groups, $splitByUserId, $paidOnCredit) {
             $locked = PendingWhmcsInvoice::query()
                 ->whereKey($pending->id)
                 ->lockForUpdate()
                 ->firstOrFail();
+            // «Δεν έχει πληρωθεί ακόμα»: decided under the lock, BEFORE the groups are mapped (→ «Επί Πιστώσει»,
+            // no receipt at issue); saved with the split. null = keep the row as it is.
+            if ($paidOnCredit !== null) {
+                $locked->forceFill(['whmcs_paid_waived_at' => $paidOnCredit && $locked->whmcsReportsPaid()
+                    ? ($locked->whmcs_paid_waived_at ?? now())
+                    : null]);
+            }
 
             if (in_array($locked->status, [PendingWhmcsInvoice::STATUS_FILED, PendingWhmcsInvoice::STATUS_SPLIT], true)) {
                 throw new RuntimeException(

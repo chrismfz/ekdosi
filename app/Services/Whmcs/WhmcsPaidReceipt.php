@@ -3,6 +3,7 @@
 namespace App\Services\Whmcs;
 
 use App\Models\Payment;
+use App\Models\PendingWhmcsInvoice;
 use Illuminate\Support\Carbon;
 
 /**
@@ -89,6 +90,36 @@ final class WhmcsPaidReceipt
 
         return $rows->contains(fn (Payment $p) => $p->created_at === null
             || $paidAt->lte($p->created_at->copy()->addHours(self::CLOCK_GRACE_HOURS)));
+    }
+
+    /**
+     * Is THIS WHMCS «Paid» not money, so the payment sync must neither record nor list it?
+     *
+     *  - the customer is flagged «Πληρωμένο στο WHMCS ≠ εισπραγμένο» (`customers.whmcs_paid_on_credit`, on the billed
+     *    customer or the WHMCS client's): their WHMCS «Paid» is never taken for a payment automatically — whatever
+     *    the timeline (issued Unpaid first and marked Paid later only to stop a suspension, included). Staff record
+     *    their payments by hand («Νέα είσπραξη»);
+     *  - or the operator issued this row ΕΠΙ ΠΙΣΤΩΣΕΙ with «Δεν έχει πληρωθεί ακόμα» (`whmcs_paid_waived_at`): the
+     *    settlement WHMCS already reported then (`datepaid` ≤ waived_at + grace) is the waived one; a LATER one (WHMCS
+     *    unwound and really paid) is money and syncs. No usable `datepaid` → waived (the conservative side). A real
+     *    payment back-dated in WHMCS to before the waiver, or entered within the grace, stays open for a human.
+     *
+     * Either way the invoice stays an open receivable — visible, never silently settled.
+     *
+     * @param  array<string, mixed>|null  $payload
+     */
+    public static function isWaived(PendingWhmcsInvoice $row, ?array $payload): bool
+    {
+        if ($row->customer?->whmcs_paid_on_credit || $row->invoice?->customer?->whmcs_paid_on_credit) {
+            return true;
+        }
+        $waivedAt = $row->whmcs_paid_waived_at;
+        if ($waivedAt === null) {
+            return false;
+        }
+        $paidAt = $payload === null ? null : self::paidAt($payload);
+
+        return $paidAt === null || $paidAt->lte($waivedAt->copy()->addHours(self::CLOCK_GRACE_HOURS));
     }
 
     /**
