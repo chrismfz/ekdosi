@@ -196,6 +196,7 @@ class WhmcsPaymentSyncerTest extends TestCase
             'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
             'kind' => 'payment', 'amount' => (float) $invoice->gross_total, 'pay_date' => $payDate,
             'transaction_id' => $txn ?? 'whmcs-paid:'.$whmcsId,
+            'notes' => 'Είσπραξη από WHMCS #'.$whmcsId.' · eurobanklib (αυτόματη καταγραφή).',
         ]);
         $this->travelBack();
         $p->delete();
@@ -247,6 +248,23 @@ class WhmcsPaymentSyncerTest extends TestCase
 
         $this->assertSame(1, $result->recorded);
         $this->assertSame(1, Payment::where('invoice_id', $invoice->id)->count());
+    }
+
+    public function test_a_manual_partial_payment_with_the_same_transid_does_not_block_the_rest(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7010);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
+            'kind' => 'payment', 'amount' => 24.0, 'pay_date' => '2026-11-20', 'transaction_id' => 'ΕΜΒΑΣΜΑ',
+        ]);
+
+        $amount = $this->syncer()->syncInvoice($invoice, fn (int $id) => [
+            'status' => 'Paid', 'datepaid' => '2026-11-25 10:00:00',
+            'transactions' => ['transaction' => [['amountin' => '124.00', 'gateway' => 'banktransfer', 'transid' => 'ΕΜΒΑΣΜΑ']]],
+        ]);
+
+        $this->assertEqualsWithDelta(100.0, $amount, 0.001, 'the open remainder is synced');
     }
 
     public function test_a_real_payment_within_the_clock_grace_is_left_for_the_operator(): void

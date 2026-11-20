@@ -61,12 +61,16 @@ final class WhmcsPaidReceipt
 
         $rows = Payment::withTrashed()
             ->where('company_id', $companyId)
-            ->where(function ($q) use ($key, $ref, $invoiceId) {
+            ->where(function ($q) use ($key, $ref, $invoiceId, $whmcsInvoiceId) {
                 $q->where('transaction_id', $key);
                 // The WHMCS transid is free text (an operator may type «ΕΜΒΑΣΜΑ» on
-                // every bank transfer) → match it ONLY on this invoice, never tenant-wide.
+                // every bank transfer) → match it ONLY on this invoice AND only the
+                // recorder's own auto-receipt for THIS WHMCS invoice (its note), never
+                // an operator's manual payment that happens to carry the same text.
                 if ($ref !== null) {
-                    $q->orWhere(fn ($r) => $r->where('transaction_id', $ref)->where('invoice_id', $invoiceId));
+                    $q->orWhere(fn ($r) => $r->where('transaction_id', $ref)
+                        ->where('invoice_id', $invoiceId)
+                        ->where('notes', 'like', 'Είσπραξη από WHMCS #'.$whmcsInvoiceId.'%'));
                 }
             })
             ->get(['id', 'created_at', 'deleted_at']);
