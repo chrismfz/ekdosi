@@ -221,6 +221,11 @@ class WhmcsAutoIssue extends Command
             // default receipt type (or an ambiguous third-party) is HELD, not
             // mis-issued.
             [$chosenType, $holdReason] = $this->chooseType($row, $invoiceType, $receiptType);
+            // A customer whose WHMCS «Paid» is only a service-continuity mark (no money yet): never auto-issue — the
+            // operator issues it ΕΠΙ ΠΙΣΤΩΣΕΙ from the inbox (the modal pre-ticks «Δεν έχει πληρωθεί ακόμα»).
+            if ($chosenType !== null && $customer->whmcs_paid_on_credit) {
+                [$chosenType, $holdReason] = [null, 'πελάτης «Πληρωμένο στο WHMCS ≠ εισπραγμένο» — έκδοση επί πιστώσει από χειριστή'];
+            }
             // The customer's country for this type, before anything is saved: a submit that refused it later left a
             // provisional document no run retries (review of #717).
             if ($chosenType !== null && ($countryHold = self::countryHold($customer, $chosenType)) !== null) {

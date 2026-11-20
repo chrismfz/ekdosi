@@ -62,7 +62,7 @@ class WhmcsPaymentSyncer
             ->where('status', PendingWhmcsInvoice::STATUS_FILED)
             ->whereNotNull('invoice_id')
             ->whereNotNull('whmcs_invoice_id')
-            ->with('invoice.paymentMethod')
+            ->with(['invoice.paymentMethod', 'invoice.customer', 'customer'])
             ->get();
 
         foreach ($rows as $row) {
@@ -154,6 +154,10 @@ class WhmcsPaymentSyncer
         }
         // The same number for another client (WHMCS and MyCS share the id space): not this receivable's payment.
         if ($row->whmcs_userid !== null && (int) ($payload['userid'] ?? 0) !== (int) $row->whmcs_userid) {
+            return 0.0;
+        }
+        // Issued ΕΠΙ ΠΙΣΤΩΣΕΙ with this WHMCS «Paid» declared not money: not a payment to record.
+        if (WhmcsPaidReceipt::isWaived($row, $payload)) {
             return 0.0;
         }
 

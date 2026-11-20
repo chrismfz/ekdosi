@@ -293,7 +293,16 @@ class WhmcsInvoiceFiler
         Customer $customer,
         InvoiceType $invoiceType,
         ?int $createdByUserId = null,
+        ?bool $paidOnCredit = null,
     ): Invoice {
+        // «Δεν έχει πληρωθεί ακόμα» (the inbox modal): on a WHMCS-«Paid» row, the operator's choice whether that «Paid»
+        // is money. Mapped from a copy (→ the «Επί Πιστώσει» method), persisted with the draft under the row lock
+        // below — never on the caller's stale instance. null = keep the row as it is.
+        if ($paidOnCredit !== null) {
+            $paidOnCredit = $paidOnCredit && $pending->whmcsReportsPaid();
+            $pending = clone $pending;
+            $pending->whmcs_paid_waived_at = $paidOnCredit ? ($pending->whmcs_paid_waived_at ?? now()) : null;
+        }
         $mapped = $this->mapper->map($tenant, $pending, $customer, $invoiceType);
         // WH-1/WH-4: a non-EUR or negative-line draft would be wrong from the
         // start (foreign amounts as EUR / a line AADE later rejects) and the
@@ -314,13 +323,16 @@ class WhmcsInvoiceFiler
         WhmcsFilingGuard::assertNotAddFunds($pending, allowMixed: true);
         WhmcsFilingGuard::assertPayloadFilable($mapped, $pending);
 
-        return DB::transaction(function () use ($tenant, $pending, $mapped, $createdByUserId) {
+        return DB::transaction(function () use ($tenant, $pending, $mapped, $createdByUserId, $paidOnCredit) {
             $locked = PendingWhmcsInvoice::query()
                 ->whereKey($pending->id)
                 ->lockForUpdate()
                 ->firstOrFail();
 
             $this->assertCanBeFiled($locked);
+            if ($paidOnCredit !== null) {
+                $locked->forceFill(['whmcs_paid_waived_at' => $pending->whmcs_paid_waived_at]);
+            }
 
             // Gapless-at-send: the inbox draft carries a provisional identity (no ΑΑ);
             // the real number is allocated when the operator issues it.

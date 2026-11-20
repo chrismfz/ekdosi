@@ -59,7 +59,7 @@ class Customer extends Model
             'type', 'afm', 'name', 'address1', 'address2', 'city', 'postcode',
             'phone1', 'phone2', 'occupation', 'tax_office', 'email', 'secondary_email',
             'discount', 'country', 'language', 'vat_vies', 'withhold_tax', 'payment_method_id', 'default_invoice_type_id',
-            'is_active', 'needs_immediate_invoice', 'needs_invoice_before_payment', 'auto_email_invoices', 'reminders_enabled',
+            'is_active', 'needs_immediate_invoice', 'needs_invoice_before_payment', 'whmcs_paid_on_credit', 'auto_email_invoices', 'reminders_enabled',
         ];
     }
 
@@ -104,6 +104,8 @@ class Customer extends Model
         // PR-only additions:
         'needs_immediate_invoice',
         'needs_invoice_before_payment',
+        // WHMCS «Paid» is a service-continuity mark, not money → issue on credit, no receipt, auto-issue holds.
+        'whmcs_paid_on_credit',
         'is_active',
         // #8: AADE/GSIS registry activity status of the ΑΦΜ (distinct from the
         // operator's `is_active`). Written by the crosscheck action + the periodic
@@ -139,6 +141,7 @@ class Customer extends Model
             'collection_last_contact_at' => 'date',
             'needs_immediate_invoice' => 'boolean',
             'needs_invoice_before_payment' => 'boolean',
+            'whmcs_paid_on_credit' => 'boolean',
             'auto_email_invoices' => 'boolean',
             'reminders_enabled' => 'boolean',
             'is_active' => 'boolean',

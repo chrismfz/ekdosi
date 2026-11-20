@@ -129,6 +129,12 @@
         <div class="text-sm">
             Τρόπος πληρωμής: <strong>{{ $method?->description ?? '—' }}</strong>
             <span class="text-gray-500">({{ $creditTerm ? 'επί πιστώσει: ανοιχτή οφειλή μέχρι την πληρωμή' : 'εξοφλείται με την έκδοση' }})</span>
+            @if (! empty($src['whmcs_paid_waived']) && ! $creditTerm)
+                <div class="text-danger-600 font-semibold">
+                    ⚠️ «Δεν έχει πληρωθεί ακόμα», αλλά δεν υπάρχει τρόπος πληρωμής «Επί Πιστώσει» (τύπος myDATA 5, με ημέρες πίστωσης):
+                    θα εκδιδόταν εξοφλημένο. Όρισέ τον στους Τρόπους πληρωμής.
+                </div>
+            @endif
             @if (! empty($src['whmcs_unpaid']) && ! $creditTerm)
                 <div class="text-danger-600 font-semibold">
                     ⚠️ Απλήρωτο, αλλά δεν υπάρχει τρόπος πληρωμής «Επί Πιστώσει» (τύπος myDATA 5, με ημέρες πίστωσης):

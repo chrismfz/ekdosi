@@ -32,6 +32,7 @@ use App\Services\Whmcs\PaymentPushResult;
 use App\Services\Whmcs\WhmcsInvoiceFetcher;
 use App\Services\Whmcs\WhmcsPaymentPusher;
 use App\Services\Whmcs\WhmcsPaymentPusherFactory;
+use App\Services\Whmcs\WhmcsPaidReceipt;
 use App\Services\Whmcs\WhmcsPaymentSyncer;
 use App\Support\EInvoice\ProviderIssueDateGuard;
 use App\Support\InvoiceScope;
@@ -631,6 +632,15 @@ class ViewInvoice extends ViewRecord
                             ->body('Το τιμολόγιο εξοφλήθηκε — καταχωρίστηκε πληρωμή '.number_format($amount, 2, ',', '.').' €.')
                             ->success()->send();
                         $this->redirect(static::getResource()::getUrl('view', ['record' => $record, 'tenant' => $record->company]));
+                    } elseif ($record->whmcsPending !== null
+                        && WhmcsPaidReceipt::isPaid($live = $fetch((int) $record->whmcsPending->whmcs_invoice_id))
+                        // …of THIS client (WHMCS and MyCS share the id space), as the syncer checks it.
+                        && ($record->whmcsPending->whmcs_userid === null || (int) ($live['userid'] ?? 0) === (int) $record->whmcsPending->whmcs_userid)
+                        && WhmcsPaidReceipt::isWaived($record->whmcsPending, $live)) {
+                        Notification::make()
+                            ->title('Δεν καταγράφηκε αυτόματα')
+                            ->body('Εκδόθηκε επί πιστώσει με «Δεν έχει πληρωθεί ακόμα» (ή ο πελάτης έχει «Πληρωμένο στο WHMCS ≠ εισπραγμένο»): το «Paid» '.$this->sourceName($record)->in().' δεν μετράει ως είσπραξη. Όταν έρθουν τα χρήματα, πέρασε την πληρωμή χειροκίνητα («Νέα είσπραξη»).')
+                            ->warning()->send();
                     } else {
                         Notification::make()
                             ->title('Δεν έχει πληρωθεί ακόμη')
