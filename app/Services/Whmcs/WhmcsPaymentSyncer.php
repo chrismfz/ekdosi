@@ -7,6 +7,7 @@ use App\Models\Invoice;
 use App\Models\Payment;
 use App\Models\PendingWhmcsInvoice;
 use App\Services\InvoiceBalance;
+use App\Support\Billing\MycsPayload;
 use Illuminate\Support\Facades\DB;
 use Throwable;
 
@@ -215,6 +216,12 @@ class WhmcsPaymentSyncer
     /** @param  array<string, mixed>  $payload */
     private static function payDate(array $payload): string
     {
+        // MyCS keeps its FIRST paid_at as `datepaid` (e.g. the day staff marked it Paid by hand): the money that
+        // closes the rest came with its latest transaction — date it by that.
+        if (MycsPayload::is($payload) && ($latest = MycsPayload::latestTransactionDate($payload)) !== null) {
+            return $latest;
+        }
+
         return WhmcsPaidReceipt::payDate($payload);
     }
 }

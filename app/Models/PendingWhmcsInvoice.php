@@ -625,7 +625,10 @@ class PendingWhmcsInvoice extends Model
      */
     public function issuesOnCredit(): bool
     {
-        return $this->whmcsIsNotPaid() || $this->whmcsPaidIsWaived();
+        // A MyCS «Paid» that MyCS itself reports short (mycs.balance > 0) is on credit whatever the box says: issued
+        // settled it would read «Εξοφλημένο» for money MyCS says never came in.
+        return $this->whmcsIsNotPaid() || $this->whmcsPaidIsWaived()
+            || MycsPayload::shortfall(is_array($this->payload) ? $this->payload : null) > 0.005;
     }
 
     /** The source reports this invoice fully «Paid» — the only case «Δεν έχει πληρωθεί ακόμα» applies to. */

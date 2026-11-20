@@ -364,6 +364,135 @@ class WhmcsPaidOnCreditTest extends TestCase
         $this->assertNotNull($row->fresh()->whmcs_paid_waived_at, 'null = keep the row as it is (other callers)');
     }
 
+    // --- MyCS «Paid χωρίς (όλα) τα χρήματα» (mycs.balance > 0) ---------------------------------------
+
+    /** @param array<string, mixed> $extra */
+    private function mycsRow(string $balance, array $extra = [], int $id = 50001): PendingWhmcsInvoice
+    {
+        return $this->row(array_merge(self::PAID, [
+            'transactions' => ['transaction' => []], 'paymentmethod' => '',
+            'mycs' => ['source' => 'mycs', 'balance' => $balance],
+        ], $extra), $id);
+    }
+
+    public function test_a_mycs_paid_with_no_money_is_issued_on_credit_with_no_receipt(): void
+    {
+        // Not waived (box unticked / auto path): a short MyCS «Paid» is on credit anyway (review P1-2).
+        $invoice = $this->issue($this->mycsRow('124.00'));
+
+        $this->assertSame($this->credit->id, $invoice->payment_method_id);
+        $this->assertSame(0, Payment::where('invoice_id', $invoice->id)->count());
+        $balance = app(InvoiceBalance::class)->for($invoice);
+        $this->assertSame(PaymentStatus::Unpaid, $balance->status, 'never a synthetic «Εξοφλημένο» for money MyCS says never came');
+        $this->assertEqualsWithDelta(124.0, $balance->balance, 0.001);
+    }
+
+    public function test_a_mycs_partial_paid_records_only_what_was_collected_and_the_rest_syncs_later(): void
+    {
+        // MyCS shape: transactions carry `amount` (not WHMCS `amountin`).
+        $row = $this->mycsRow('74.00', ['transactions' => ['transaction' => [['gateway' => 'banktransfer', 'transid' => '', 'amount' => '50.00']]]]);
+        $invoice = $this->issue($row);
+
+        $this->assertSame($this->credit->id, $invoice->payment_method_id);
+        $this->assertEqualsWithDelta(50.0, (float) Payment::where('invoice_id', $invoice->id)->sum('amount'), 0.001);
+        $this->assertSame('whmcs-paid:50001:partial', Payment::where('invoice_id', $invoice->id)->value('transaction_id'));
+        $this->assertEqualsWithDelta(74.0, app(InvoiceBalance::class)->for($invoice->fresh())->balance, 0.001, 'the rest stays owed');
+
+        // The rest paid in MyCS later: same paid_at (MyCS keeps its first), balance now 0 → the sync closes it.
+        $settled = ['mycs' => ['source' => 'mycs', 'balance' => '0.00'], 'userid' => 82, 'transactions' => [
+            ['transid' => '', 'gateway' => 'banktransfer', 'date' => '2026-11-11 15:32:01', 'amount' => '50.00', 'refunded' => '0.00'],
+            ['transid' => '', 'gateway' => 'banktransfer', 'date' => '2026-11-27 09:10:00', 'amount' => '74.00', 'refunded' => '0.00'],
+            ['transid' => '', 'gateway' => 'banktransfer', 'date' => '2026-11-28 12:00:00', 'amount' => '5.00', 'refunded' => '5.00'],
+        ]] + self::PAID;
+        $this->assertSame([$invoice->id], app(WhmcsPaymentReconciler::class)->reconcile($this->tenant, fn (int $id) => $settled));
+        $this->assertSame(1, app(WhmcsPaymentSyncer::class)->syncTenant($this->tenant, fn (int $id) => $settled)->recorded);
+        $this->assertEqualsWithDelta(0.0, app(InvoiceBalance::class)->for($invoice->fresh())->balance, 0.001);
+        $this->assertEqualsWithDelta(124.0, (float) Payment::where('invoice_id', $invoice->id)->sum('amount'), 0.001, 'never more than the invoice');
+        $this->assertSame('2026-11-27', Payment::where('invoice_id', $invoice->id)->where('transaction_id', 'whmcs-paid:50001')->first()->pay_date->format('Y-m-d'), 'dated by the money, not the staff mark');
+    }
+
+    /** Review P1-1: MyCS `total` is net of account credit; credit counts as paid. */
+    public function test_account_credit_on_a_short_mycs_paid_counts_as_collected(): void
+    {
+        $row = $this->mycsRow('100.00', ['total' => '100.00', 'credit' => '24.00']);
+        $invoice = $this->issue($row);
+
+        $this->assertEqualsWithDelta(24.0, (float) Payment::where('invoice_id', $invoice->id)->sum('amount'), 0.001);
+        $this->assertEqualsWithDelta(100.0, app(InvoiceBalance::class)->for($invoice->fresh())->balance, 0.001, 'as MyCS says: 100 owed');
+    }
+
+    public function test_a_settled_mycs_paid_still_records_in_full(): void
+    {
+        $invoice = $this->issue($this->mycsRow('0.00', ['transactions' => ['transaction' => [['gateway' => 'banktransfer', 'transid' => '', 'amount' => '124.00']]]]));
+
+        $this->assertSame($this->cash->id, $invoice->payment_method_id, 'regression: a full MyCS payment is settled');
+        $this->assertEqualsWithDelta(124.0, (float) Payment::where('invoice_id', $invoice->id)->sum('amount'), 0.001);
+    }
+
+    public function test_the_sync_never_closes_a_receivable_on_a_still_short_mycs_paid(): void
+    {
+        $invoice = $this->issue($this->mycsRow('124.00'));
+        $short = self::PAID + ['userid' => 82, 'mycs' => ['source' => 'mycs', 'balance' => '24.00']];
+
+        $this->assertSame(0, app(WhmcsPaymentSyncer::class)->syncTenant($this->tenant, fn (int $id) => $short)->recorded);
+        $this->assertSame([], app(WhmcsPaymentReconciler::class)->reconcile($this->tenant, fn (int $id) => $short));
+        $this->assertSame(0, Payment::where('invoice_id', $invoice->id)->count());
+    }
+
+    public function test_unticking_the_box_on_a_short_mycs_row_still_drafts_on_credit(): void
+    {
+        $this->operator();
+        $row = $this->mycsRow('124.00');
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->callTableAction('create_draft', $row, data: [
+                'customer_id' => $this->customer->id, 'invoice_type_id' => $this->type->id, 'whmcs_paid_on_credit' => false,
+            ]);
+
+        $this->assertSame($this->credit->id, Invoice::firstOrFail()->payment_method_id);
+    }
+
+    public function test_a_short_mycs_row_without_a_credit_method_is_refused_even_unticked(): void
+    {
+        $this->operator();
+        $this->credit->delete();
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->callTableAction('create_draft', $this->mycsRow('124.00'), data: [
+                'customer_id' => $this->customer->id, 'invoice_type_id' => $this->type->id, 'whmcs_paid_on_credit' => false,
+            ]);
+
+        $this->assertSame(0, Invoice::count(), 'it would have been issued settled');
+    }
+
+    public function test_the_box_is_pre_ticked_on_a_short_mycs_paid_for_any_customer(): void
+    {
+        $this->operator();
+        $row = $this->mycsRow('124.00');
+
+        Livewire::test(ListWhmcsInbox::class)
+            ->mountTableAction('create_draft', $row)
+            ->assertTableActionDataSet(['whmcs_paid_on_credit' => true]);
+    }
+
+    public function test_auto_issue_holds_a_short_mycs_paid(): void
+    {
+        $this->tenant->forceFill([
+            'whmcs_api_url' => 'https://whmcs.example.test/includes/api.php', 'whmcs_api_identifier' => 'id', 'whmcs_api_secret' => 'secret',
+            'whmcs_auto_issue_immediate' => true, 'whmcs_default_invoice_type_id' => $this->type->id,
+        ])->save();
+        $this->customer->update(['needs_immediate_invoice' => true]);
+        $short = $this->mycsRow('124.00');
+        $other = Customer::create(['company_id' => $this->tenant->id, 'name' => 'Άλλος', 'afm' => '111111112', 'needs_immediate_invoice' => true]);
+        $control = $this->row(id: 50002);
+        $control->update(['customer_id' => $other->id]);
+
+        $this->artisan('whmcs:auto-issue')->assertExitCode(0);
+
+        $this->assertNull($short->fresh()->invoice_id, 'held for a human');
+        $this->assertNotNull($control->fresh()->invoice_id, 'control: auto-issue does run');
+    }
+
     // --- auto-issue -----------------------------------------------------------------------------------
 
     public function test_auto_issue_holds_a_flagged_customers_paid_row(): void
