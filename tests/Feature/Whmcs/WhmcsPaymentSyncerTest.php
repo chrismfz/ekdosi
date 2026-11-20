@@ -188,13 +188,87 @@ class WhmcsPaymentSyncerTest extends TestCase
      * The «fake Paid» incident (ΤΠΥ7187 / WHMCS #32722): an invoice marked Paid in
      * WHMCS with no money in → the auto-receipt was recorded → an operator DELETED it.
      */
-    private function deletedReceipt(Invoice $invoice, int $whmcsId, string $payDate): void
+    private function deletedReceipt(Invoice $invoice, int $whmcsId, string $payDate, ?string $txn = null): void
     {
-        Payment::create([
+        // Recorded at issue, 4' after WHMCS was marked Paid (15:32:01), like ΤΠΥ7187.
+        $this->travelTo('2026-11-11 15:35:59');
+        $p = Payment::create([
             'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
             'kind' => 'payment', 'amount' => (float) $invoice->gross_total, 'pay_date' => $payDate,
-            'transaction_id' => 'whmcs-paid:'.$whmcsId,
-        ])->delete();
+            'transaction_id' => $txn ?? 'whmcs-paid:'.$whmcsId,
+        ]);
+        $this->travelBack();
+        $p->delete();
+    }
+
+    public function test_an_edited_pay_date_on_the_deleted_receipt_does_not_resurrect_it(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7005);
+        // Operator corrected the date to the «bank date» before deleting it as fake.
+        $this->deletedReceipt($invoice, 7005, '2026-11-09');
+
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-11 15:32:01']);
+
+        $this->assertSame(0, $result->recorded);
+    }
+
+    public function test_a_deleted_receipt_under_a_vpos_ref_also_blocks_the_same_settlement(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7006);
+        $this->deletedReceipt($invoice, 7006, '2026-11-11', 'VPOS-123456789012');
+        $payload = fn (int $id) => [
+            'status' => 'Paid', 'datepaid' => '2026-11-11 15:32:01',
+            'transactions' => ['transaction' => [['amountin' => '124.00', 'gateway' => 'eurobanklib', 'transid' => 'VPOS-123456789012']]],
+        ];
+
+        $result = $this->syncer()->syncTenant($this->tenant, $payload);
+
+        $this->assertSame(0, $result->recorded);
+        $this->assertSame(0, Payment::where('invoice_id', $invoice->id)->count());
+    }
+
+    /** Review r2: the WHMCS transid is free text — another invoice's receipt with the same «ref» must not block this one. */
+    public function test_a_shared_free_text_transid_on_another_invoice_does_not_block(): void
+    {
+        $other = $this->openInvoice(50.0);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $other->id,
+            'kind' => 'payment', 'amount' => 50.0, 'pay_date' => '2026-11-01', 'transaction_id' => 'ΕΜΒΑΣΜΑ',
+        ]);
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7008);
+
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => [
+            'status' => 'Paid', 'datepaid' => '2026-11-25 10:00:00',
+            'transactions' => ['transaction' => [['amountin' => '124.00', 'gateway' => 'banktransfer', 'transid' => 'ΕΜΒΑΣΜΑ']]],
+        ]);
+
+        $this->assertSame(1, $result->recorded);
+        $this->assertSame(1, Payment::where('invoice_id', $invoice->id)->count());
+    }
+
+    public function test_a_real_payment_within_the_clock_grace_is_left_for_the_operator(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7009);
+        $this->deletedReceipt($invoice, 7009, '2026-11-11');   // created 15:35:59
+
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-11 17:00:00']);
+
+        $this->assertSame(0, $result->recorded, 'inside the 3h clock grace → conservative, manual');
+    }
+
+    public function test_a_real_payment_later_the_same_day_records(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7007);
+        $this->deletedReceipt($invoice, 7007, '2026-11-11');
+
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-11 19:00:00']);
+
+        $this->assertSame(1, $result->recorded);
     }
 
     public function test_a_deleted_receipt_is_not_resurrected_while_whmcs_reports_the_same_settlement(): void

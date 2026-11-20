@@ -141,10 +141,13 @@ class WhmcsPaymentReconcilerTest extends TestCase
     {
         $invoice = $this->openInvoice();
         $this->filedRow($invoice, 8006);
-        Payment::create([
+        $this->travelTo('2026-11-11 15:35:59');
+        $receipt = Payment::create([
             'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
             'kind' => 'payment', 'amount' => 124.0, 'pay_date' => '2026-11-11', 'transaction_id' => 'whmcs-paid:8006',
-        ])->delete();
+        ]);
+        $this->travelBack();
+        $receipt->delete();
 
         $same = $this->reconciler()->reconcile($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-11 15:32:01']);
         $this->assertSame([], $same);

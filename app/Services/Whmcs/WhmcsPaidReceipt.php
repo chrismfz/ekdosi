@@ -35,29 +35,41 @@ final class WhmcsPaidReceipt
     }
 
     /**
-     * Does ekdosi already hold THIS WHMCS settlement under `$txnId`?
+     * Does ekdosi already hold THIS WHMCS settlement? Matches our receipt by the
+     * deterministic `whmcs-paid:{id}` key AND — once the payload is known — by the
+     * real acquirer/vPOS ref the issue-time recorder stamps instead (provenance()).
      *
-     *  - a LIVE receipt with the key → yes, always (never double-record);
-     *  - a soft-DELETED one → only while WHMCS still reports the SAME settlement it
-     *    was recorded from (same `datepaid` day). The operator who deleted it meant
-     *    «this payment did not happen» — e.g. an invoice marked Paid in WHMCS with no
-     *    money in, just to get it issued — so a sweep must not resurrect it. But once
-     *    that is unwound in WHMCS (Mark Unpaid) and the REAL money is entered later,
-     *    WHMCS reports a different `datepaid` → a new settlement → not held, it records.
+     *  - a LIVE receipt → yes, always (never double-record);
+     *  - a soft-DELETED one → only for the settlement it mirrored, i.e. one WHMCS
+     *    already reported when that receipt was CREATED (`datepaid` ≤ its
+     *    `created_at` — a system timestamp, unlike the editable pay_date). The
+     *    operator who deleted it meant «this payment did not happen» (an invoice
+     *    marked Paid in WHMCS with no money in, just to get it issued), so a sweep
+     *    must not resurrect it. Once WHMCS is unwound (Mark Unpaid) and the REAL
+     *    money is entered, its `datepaid` is later → a new settlement → it records.
      *    Without a usable `datepaid` (or before the fetch, `$payload` null) a deleted
-     *    receipt keeps blocking — the conservative side.
-     *
-     * Known edge: fake-paid, deleted and really paid all on the SAME day still blocks
-     * the sweep — the operator records that one by hand («Νέα είσπραξη»).
+     *    receipt keeps blocking — the conservative side; so does a real payment
+     *    back-dated in WHMCS to before the bogus receipt, or entered within
+     *    CLOCK_GRACE_HOURS after it (record those by hand — «Νέα είσπραξη»).
      *
      * @param  array<string, mixed>|null  $payload
      */
-    public static function alreadyHeld(int $companyId, string $txnId, ?array $payload): bool
+    public static function alreadyHeld(int $companyId, int $whmcsInvoiceId, int $invoiceId, ?array $payload): bool
     {
+        $key = self::transactionKey($whmcsInvoiceId);
+        $ref = $payload === null ? null : self::provenance($payload)[0];
+
         $rows = Payment::withTrashed()
             ->where('company_id', $companyId)
-            ->where('transaction_id', $txnId)
-            ->get(['id', 'pay_date', 'deleted_at']);
+            ->where(function ($q) use ($key, $ref, $invoiceId) {
+                $q->where('transaction_id', $key);
+                // The WHMCS transid is free text (an operator may type «ΕΜΒΑΣΜΑ» on
+                // every bank transfer) → match it ONLY on this invoice, never tenant-wide.
+                if ($ref !== null) {
+                    $q->orWhere(fn ($r) => $r->where('transaction_id', $ref)->where('invoice_id', $invoiceId));
+                }
+            })
+            ->get(['id', 'created_at', 'deleted_at']);
 
         if ($rows->contains(fn (Payment $p) => $p->deleted_at === null)) {
             return true;
@@ -66,12 +78,80 @@ final class WhmcsPaidReceipt
             return false;
         }
 
-        $paidOn = $payload === null ? null : self::realPaidDate($payload);
-        if ($paidOn === null) {
+        $paidAt = $payload === null ? null : self::paidAt($payload);
+        if ($paidAt === null) {
             return true;
         }
 
-        return $rows->contains(fn (Payment $p) => $p->pay_date?->toDateString() === $paidOn);
+        return $rows->contains(fn (Payment $p) => $p->created_at === null
+            || $paidAt->lte($p->created_at->copy()->addHours(self::CLOCK_GRACE_HOURS)));
+    }
+
+    /**
+     * `datepaid` is WHMCS's local clock, `created_at` ours. Both are Europe/Athens
+     * today; the grace absorbs a WHMCS host left on UTC (±2-3h) so a bogus settlement
+     * can never look «newer» than its own receipt. Cost: a real payment entered in
+     * WHMCS within this window after the bogus receipt is not auto-synced — the
+     * invoice stays open and visible, the operator records it by hand (safe side).
+     */
+    private const CLOCK_GRACE_HOURS = 3;
+
+    /**
+     * Gateway name + acquirer/vPOS ref from the WHMCS payload — the SAME ref the
+     * issue-time WhmcsReceiptRecorder stamps as transaction_id (it calls this), so
+     * the syncer's dedup recognises that receipt too. Reads the largest
+     * INCOMING transaction (never a refund/adjustment); falls back to the invoice-
+     * level `paymentmethod` for the gateway and no ref when the payload carries no
+     * transaction detail (shape varies native vs bridge).
+     *
+     * @param  array<string, mixed>  $payload
+     * @return array{0: ?string, 1: ?string} [ref, gateway]
+     */
+    public static function provenance(array $payload): array
+    {
+        $gateway = ($g = trim((string) ($payload['paymentmethod'] ?? ''))) !== '' ? $g : null;
+
+        $txns = $payload['transactions']['transaction'] ?? null;
+        if (is_array($txns)) {
+            // WHMCS returns one transaction as a bare map, many as a list — normalise.
+            $rows = array_is_list($txns) ? $txns : [$txns];
+            $best = null;
+            foreach ($rows as $row) {
+                if (is_array($row) && (float) ($row['amountin'] ?? 0) > 0
+                    && ($best === null || (float) ($row['amountin'] ?? 0) > (float) ($best['amountin'] ?? 0))) {
+                    $best = $row;
+                }
+            }
+            if (is_array($best)) {
+                if (($bg = trim((string) ($best['gateway'] ?? ''))) !== '') {
+                    $gateway = $bg;
+                }
+                $ref = trim((string) ($best['transid'] ?? ''));
+
+                return [$ref !== '' ? $ref : null, $gateway];
+            }
+        }
+
+        return [null, $gateway];
+    }
+
+    /**
+     * The full WHMCS `datepaid` as a moment in the app timezone, or null when absent,
+     * the zero-date sentinel, or unparseable.
+     *
+     * @param  array<string, mixed>  $payload
+     */
+    private static function paidAt(array $payload): ?Carbon
+    {
+        $raw = trim((string) ($payload['datepaid'] ?? ''));
+        if ($raw === '' || str_starts_with($raw, '0000')) {
+            return null;
+        }
+        try {
+            return Carbon::parse($raw, config('app.timezone'));
+        } catch (\Throwable) {
+            return null;
+        }
     }
 
     /**

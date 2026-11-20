@@ -116,7 +116,8 @@ class WhmcsPaymentReconciler
         // would sit there forever behind a button that records nothing).
         return ! WhmcsPaidReceipt::alreadyHeld(
             (int) $row->company_id,
-            WhmcsPaidReceipt::transactionKey((int) $row->whmcs_invoice_id),
+            (int) $row->whmcs_invoice_id,
+            (int) $row->invoice_id,
             $payload,
         );
     }

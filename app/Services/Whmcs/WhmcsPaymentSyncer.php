@@ -27,7 +27,7 @@ use Throwable;
  *  - **dedup by transaction_id** (`whmcs-paid:{id}`): re-checked inside the lock,
  *    so the same WHMCS payment is never recorded twice even if the invoice later
  *    reopens (e.g. a credit note is reversed). A DELETED receipt blocks only the
- *    same WHMCS settlement (WhmcsPaidReceipt::alreadyHeld) — a later, real payment
+ *    settlement it mirrored (WhmcsPaidReceipt::alreadyHeld) — a later, real payment
  *    after a bogus one was unwound still records.
  *  - records the exact OUTSTANDING BALANCE (WHMCS InvoicePaid = full settlement
  *    of that document), read AFRESH under the lock, so a manual payment landing
@@ -142,9 +142,9 @@ class WhmcsPaymentSyncer
             return null;
         }
         $txnId = self::transactionId((int) $row->whmcs_invoice_id);
-        // Pre-fetch: only a LIVE receipt is a sure skip; a deleted one is judged
-        // against the WHMCS settlement once we have it (below).
-        if ($this->alreadyRecorded($tenant, $txnId, null, liveOnly: true)) {
+        // Pre-fetch: only a LIVE receipt is a sure skip; a deleted one (or one under
+        // a vPOS ref) is judged against the WHMCS settlement inside the lock below.
+        if ($this->hasLiveReceipt($tenant, $txnId)) {
             return null;
         }
 
@@ -157,17 +157,13 @@ class WhmcsPaymentSyncer
             return 0.0;
         }
 
-        if ($this->alreadyRecorded($tenant, $txnId, $payload)) {
-            return 0.0;
-        }
-
         return DB::transaction(function () use ($tenant, $invoice, $txnId, $payload, $row): float {
             $locked = Invoice::query()->whereKey($invoice->id)->lockForUpdate()->first();
             if ($locked === null || ! $this->isLiveOpen($locked)) {
                 return 0.0;
             }
             $balance = round($this->balance->for($locked)->balance, 2);
-            if ($balance <= 0.005 || $this->alreadyRecorded($tenant, $txnId, $payload)) {
+            if ($balance <= 0.005 || WhmcsPaidReceipt::alreadyHeld((int) $tenant->id, (int) $row->whmcs_invoice_id, (int) $locked->id, $payload)) {
                 return 0.0;
             }
             Payment::create([
@@ -198,23 +194,13 @@ class WhmcsPaymentSyncer
             && ! $invoice->isCreditNote();
     }
 
-    /**
-     * A live receipt always blocks; a DELETED one only the same WHMCS settlement it
-     * was recorded from — never resurrected by a sweep, but a later real payment
-     * (WHMCS unwound + re-paid on another day) still records. See WhmcsPaidReceipt::alreadyHeld.
-     *
-     * @param  array<string, mixed>|null  $payload
-     */
-    private function alreadyRecorded(Company $tenant, string $txnId, ?array $payload, bool $liveOnly = false): bool
+    /** A LIVE (not deleted) receipt under the whmcs-paid key — the cheap pre-fetch skip. */
+    private function hasLiveReceipt(Company $tenant, string $txnId): bool
     {
-        if ($liveOnly) {
-            return Payment::query()
-                ->where('company_id', $tenant->id)
-                ->where('transaction_id', $txnId)
-                ->exists();
-        }
-
-        return WhmcsPaidReceipt::alreadyHeld((int) $tenant->id, $txnId, $payload);
+        return Payment::query()
+            ->where('company_id', $tenant->id)
+            ->where('transaction_id', $txnId)
+            ->exists();
     }
 
     private static function transactionId(int $whmcsInvoiceId): string

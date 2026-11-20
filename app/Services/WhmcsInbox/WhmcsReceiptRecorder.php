@@ -41,10 +41,8 @@ use Illuminate\Support\Facades\DB;
  *  - Idempotent: skips (withTrashed) if a row with that same id already exists on
  *    the invoice — so a re-issue never doubles and a deliberately deleted/refunded
  *    receipt is never resurrected — and also skips when ANY real payment is already
- *    on the invoice. (For a vPOS-ref id the WhmcsPaymentSyncer's whmcs-paid-keyed
- *    dedup won't recognise this row, but the syncer only touches credit-term
- *    invoices, so the cash-term vPOS case is unaffected; the credit-term-paid-at-
- *    issue-then-refunded edge is an accepted tradeoff — see BACKLOG.)
+ *    on the invoice. The WhmcsPaymentSyncer recognises this row under either id
+ *    (WhmcsPaidReceipt::alreadyHeld), so it never re-adds it later either.
  *  - Serialised under a lockForUpdate on the invoice so a concurrent recorder /
  *    manual payment can't both pass the dedup check.
  */
@@ -78,13 +76,11 @@ class WhmcsReceiptRecorder
         }
 
         $whmcsInvoiceId = (int) $pending->whmcs_invoice_id;
-        [$ref, $gateway] = self::provenance($payload);
+        [$ref, $gateway] = WhmcsPaidReceipt::provenance($payload);
         // The visible «Κωδ. συναλλαγής»: the real acquirer/vPOS ref when present,
-        // else the deterministic whmcs-paid key (which the WhmcsPaymentSyncer also
-        // dedups on). NOTE: with the vPOS ref, the syncer's whmcs-paid-keyed dedup
-        // won't recognise this row — harmless for the cash-term vPOS case (the
-        // syncer skips cash-term entirely), and a narrow, accepted edge for a
-        // credit-term invoice paid at issue that is later refunded (see BACKLOG).
+        // else the deterministic whmcs-paid key. The WhmcsPaymentSyncer recognises
+        // BOTH (WhmcsPaidReceipt::alreadyHeld — the ref only on this same invoice),
+        // so a deleted or refunded receipt here is never re-added by a later sweep.
         $txnId = $ref ?? WhmcsPaidReceipt::transactionKey($whmcsInvoiceId);
 
         return DB::transaction(function () use ($invoice, $payload, $txnId, $gateway, $whmcsInvoiceId): float {
@@ -135,45 +131,6 @@ class WhmcsReceiptRecorder
 
             return $owed;
         });
-    }
-
-    /**
-     * Gateway name + acquirer/vPOS ref from the WHMCS payload, for the note. Reads
-     * the largest incoming transaction; falls back to the invoice-level
-     * `paymentmethod` for the gateway and no ref when the payload carries no
-     * transaction detail (shape varies native vs bridge).
-     *
-     * @param  array<string, mixed>  $payload
-     * @return array{0: ?string, 1: ?string} [ref, gateway]
-     */
-    private static function provenance(array $payload): array
-    {
-        $gateway = ($g = trim((string) ($payload['paymentmethod'] ?? ''))) !== '' ? $g : null;
-
-        $txns = $payload['transactions']['transaction'] ?? null;
-        if (is_array($txns)) {
-            // WHMCS returns one transaction as a bare map, many as a list — normalise.
-            $rows = array_is_list($txns) ? $txns : [$txns];
-            $best = null;
-            foreach ($rows as $row) {
-                // Only INCOMING money (amountin > 0) — never label the receipt with a
-                // refund/adjustment (amountout) transaction's id.
-                if (is_array($row) && (float) ($row['amountin'] ?? 0) > 0
-                    && ($best === null || (float) ($row['amountin'] ?? 0) > (float) ($best['amountin'] ?? 0))) {
-                    $best = $row;
-                }
-            }
-            if (is_array($best)) {
-                if (($bg = trim((string) ($best['gateway'] ?? ''))) !== '') {
-                    $gateway = $bg;
-                }
-                $ref = trim((string) ($best['transid'] ?? ''));
-
-                return [$ref !== '' ? $ref : null, $gateway];
-            }
-        }
-
-        return [null, $gateway];
     }
 
     /**
