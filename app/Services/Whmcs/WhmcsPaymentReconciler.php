@@ -105,8 +105,20 @@ class WhmcsPaymentReconciler
         $payload = $fetchInvoice((int) $row->whmcs_invoice_id);
 
         // …and of this row's client: the same number for another one (WHMCS and MyCS share the id space) is not it.
-        return is_array($payload) && strcasecmp((string) ($payload['status'] ?? ''), 'Paid') === 0
-            && ($row->whmcs_userid === null || (int) ($payload['userid'] ?? 0) === (int) $row->whmcs_userid);
+        if (! is_array($payload) || strcasecmp((string) ($payload['status'] ?? ''), 'Paid') !== 0
+            || ($row->whmcs_userid !== null && (int) ($payload['userid'] ?? 0) !== (int) $row->whmcs_userid)) {
+            return false;
+        }
+
+        // …and only what the 1-click would actually record: a settlement ekdosi
+        // already holds — or one whose receipt an operator DELETED as bogus while
+        // WHMCS still reports that same settlement — is not a worklist item (it
+        // would sit there forever behind a button that records nothing).
+        return ! WhmcsPaidReceipt::alreadyHeld(
+            (int) $row->company_id,
+            WhmcsPaidReceipt::transactionKey((int) $row->whmcs_invoice_id),
+            $payload,
+        );
     }
 
     /**

@@ -135,4 +135,23 @@ class WhmcsPaymentReconcilerTest extends TestCase
         // …but the item stays in the cached worklist.
         $this->assertSame([$invoice->id], WhmcsPaymentSyncCache::inboundIds($this->tenant->fresh()));
     }
+
+    /** The «fake Paid» incident: the deleted bogus receipt must not sit in the worklist behind a no-op button. */
+    public function test_a_deleted_receipt_for_the_same_settlement_is_not_a_worklist_item(): void
+    {
+        $invoice = $this->openInvoice();
+        $this->filedRow($invoice, 8006);
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
+            'kind' => 'payment', 'amount' => 124.0, 'pay_date' => '2026-11-11', 'transaction_id' => 'whmcs-paid:8006',
+        ])->delete();
+
+        $same = $this->reconciler()->reconcile($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-11 15:32:01']);
+        $this->assertSame([], $same);
+        $this->assertSame(0, $this->operator->fresh()->notifications()->count());
+
+        // A later real settlement IS one — and the 1-click would record it.
+        $later = $this->reconciler()->reconcile($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-25 10:00:00']);
+        $this->assertSame([$invoice->id], $later);
+    }
 }

@@ -184,6 +184,77 @@ class WhmcsPaymentSyncerTest extends TestCase
         $this->assertSame(1, Payment::where('company_id', $this->tenant->id)->count());
     }
 
+    /**
+     * The «fake Paid» incident (ΤΠΥ7187 / WHMCS #32722): an invoice marked Paid in
+     * WHMCS with no money in → the auto-receipt was recorded → an operator DELETED it.
+     */
+    private function deletedReceipt(Invoice $invoice, int $whmcsId, string $payDate): void
+    {
+        Payment::create([
+            'company_id' => $this->tenant->id, 'customer_id' => $this->customer->id, 'invoice_id' => $invoice->id,
+            'kind' => 'payment', 'amount' => (float) $invoice->gross_total, 'pay_date' => $payDate,
+            'transaction_id' => 'whmcs-paid:'.$whmcsId,
+        ])->delete();
+    }
+
+    public function test_a_deleted_receipt_is_not_resurrected_while_whmcs_reports_the_same_settlement(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7001);
+        $this->deletedReceipt($invoice, 7001, '2026-11-11');
+
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-11 15:32:01']);
+
+        $this->assertSame(0, $result->recorded);
+        $this->assertSame(0, Payment::where('transaction_id', 'whmcs-paid:7001')->count(), 'no live receipt');
+        $this->assertSame(0.0, $this->syncer()->syncInvoice($invoice, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-11 15:32:01']));
+    }
+
+    public function test_a_real_payment_after_a_deleted_bogus_receipt_records(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7002);
+        $this->deletedReceipt($invoice, 7002, '2026-11-11');
+
+        // WHMCS was unwound (Mark Unpaid) and the real money entered on a later day.
+        $result = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-25 10:00:00']);
+
+        $this->assertSame(1, $result->recorded);
+        $live = Payment::where('transaction_id', 'whmcs-paid:7002')->get();
+        $this->assertCount(1, $live);
+        $this->assertSame('2026-11-25', $live->first()->pay_date->format('Y-m-d'));
+        $this->assertEqualsWithDelta(0.0, app(InvoiceBalance::class)->for($invoice->fresh())->balance, 0.001);
+
+        // …and only once.
+        $again = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-25 10:00:00']);
+        $this->assertSame(0, $again->recorded);
+        $this->assertSame(1, Payment::where('transaction_id', 'whmcs-paid:7002')->count());
+    }
+
+    public function test_the_per_invoice_action_records_a_real_payment_after_a_deleted_bogus_receipt(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7003);
+        $this->deletedReceipt($invoice, 7003, '2026-11-11');
+
+        $amount = $this->syncer()->syncInvoice($invoice, fn (int $id) => ['status' => 'Paid', 'datepaid' => '2026-11-25 10:00:00']);
+
+        $this->assertEqualsWithDelta(124.0, $amount, 0.001);
+    }
+
+    public function test_a_deleted_receipt_keeps_blocking_when_whmcs_gives_no_usable_datepaid(): void
+    {
+        $invoice = $this->openInvoice(124.0);
+        $this->filedRow($invoice, 7004);
+        $this->deletedReceipt($invoice, 7004, '2026-11-11');
+
+        $none = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid']);
+        $zero = $this->syncer()->syncTenant($this->tenant, fn (int $id) => ['status' => 'Paid', 'datepaid' => '0000-00-00 00:00:00']);
+
+        $this->assertSame(0, $none->recorded + $zero->recorded);
+        $this->assertSame(0, Payment::where('transaction_id', 'whmcs-paid:7004')->count());
+    }
+
     // --- syncInvoice(): the single-invoice path behind the per-invoice UI action.
 
     public function test_sync_invoice_records_the_balance_for_a_paid_open_invoice(): void
