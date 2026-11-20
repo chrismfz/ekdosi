@@ -26,7 +26,9 @@ use Throwable;
  *    the second blocks, then sees the now-recorded payment / zero balance.
  *  - **dedup by transaction_id** (`whmcs-paid:{id}`): re-checked inside the lock,
  *    so the same WHMCS payment is never recorded twice even if the invoice later
- *    reopens (e.g. a credit note is reversed).
+ *    reopens (e.g. a credit note is reversed). A DELETED receipt blocks only the
+ *    settlement it mirrored (WhmcsPaidReceipt::alreadyHeld) — a later, real payment
+ *    after a bogus one was unwound still records.
  *  - records the exact OUTSTANDING BALANCE (WHMCS InvoicePaid = full settlement
  *    of that document), read AFRESH under the lock, so a manual payment landing
  *    mid-run reduces (never over-pays) it.
@@ -140,7 +142,9 @@ class WhmcsPaymentSyncer
             return null;
         }
         $txnId = self::transactionId((int) $row->whmcs_invoice_id);
-        if ($this->alreadyRecorded($tenant, $txnId)) {
+        // Pre-fetch: only a LIVE receipt is a sure skip; a deleted one (or one under
+        // a vPOS ref) is judged against the WHMCS settlement inside the lock below.
+        if ($this->hasLiveReceipt($tenant, $txnId)) {
             return null;
         }
 
@@ -159,7 +163,7 @@ class WhmcsPaymentSyncer
                 return 0.0;
             }
             $balance = round($this->balance->for($locked)->balance, 2);
-            if ($balance <= 0.005 || $this->alreadyRecorded($tenant, $txnId)) {
+            if ($balance <= 0.005 || WhmcsPaidReceipt::alreadyHeld((int) $tenant->id, (int) $row->whmcs_invoice_id, (int) $locked->id, $payload)) {
                 return 0.0;
             }
             Payment::create([
@@ -190,11 +194,10 @@ class WhmcsPaymentSyncer
             && ! $invoice->isCreditNote();
     }
 
-    private function alreadyRecorded(Company $tenant, string $txnId): bool
+    /** A LIVE (not deleted) receipt under the whmcs-paid key — the cheap pre-fetch skip. */
+    private function hasLiveReceipt(Company $tenant, string $txnId): bool
     {
-        // withTrashed: dedup on the whmcs-paid id ONCE, ever — a receipt an operator
-        // deliberately DELETED (soft) must not be resurrected on the next sweep.
-        return Payment::withTrashed()
+        return Payment::query()
             ->where('company_id', $tenant->id)
             ->where('transaction_id', $txnId)
             ->exists();
